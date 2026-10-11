@@ -92,7 +92,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)
-		return insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.invoiceItemSourceID(), amount, now, map[string]any{
+		return insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.owedItemSourceID(), amount, now, map[string]any{
 			"operation": string(key.Operation()),
 			"source":    key.Source(),
 		})

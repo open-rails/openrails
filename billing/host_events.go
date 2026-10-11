@@ -99,7 +99,7 @@ type DelinquencyHostEvent struct {
 	ToState          string     `json:"to_state"`
 	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
 	OverdueAmount    int64      `json:"overdue_amount,string"`
-	OverdueInvoices  int64      `json:"overdue_invoices"`
+	OverdueOrders    int64      `json:"overdue_orders"`
 	GraceDays        int64      `json:"grace_days"`
 	AmountFloor      int64      `json:"amount_floor,string"`
 }

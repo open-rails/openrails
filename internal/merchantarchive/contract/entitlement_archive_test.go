@@ -24,9 +24,13 @@ func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
 	writer, err := archivewire.NewVersionWriter(&artifact, 1, testMerchant)
 	require.NoError(t, err)
 	for _, p := range ProfilesFor(1) {
-		if p.Name == "invoice_collection_cadence" || p.Name == "product_entitlements" {
+		switch p.Name {
+		case "usage_collection_cadence":
+			require.NoError(t, writer.Table("invoices")) // The historical format had invoices, no cadence.
 			continue
-		} // Not present in the historical format.
+		case "product_entitlements":
+			continue // Not present in the historical format.
+		}
 		require.NoError(t, writer.Table(p.Name))
 		switch p.Name {
 		case "products":

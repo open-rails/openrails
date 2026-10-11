@@ -11,7 +11,7 @@ import (
 type PaymentAttempt struct {
 	ID PaymentAttemptID `json:"id"`
 	// Kind is verify, initial, upgrade, rebill, dunning_retry, customer_retry
-	// or invoice.
+	// or collection (a usage order's).
 	Kind string `json:"kind"`
 	// Owner is who collects the subscription: engine, nmi_schedule, provider
 	// or none.
@@ -43,8 +43,7 @@ type PaymentAttempt struct {
 	Amount        int64        `json:"amount,string"`
 	Currency      string       `json:"currency"`
 	AttemptedAt   time.Time    `json:"attempted_at"`
-	// InvoiceID or OrderID is what the attempt tried to pay.
-	InvoiceID       *InvoiceID       `json:"invoice_id"`
+	// OrderID is the order the attempt tried to pay.
 	OrderID         *OrderID         `json:"order_id"`
 	CycleID         *RenewalID       `json:"cycle_id"`
 	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
@@ -72,7 +71,6 @@ type PaymentAttemptListParams struct {
 	PSPID                                                  PSPID
 	CustomerID                                             CustomerID
 	PaymentID                                              PaymentID
-	InvoiceID                                              InvoiceID
 	OrderID                                                OrderID
 	SubscriptionID                                         SubscriptionID
 	CycleID                                                RenewalID

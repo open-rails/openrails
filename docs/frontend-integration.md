@@ -52,7 +52,7 @@ can only ever act on itself. In embedded mode, prepend the mount prefix to every
 GET  /v1/me                               balances, default cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
-GET  /v1/me/invoices[/{id}]               itemized statements (cursor page)
+GET  /v1/me/orders[/{id}]                 purchases, renewals and usage orders (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements
 PUT  /v1/me/default-payment-methods/{currency}  body {"payment_method_id"}: the card that pays a currency

@@ -58,7 +58,7 @@ func TestNMINewScheduleCannotBorrowAnotherChargeOnItsVault(t *testing.T) {
 
 func TestNMIInvoiceReceiptCannotBecomeSubscriptionRefund(t *testing.T) {
 	invoice := uuid.New()
-	known := LocalPayment{ID: uuid.New(), CustomerID: uuid.New(), TransactionID: "invoice-sale", AmountCents: 999, Currency: "USD", InvoiceID: &invoice, Status: "settled"}
+	known := LocalPayment{ID: uuid.New(), CustomerID: uuid.New(), TransactionID: "invoice-sale", AmountCents: 999, Currency: "USD", UsageOrderID: &invoice, Status: "settled"}
 	tx := RemoteTransaction{TransactionID: "invoice-sale", Type: TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD"}
 	snapshot := &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{tx}}
 	require.Empty(t, diffProvider(ProviderNMI, snapshot, &LocalState{}, []LocalPayment{known}, time.Now(), diffOptions{}))

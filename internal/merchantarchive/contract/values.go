@@ -116,16 +116,16 @@ func ValidateValues(p Profile, values []*string) error {
 		return err
 	}
 	if p.Name == "ledger_transfers" {
-		key, payer, invoice := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "invoice_id")
-		if key != nil && strings.HasPrefix(*key, "invoice_collection:") {
-			payerID, invoiceID := uuid.Nil, uuid.Nil
+		key, payer, order := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "order_id")
+		if key != nil && intents.IsOrderCollectionKey(*key) {
+			payerID, orderID := uuid.Nil, uuid.Nil
 			if payer != nil {
 				payerID, _ = uuid.Parse(*payer)
 			}
-			if invoice != nil {
-				invoiceID, _ = uuid.Parse(*invoice)
+			if order != nil {
+				orderID, _ = uuid.Parse(*order)
 			}
-			encodedKey = payerID != uuid.Nil && invoiceID != uuid.Nil && (charge.CustomerPaymentKeyValid("invoice_collection", payerID, *key) || intents.InvoiceCollectionRetryKeyValid(invoiceID, *key))
+			encodedKey = orderID != uuid.Nil && intents.OrderCollectionKeyValid(payerID, orderID, *key)
 			if encodedKey && p.Name == "ledger_transfers" {
 				for field, expected := range map[string]string{"source": "invoice_charge", "operation": "invoice_payment", "transfer_type": "owed_payment"} {
 					if actual := value(p, values, field); actual == nil || *actual != expected {
@@ -203,7 +203,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "provider_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection) {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == intents.TypeOrderCollection || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection) {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -212,8 +212,6 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 		switch p.Name + "." + c.Name {
-		case "invoices.collection_intent_id":
-			return bad() // Any live collection must resolve before cutover.
 		case "payments.status":
 			if v == "pending" {
 				return bad()
@@ -338,7 +336,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection)) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection)) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -367,7 +365,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership {
+	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != intents.TypeOrderCollection && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -405,7 +403,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		terms, _ := subscriptions.DecodeManualRebillPayload(row)
 		return terms.Initiator == charge.InitiatorCustomer, nil
 	}
-	terms, err := intents.DecodeInvoiceCollectionPayload(row)
+	terms, err := intents.DecodeOrderCollectionPayload(row)
 	if err != nil {
 		return false, fmt.Errorf("invalid accepted collection payload: %w", err)
 	}
@@ -416,7 +414,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	if (row.Status == intents.StatusSucceeded) != found {
 		return false, fmt.Errorf("collection terminal state and qualified receipt disagree")
 	}
-	return terms.Initiator == charge.InitiatorCustomer || row.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(terms.InvoiceID, row.IdempotencyKey), nil
+	return terms.Initiator == charge.InitiatorCustomer || row.Origin == string(intents.OriginAdmin) && intents.OrderCollectionRetryKeyValid(terms.OrderID, row.IdempotencyKey), nil
 }
 
 func value(p Profile, values []*string, name string) *string {

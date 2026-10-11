@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -173,10 +174,14 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
 		Lines: make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
 		Payment:   billing.OrderPayment{Status: billing.OrderPaymentStatus(o.PaymentStatus)},
-		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, VoidedAt: o.VoidedAt, CreatedAt: o.CreatedAt,
+		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, VoidedAt: o.VoidedAt,
+		UncollectibleAt: o.UncollectibleAt, CreatedAt: o.CreatedAt,
 	}
 	if o.SubscriptionID != nil && o.PeriodStartsAt != nil && o.PeriodEndsAt != nil && o.DueAt != nil {
 		out.Renewal = &billing.OrderRenewal{SubscriptionID: billing.SubscriptionID(*o.SubscriptionID), PeriodStartsAt: *o.PeriodStartsAt, PeriodEndsAt: *o.PeriodEndsAt, DueAt: *o.DueAt}
+	}
+	if o.Origin == string(billing.OrderOriginUsage) {
+		out.Usage = usageView(o.BillingOrder)
 	}
 	if o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction
@@ -203,9 +208,12 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		out.Payment.PaymentID = &id
 	}
 	for _, l := range o.Lines {
-		line := billing.OrderLine{ID: billing.OrderLineID(l.ID), PriceID: billing.PriceID(l.PriceID), ProductID: billing.ProductID(l.ProductID),
-			Description: l.Description, Quantity: intPtr(l.Quantity), UnitAmount: l.UnitAmount, Amount: l.Amount,
-			Ownership: catalog.Ownership(l.Ownership), BillingIntervalHours: intPtr(l.BillingIntervalHours), AccessDurationHours: intPtr(l.AccessDurationHours)}
+		line := billing.OrderLine{ID: billing.OrderLineID(l.ID), Description: l.Description, Quantity: intPtr(l.Quantity), UnitAmount: l.UnitAmount, Amount: l.Amount,
+			BillingIntervalHours: intPtr(l.BillingIntervalHours), AccessDurationHours: intPtr(l.AccessDurationHours), Source: l.Source}
+		if l.PriceID != nil && l.ProductID != nil && l.Ownership != nil {
+			price, product, ownership := billing.PriceID(*l.PriceID), billing.ProductID(*l.ProductID), catalog.Ownership(*l.Ownership)
+			line.PriceID, line.ProductID, line.Ownership = &price, &product, &ownership
+		}
 		if l.SubscriptionID != nil {
 			id := billing.SubscriptionID(*l.SubscriptionID)
 			line.SubscriptionID = &id
@@ -215,6 +223,27 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 			line.ProductAccessID = &id
 		}
 		out.Lines = append(out.Lines, line)
+	}
+	return out
+}
+
+func usageView(o gen.BillingOrder) *billing.OrderUsage {
+	out := &billing.OrderUsage{AmountPaid: usage.Paid(o), AmountDue: usage.Due(o), NextCollectionAttemptAt: o.NextCollectionAttemptAt,
+		PONumber: o.PoNumber, Memo: o.Memo, Tax: map[string]any{}, BillingContacts: []billing.InvoiceContact{}}
+	if o.PeriodStartsAt != nil && o.PeriodEndsAt != nil && o.DueAt != nil {
+		out.PeriodStartsAt, out.PeriodEndsAt, out.DueAt = *o.PeriodStartsAt, *o.PeriodEndsAt, *o.DueAt
+	}
+	if o.Status == string(billing.OrderVoid) {
+		out.AmountDue = 0
+	}
+	if o.CollectionMethod != nil {
+		out.CollectionMethod = billing.InvoiceCollectionMethod(*o.CollectionMethod)
+	}
+	if len(o.Tax) > 0 {
+		_ = json.Unmarshal(o.Tax, &out.Tax)
+	}
+	if len(o.BillingContacts) > 0 {
+		_ = json.Unmarshal(o.BillingContacts, &out.BillingContacts)
 	}
 	return out
 }

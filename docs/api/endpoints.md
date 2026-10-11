@@ -42,8 +42,8 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Errors.** `{"error": {"type", "code", "message", "param", "metadata"}}`
   ([errors](errors.md)). The `code` is stable; the `message` is not contract.
 - **Idempotency.** Send `Idempotency-Key` only on the routes that read it
-  (marked in [routes.md](routes.md)): checkout, refunds, tier changes, invoice
-  collection. Each such operation keeps its own durable receipt: the same key
+  (marked in [routes.md](routes.md)): checkout, orders, refunds, tier changes,
+  usage order collection. Each such operation keeps its own durable receipt: the same key
   with the same terms answers the original result, and with other terms
   `422 idempotency_key_reused`. There is no generic response cache; every
   request authenticates and authorizes again. One key names one purchase:
@@ -239,7 +239,7 @@ the customer's default for, and `subscriptions` the subscriptions it pays.
 
 The default has two levels, as in Stripe. A customer's default card per
 currency (`PUT /v1/me/default-payment-methods/{currency}`) collects their
-invoices there and pays every card subscription in it without its own card.
+usage orders there and pays every card subscription in it without its own card.
 A subscription's `payment_method_id` is its own card, `null` when it follows
 the default; `card` shows the card that pays it. Changing the default moves
 every subscription that follows it, and
@@ -275,11 +275,10 @@ default not set is `400 default_payment_method_required`.
 A merchant reads a customer's cards and may delete one; it can never create or
 change one.
 
-A customer pays an open invoice (`POST /v1/me/invoices/{id}/pay-now`), an
-open renewal order (`POST /v1/me/orders/{id}/pay`) or retries a past-due
-subscription the PSP schedules (`POST /v1/me/subscriptions/{id}/retry-now`)
-with a saved card and an `Idempotency-Key`: `200` complete, `202` unresolved, a
-coded `402` refusal. See [customer payment recovery](../architecture/customer-payment-recovery.md).
+A customer pays an open renewal or usage order (`POST /v1/me/orders/{id}/pay`)
+or retries a past-due subscription the PSP schedules
+(`POST /v1/me/subscriptions/{id}/retry-now`) with a saved card and an
+`Idempotency-Key`: `200` complete, `202` unresolved, a coded `402` refusal. See [customer payment recovery](../architecture/customer-payment-recovery.md).
 
 ## Customers, credit and usage
 

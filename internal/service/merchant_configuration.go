@@ -179,14 +179,14 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 		}
 		current.Profile = &p
 	}
-	if patch.InvoiceCollectionThreshold != nil {
-		current.InvoiceCollectionThreshold = patch.InvoiceCollectionThreshold
+	if patch.CollectionThreshold != nil {
+		current.CollectionThreshold = patch.CollectionThreshold
 	}
-	if patch.InvoiceMonthlyFloor != nil {
-		current.InvoiceMonthlyFloor = patch.InvoiceMonthlyFloor
+	if patch.MonthlyFloor != nil {
+		current.MonthlyFloor = patch.MonthlyFloor
 	}
-	if patch.InvoiceBillingBoundary != "" {
-		current.InvoiceBillingBoundary = patch.InvoiceBillingBoundary
+	if patch.BillingPeriodBoundary != "" {
+		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}
 	if patch.AlertEmail != nil {
 		current.AlertEmail = patch.AlertEmail

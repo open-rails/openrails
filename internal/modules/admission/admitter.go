@@ -53,9 +53,9 @@ const DenyAccrualRateCap = "accrual_rate_cap_reached"
 // DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
 // outlived the merchant's grace window. Deliberately DISTINCT from
 // insufficient_credit — "you are over your limit" and "you have an unpaid
-// invoice" call for different things from the customer, and a host that cannot
+// bill" call for different things from the customer, and a host that cannot
 // tell them apart cannot say anything useful to either.
-const DenyDelinquent = "delinquent_unpaid_invoice"
+const DenyDelinquent = "delinquent_unpaid_order"
 
 // Admitter is the service-admit money gate.
 type Admitter struct {

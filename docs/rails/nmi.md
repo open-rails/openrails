@@ -275,7 +275,7 @@ doesn't surprise you:
   the PSP account that ran it. A merchant-initiated charge runs only under an
   active mandate; without one the card is not charged off-session (an import
   raises `life.import.no_recurring_anchor`): a renewal stops for the member
-  and an invoice's collection stops with failure code
+  and a usage order's collection stops with failure code
   `stored_credential_required`. Saving a card verifies it for reuse without
   `billing_method`; moving a subscription onto a card without a recurring
   agreement verifies one first.

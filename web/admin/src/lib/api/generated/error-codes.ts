@@ -82,11 +82,6 @@ export type OpenRailsErrorCode =
   | "invalid_query"
   | "invalid_request_body"
   | "invalid_settlement_status_request"
-  | "invoice_action_not_allowed"
-  | "invoice_not_retryable"
-  | "invoice_retry_idempotency_conflict"
-  | "invoice_retry_in_progress"
-  | "invoice_retry_outcome_unknown"
   | "invoker_scoped_principal"
   | "merchant_binding_mismatch"
   | "merchant_config_read_only"
@@ -104,6 +99,7 @@ export type OpenRailsErrorCode =
   | "network_link_conflict"
   | "network_link_in_use"
   | "network_terms_required"
+  | "order_action_not_allowed"
   | "order_has_recurring_line"
   | "order_line_unavailable"
   | "order_not_cancelable"
@@ -297,11 +293,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_query: { status: 400, type: "invalid_request_error", meaning: "A query parameter is malformed or out of range; param is the parameter." },
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
-  invoice_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The invoice's status does not allow this action." },
-  invoice_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The invoice cannot be collected again." },
-  invoice_retry_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key names a different collection attempt." },
-  invoice_retry_in_progress: { status: 409, type: "invalid_request_error", meaning: "A collection attempt on this invoice is unresolved." },
-  invoice_retry_outcome_unknown: { status: 409, type: "invalid_request_error", meaning: "The last collection attempt's outcome is unknown." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   merchant_binding_mismatch: { status: 409, type: "invalid_request_error", meaning: "The selected merchant is not the one the credential, deployment or request is bound to." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
@@ -319,6 +310,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   network_link_conflict: { status: 409, type: "invalid_request_error", meaning: "The customer is linked to another openrails.dev account; sign in with that one." },
   network_link_in_use: { status: 409, type: "invalid_request_error", meaning: "The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first." },
   network_terms_required: { status: 403, type: "authorization_error", meaning: "The openrails.dev account has not accepted the network terms." },
+  order_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The order's origin or status does not allow this action." },
   order_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
   order_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
   order_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open order, or one awaiting the customer's action, can be canceled." },
@@ -326,7 +318,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   order_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this order is unresolved; read the order." },
   order_total_changed: { status: 409, type: "invalid_request_error", meaning: "The order's total is not expected_total; preview it again." },
   payment_duplicate_refused: { status: 409, type: "invalid_request_error", meaning: "The provider refused an identical charge it had just made; retry after its duplicate window." },
-  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the invoice has due, or is not the order's total." },
+  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the usage order has due, or is not the order's total." },
   payment_failed: { status: 402, type: "card_error", meaning: "The payment was not made." },
   payment_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key belongs to another payment request." },
   payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment is already unresolved; read the resource before retrying." },

@@ -35,7 +35,7 @@ type MoneyTransaction struct {
 	Captured        *int64         `json:"captured_amount,omitempty"`
 	Source          string         `json:"source"`
 	SourceID        *string        `json:"source_id,omitempty"`
-	InvoiceID       *uuid.UUID     `json:"invoice_id,omitempty"`
+	OrderID         *uuid.UUID     `json:"order_id,omitempty"`
 	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
 	Description     *string        `json:"description,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`

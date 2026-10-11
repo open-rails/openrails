@@ -158,10 +158,10 @@ The next funding repays the debt first, in the same transaction and under the
 same customer lock: a purchased-credit lot repays from its paid part (a bonus
 never repays debt), and `CreateCreditGrants` from its amount. Each repayment is
 an `owed_repayment` credit transaction on the funding lot, so a replayed
-funding repays once. It pays the invoices that claim the debt first, oldest
-first, as balance payments; an invoice whose collection is in flight keeps its
-claim. Debt no invoice claims yet is repaid directly, and a later invoice
-claims only what is still owed. The repaid part of a lot is used credit: a
+funding repays once. It pays the usage orders that claim the debt first,
+oldest first, as balance payments; an order whose collection is in flight
+keeps its claim. Debt no order claims yet is repaid directly, and a later
+order claims only what is still owed. The repaid part of a lot is used credit: a
 refund returns only unused credit, and a chargeback of the lot makes the
 repaid part owed again (a won dispute repays it).
 

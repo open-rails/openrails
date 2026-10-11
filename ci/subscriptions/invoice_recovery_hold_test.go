@@ -44,7 +44,7 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.NotContains(t, string(answer.body), "history unavailable")
 	require.Empty(t, w.nmi.Attempts())
 	var operations int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection'`)).Scan(&operations))
 	require.Zero(t, operations, "temporary pre-admission hold created no payment operation")
 	w.nmi.ClearIntercepts()
 	w.refreshProviders()
@@ -66,15 +66,15 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	blockHistory()
 	w.advance(5 * 24 * time.Hour)
-	params := billing.RetryInvoiceCollectionParams{PaymentMethodID: pmid(method), IdempotencyKey: "merchant-recovery"}
-	_, err := w.client[remote].RetryInvoiceCollection(t.Context(), second, params)
+	params := billing.RetryOrderCollectionParams{PaymentMethodID: pmid(method), IdempotencyKey: "merchant-recovery"}
+	_, err := w.client[remote].RetryOrderCollection(t.Context(), second, params)
 	requireCode(t, err, http.StatusServiceUnavailable, billing.CodeServiceUnavailable)
 	require.Len(t, w.nmi.Attempts(), 2, "held retry sends no additional sale")
 	w.nmi.ClearIntercepts()
 	w.refreshProviders()
 	w.settleCollectionScans()
 	w.settle()
-	require.Equal(t, billing.InvoicePaid, w.invoice(second).Status, "once the hold lifts, collection under the card's mandate pays it")
+	require.Equal(t, billing.OrderComplete, w.invoice(second).Status, "once the hold lifts, collection under the card's mandate pays it")
 	require.Len(t, w.nmi.Attempts(), 3, "each invoice has one approved sale; the decline stays an attempt")
 	require.Equal(t, "merchant", w.nmi.LastSale().InitiatedBy)
 	require.Len(t, w.nmi.ledger(""), 2)

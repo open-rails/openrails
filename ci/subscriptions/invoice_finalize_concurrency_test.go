@@ -43,7 +43,7 @@ func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 			lock, err := f.base.pool.Begin(t.Context())
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = lock.Rollback(context.Background()) })
-			_, err = lock.Exec(t.Context(), f.q(`LOCK TABLE billing.invoices IN SHARE MODE`))
+			_, err = lock.Exec(t.Context(), f.q(`LOCK TABLE billing.orders IN SHARE MODE`))
 			require.NoError(t, err)
 			passes := invoicePasses(f, false)
 			require.Eventually(t, func() bool {
@@ -54,10 +54,10 @@ func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 			require.NoError(t, lock.Commit(t.Context()))
 			f.awaitPasses(passes)
 			require.Empty(t, failures.messages(), "a concurrent retry must return the same invoice, not fail the merchant pass")
-			invoices, err := client.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: c.cid()})
+			invoices, err := client.ListOrders(t.Context(), billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 			require.NoError(t, err)
 			require.Len(t, invoices.Items, 1)
-			require.Equal(t, nmiInvoiceAmount, invoices.Items[0].AmountDue)
+			require.Equal(t, nmiInvoiceAmount, invoices.Items[0].Usage.AmountDue)
 			require.Empty(t, f.base.nmi.Attempts())
 		})
 	}

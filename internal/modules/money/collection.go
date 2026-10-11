@@ -28,7 +28,7 @@ type CollectionAdapter interface {
 }
 
 // ScopedCharger validates merchant/customer/payment-method scope and resolves
-// the store-armed adapter before an off-session invoice collection charge.
+// the store-armed adapter before an off-session usage order charge.
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter
@@ -122,7 +122,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		return nil, fmt.Errorf("payment method rail required")
 	}
 	if d, ok := rails.Lookup(models.Rail(rail)); ok && !d.SupportsChargeSavedMethod {
-		return nil, fmt.Errorf("rail %q does not support invoice collection", rail)
+		return nil, fmt.Errorf("rail %q does not support usage order collection", rail)
 	}
 
 	// Store-armed per-merchant credentials are the ONLY source once a resolver
@@ -141,7 +141,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		adapter = stored
 	}
 	if adapter == nil {
-		return nil, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)
+		return nil, fmt.Errorf("no usage collection adapter configured for rail %q", rail)
 	}
 	inner, err := adapter.Prepare(ctx, method, req)
 	if err != nil {

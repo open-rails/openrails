@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -22,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,15 +70,15 @@ func TestInvoicePreflightRecoversPaymentNewerThanBulkWindow(t *testing.T) {
 	require.NoError(t, retry.err)
 	require.Len(t, target.nmi.Attempts(), 1, "old source without preflight charges this already-paid invoice twice")
 	require.Equal(t, http.StatusConflict, retry.status, string(retry.body))
-	require.Contains(t, string(retry.body), "payment_not_retryable")
-	paid, err := target.client[remote].GetInvoice(t.Context(), invoice)
+	require.Contains(t, string(retry.body), billing.CodeOrderNotPayable)
+	paid, err := target.client[remote].GetOrder(t.Context(), invoice)
 	require.NoError(t, err)
-	require.Equal(t, billing.InvoicePaid, paid.Status)
-	require.Zero(t, paid.AmountDue)
+	require.Equal(t, billing.OrderComplete, paid.Status)
+	require.Zero(t, paid.Usage.AmountDue)
 	var operations, allocations int
-	require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
+	require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection'`)).Scan(&operations))
 	require.Zero(t, operations, "readback did not fabricate an accepted charge or initiator")
-	require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND invoice_id=$1`), invoice.UUID()).Scan(&allocations))
+	require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND order_id=$1`), invoice.UUID()).Scan(&allocations))
 	require.Equal(t, 1, allocations)
 	require.Len(t, target.nmi.Attempts(), 1, "only the source charged; destination's fresh request recovered")
 	require.Len(t, target.nmi.ledger(""), 1)
@@ -118,19 +119,19 @@ func TestInvoicePreflightHoldsVisibleUnknownUntilPositiveReceipt(t *testing.T) {
 	require.Contains(t, string(answer.body), `"code":"service_unavailable"`)
 	require.Empty(t, w.nmi.Attempts(), "visible uncertainty is not absence and never authorizes another sale")
 	var operations int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection'`)).Scan(&operations))
 	require.Zero(t, operations)
-	stillDue, err := w.client[remote].GetInvoice(t.Context(), invoice)
+	stillDue, err := w.client[remote].GetOrder(t.Context(), invoice)
 	require.NoError(t, err)
-	require.Equal(t, int64(50_000_000), stillDue.AmountDue)
+	require.Equal(t, int64(50_000_000), stillDue.Usage.AmountDue)
 
 	uncertain.Store(false)
 	retry := payNMIInvoice(t.Context(), w, c, invoice, method, "visible-unknown")
 	require.NoError(t, retry.err)
 	require.Equal(t, http.StatusConflict, retry.status, string(retry.body))
-	paid, err := w.client[remote].GetInvoice(t.Context(), invoice)
+	paid, err := w.client[remote].GetOrder(t.Context(), invoice)
 	require.NoError(t, err)
-	require.Equal(t, billing.InvoicePaid, paid.Status)
+	require.Equal(t, billing.OrderComplete, paid.Status)
 	require.Empty(t, w.nmi.Attempts())
 	require.Len(t, w.nmi.ledger(""), 1)
 }
@@ -150,9 +151,8 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	w.settleRefreshes()
 	answer := payNMIInvoice(t.Context(), w, c, invoice, method, "fence-race")
 	require.NoError(t, answer.err)
-	require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
-	var accepted billing.InvoicePayNow
-	require.NoError(t, json.Unmarshal(answer.body, &accepted))
+	require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+	operation := acceptedCollection(t, w, invoice)
 	sale := w.nmi.AddSale(nmimock.Sale{OrderID: uuid.NewString(), OrderDescription: "invoice " + invoice.UUID().String(), Vault: w.vaultOf(method), Amount: "50.00"})
 	gate := w.nmi.hold(newGate(func(r *http.Request) bool {
 		return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+sale.TransactionID)
@@ -169,8 +169,11 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	w.advance(time.Minute)
 	w.restart()
 	w.settleRefreshes()
+	// The replay answers the first request; the accepted operation runs as
+	// its own job.
 	result := make(chan invoiceAnswer, 1)
 	go func() { result <- payNMIInvoice(t.Context(), w, c, invoice, method, "fence-race") }()
+	w.retryOperations()
 	select {
 	case <-gate.arrived:
 	case <-time.After(20 * time.Second):
@@ -182,7 +185,7 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), mid)
 	rt := engine.Graph(w.rt).Runtime
 	store := intents.NewStore(rt.DB)
-	in, err := store.Get(ctx, accepted.Operation.ID.UUID())
+	in, err := store.Get(ctx, operation)
 	require.NoError(t, err)
 	_, first, err := store.BeginCollectedPayment(ctx, in, w.clock.Now())
 	require.NoError(t, err)
@@ -192,16 +195,16 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	reply := <-result
 	require.NoError(t, reply.err)
 	w.settle()
-	current, err := store.Get(ctx, accepted.Operation.ID.UUID())
+	current, err := store.Get(ctx, operation)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, current.Status)
 	require.NotEmpty(t, intents.EvidenceString(current, "submitted_at"))
 	require.Empty(t, intents.EvidenceString(current, "not_executed"), "the racing fence prevents unsent completion")
-	stillDue, err := w.client[remote].GetInvoice(t.Context(), invoice)
+	stillDue, err := w.client[remote].GetOrder(t.Context(), invoice)
 	require.NoError(t, err)
-	require.Equal(t, int64(50_000_000), stillDue.AmountDue)
+	require.Equal(t, int64(50_000_000), stillDue.Usage.AmountDue)
 	var allocations int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.ledger_transfers WHERE invoice_id=$1 AND operation='invoice_payment'`), invoice.UUID()).Scan(&allocations))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.ledger_transfers WHERE order_id=$1 AND operation='invoice_payment'`), invoice.UUID()).Scan(&allocations))
 	require.Zero(t, allocations)
 	require.Empty(t, w.nmi.Attempts())
 }
@@ -229,10 +232,8 @@ func TestInvoicePreflightResolvesUnsentAcceptedOperation(t *testing.T) {
 			w.settleRefreshes() // the readonly process's own refresh precedes the sale
 			answer := payNMIInvoice(t.Context(), w, c, invoice, method, "accepted-unsent")
 			require.NoError(t, answer.err)
-			require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
-			var accepted billing.InvoicePayNow
-			require.NoError(t, json.Unmarshal(answer.body, &accepted))
-			operation := accepted.Operation.ID.UUID()
+			require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+			operation := acceptedCollection(t, w, invoice)
 			var fenced bool
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT COALESCE(result_evidence ? 'submitted_at',false) FROM billing.provider_intents WHERE id=$1`), operation).Scan(&fenced))
 			require.False(t, fenced)
@@ -248,15 +249,11 @@ func TestInvoicePreflightResolvesUnsentAcceptedOperation(t *testing.T) {
 			w.settle()
 			retry := payNMIInvoice(t.Context(), w, c, invoice, method, "accepted-unsent")
 			require.NoError(t, retry.err)
-			if sameOrder {
-				require.Equal(t, http.StatusOK, retry.status, string(retry.body))
-			} else {
-				require.Equal(t, http.StatusConflict, retry.status, string(retry.body))
-			}
-			paid, err := w.client[remote].GetInvoice(t.Context(), invoice)
+			require.Equal(t, http.StatusOK, retry.status, "the key answers what its first request did: %s", retry.body)
+			paid, err := w.client[remote].GetOrder(t.Context(), invoice)
 			require.NoError(t, err)
-			require.Equal(t, billing.InvoicePaid, paid.Status)
-			require.Zero(t, paid.AmountDue)
+			require.Equal(t, billing.OrderComplete, paid.Status)
+			require.Zero(t, paid.Usage.AmountDue)
 			var status string
 			var evidence []byte
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status,result_evidence FROM billing.provider_intents WHERE id=$1`), operation).Scan(&status, &evidence))
@@ -265,14 +262,33 @@ func TestInvoicePreflightResolvesUnsentAcceptedOperation(t *testing.T) {
 				require.Contains(t, string(evidence), sale.TransactionID)
 			} else {
 				require.Equal(t, "failed_terminal", status)
-				require.Contains(t, string(evidence), "invoice_paid_elsewhere")
+				require.Contains(t, string(evidence), "order_paid_elsewhere")
 				require.NotContains(t, string(evidence), sale.TransactionID, "foreign receipt was not made this operation's charge")
 			}
 			require.Empty(t, w.nmi.Attempts(), "positive readback never sent another sale")
 			require.Len(t, w.nmi.ledger(""), 1)
 			var allocations int
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND invoice_id=$1`), invoice.UUID()).Scan(&allocations))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND order_id=$1`), invoice.UUID()).Scan(&allocations))
 			require.Equal(t, 1, allocations)
 		})
+	}
+}
+
+// acceptedCollection is the one collection operation accepted for order.
+func acceptedCollection(t *testing.T, w *world, order billing.OrderID) uuid.UUID {
+	t.Helper()
+	var operation uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1`), order.UUID().String()).Scan(&operation))
+	return operation
+}
+
+// retryOperations runs every waiting provider operation now, without waiting
+// for it.
+func (w *world) retryOperations() {
+	w.t.Helper()
+	page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable, rivertype.JobStateAvailable).First(100))
+	require.NoError(w.t, err)
+	for _, job := range page.Jobs {
+		_, _ = w.jobs.JobRetry(w.t.Context(), job.ID)
 	}
 }

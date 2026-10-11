@@ -370,7 +370,7 @@ type BillingCustomerDelinquency struct {
 	OverdueStartedAt *time.Time
 	EnteredAt        time.Time
 	OverdueAmount    int64
-	OverdueInvoices  int64
+	OverdueOrders    int64
 	// Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.
 	TransitionSeq int64
 	EvaluatedAt   time.Time
@@ -559,80 +559,6 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
-// Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements. Retention: permanent, never pruned.
-type BillingInvoice struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	InvoiceNumber  *string
-	PeriodStartsAt time.Time
-	PeriodEndsAt   time.Time
-	UsageTotal     int64
-	DepositsTotal  int64
-	OwedAccrued    int64
-	OwedPaid       int64
-	ClosingBalance int64
-	SubtotalAmount int64
-	TotalAmount    int64
-	AmountPaid     int64
-	// Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.
-	AmountDue int64
-	// Immutable as-billed statement itemization frozen at close: per-event_type usage rollups. The only reader-facing line-item representation.
-	LineItems         []byte
-	MoneyMovements    []byte
-	Status            string
-	CollectionMethod  string
-	IssuedAt          *time.Time
-	DueAt             *time.Time
-	PaidAt            *time.Time
-	VoidedAt          *time.Time
-	UncollectibleAt   *time.Time
-	FinalizedAt       *time.Time
-	ExternalInvoiceID *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	// Purchase-order reference snapshotted from the payer invoice profile at finalize.
-	PoNumber *string
-	// Tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.
-	Tax []byte
-	// Billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.
-	BillingContacts              []byte
-	Memo                         *string
-	CollectionFailureCount       int32
-	CollectionFailedAt           *time.Time
-	NextCollectionAttemptAt      *time.Time
-	LastCollectionFailureCode    *string
-	LastCollectionFailureMessage *string
-	// The live invoice_collection operation (provider_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation's terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.
-	CollectionIntentID     *uuid.UUID
-	CollectionAttemptCount int32
-}
-
-// Last fully scanned thirty-day invoice collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.
-type BillingInvoiceCollectionCadence struct {
-	MerchantID             uuid.UUID
-	MonthlyPeriodStartedAt time.Time
-	CompletedAt            time.Time
-}
-
-// Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items. Retention: permanent, never pruned.
-type BillingInvoiceItem struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	InvoiceID  *uuid.UUID
-	SourceType string
-	SourceID   string
-	InvoiceAt  time.Time
-	Amount     int64
-	Status     string
-	Metadata   []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
@@ -666,12 +592,12 @@ type BillingLedgerTransfer struct {
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source   string
 	SourceID string
-	// Credit-lot attribution. grant_id/invoice_id/customer_id deliberately carry no FKs (ledger purity): the append-only ledger never blocks or cascades on control-plane rows.
+	// Credit-lot attribution. grant_id/order_id/customer_id deliberately carry no FKs (ledger purity): the append-only ledger never blocks or cascades on business rows.
 	GrantID    *uuid.UUID
 	CustomerID *uuid.UUID
 	InvokerID  *string
 	Resource   *string
-	InvoiceID  *uuid.UUID
+	OrderID    *uuid.UUID
 	CreatedAt  time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
@@ -934,9 +860,9 @@ type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 	CustomerID uuid.UUID
-	// customer (the customer's own purchase), merchant (an unpaid order the merchant created for them) or subscription (a renewal of an engine-owned subscription: subscription_id, its period and due_at).
+	// customer (the customer's own purchase), merchant (an unpaid order the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
 	Origin string
-	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed).
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage order the merchant voided), uncollectible (a usage order the merchant wrote off; collecting it reopens it).
 	Status         string
 	Currency       string
 	Total          int64
@@ -974,6 +900,20 @@ type BillingOrder struct {
 	VoidedAt *time.Time
 	// Where the checkout page runs: hosted, or embedded in the merchant's registered origins (settings checkout.embed_origins).
 	CheckoutUiMode *string
+	// A usage order's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
+	AmountPaid      *int64
+	UncollectibleAt *time.Time
+	// A usage order's collection: charge_automatically (charged to the currency's collection card) or send_invoice (the customer remits).
+	CollectionMethod       *string
+	PoNumber               *string
+	Memo                   *string
+	Tax                    []byte
+	BillingContacts        []byte
+	CollectionFailureCount *int32
+	// A usage order's first declined collection, which its retry schedule counts from.
+	CollectionFailedAt *time.Time
+	// When a usage order's next scheduled charge runs; NULL while none is scheduled.
+	NextCollectionAttemptAt *time.Time
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
@@ -983,13 +923,13 @@ type BillingOrderLine struct {
 	OrderID     uuid.UUID
 	CustomerID  uuid.UUID
 	Position    int32
-	PriceID     uuid.UUID
-	ProductID   uuid.UUID
+	PriceID     *uuid.UUID
+	ProductID   *uuid.UUID
 	Description string
 	Quantity    *int32
 	UnitAmount  int64
 	Amount      int64
-	Ownership   string
+	Ownership   *string
 	// product:<id> or tier_group:<group>: the ownership a unique line claims while its order is live.
 	ClaimKey             *string
 	BillingIntervalHours *int32
@@ -998,6 +938,25 @@ type BillingOrderLine struct {
 	SubscriptionID       *uuid.UUID
 	ProductAccessID      *uuid.UUID
 	CreatedAt            time.Time
+	// A usage line's accrual source (e.g. metered:<meter>); NULL on a priced line.
+	Source *string
+}
+
+// Owed charges awaiting their usage order: an accrual is born pending and gates arrears exposure; finalization moves it onto an order (order_id, status billed), so it bills once. Retention: permanent, never pruned.
+type BillingOwedItem struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	OrderID    *uuid.UUID
+	SourceType string
+	SourceID   string
+	AccruedAt  time.Time
+	Amount     int64
+	Status     string
+	Metadata   []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // At most one live ownership per customer and key (product or tier group). An order claims its unique lines when created; paying hands each claim to the subscription or product access it produced; cancel, expiry, the subscription's end or the access's revocation deletes it.
@@ -1060,8 +1019,7 @@ type BillingPayment struct {
 	CreditGrantSnapshot []byte
 	// The order this charge (or its refund) paid; its lines say what it bought, and price_id is then NULL.
 	OrderID *uuid.UUID
-	// The invoice this payment paid, with ledger_transfer_id the owed payment that settled it. A balance repayment moves no money and is only its ledger transfer.
-	InvoiceID        *uuid.UUID
+	// The owed payment that settled a usage order's charge or remittance. A balance repayment moves no money and is only its ledger transfer.
 	LedgerTransferID *uuid.UUID
 	// Seats a per-seat subscription payment billed: a period at that many seats, or the seats a mid-period increase added. NULL otherwise.
 	Quantity *int32
@@ -1113,7 +1071,6 @@ type BillingPaymentAttempt struct {
 	MandateID *uuid.UUID
 	// The initial transaction id the attempt sent the provider, verbatim.
 	SentInitialTransactionID *string
-	InvoiceID                *uuid.UUID
 	OrderID                  *uuid.UUID
 }
 
@@ -1712,7 +1669,14 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// Append-only multi-dimensional metered usage. Source of truth for usage reporting + invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was invoiced.
+// Last fully scanned thirty-day usage collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.
+type BillingUsageCollectionCadence struct {
+	MerchantID             uuid.UUID
+	MonthlyPeriodStartedAt time.Time
+	CompletedAt            time.Time
+}
+
+// Append-only multi-dimensional metered usage. Source of truth for usage reporting and usage order lines. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was billed.
 type BillingUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID

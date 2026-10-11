@@ -9,19 +9,19 @@ import (
 type MerchantConfiguration struct {
 	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
 
-	// Invoice settings are merchant-owned billing cadence and collection knobs.
+	// Usage billing settings: the billing period and collection knobs.
 	// Missing values use money service defaults.
-	InvoiceCollectionThreshold *int64 `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor        *int64 `json:"monthly_floor,omitempty"`
-	InvoiceBillingBoundary     string `json:"billing_period_boundary,omitempty"`
+	CollectionThreshold   *int64 `json:"collection_threshold,omitempty"`
+	MonthlyFloor          *int64 `json:"monthly_floor,omitempty"`
+	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
-	// ArrearsGraceDays is how many days past an invoice's due_at a payer keeps
+	// ArrearsGraceDays is how many days past a usage order's due_at a payer keeps
 	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
 	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
 
 	// ArrearsDelinquencyFloor (micros) is the smallest overdue balance that can
-	// make a payer delinquent. Nil ⇒ derived from InvoiceMonthlyFloor, else
+	// make a payer delinquent. Nil ⇒ derived from MonthlyFloor, else
 	// delinquency.DefaultAmountFloor.
 	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
 

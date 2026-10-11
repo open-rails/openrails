@@ -23,7 +23,6 @@ import {
   networkLinkChallengeSchema,
   publicConfigSchema,
   paymentAuthenticationSchema,
-  invoiceSchema,
   listPageSchema,
   orderSchema,
   cartSchema,
@@ -41,7 +40,6 @@ import {
   type PublicConfig,
   type PaymentAuthentication,
   type CurrencyScales,
-  type Invoice,
   type ListPage,
   type NewCard,
   type NextAction,
@@ -319,7 +317,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const subscriptionPage = listPageSchema(subscriptionSchema)
   const methodPage = listPageSchema(paymentMethodSchema)
   const paymentPage = listPageSchema(paymentSchema)
-  const invoicePage = listPageSchema(invoiceSchema)
+  const orderPage = listPageSchema(orderSchema)
   const cursorQuery = (opts: CursorOptions, limit: number) => ({
     limit: opts.limit ?? limit,
     cursor: opts.cursor ?? undefined,
@@ -542,6 +540,30 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
+    /**
+     * The customer's orders, newest first: `origin: "usage"` their usage
+     * orders, `overdue` those still owed past their due date.
+     */
+    listOrders(
+      opts: CursorOptions & {
+        origin?: string
+        status?: string
+        subscriptionId?: string
+        overdue?: boolean
+      } = {}
+    ): Promise<ListPage<Order>> {
+      return json(orderPage, "/me/orders", {
+        query: {
+          ...cursorQuery(opts, 20),
+          origin: opts.origin,
+          status: opts.status,
+          subscription_id: opts.subscriptionId,
+          overdue: opts.overdue ? "true" : undefined,
+        },
+        signal: opts.signal,
+      })
+    },
+
     /** One of the customer's orders: the resumable handle of a purchase. */
     getOrder(orderId: string, signal?: AbortSignal): Promise<Order> {
       return json(orderSchema, `/me/orders/${id(orderId)}`, { signal })
@@ -622,7 +644,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * Makes the card the default for one currency: it pays the currency's
-     * invoices and every subscription in it without its own card.
+     * usage orders and every subscription in it without its own card.
      */
     async setDefaultPaymentMethod(input: {
       currency: string
@@ -649,23 +671,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    listInvoices(opts: CursorOptions = {}): Promise<ListPage<Invoice>> {
-      return json(invoicePage, "/me/invoices", {
-        query: cursorQuery(opts, 20),
-        signal: opts.signal,
-      })
-    },
-
     /**
      * The customer's summary: balance and amount owed per currency, the card
      * that pays each currency, and unread notices.
      */
     getAccount(signal?: AbortSignal): Promise<Account> {
       return json(accountSchema, "/me", { signal })
-    },
-
-    getInvoice(invoiceId: string, signal?: AbortSignal): Promise<Invoice> {
-      return json(invoiceSchema, `/me/invoices/${id(invoiceId)}`, { signal })
     },
 
     /**

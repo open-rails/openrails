@@ -1184,8 +1184,8 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				RemoteEvidence: remoteTxnEvidence(t), RecommendedAction: "provider reports a voided sale; reconcile its retained or missing billing allocation before collection resumes; observation does not create a refund"}
 			if known != nil {
 				finding.LocalEvidence = map[string]any{"payment_id": known.ID.String(), "status": known.Status, "amount_cents": strconv.FormatInt(known.AmountCents, 10), "currency": known.Currency}
-				if known.InvoiceID != nil {
-					finding.LocalEvidence["invoice_id"] = known.InvoiceID.String()
+				if known.UsageOrderID != nil {
+					finding.LocalEvidence["order_id"] = known.UsageOrderID.String()
 				}
 			}
 			findings = append(findings, finding)
@@ -1194,10 +1194,10 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				continue
 			}
 			if payment, ok := paymentsByTxnID[t.TransactionID]; ok {
-				if payment.InvoiceID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
+				if payment.UsageOrderID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
 					findings = append(findings, Finding{Provider: provider, Type: FindingChargeMissingLocal, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
-						LocalEvidence: map[string]any{"invoice_id": payment.InvoiceID.String(), "amount_cents": strconv.FormatInt(payment.AmountCents, 10), "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
-						RecommendedAction: "provider charge contradicts the canonical invoice receipt; reconcile the exact operation before collection resumes"})
+						LocalEvidence: map[string]any{"order_id": payment.UsageOrderID.String(), "amount_cents": strconv.FormatInt(payment.AmountCents, 10), "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
+						RecommendedAction: "provider charge contradicts the usage order's canonical receipt; reconcile the exact operation before collection resumes"})
 				}
 				continue
 			}
@@ -1494,10 +1494,10 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		RemoteEvidence: remoteTxnEvidence(t),
 	}
 
-	if original != nil && original.InvoiceID != nil {
+	if original != nil && original.UsageOrderID != nil {
 		f.Status, f.RequiresAdmin = FindingStatusRequiresReview, true
-		f.LocalEvidence = map[string]any{"invoice_id": original.InvoiceID.String(), "transaction_id": original.TransactionID}
-		f.RecommendedAction = "refund belongs to an invoice collection; reconcile its canonical invoice and ledger rather than creating a subscription refund"
+		f.LocalEvidence = map[string]any{"order_id": original.UsageOrderID.String(), "transaction_id": original.TransactionID}
+		f.RecommendedAction = "refund belongs to a usage order's collection; reconcile its order and ledger rather than creating a subscription refund"
 		return f, true
 	}
 	if original == nil {

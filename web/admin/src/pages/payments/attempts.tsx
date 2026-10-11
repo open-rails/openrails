@@ -250,12 +250,8 @@ export function AttemptDetailPage() {
           )}
         </Fact>
         <Fact label="Paying">
-          {a.invoice_id ? (
-            <To to={`/invoices/${a.invoice_id}`}>
-              {shortId(a.invoice_id, 16)}
-            </To>
-          ) : a.order_id ? (
-            <To to={`/payments/attempts?order_id=${a.order_id}`}>
+          {a.order_id ? (
+            <To to={`/orders/${a.order_id}`}>
               {shortId(a.order_id, 16)}
             </To>
           ) : (

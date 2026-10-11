@@ -84,3 +84,38 @@ func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID, requestOpt
 	}
 	return &out, nil
 }
+
+// adminOrderPost posts to one of an order's admin actions.
+func (c *Client) adminOrderPost(ctx context.Context, id billing.OrderID, action string, body any, headers http.Header, requestOptions []RequestOption) (*billing.Order, error) {
+	order, err := requireTypedID("order_id", id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Order
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/orders/"+order+"/"+action, body, &out, headers, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// VoidOrder voids an unpaid usage order: what it still owes is written off.
+// Repeating it changes nothing.
+func (c *Client) VoidOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
+	return c.adminOrderPost(ctx, id, "void", nil, nil, requestOptions)
+}
+
+// MarkOrderUncollectible writes an open usage order off; collecting it
+// again reopens it. Repeating it changes nothing.
+func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
+	return c.adminOrderPost(ctx, id, "mark-uncollectible", nil, nil, requestOptions)
+}
+
+// RetryOrderCollection charges what a usage order owes to one of its
+// customer's cards now. The same IdempotencyKey answers the first attempt; a failed
+// charge is an *Error (card_declined or payment_failed) carrying the order.
+func (c *Client) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams, requestOptions ...RequestOption) (*billing.Order, error) {
+	if strings.TrimSpace(params.IdempotencyKey) == "" {
+		return nil, invalidErr("Idempotency-Key required")
+	}
+	return c.adminOrderPost(ctx, id, "retry-collection", params, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions)
+}

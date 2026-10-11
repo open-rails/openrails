@@ -11,7 +11,6 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -71,59 +70,51 @@ func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	}
 }
 
-func TestInvoiceCollectionEligibility(t *testing.T) {
+func TestUsageCollectionEligibility(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Hour), now.Add(time.Hour)
-	live := uuid.New()
-	inv := func(edit func(*models.Invoice)) *models.Invoice {
-		i := &models.Invoice{Status: "open", CollectionMethod: CollectionChargeAutomatically, AmountDue: 100}
-		edit(i)
-		return i
+	order := func(edit func(*gen.BillingOrder)) gen.BillingOrder {
+		paid, failures, method := int64(0), int32(0), CollectionChargeAutomatically
+		o := gen.BillingOrder{Origin: "usage", Status: "open", CollectionMethod: &method, Total: 100, AmountPaid: &paid, CollectionFailureCount: &failures, DueAt: &past}
+		edit(&o)
+		return o
 	}
+	failed := func(n int32) *int32 { return &n }
 	for _, tt := range []struct {
 		name      string
-		invoice   *models.Invoice
+		order     gen.BillingOrder
 		threshold int64
-		retry     bool // manual retry surface
-		scheduled bool // automatic sweep
+		retry     bool // the merchant's retry
+		scheduled bool // automatic collection
 	}{
-		{name: "new open invoice past due", invoice: inv(func(i *models.Invoice) { i.DueAt = &past }), retry: true, scheduled: true},
-		{name: "open invoice not yet due", invoice: inv(func(i *models.Invoice) { i.DueAt = &future })},
-		{name: "open after a failure", invoice: inv(func(i *models.Invoice) {
-			i.CollectionFailureCount = 1
-			i.NextCollectionAttemptAt = &past
-		}), retry: true, scheduled: true},
-		{name: "retry at exactly now", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "open", 1, &now
-		}), retry: true, scheduled: true},
-		{name: "retry in future", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "open", 1, &future
+		{name: "new order past due", order: order(func(*gen.BillingOrder) {}), retry: true, scheduled: true},
+		{name: "not yet due", order: order(func(o *gen.BillingOrder) { o.DueAt = &future })},
+		{name: "after a failure", order: order(func(o *gen.BillingOrder) {
+			o.CollectionFailureCount, o.NextCollectionAttemptAt, o.DueAt = failed(1), &past, &future
 		}), retry: true},
-		{name: "failed without a scheduled retry", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount = "open", 1
-		}), retry: true},
-		{name: "uncollectible", invoice: inv(func(i *models.Invoice) { i.Status = "uncollectible" }), retry: true},
-		{name: "below minimum threshold", invoice: inv(func(i *models.Invoice) {}), threshold: 101},
-		{name: "at minimum threshold", invoice: inv(func(i *models.Invoice) {}), threshold: 100, scheduled: true},
-		{name: "collection operation live", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionIntentID = "open", &live
+		{name: "retry due", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &now }), retry: true, scheduled: true},
+		{name: "retry in future", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &future }), retry: true},
+		{name: "failed without a scheduled retry", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount = failed(1) }), retry: true},
+		{name: "uncollectible", order: order(func(o *gen.BillingOrder) { o.Status = "uncollectible" }), retry: true},
+		{name: "below minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 101, retry: true},
+		{name: "at minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 100, retry: true, scheduled: true},
+		{name: "collection live", order: order(func(o *gen.BillingOrder) { o.Status = "processing" })},
+		{name: "manual remittance", order: order(func(o *gen.BillingOrder) {
+			m := CollectionSendInvoice
+			o.CollectionMethod = &m
 		})},
-		{name: "manual remittance", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionMethod = "open", CollectionSendInvoice
-		})},
-		{name: "paid", invoice: inv(func(i *models.Invoice) { i.Status, i.AmountDue = "paid", 0 })},
-		{name: "nothing owed", invoice: inv(func(i *models.Invoice) { i.Status, i.AmountDue = "open", 0 })},
-		{name: "nil invoice"},
+		{name: "paid", order: order(func(o *gen.BillingOrder) { o.Status, o.AmountPaid = "complete", &o.Total })},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.retry, invoiceCollectionRetryable(tt.invoice, now), "manual retry")
-			require.Equal(t, tt.scheduled, scheduledInvoiceCollectionEligible(tt.invoice, tt.threshold, now), "scheduled")
+			require.Equal(t, tt.retry, usageRetryable(tt.order, now), "merchant retry")
+			require.Equal(t, tt.scheduled, scheduledUsageCollectionEligible(tt.order, tt.threshold, now), "scheduled")
 		})
 	}
 
-	invoiceID := uuid.New()
-	key := intents.InvoiceCollectionRetryKey(invoiceID, "client-key")
-	require.Equal(t, key, intents.InvoiceCollectionRetryKey(invoiceID, "client-key"))
-	require.NotEqual(t, key, intents.InvoiceCollectionRetryKey(uuid.New(), "client-key"), "scoped to the invoice")
-	require.NotEqual(t, key, intents.InvoiceCollectionRetryKey(invoiceID, "other-key"), "scoped to the client key")
+	orderID := uuid.New()
+	key := intents.OrderCollectionRetryKey(orderID, "client-key")
+	require.Equal(t, key, intents.OrderCollectionRetryKey(orderID, "client-key"))
+	require.True(t, intents.OrderCollectionRetryKeyValid(orderID, key))
+	require.NotEqual(t, key, intents.OrderCollectionRetryKey(uuid.New(), "client-key"), "scoped to the order")
+	require.NotEqual(t, key, intents.OrderCollectionRetryKey(orderID, "other-key"), "scoped to the client key")
 }

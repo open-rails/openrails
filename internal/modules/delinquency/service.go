@@ -86,7 +86,7 @@ func (s *Service) now() time.Time {
 }
 
 // Policy resolves the merchant's declared delinquency policy. The amount floor
-// derives from the invoice monthly floor unless arrears_delinquency_floor
+// derives from the monthly floor unless arrears_delinquency_floor
 // overrides it.
 func (s *Service) Policy(ctx context.Context) (Policy, error) {
 	if s == nil || s.db == nil {
@@ -108,8 +108,8 @@ func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
 	switch {
 	case cfg.ArrearsDelinquencyFloor != nil:
 		p.AmountFloor = *cfg.ArrearsDelinquencyFloor
-	case cfg.InvoiceMonthlyFloor != nil:
-		p.AmountFloor = *cfg.InvoiceMonthlyFloor
+	case cfg.MonthlyFloor != nil:
+		p.AmountFloor = *cfg.MonthlyFloor
 	}
 	if err := p.Validate(); err != nil {
 		return Policy{}, err
@@ -145,12 +145,12 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 	}
 
 	// Pinned explicitly; reentrant, so the worker's outer scope stands.
-	var overdue []gen.ListOverdueInvoiceAggregatesRow
+	var overdue []gen.ListOverdueOrderAggregatesRow
 	var parked []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		var qErr error
-		if overdue, qErr = q.ListOverdueInvoiceAggregates(ctx, gen.ListOverdueInvoiceAggregatesParams{
+		if overdue, qErr = q.ListOverdueOrderAggregates(ctx, gen.ListOverdueOrderAggregatesParams{
 			MerchantID: tid.UUID(), Now: now, RowLimit: PassBatch, Policies: settings.PoliciesParam(),
 		}); qErr != nil {
 			return fmt.Errorf("list overdue aggregates: %w", qErr)
@@ -187,7 +187,7 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 			exposure: Exposure{
 				OverdueStartedAt: r.OverdueStartedAt.UTC(),
 				OverdueAmount:    r.OverdueAmount,
-				OverdueInvoices:  int(r.OverdueInvoices),
+				OverdueOrders:    int(r.OverdueOrders),
 			},
 			policy: effective,
 		}
@@ -239,7 +239,7 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 			State:            string(state),
 			OverdueStartedAt: since,
 			OverdueAmount:    exposure.OverdueAmount,
-			OverdueInvoices:  int64(exposure.OverdueInvoices),
+			OverdueOrders:    int64(exposure.OverdueOrders),
 			Now:              now,
 		})
 		if err != nil {
@@ -258,13 +258,13 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 		transition = Transition{CustomerID: customerID, Currency: currency, From: previous, To: ParseState(row.State)}
 
 		payload := map[string]any{
-			"from_state":       previous.String(),
-			"to_state":         row.State,
-			"currency":         currency,
-			"overdue_amount":   row.OverdueAmount,
-			"overdue_invoices": row.OverdueInvoices,
-			"grace_days":       policy.GraceDays,
-			"amount_floor":     policy.AmountFloor,
+			"from_state":     previous.String(),
+			"to_state":       row.State,
+			"currency":       currency,
+			"overdue_amount": row.OverdueAmount,
+			"overdue_orders": row.OverdueOrders,
+			"grace_days":     policy.GraceDays,
+			"amount_floor":   policy.AmountFloor,
 		}
 		if row.OverdueStartedAt != nil {
 			payload["overdue_started_at"] = row.OverdueStartedAt.UTC().Format(time.RFC3339)
@@ -314,7 +314,7 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 	}
 	overdue := exposure.OverdueAmount
 	data := billing.NotificationData{
-		Currency: t.Currency, OverdueAmount: &overdue, OverdueInvoices: exposure.OverdueInvoices,
+		Currency: t.Currency, OverdueAmount: &overdue, OverdueOrders: exposure.OverdueOrders,
 		FromState: t.From.String(), ToState: t.To.String(),
 	}
 	if exposure.Owes() {
@@ -336,7 +336,7 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 
 // IsDelinquent is the admission gate's question, answered conservatively: it
 // reads the stored state (one primary-key lookup) and refuses only if a live
-// recompute against the invoices agrees, so a payer who just settled or was
+// recompute against the usage orders agrees, so a payer who just settled or was
 // never evaluated is never refused. Any error fails open: our malfunction must
 // not become the customer's outage.
 func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
@@ -372,7 +372,7 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 			return err
 		}
 		now := s.now()
-		live, err := q.GetOverdueInvoiceAggregate(ctx, gen.GetOverdueInvoiceAggregateParams{
+		live, err := q.GetOverdueOrderAggregate(ctx, gen.GetOverdueOrderAggregateParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now,
 		})
 		if err != nil {
@@ -381,7 +381,7 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 		delinquent = Classify(policy, Exposure{
 			OverdueStartedAt: live.OverdueStartedAt.UTC(),
 			OverdueAmount:    live.OverdueAmount,
-			OverdueInvoices:  int(live.OverdueInvoices),
+			OverdueOrders:    int(live.OverdueOrders),
 		}, now) == StateDelinquent
 		return nil
 	})

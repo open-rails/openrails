@@ -227,12 +227,12 @@ type MerchantCheckoutSettings struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                    *MerchantProfile `json:"profile,omitempty"`
-	InvoiceCollectionThreshold *int64           `json:"collection_threshold,omitempty,string"`
-	InvoiceMonthlyFloor        *int64           `json:"monthly_floor,omitempty,string"`
-	InvoiceBillingBoundary     string           `json:"billing_period_boundary,omitempty"`
-	AlertEmail                 *string          `json:"alert_email,omitempty"`
-	RepriceNoticeWindowDays    *int             `json:"reprice_notice_window_days,omitempty"`
+	Profile                 *MerchantProfile `json:"profile,omitempty"`
+	CollectionThreshold     *int64           `json:"collection_threshold,omitempty,string"`
+	MonthlyFloor            *int64           `json:"monthly_floor,omitempty,string"`
+	BillingPeriodBoundary   string           `json:"billing_period_boundary,omitempty"`
+	AlertEmail              *string          `json:"alert_email,omitempty"`
+	RepriceNoticeWindowDays *int             `json:"reprice_notice_window_days,omitempty"`
 	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription:
 	// a renewal starting sooner than this after the membership start or the
 	// last receipted renewal sends none. Nil uses 24; 0 receipts every renewal.

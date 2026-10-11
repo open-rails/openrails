@@ -466,7 +466,6 @@ func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool)
 	params := billing.PaymentListParams{PageRequest: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
 	for name, parse := range map[string]func(string) error{
 		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
-		"invoice_id":      func(v string) (err error) { params.InvoiceID, err = billing.ParseInvoiceID(v); return },
 		"order_id":        func(v string) (err error) { params.OrderID, err = billing.ParseOrderID(v); return },
 	} {
 		if raw := strings.TrimSpace(r.Query(name)); raw != "" {
@@ -541,7 +540,7 @@ func GetPayment(r *httprequest.Request) {
 }
 
 // CreatePayment (POST /admin/payments) records money received outside
-// OpenRails for one invoice or one order: 201 with the payment, 200 when the
+// OpenRails for one order: 201 with the payment, 200 when the
 // same transaction_id was already recorded with the same terms, and 422
 // idempotency_key_reused when it was recorded with other terms.
 func CreatePayment(r *httprequest.Request) {
@@ -551,9 +550,8 @@ func CreatePayment(r *httprequest.Request) {
 	}
 	req.TransactionID = strings.TrimSpace(req.TransactionID)
 	switch {
-	case (req.InvoiceID == nil) == (req.OrderID == nil),
-		req.InvoiceID != nil && req.InvoiceID.IsZero(), req.OrderID != nil && req.OrderID.IsZero():
-		r.APIError(api.Coded(billing.CodeInvalidParam, "name exactly one of invoice_id and order_id").WithParam("invoice_id"))
+	case req.OrderID.IsZero():
+		r.APIError(api.Coded(billing.CodeInvalidParam, "order_id required").WithParam("order_id"))
 		return
 	case req.Amount <= 0:
 		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be positive").WithParam("amount"))
@@ -573,13 +571,13 @@ func CreatePayment(r *httprequest.Request) {
 	switch {
 	case err == nil:
 	case db.IsNotFound(err):
-		r.ErrorCode(billing.CodeResourceNotFound, "invoice or order not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "order not found")
 		return
 	case errors.Is(err, billing.ErrIdempotencyKeyReused):
 		r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
 		return
-	case errors.Is(err, money.ErrInvoiceActionNotAllowed), errors.Is(err, money.ErrPaymentExceedsDue):
-		writeInvoiceError(r, err)
+	case errors.Is(err, money.ErrPaymentExceedsDue):
+		r.ErrorCode(billing.CodePaymentExceedsDue, err.Error())
 		return
 	default:
 		writeOrderError(r, err)

@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -225,13 +224,7 @@ func customerPaymentRefusal(row gen.BillingProviderIntent) error {
 			return intents.ErrRebillNotRetryable
 		}
 		evidence.FailureCode = strconv.Itoa(evidence.ResponseCode)
-	case money.TypeInvoiceCollection:
-		if _, err := intents.DecodeInvoiceCollectionPayload(row); err != nil {
-			return err
-		}
-		if !evidence.Declined {
-			return money.ErrInvoiceNotRetryable
-		}
+
 	default:
 		return fmt.Errorf("unexpected customer payment operation %q", row.IntentType)
 	}

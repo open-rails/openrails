@@ -39,7 +39,6 @@ export type {
   PublicConfig,
   PublicMerchant,
   CheckoutSessionLink,
-  Invoice,
   ListPage,
   NetworkLinkChallenge,
   NewCard,

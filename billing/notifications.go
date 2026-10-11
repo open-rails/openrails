@@ -30,7 +30,7 @@ type CustomerNotificationLookup struct {
 type NotificationData struct {
 	// Reason qualifies premium_ended (user_cancel, admin, expired, refund,
 	// chargeback, non_recoverable, access_ended) and
-	// invoice_collection_stopped (schedule_exhausted, non_recoverable).
+	// order_collection_stopped (schedule_exhausted, non_recoverable).
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself
@@ -60,16 +60,14 @@ type NotificationData struct {
 
 	// Arrears delinquency (account_delinquent, account_delinquency_cleared).
 	OverdueAmount    *int64     `json:"overdue_amount,omitempty,string"`
-	OverdueInvoices  int        `json:"overdue_invoices,omitempty"`
+	OverdueOrders    int        `json:"overdue_orders,omitempty"`
 	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
 	FromState        string     `json:"from_state,omitempty"`
 	ToState          string     `json:"to_state,omitempty"`
 
-	// Invoice lifecycle and collection (invoice_issued,
+	// A usage order's billing and collection (order_due, order_overdue,
 	// payment_method_failed, payment_method_update_required,
-	// invoice_collection_stopped).
-	InvoiceID      InvoiceID  `json:"invoice_id,omitzero"`
-	InvoiceNumber  string     `json:"invoice_number,omitempty"`
+	// order_collection_stopped); OrderID names it.
 	AmountDue      *int64     `json:"amount_due,omitempty,string"`
 	DueAt          *time.Time `json:"due_at,omitempty"`
 	FailureCode    string     `json:"failure_code,omitempty"`

@@ -73,7 +73,7 @@ modes"](operations.md#operating-modes-the-safety-levers).
 | Real money can move | yes | yes | no |
 | User checkout / charge / refund / cancel | yes | yes | no (fails loudly) |
 | Dunning charges + expiry cancellations | yes | dry-run, intents parked | no |
-| Invoice collection, Solana pulls | yes | no | no |
+| Usage order collection, Solana pulls | yes | no | no |
 | Catalog provider-object writes | yes | deferred | deferred |
 | Provider reads + webhook ingestion | yes | yes | yes |
 
@@ -101,7 +101,7 @@ Ownership determines which system may initiate the renewal.
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
-| Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
+| Cleanup / usage orders | 1 h – daily | expired-data cleanup, usage order collection + period billing |
 | Worker health check | 5 min | seeds `billing.worker_state`, raises a critical notification in the merchant inbox when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`

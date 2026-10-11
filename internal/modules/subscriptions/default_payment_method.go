@@ -333,7 +333,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 		swaps = append(swaps, id)
 	}
 	// Choosing a card is what a stopped collection waited for.
-	if _, err := q.ResumeStoppedInvoiceCollection(ctx, gen.ResumeStoppedInvoiceCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
+	if _, err := q.ResumeStoppedUsageCollection(ctx, gen.ResumeStoppedUsageCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
 		return nil, nil, err
 	}
 	return nil, swaps, nil

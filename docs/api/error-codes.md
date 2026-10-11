@@ -87,11 +87,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_query` | 400 | `invalid_request_error` | A query parameter is malformed or out of range; param is the parameter. |
 | `invalid_request_body` | 400 | `invalid_request_error` | The request body could not be read or is not one JSON value. |
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
-| `invoice_action_not_allowed` | 409 | `invalid_request_error` | The invoice's status does not allow this action. |
-| `invoice_not_retryable` | 409 | `invalid_request_error` | The invoice cannot be collected again. |
-| `invoice_retry_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key names a different collection attempt. |
-| `invoice_retry_in_progress` | 409 | `invalid_request_error` | A collection attempt on this invoice is unresolved. |
-| `invoice_retry_outcome_unknown` | 409 | `invalid_request_error` | The last collection attempt's outcome is unknown. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `merchant_binding_mismatch` | 409 | `invalid_request_error` | The selected merchant is not the one the credential, deployment or request is bound to. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
@@ -109,6 +104,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `network_link_conflict` | 409 | `invalid_request_error` | The customer is linked to another openrails.dev account; sign in with that one. |
 | `network_link_in_use` | 409 | `invalid_request_error` | The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first. |
 | `network_terms_required` | 403 | `authorization_error` | The openrails.dev account has not accepted the network terms. |
+| `order_action_not_allowed` | 409 | `invalid_request_error` | The order's origin or status does not allow this action. |
 | `order_has_recurring_line` | 409 | `invalid_request_error` | An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
 | `order_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
 | `order_not_cancelable` | 409 | `invalid_request_error` | Only an open order, or one awaiting the customer's action, can be canceled. |
@@ -116,7 +112,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `order_payment_in_progress` | 409 | `invalid_request_error` | A payment on this order is unresolved; read the order. |
 | `order_total_changed` | 409 | `invalid_request_error` | The order's total is not expected_total; preview it again. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
-| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the invoice has due, or is not the order's total. |
+| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the usage order has due, or is not the order's total. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |
 | `payment_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key belongs to another payment request. |
 | `payment_in_progress` | 409 | `invalid_request_error` | A payment is already unresolved; read the resource before retrying. |

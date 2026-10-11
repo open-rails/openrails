@@ -86,7 +86,7 @@ unbounded-many ListOpenCatalogDriftEvents       # open catalog.* findings: catal
 # never a request or a routine job.
 unpruned-partition archive.count.admission_operations        # archive counts every retained admission
 unpruned-partition archive.export.admission_operations       # archive exports every retained admission
-unpruned-partition archive.preflight.admission_operations.12 # archive refuses while any admission is open
+unpruned-partition archive.preflight.admission_operations.11 # archive refuses while any admission is open
 unpruned-partition archive.count.usage_events                # archive counts every retained usage event
 unpruned-partition archive.export.usage_events               # archive exports every retained usage event
 
@@ -105,9 +105,9 @@ unpruned-partition HasUsageActivity             # default dashboard: any retaine
 unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge scan
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
 unbounded-many ListStuckProviderIntents                        # or#837 scan of all live intents
-unbounded-many ListInvoicePayers                           # or#837 aggregate over all ledger transfers and catalog usage
-unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
-unbounded-many ListInvoiceThresholdCandidates             # or#837 scan of every arrears payer with pending items
+unbounded-many ListUsagePayers                             # or#837 aggregate over all ledger transfers and catalog usage
+unbounded-many ListChargeableUsageOrders                   # or#837 scan of all open usage orders
+unbounded-many ListUsageThresholdCandidates               # or#837 scan of every arrears payer with pending items
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
 unbounded-many ListMigratableSubscriptionsByPriceIDs     # or#837 fan-out per price: a price migration's cohort

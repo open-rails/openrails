@@ -106,19 +106,19 @@ func customerPaymentError(r *httprequest.Request, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, providerrecovery.ErrPending), errors.Is(err, money.ErrInvoiceRecoveryHeld):
+	case errors.Is(err, providerrecovery.ErrPending), errors.Is(err, money.ErrUsageRecoveryHeld):
 		r.ErrorCode(billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
 	case errors.Is(err, money.ErrCustomerSessionRequired):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, subscriptions.ErrSubscriptionNotFound):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "billing resource not found"))
-	case errors.Is(err, money.ErrInvoiceRetryIdempotencyConflict), errors.Is(err, intents.ErrRebillKeyConflict):
+	case errors.Is(err, intents.ErrRebillKeyConflict):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_idempotency_conflict", "key belongs to another payment request"))
-	case errors.Is(err, money.ErrInvoiceRetryInProgress), errors.Is(err, money.ErrInvoiceRetryOutcomeUnknown), errors.Is(err, intents.ErrRebillInProgress):
+	case errors.Is(err, intents.ErrRebillInProgress):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_in_progress", "a payment is already unresolved; read this resource before retrying"))
 	case errors.Is(err, money.ErrCustomerPaymentUnsupported), errors.Is(err, intents.ErrRebillUnsupported):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "customer_payment_unsupported", "customer-present payment is unsupported for this rail or method"))
-	case errors.Is(err, money.ErrInvoiceNotRetryable), errors.Is(err, intents.ErrRebillNotRetryable):
+	case errors.Is(err, intents.ErrRebillNotRetryable):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "resource is not payable now"))
 	case errors.Is(err, money.ErrDefaultPaymentMethodInvalid), errors.Is(err, money.ErrDefaultPaymentMethodRequired), errors.Is(err, charge.ErrAgreementRequired):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_payment_method", "payment method is not eligible"))

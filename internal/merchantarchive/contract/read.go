@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -52,11 +54,25 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// A version 1 archive's invoice_payments table is gone: its settled rows
 	// are payments since migration 38, so one with rows is refused.
 	invoicePayments := false
+	// An archive from before usage orders (migration 61) names invoices,
+	// skipped and refused with rows, and the tables usage orders renamed.
+	invoices, preUsage := false, false
 	info, err := archivewire.Read(src, onHeader, func(r archivewire.Record) error {
 		legacy := version == 1
 		if r.Kind == "table" {
 			if invoicePayments = legacy && r.Table == "invoice_payments"; invoicePayments {
 				return nil
+			}
+			if invoices = r.Table == "invoices"; invoices {
+				preUsage = true
+				// One preceding invoice cadence retains no completed scan.
+				if table+1 < len(profiles) && profiles[table+1].Name == "usage_collection_cadence" {
+					table++
+				}
+				return nil
+			}
+			if renamed, ok := usageRenames[r.Table]; ok {
+				r.Table, preUsage = renamed, true
 			}
 			if legacy && table >= 0 && profiles[table].Name == "products" {
 				current := r.Table == "product_entitlements"
@@ -69,10 +85,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				}
 			}
 			table++
-			// Archives preceding invoice cadence have no completed scan to retain.
-			if legacy && table < len(profiles) && profiles[table].Name == "invoice_collection_cadence" && r.Table == "invoices" {
-				table++
-			}
 			if table >= len(profiles) || r.Table != profiles[table].Name {
 				return fmt.Errorf("invalid archive table order")
 			}
@@ -81,7 +93,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoicePayments {
 			return fmt.Errorf("a version 1 archive with invoice payments: restore it on a release before orders, then export it again")
 		}
+		if invoices {
+			return errArchivedInvoices
+		}
 		p := profiles[table]
+		if preUsage {
+			if err := normalizePreUsage(p, &r.Values); err != nil {
+				return err
+			}
+		}
 		// Usage events before failed usage all succeeded and forgave nothing.
 		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-2 {
 			r.Values = append(r.Values, new("succeeded"), new("0"))
@@ -90,19 +110,27 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
-		// Orders before ui_mode had hosted checkouts only; before renewals
-		// none of their columns; before hosted checkout none of its; before
-		// the payment axis one status.
+		// Orders before usage orders had none of their columns; before ui_mode
+		// hosted checkouts only; before renewals none of their columns; before
+		// hosted checkout none of its; before the payment axis one status.
 		if p.Name == "orders" {
 			missing := len(p.Columns) - len(r.Values)
-			if missing == 1+orderRenewalColumns+orderCheckoutColumns+1 {
+			if missing == orderUsageColumns+1+orderRenewalColumns+orderCheckoutColumns+1 {
 				r.Values = splitOrderStatus(p, r.Values)
 				missing--
 			}
-			if missing == 1 || missing == 1+orderRenewalColumns || missing == 1+orderRenewalColumns+orderCheckoutColumns {
-				r.Values = append(r.Values, make([]*string, missing-1)...)
+			switch missing {
+			case orderUsageColumns:
+				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
+			case orderUsageColumns + 1, orderUsageColumns + 1 + orderRenewalColumns, orderUsageColumns + 1 + orderRenewalColumns + orderCheckoutColumns:
+				r.Values = append(r.Values, make([]*string, missing-orderUsageColumns-1)...)
 				r.Values = append(r.Values, hostedIfCheckout(p, r.Values))
+				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
 			}
+		}
+		// Order lines before usage orders named no accrual source.
+		if p.Name == "order_lines" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
 		}
 		if !legacy {
 			return emit(p, r.Values)
@@ -310,13 +338,12 @@ func renamePaymentStatus(p Profile, values []*string) {
 	}
 }
 
-// splitOrderStatus is an order of one status as migration 49 split it: the
-// order's own status and its payment's.
-// orderCheckoutColumns are the hosted checkout's columns on orders, before
-// the orderRenewalColumns, then checkout_ui_mode, last.
+// The column groups later migrations appended to orders, in order: hosted
+// checkout's, renewals', checkout_ui_mode, usage orders'.
 const (
 	orderCheckoutColumns = 5
 	orderRenewalColumns  = 5
+	orderUsageColumns    = 10
 )
 
 // hostedIfCheckout is the ui_mode of an order archived before it had one:
@@ -330,6 +357,56 @@ func hostedIfCheckout(p Profile, values []*string) *string {
 	return nil
 }
 
+// usageRenames are the tables usage orders renamed.
+var usageRenames = map[string]string{"invoice_collection_cadence": "usage_collection_cadence", "invoice_items": "owed_items"}
+
+var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage orders, then export it again")
+
+// normalizePreUsage moves a row exported before usage orders to their
+// shapes, as migration 61 moved the database. Rows naming an invoice are
+// refused with the invoices.
+func normalizePreUsage(p Profile, values *[]*string) error {
+	row := *values
+	switch p.Name {
+	case "owed_items":
+		if v := value(p, row, "order_id"); v != nil {
+			return errArchivedInvoices
+		}
+	case "payments":
+		// payments.invoice_id preceded ledger_transfer_id.
+		if len(row) != len(p.Columns)+1 {
+			return nil
+		}
+		at := slices.IndexFunc(p.Columns, func(c Column) bool { return c.Name == "ledger_transfer_id" })
+		if row[at] != nil {
+			return errArchivedInvoices
+		}
+		*values = slices.Delete(row, at, at+1)
+	case "provider_intents":
+		if typ := value(p, row, "intent_type"); typ != nil && *typ == "invoice_collection" {
+			setValue(p, row, "intent_type", "order_collection")
+		}
+		if evidence := value(p, row, "result_evidence"); evidence != nil {
+			setValue(p, row, "result_evidence", strings.Replace(*evidence, `"qualified_invoice_nonexecution":`, `"qualified_collection_nonexecution":`, 1))
+		}
+	case "host_outbox":
+		if data := value(p, row, "data"); data != nil {
+			setValue(p, row, "data", strings.Replace(*data, `"overdue_invoices":`, `"overdue_orders":`, 1))
+		}
+	}
+	return nil
+}
+
+func setValue(p Profile, values []*string, name, v string) {
+	for i, c := range p.Columns {
+		if c.Name == name && i < len(values) {
+			values[i] = &v
+		}
+	}
+}
+
+// splitOrderStatus is an order of one status as migration 49 split it: the
+// order's own status and its payment's.
 func splitOrderStatus(p Profile, values []*string) []*string {
 	status, payment := "", "requires_payment_method"
 	for i, c := range p.Columns[:len(values)] {

@@ -189,15 +189,16 @@ func TestIdempotencyKeysAreContentAddressed(t *testing.T) {
 	assert.NotEqual(t, subscriptions.ObligationOrderReference(a, period), subscriptions.ObligationOrderReference(a, period.Add(time.Microsecond)))
 	assert.NotEqual(t, subscriptions.ObligationOrderReference(a, period), subscriptions.ObligationOrderReference(b, period))
 
-	key := InvoiceCollectionRetryKey(a, "client")
-	assert.True(t, InvoiceCollectionRetryKeyValid(a, key))
-	assert.Equal(t, key, InvoiceCollectionRetryKey(a, "client"))
-	assert.NotEqual(t, key, InvoiceCollectionRetryKey(a, "other"))
+	key := OrderCollectionRetryKey(a, "client")
+	assert.True(t, OrderCollectionRetryKeyValid(a, key))
+	assert.True(t, OrderCollectionRetryKeyValid(a, strings.Replace(key, TypeOrderCollection, legacyCollectionKind, 1)), "a key made before usage orders")
+	assert.Equal(t, key, OrderCollectionRetryKey(a, "client"))
+	assert.NotEqual(t, key, OrderCollectionRetryKey(a, "other"))
 	for _, bad := range []struct {
-		invoice uuid.UUID
-		key     string
+		order uuid.UUID
+		key   string
 	}{{b, key}, {uuid.Nil, key}, {a, key[:len(key)-32] + strings.ToUpper(key[len(key)-32:])}, {a, key[:len(key)-2]}, {a, "client"}} {
-		assert.False(t, InvoiceCollectionRetryKeyValid(bad.invoice, bad.key), bad.key)
+		assert.False(t, OrderCollectionRetryKeyValid(bad.order, bad.key), bad.key)
 	}
 
 	for rail, want := range map[models.Rail]string{models.RailStripe: TypeStripeRefund, models.RailNMI: TypeNMIRefund} {

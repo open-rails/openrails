@@ -48,6 +48,7 @@ const (
 	CodeOrderPaymentInProgress   = "order_payment_in_progress"
 	CodeOrderNotPayable          = "order_not_payable"
 	CodeOrderNotCancelable       = "order_not_cancelable"
+	CodeOrderActionNotAllowed    = "order_action_not_allowed"
 	CodePaymentOptionUnavailable = "payment_option_unavailable"
 	// Payments recorded outside OpenRails.
 	CodePaymentExceedsDue     = "payment_exceeds_due"
@@ -249,9 +250,10 @@ var errorCodes = []ErrorCode{
 	{CodeOrderPaymentInProgress, 409, invalid, "A payment on this order is unresolved; read the order."},
 	{CodeOrderNotPayable, 409, invalid, "The order takes no payment: it is paid, canceled or expired."},
 	{CodeOrderNotCancelable, 409, invalid, "Only an open order, or one awaiting the customer's action, can be canceled."},
+	{CodeOrderActionNotAllowed, 409, invalid, "The order's origin or status does not allow this action."},
 	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the order's lines accepts this payment."},
 	{CodeOrderHasRecurringLine, 409, invalid, "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
-	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the invoice has due, or is not the order's total."},
+	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the usage order has due, or is not the order's total."},
 
 	// Subscriptions and tier changes.
 	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},
@@ -286,12 +288,7 @@ var errorCodes = []ErrorCode{
 	{CodePriceChangeTargetArchived, 422, invalid, "The target price is archived."},
 	{CodePriceIncreaseNoticeTooShort, 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},
 
-	// Invoices and collection.
-	{CodeInvoiceActionNotAllowed, 409, invalid, "The invoice's status does not allow this action."},
-	{CodeInvoiceNotRetryable, 409, invalid, "The invoice cannot be collected again."},
-	{CodeInvoiceRetryInProgress, 409, invalid, "A collection attempt on this invoice is unresolved."},
-	{CodeInvoiceRetryOutcomeUnknown, 409, invalid, "The last collection attempt's outcome is unknown."},
-	{CodeInvoiceRetryIdempotencyConflict, 409, invalid, "The idempotency key names a different collection attempt."},
+	// Collection.
 	{CodeDefaultPaymentMethodRequired, 400, invalid, "The customer has no default card for the currency."},
 	{CodeDefaultPaymentMethodInvalid, 400, invalid, "The card cannot be the customer's default for the currency."},
 

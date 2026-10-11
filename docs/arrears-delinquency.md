@@ -52,14 +52,14 @@ current ──overdue──► grace ──past the grace window, over the floor
 - **delinquent** — past grace and over the floor. New spend is refused and you
   are signalled.
 
-Every state is **derived** from the customer's overdue open receivables
-(`min(due_at)`, `sum(amount_due)` over `open` invoices past `due_at`) against the
+Every state is **derived** from the customer's overdue usage orders
+(`min(due_at)`, the sum of what is due over `open` usage orders past `due_at`) against the
 merchant's policy. The stored row exists only to remember when a state started
 and whether its transition has already been announced — recompute it any time
 and you get the same answer.
 
 A debt below the floor never escalates, however old: a rounding remnant on a
-year-old invoice must not turn into a shutoff instruction.
+year-old usage order must not turn into a shutoff instruction.
 
 ## Policy (two knobs, both defaulted)
 
@@ -87,18 +87,18 @@ A delinquent customer is refused at `/v1/app/admissions` with its **own** deny
 code:
 
 ```json
-{ "allowed": false, "blocked_by": "money", "deny_code": "delinquent_unpaid_invoice" }
+{ "allowed": false, "blocked_by": "money", "deny_code": "delinquent_unpaid_order" }
 ```
 
 Distinct from `insufficient_credit` on purpose: "you are over your limit" and
-"you have an unpaid invoice" ask different things of the customer, and a host
+"you have an unpaid bill" ask different things of the customer, and a host
 that cannot tell them apart cannot say anything useful to either.
 
 For usage billing this **is** the meaningful cutoff — refusing new spend is what
 stops the bill growing. It revokes nothing and cancels nothing.
 
 The gate fails open by construction. It refuses only when the recorded state says
-delinquent **and** a live re-read of the invoices still agrees, so a customer who has
+delinquent **and** a live re-read of the usage orders still agrees, so a customer who has
 just settled is never held out by our evaluation lag.
 
 ## What you enforce: the signal
@@ -115,7 +115,7 @@ signal is an outage for someone who has already paid.
 | `delinquency.cleared` | settled. **Restore it.** |
 
 Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_started_at`,
-`overdue_invoices`, `grace_days`, `amount_floor`.
+`overdue_orders`, `grace_days`, `amount_floor`.
 
 Embedded hosts:
 
@@ -155,15 +155,16 @@ dedupe key, so a re-run never instructs you to shut the same customer off twice.
 
 ## Reading the state
 
-- `GET /v1/admin/invoices?overdue=true` (`Client.ListInvoices` with
-  `Overdue`): the invoices still owed past their due date. One leaves only
-  when paid, voided or written off. Each is `delinquent` once the customer is
-  past grace in its currency: new usage there is refused. The policy is in the
+- `GET /v1/admin/orders?origin=usage&overdue=true` (`Client.ListOrders` with
+  `Origin` and `Overdue`): the usage orders still owed past their due date.
+  One leaves only when paid, voided or written off. Its `usage.delinquent` is
+  set once the customer is past grace in its currency: new usage there is
+  refused. The policy is in the
   merchant's settings (`arrears_grace_days`, `arrears_delinquency_floor`).
-- A refused admission says why: `deny_code` `delinquent_unpaid_invoice`.
+- A refused admission says why: `deny_code` `delinquent_unpaid_order`.
 
-Both are read-only. The state is a reading of invoice truth, so it is settled by
-paying the invoice, never by an API call.
+Both are read-only. The state is a reading of usage orders, so it is settled
+by paying them, never by an API call.
 
 ## Also notified
 

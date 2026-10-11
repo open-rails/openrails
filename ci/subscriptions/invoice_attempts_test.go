@@ -43,22 +43,22 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(res.Job.ID)
-	invoices, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: c.cid()})
+	invoices, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(t, err)
 	require.Len(t, invoices.Items, 1)
-	invoice := invoices.Items[0].ID.String()
+	invoice := invoices.Items[0].ID
 
 	w.refreshProviders()
 	w.settleCollectionScans()
 	declining := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
-	status, out := c.call(http.MethodPost, "/invoices/"+invoice+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": declining})
+	status, out := c.call(http.MethodPost, "/orders/"+invoice.String()+"/pay", "pay-"+uuid.NewString(), w.usagePay(invoice, declining))
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", out)
 	approving := c.saveCard("nmi", visa)
-	c.must(http.MethodPost, "/invoices/"+invoice+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": approving})
+	c.must(http.MethodPost, "/orders/"+invoice.String()+"/pay", "pay-"+uuid.NewString(), w.usagePay(invoice, approving))
 
 	var charges []attempt
 	for _, a := range w.attempts(c.id) {
-		if a.Kind == "invoice" {
+		if a.Kind == "collection" {
 			charges = append(charges, a)
 		}
 	}

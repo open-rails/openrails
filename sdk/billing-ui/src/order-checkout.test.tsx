@@ -263,6 +263,64 @@ describe("OrderCheckout", () => {
     expect(screen.queryByText(/1881/)).not.toBeInTheDocument()
   })
 
+  it("pays what a usage order still owes with a saved card", async () => {
+    const usage = (status = "open") => ({
+      ...order({ status: status === "complete" ? "succeeded" : "requires_payment_method" }, status),
+      origin: "usage",
+      expires_at: null,
+      usage: {
+        period_starts_at: "2026-09-01T00:00:00Z",
+        period_ends_at: "2026-10-01T00:00:00Z",
+        due_at: "2026-10-01T00:00:00Z",
+        amount_paid: "5000000",
+        amount_due: status === "complete" ? "0" : "10000000",
+        collection_method: "charge_automatically",
+        delinquent: false,
+      },
+      payment_options: [
+        { psp_id: "psp_stripe", rail: "stripe", accepts: ["saved_card"] },
+      ],
+    })
+    const paid: Record<string, unknown>[] = []
+    const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/config")) return Response.json(config)
+      if (input.includes("/me/payment-methods"))
+        return Response.json({
+          data: [
+            {
+              id: "pm_kept",
+              customer_id: "c1",
+              rail: "stripe",
+              psp_id: "psp_stripe",
+              status: "active",
+              card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2035 },
+              reusable: true,
+            },
+          ],
+          next_cursor: null,
+        })
+      if (input.endsWith("/me/orders/ord_1")) return Response.json(usage())
+      if (input.endsWith("/me/orders/ord_1/pay")) {
+        paid.push(JSON.parse(String(init?.body)))
+        return Response.json(usage("complete"))
+      }
+      return Response.json({}, { status: 404 })
+    })
+    const onSettled = vi.fn()
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderCheckout orderId="ord_1" onSettled={onSettled} />
+      </BillingProvider>
+    )
+    expect(await screen.findByText("Due")).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("radio", { name: /4242/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "Pay $10.00" }))
+    await waitFor(() => expect(onSettled).toHaveBeenCalled())
+    expect(paid).toEqual([
+      expect.objectContaining({ payment: { payment_method_id: "pm_kept" }, expected_total: "15000000" }),
+    ])
+  })
+
   it("pays from a Solana wallet: a Solana Pay QR for the order", async () => {
     const solanaConfig = {
       ...config,

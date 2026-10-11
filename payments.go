@@ -23,7 +23,7 @@ func (c *Client) GetPayment(ctx context.Context, id billing.PaymentID, requestOp
 // ListPayments is one page of the merchant's payments, newest first.
 func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Payment], error) {
 	q := pageValues(nil, params.PageRequest)
-	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "subscription_id": params.SubscriptionID.String(), "invoice_id": params.InvoiceID.String(),
+	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "subscription_id": params.SubscriptionID.String(),
 		"order_id": params.OrderID.String(), "status": string(params.Status), "rail": params.Rail, "kind": string(params.Kind), "transaction_id": params.TransactionID})
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
@@ -36,7 +36,8 @@ func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListPar
 }
 
 // CreatePayment records money the merchant received outside OpenRails for
-// one invoice or one order. Recording the same TransactionID again with the
+// one order: part or all of what a usage order owes, or another order's
+// total. Recording the same TransactionID again with the
 // same terms answers the first payment; with other terms it is
 // billing.ErrIdempotencyKeyReused.
 func (c *Client) CreatePayment(ctx context.Context, params billing.CreatePaymentParams, requestOptions ...RequestOption) (*billing.Payment, error) {

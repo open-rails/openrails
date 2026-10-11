@@ -17,14 +17,14 @@ import (
 // collapse adjacent values above 2^53.
 func TestCollectionReceiptBindsExactAcceptedAmount(t *testing.T) {
 	psp := uuid.New()
-	payload := InvoiceCollectionPayload{Initiator: charge.InitiatorMerchant, InvoiceID: uuid.New(), CustomerID: uuid.New(), PaymentID: uuid.New(), PaymentMethodID: uuid.New(),
+	payload := OrderCollectionPayload{Initiator: charge.InitiatorMerchant, OrderID: uuid.New(), CustomerID: uuid.New(), PaymentID: uuid.New(), PaymentMethodID: uuid.New(),
 		Rail: "nmi", Currency: "USD", Amount: 9_007_199_254_740_992, Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "vault"}}
 	minor, err := moneyutil.NativeToRailMinor(payload.Currency, payload.Amount)
 	require.NoError(t, err)
 	payload.AmountMinor = minor
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
-	in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), PspID: &psp, IntentType: "invoice_collection", Rail: "nmi", Payload: raw}
+	in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), PspID: &psp, IntentType: TypeOrderCollection, Rail: "nmi", Payload: raw}
 	binding, err := collectionBinding(in)
 	require.NoError(t, err)
 	receipt := CollectedReceipt{data: collectedReceipt{Version: 1, Family: "collected_payment", Binding: binding,
@@ -53,4 +53,33 @@ func TestInitialMembershipDeclineRejectsAmbiguousRawProof(t *testing.T) {
 		require.Error(t, err, raw)
 		require.NotContains(t, err.Error(), "RAW_PROVIDER_SENTINEL")
 	}
+}
+
+// A collection accepted before usage orders names its order invoice_id; its
+// receipt stays bound to that payload and kind.
+func TestLegacyCollectionKeepsItsBinding(t *testing.T) {
+	psp, order := uuid.New(), uuid.New()
+	payload := OrderCollectionPayload{Initiator: charge.InitiatorMerchant, CustomerID: uuid.New(), PaymentID: uuid.New(), PaymentMethodID: uuid.New(),
+		Rail: "nmi", Currency: "USD", Amount: 50_000, AmountMinor: 5, Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "vault"}}
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	delete(fields, "order_id")
+	fields["invoice_id"] = order.String()
+	raw, err = json.Marshal(fields)
+	require.NoError(t, err)
+	in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), PspID: &psp, IntentType: TypeOrderCollection, Rail: "nmi", Payload: raw}
+	decoded, err := DecodeOrderCollectionPayload(in)
+	require.NoError(t, err)
+	require.Equal(t, order, decoded.OrderID)
+	binding, err := collectionBinding(in)
+	require.NoError(t, err)
+	require.Equal(t, legacyCollectionKind, binding.Kind)
+
+	fields["order_id"] = order.String()
+	in.Payload, err = json.Marshal(fields)
+	require.NoError(t, err)
+	_, err = DecodeOrderCollectionPayload(in)
+	require.Error(t, err, "a payload naming its order twice")
 }

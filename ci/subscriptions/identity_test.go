@@ -203,7 +203,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(job.Job.ID)
-	invoices, err := w.client[embedded].ListInvoices(ctx, billing.InvoiceListParams{CustomerID: a.cid()})
+	invoices, err := w.client[embedded].ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: a.cid()})
 	require.NoError(t, err)
 	require.NotEmpty(t, invoices.Items)
 	invoice := invoices.Items[0].ID.String()
@@ -236,8 +236,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/subscriptions/{id}/change/preview":              {"/subscriptions/" + sub.String() + "/change/preview", map[string]any{"price_id": to.ID}},
 		"GET /v1/me/payment-operations/{id}/authentication":          {"/payment-operations/" + op + "/authentication", nil},
 		"POST /v1/me/payment-operations/{id}/authentication/confirm": {"/payment-operations/" + op + "/authentication/confirm", map[string]any{}},
-		"GET /v1/me/invoices/{id}":                                   {"/invoices/" + invoice, nil},
-		"POST /v1/me/invoices/{id}/pay-now":                          {"/invoices/" + invoice + "/pay-now", map[string]any{"payment_method_id": bCard}},
 		"PATCH /v1/me/payment-methods/{id}":                          {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
 		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
@@ -262,6 +260,17 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		probed++
 	}
 	require.Len(t, probes, probed, "every fixture names a mounted route")
+	// A's usage order, read and paid by B.
+	for _, probe := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, "/orders/" + invoice, nil},
+		{http.MethodPost, "/orders/" + invoice + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "50000000"}},
+	} {
+		status, out := w.callAt(w.server.URL, b.token, probe.method, probe.path, "idor-"+uuid.NewString(), probe.body)
+		require.Equal(t, http.StatusNotFound, status, "%s %s with A's usage order: %v", probe.method, probe.path, out)
+	}
 
 	// Routes naming objects in their body: A's ids are answered null and
 	// left untouched. Every such route needs a fixture here.
@@ -307,9 +316,9 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	methods, err := w.client[embedded].ListPaymentMethods(ctx, a.cid(), billing.PaymentMethodListParams{})
 	require.NoError(t, err)
 	require.Len(t, methods.Items, 2, "A's cards are A's")
-	again, err := w.client[embedded].GetInvoice(ctx, invoices.Items[0].ID)
+	again, err := w.client[embedded].GetOrder(ctx, invoices.Items[0].ID)
 	require.NoError(t, err)
-	require.Equal(t, invoices.Items[0].AmountDue, again.AmountDue)
+	require.Equal(t, invoices.Items[0].Usage.AmountDue, again.Usage.AmountDue)
 	status, everything := w.callAt(w.server.URL, b.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true})
 	require.Equal(t, http.StatusOK, status, "%v", everything)
 	require.Empty(t, everything["notifications"], "marking all read names none")

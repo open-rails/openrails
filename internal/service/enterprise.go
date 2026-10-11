@@ -18,12 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// Enterprise arrears facade (#798): the host-facing seams for negotiated rate
-// cards, invoice profiles (net-N terms + document fields), exposure-freshness
-// sweeps, past-due marking, collection and manual remittance. All input/output
-// types here are public — hosts cannot import internal/modules/money.
+// Arrears seams: negotiated rate cards and exposure-freshness sweeps.
 
-// Invoice collection methods (#798, mirrors money constants).
+// Usage collection methods, as money's.
 const (
 	CollectionChargeAutomatically = money.CollectionChargeAutomatically
 	CollectionSendInvoice         = money.CollectionSendInvoice
@@ -225,99 +222,4 @@ func (s *Service) SweepUsage(ctx context.Context, payer identity.CustomerID, cur
 		return err
 	}
 	return s.moneyService().SweepUsage(ctx, payer, cur, from, to)
-}
-
-// PendingChargeDTO is one accrued-but-uninvoiced owed item (running spend).
-// Source is the accrual identity (e.g. "metered:storage.repo_public_gb").
-type PendingChargeDTO struct {
-	SourceType string    `json:"source_type"`
-	Source     string    `json:"source"`
-	Amount     int64     `json:"amount"`
-	InvoiceAt  time.Time `json:"invoice_at"`
-}
-
-// ListPendingCharges returns a payer's accrued-but-uninvoiced owed items —
-// the current-period running spend after a SweepUsage.
-func (s *Service) ListPendingCharges(ctx context.Context, payer identity.CustomerID, currency string) ([]PendingChargeDTO, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	cur, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.moneyService().ListPendingCharges(ctx, payer, cur)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]PendingChargeDTO, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, PendingChargeDTO{
-			SourceType: r.SourceType,
-			Source:     r.Source,
-			Amount:     r.Amount,
-			InvoiceAt:  r.InvoiceAt,
-		})
-	}
-	return out, nil
-}
-
-// GetOutstandingOwed returns the payer's current arrears exposure: open/
-// past-due invoice balances plus accrued-but-uninvoiced pending items.
-func (s *Service) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
-	if s == nil || s.rt == nil {
-		return 0, fmt.Errorf("service not initialized")
-	}
-	cur, err := requireCurrency(currency)
-	if err != nil {
-		return 0, err
-	}
-	var out int64
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var e error
-		out, e = s.moneyService().GetOutstandingOwed(ctx, payer, cur)
-		return e
-	})
-	return out, err
-}
-
-// NotifyOverdueInvoices tells each payer once about each invoice still owed
-// past its due date. Returns the number of new notices.
-func (s *Service) NotifyOverdueInvoices(ctx context.Context, now time.Time) (int, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return 0, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return 0, fmt.Errorf("service not initialized")
-	}
-	return s.moneyService().NotifyOverdueInvoices(ctx, now)
-}
-
-// ChargeOutstanding collects the merchant's chargeable open/past-due
-// receivables (collection_method=charge_automatically, saved method on file)
-// through durable invoice_collection operations. Returns the settled count.
-func (s *Service) ChargeOutstanding(ctx context.Context, minThreshold int64) (int, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return 0, err
-	}
-	if rt.MoneyCharger == nil {
-		return 0, fmt.Errorf("invoice collection charger not configured")
-	}
-	var n int
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var e error
-		n, e = s.moneyService().ChargeOutstanding(ctx, rt.IntentRunner(), minThreshold)
-		return e
-	})
-	return n, err
 }

@@ -28,10 +28,10 @@ const (
 	// One-off payment notifications
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // a one-off purchase's receipt
 
-	// Invoice collection stopped: nothing is canceled and the debt stands.
-	// data.reason is schedule_exhausted (we gave up) or non_recoverable (the
-	// issuer withdrew the mandate).
-	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
+	// A usage order's collection stopped: nothing is canceled and the debt
+	// stands. data.reason is schedule_exhausted (we gave up) or non_recoverable
+	// (the issuer withdrew the mandate).
+	NotificationOrderCollectionStopped NotificationEventType = "order_collection_stopped"
 
 	// Arrears delinquency: the debt outlived the merchant's grace window.
 	// Nothing is canceled or withdrawn; OpenRails refuses new spend and tells
@@ -39,9 +39,9 @@ const (
 	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"
 	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
 
-	// Ordinary invoice lifecycle notifications, independent of onboarding.
-	NotificationInvoiceIssued  NotificationEventType = "invoice_issued"
-	NotificationInvoiceOverdue NotificationEventType = "invoice_overdue"
+	// A usage order with an amount due, and one past its due date.
+	NotificationOrderDue     NotificationEventType = "order_due"
+	NotificationOrderOverdue NotificationEventType = "order_overdue"
 
 	// Translation notifications
 	NotificationTranslationCompleted              NotificationEventType = "translation_completed"                // Voted translation completed (rate-limited)

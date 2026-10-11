@@ -52,9 +52,6 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		PaymentID: q.typed("payment_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParsePaymentID(s)
 			return id.UUID(), err
-		}), InvoiceID: q.typed("invoice_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseInvoiceID(s)
-			return id.UUID(), err
 		}), OrderID: q.typed("order_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParseOrderID(s)
 			return id.UUID(), err
@@ -223,10 +220,6 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
 		Rail: a.Rail, PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
 		AttemptedAt: a.AttemptedAt, EnrichedAt: a.EnrichedAt,
-	}
-	if a.InvoiceID != nil {
-		id := billing.InvoiceID(*a.InvoiceID)
-		out.InvoiceID = &id
 	}
 	if a.OrderID != nil {
 		id := billing.OrderID(*a.OrderID)

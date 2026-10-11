@@ -15,7 +15,7 @@ beside a `currency`. No field name carries a currency.
   `currencies` list each currency's `decimals` (the native scale) and `minor_decimals`
   (what providers settle in); `billing.Currencies()` is the same table in Go.
 - **Every monetary value is a string**: prices, payments and refunds, balances,
-  holds and captures, credit grants and transactions, usage, invoices, limits
+  holds and captures, credit grants and transactions, usage, orders, limits
   and spend windows, rate cards, tier-change amounts, and the checkout session
   document. A JavaScript consumer uses `BigInt` or an exact decimal library;
   converting to `Number` loses values above 2^53. A numeric amount in a request
@@ -38,7 +38,7 @@ another kind's prefix is `400 invalid_param`.
 |---|---|---|---|
 | `prod_` | product | `price_` | price |
 | `sub_` | subscription | `pay_` | payment |
-| `pm_` | payment method | `inv_` | invoice |
+| `pm_` | payment method | `ord_` | order |
 | `psp_` | PSP | `chk_` | checkout attempt |
 | `ocs_` | checkout session | `att_` | payment attempt |
 | `cyc_` | rebill cycle | | |
@@ -105,7 +105,7 @@ The exact display path (`web/admin/src/lib/format.ts`) depends on:
 | Feature | Used for | Minimum (MDN compat data) |
 |---|---|---|
 | `Intl.NumberFormat.prototype.format` with a decimal **string** argument (ECMA-402 2023) | rendering the exact major-unit decimal without a `Number` | Chrome/Edge 106, Firefox 116, Safari/iOS 15.4, Node 19 |
-| `BigInt` (literals, `**`, `%`, `/`, comparisons) | scaling int64 units, input parsing, invoice arithmetic | Chrome/Edge 67, Firefox 68, Safari/iOS 14, Node 10.4 |
+| `BigInt` (literals, `**`, `%`, `/`, comparisons) | scaling int64 units, input parsing, order arithmetic | Chrome/Edge 67, Firefox 68, Safari/iOS 14, Node 10.4 |
 | `Object.hasOwn` | registry lookup | Chrome/Edge 93, Firefox 92, Safari/iOS 15.4 |
 | `Intl.NumberFormat` options `style: "currency"`, `currency`, `maximumFractionDigits`, `useGrouping` (boolean) | currency and plain-number rendering | baseline (Chrome 24, Firefox 29, Safari 10) |
 

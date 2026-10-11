@@ -135,17 +135,17 @@ const router = createBrowserRouter(
             })),
         },
         {
-          path: "invoices",
+          path: "orders",
           lazy: () =>
-            import("@/pages/invoices").then((module) => ({
-              Component: module.InvoicesPage,
+            import("@/pages/orders").then((module) => ({
+              Component: module.OrdersPage,
             })),
         },
         {
-          path: "invoices/:id",
+          path: "orders/:id",
           lazy: () =>
-            import("@/pages/invoices/detail").then((module) => ({
-              Component: module.InvoiceDetailPage,
+            import("@/pages/orders/detail").then((module) => ({
+              Component: module.OrderDetailPage,
             })),
         },
         {

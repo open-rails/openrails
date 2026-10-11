@@ -256,29 +256,29 @@ func (c *Client) RiverJobs() riverhelpers.Contribution {
 // concurrency in the shared River config; it needs at least one worker.
 const QueueBilling = riverjobs.QueueBilling
 
-// InvoiceSweepArgs is the invoice job OpenRails schedules on QueueBilling
-// (daily period finalize, hourly collection, monthly-floor collection). A host
-// whose fleet runs RiverJobs may insert one run itself, e.g.
-// InvoiceSweepArgs{FinalizePreviousMonth: true} to finalize every payer's
+// UsageSweepArgs is the usage-order job OpenRails schedules on QueueBilling
+// (daily billing of the previous period, hourly collection, monthly-floor
+// collection). A host whose fleet runs RiverJobs may insert one run itself,
+// e.g. UsageSweepArgs{FinalizePreviousMonth: true} to bill every customer's
 // previous period now. Every run is idempotent.
-type InvoiceSweepArgs struct {
+type UsageSweepArgs struct {
 	// MerchantID limits this run to one merchant; nil visits active merchants.
 	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
-	// Collect runs the collection pass over open receivables.
+	// Collect runs the collection pass over unpaid usage orders.
 	Collect bool `json:"collect,omitempty"`
 	// UseMonthlyFloor collects down to the merchant's monthly floor instead of
 	// its collection threshold.
 	UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
-	// FinalizePreviousMonth finalizes each payer's previous billing period,
+	// FinalizePreviousMonth bills each customer's previous billing period,
 	// rating reported usage.
 	FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
 }
 
-// Kind is the engine's invoice job kind.
-func (InvoiceSweepArgs) Kind() string { return riverjobs.KindInvoice }
+// Kind is the engine's usage-order job kind.
+func (UsageSweepArgs) Kind() string { return riverjobs.KindUsageOrders }
 
 // InsertOpts targets QueueBilling.
-func (InvoiceSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: QueueBilling} }
+func (UsageSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: QueueBilling} }
 
 // DeclarePSP records a PSP identity, without credentials, for imported billing
 // facts attributed to it. Call during setup, before serving or starting

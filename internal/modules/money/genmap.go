@@ -71,7 +71,7 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 		Status:          status,
 		Source:          r.Source,
 		SourceID:        &r.SourceID,
-		InvoiceID:       r.InvoiceID,
+		OrderID:         r.OrderID,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.CreatedAt,
 	}
@@ -152,64 +152,6 @@ func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 	}
 	if err := fromJSONBC(r.Metadata, &m.Metadata, "usage_events.metadata"); err != nil {
 		return nil, err
-	}
-	return m, nil
-}
-
-func invoiceFromGen(r gen.BillingInvoice) (*models.Invoice, error) {
-	m := &models.Invoice{
-		ID:                           r.ID,
-		MerchantID:                   r.MerchantID,
-		CustomerID:                   r.CustomerID,
-		Currency:                     r.Currency,
-		InvoiceNumber:                r.InvoiceNumber,
-		PeriodStartsAt:               r.PeriodStartsAt,
-		PeriodEndsAt:                 r.PeriodEndsAt,
-		UsageTotal:                   r.UsageTotal,
-		DepositsTotal:                r.DepositsTotal,
-		OwedAccrued:                  r.OwedAccrued,
-		OwedPaid:                     r.OwedPaid,
-		ClosingBalance:               r.ClosingBalance,
-		SubtotalAmount:               r.SubtotalAmount,
-		TotalAmount:                  r.TotalAmount,
-		AmountPaid:                   r.AmountPaid,
-		AmountDue:                    r.AmountDue,
-		PONumber:                     r.PoNumber,
-		Memo:                         r.Memo,
-		Status:                       r.Status,
-		CollectionMethod:             r.CollectionMethod,
-		IssuedAt:                     r.IssuedAt,
-		DueAt:                        r.DueAt,
-		PaidAt:                       r.PaidAt,
-		VoidedAt:                     r.VoidedAt,
-		UncollectibleAt:              r.UncollectibleAt,
-		FinalizedAt:                  r.FinalizedAt,
-		ExternalInvoiceID:            r.ExternalInvoiceID,
-		CollectionFailureCount:       r.CollectionFailureCount,
-		CollectionAttemptCount:       r.CollectionAttemptCount,
-		CollectionFailedAt:           r.CollectionFailedAt,
-		NextCollectionAttemptAt:      r.NextCollectionAttemptAt,
-		LastCollectionFailureCode:    r.LastCollectionFailureCode,
-		LastCollectionFailureMessage: r.LastCollectionFailureMessage,
-		CollectionIntentID:           r.CollectionIntentID,
-		CreatedAt:                    r.CreatedAt,
-		UpdatedAt:                    r.UpdatedAt,
-	}
-	if len(r.LineItems) > 0 {
-		if err := json.Unmarshal(r.LineItems, &m.LineItems); err != nil {
-			return nil, fmt.Errorf("money: decode invoices.line_items: %w", err)
-		}
-	}
-	if err := fromJSONBC(r.MoneyMovements, &m.MoneyMovements, "invoices.money_movements"); err != nil {
-		return nil, err
-	}
-	if err := fromJSONBC(r.Tax, &m.Tax, "invoices.tax"); err != nil {
-		return nil, err
-	}
-	if len(r.BillingContacts) > 0 {
-		if err := json.Unmarshal(r.BillingContacts, &m.BillingContacts); err != nil {
-			return nil, fmt.Errorf("money: decode invoices.billing_contacts: %w", err)
-		}
 	}
 	return m, nil
 }

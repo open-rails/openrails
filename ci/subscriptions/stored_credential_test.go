@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,11 +65,11 @@ func (w *world) methodVersions(method string) []string {
 
 // arrearsInvoice runs up 50 USD of usage for c and invoices it. A scheduled
 // collection may already have collected it under the customer's mandate.
-func (w *world) arrearsInvoice(c *customer) billing.InvoiceID {
+func (w *world) arrearsInvoice(c *customer) billing.OrderID {
 	w.t.Helper()
 	ctx, client := w.t.Context(), w.client[embedded]
 	const owed = 50_000_000 // the default invoice threshold
-	before, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: c.cid()})
+	before, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(w.t, err)
 	_, err = client.UpdateCustomer(ctx, c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: owed}}})
 	require.NoError(w.t, err)
@@ -82,16 +83,16 @@ func (w *world) arrearsInvoice(c *customer) billing.InvoiceID {
 	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
-	after, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: c.cid()})
+	after, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(w.t, err)
 	for _, invoice := range after.Items {
-		if !slices.ContainsFunc(before.Items, func(old billing.Invoice) bool { return old.ID == invoice.ID }) {
-			require.EqualValues(w.t, owed, invoice.TotalAmount)
+		if !slices.ContainsFunc(before.Items, func(old billing.Order) bool { return old.ID == invoice.ID }) {
+			require.EqualValues(w.t, owed, invoice.Total)
 			return invoice.ID
 		}
 	}
 	w.t.Fatal("no invoice for the usage")
-	return billing.InvoiceID{}
+	return billing.OrderID{}
 }
 
 // collectInvoices runs the scheduled invoice collection once, and waits for
@@ -105,11 +106,17 @@ func (w *world) collectInvoices() {
 	w.settle()
 }
 
-func (w *world) invoice(id billing.InvoiceID) *billing.Invoice {
+func (w *world) invoice(id billing.OrderID) *billing.Order {
 	w.t.Helper()
-	invoice, err := w.client[embedded].GetInvoice(w.t.Context(), id)
+	invoice, err := w.client[embedded].GetOrder(w.t.Context(), id)
 	require.NoError(w.t, err)
 	return invoice
+}
+
+// usagePay is the /pay body of a usage order paid with a saved card.
+func (w *world) usagePay(id billing.OrderID, method string) map[string]any {
+	w.t.Helper()
+	return map[string]any{"payment": map[string]any{"payment_method_id": method}, "expected_total": strconv.FormatInt(w.invoice(id).Total, 10)}
 }
 
 func credentialFields(s *nmimock.Sale) []string {
@@ -212,7 +219,7 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	invoice := w.arrearsInvoice(e.c)
 	w.collectInvoices()
 	require.Equal(t, sent, e.providerAttempts())
-	require.Equal(t, agreementRequired, *w.invoice(invoice).LastCollectionFailureCode, "invoice collection waits for the customer")
+	require.Equal(t, agreementRequired, w.invoice(invoice).Payment.LastPaymentError.Reason, "invoice collection waits for the customer")
 	require.Empty(t, w.stripe.Unexpected())
 	status, body := e.c.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": e.method})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)

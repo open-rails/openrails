@@ -1578,7 +1578,7 @@ func IsTestMode(cfg *Config) bool {
 }
 
 // IsLimitedMode returns true if proactive payment-provider operations
-// (dunning charges/cancellations, invoice collection, Solana
+// (dunning charges/cancellations, usage order collection, Solana
 // pulls, catalog provider-object writes) are disabled, leaving only reactive,
 // user-initiated operations. True in limited and readonly modes.
 func IsLimitedMode(cfg *Config) bool {
@@ -1662,7 +1662,7 @@ func logOperatingModeStatus(cfg *Config) {
 		log.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
 	case ProviderWriteModeLimited:
 		log.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
-		log.Info("   Dunning charges/cancellations, invoice collection, Solana pulls and catalog provider writes are paused")
+		log.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
 		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
 		log.Info("   Set provider_write_mode=full to resume proactive operations")
 	case ProviderWriteModeFull:

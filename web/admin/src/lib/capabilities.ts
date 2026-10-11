@@ -22,7 +22,7 @@ export function hasAnyArea(access: AdminAccess): boolean {
 }
 
 // useAdminArea reports customer support: customers, subscriptions, payments,
-// invoices and findings.
+// orders and findings.
 export function useAdminArea(): boolean {
   return (useAccess()?.admin ?? "none") !== "none"
 }

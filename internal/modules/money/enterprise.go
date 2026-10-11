@@ -23,16 +23,16 @@ import (
 // (including negotiated per-payer overrides).
 
 // SweepUsage rates a payer's reported usage over [from, to) through the
-// catalog rate cards into pending owed invoice items — the same watermarked
-// sweep FinalizeInvoice runs, without finalizing. Hosts call it to keep
+// catalog rate cards into pending owed items — the same watermarked sweep
+// FinalizeUsage runs, without billing. Hosts call it to keep
 // arrears exposure (GetOutstandingOwed) fresh mid-period.
 func (s *MoneyService) SweepUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
 	return s.sweepCatalogRateCardUsage(ctx, payer, currency, from, to)
 }
 
-// NotifyOverdueInvoices queues one overdue notice per open invoice still owed
-// past its due date. Returns the number of new notices.
-func (s *MoneyService) NotifyOverdueInvoices(ctx context.Context, now time.Time) (int, error) {
+// NotifyOverdueUsageOrders queues one overdue notice per usage order still
+// owed past its due date. Returns the number of new notices.
+func (s *MoneyService) NotifyOverdueUsageOrders(ctx context.Context, now time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -46,59 +46,12 @@ func (s *MoneyService) NotifyOverdueInvoices(ctx context.Context, now time.Time)
 	var n int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		n, e = s.db.Gen(ctx).NotifyOverdueInvoices(ctx, gen.NotifyOverdueInvoicesParams{
+		n, e = s.db.Gen(ctx).NotifyOverdueUsageOrders(ctx, gen.NotifyOverdueUsageOrdersParams{
 			MerchantID: tid.UUID(), Now: now.UTC(),
 		})
 		return e
 	})
 	return int(n), err
-}
-
-// PendingCharge is one accrued-but-uninvoiced owed item (running spend).
-// Source is the accrual identity (e.g. "metered:storage.repo_public_gb").
-type PendingCharge struct {
-	SourceType string    `json:"source_type"`
-	Source     string    `json:"source"`
-	Amount     int64     `json:"amount"`
-	InvoiceAt  time.Time `json:"invoice_at"`
-}
-
-// ListPendingCharges returns a payer's pending (uninvoiced) owed items.
-func (s *MoneyService) ListPendingCharges(ctx context.Context, payer identity.CustomerID, currency string) ([]PendingCharge, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	cur := normalizeCurrency(currency)
-	if err := RequireBillingCurrency(cur); err != nil {
-		return nil, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []PendingCharge
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, e := s.db.Gen(ctx).ListPendingInvoiceItemsByPayer(ctx, gen.ListPendingInvoiceItemsByPayerParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: cur,
-		})
-		if e != nil {
-			return e
-		}
-		out = make([]PendingCharge, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, PendingCharge{
-				SourceType: r.SourceType,
-				Source:     r.Source,
-				Amount:     r.Amount,
-				InvoiceAt:  r.InvoiceAt,
-			})
-		}
-		return nil
-	})
-	return out, err
 }
 
 // EnsureUsageMeter idempotently upserts a catalog meter.

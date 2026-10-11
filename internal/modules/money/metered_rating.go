@@ -472,7 +472,7 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 		// The accrual belongs to its rating period, not the sweep time:
 		// invoice_at = periodFrom, so a close over a past window attaches it
 		// instead of leaking it into the next period's invoice.
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, ratingKey.invoiceItemSourceID(), delta, periodFrom.UTC(), map[string]any{
+		if err := insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, ratingKey.owedItemSourceID(), delta, periodFrom.UTC(), map[string]any{
 			"operation": string(ratingKey.Operation()),
 			"source":    ratingKey.Source(),
 		}); err != nil {

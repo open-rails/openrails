@@ -174,41 +174,41 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.EqualValues(t, 100_000, balance(customer).OwedAmount, "funding repays arrears debt too")
 	})
 
-	t.Run("repayment pays the invoice that claims the debt", func(t *testing.T) {
+	t.Run("repayment pays the usage order that claims the debt", func(t *testing.T) {
 		svc := money.NewMoneyService(database)
 		from, to := time.Now().UTC().Add(-24*time.Hour).Truncate(time.Second), time.Now().UTC().Add(24*time.Hour).Truncate(time.Second)
 
-		invoiced := newCustomer()
-		overdraw(invoiced, "od-inv", 1_000_000, 300_000)
-		inv, err := svc.FinalizeInvoice(ctx, identity.CustomerID(invoiced), "USD", from, to)
+		billed := newCustomer()
+		overdraw(billed, "od-inv", 1_000_000, 300_000)
+		order, err := svc.FinalizeUsage(ctx, identity.CustomerID(billed), "USD", from, to)
 		require.NoError(t, err)
-		require.EqualValues(t, 300_000, inv.AmountDue)
-		require.Equal(t, "open", inv.Status)
-		grant(invoiced, 1_000_000, "pays-invoice")
-		bal := balance(invoiced)
+		require.EqualValues(t, 300_000, order.Total)
+		require.Equal(t, "open", order.Status)
+		grant(billed, 1_000_000, "pays-order")
+		bal := balance(billed)
 		require.EqualValues(t, 0, bal.OwedAmount)
 		require.EqualValues(t, 700_000, bal.BalanceAmount)
-		paid, err := client.GetInvoice(ctx, billing.InvoiceID(inv.ID))
+		paid, err := client.GetOrder(ctx, billing.OrderID(order.ID))
 		require.NoError(t, err)
-		require.Equal(t, billing.InvoiceStatus("paid"), paid.Status)
-		require.EqualValues(t, 0, paid.AmountDue)
-		require.EqualValues(t, 300_000, paid.AmountPaid)
+		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.EqualValues(t, 0, paid.Usage.AmountDue)
+		require.EqualValues(t, 300_000, paid.Usage.AmountPaid)
+		require.NotNil(t, paid.Number, "a paid usage order is numbered")
 		// A balance repayment moves no money: it is a ledger transfer, not a
 		// payment.
-		history, err := client.ListPayments(ctx, billing.PaymentListParams{InvoiceID: billing.InvoiceID(inv.ID)})
+		history, err := client.ListPayments(ctx, billing.PaymentListParams{OrderID: billing.OrderID(order.ID)})
 		require.NoError(t, err)
 		require.Empty(t, history.Items)
 
-		// Repaid before any invoice: the period's invoice claims nothing.
+		// Repaid before it was billed: the period's order is complete at once.
 		early := newCustomer()
 		overdraw(early, "od-early", 1_000_000, 300_000)
-		grant(early, 1_000_000, "before-invoice")
-		inv, err = svc.FinalizeInvoice(ctx, identity.CustomerID(early), "USD", from, to)
+		grant(early, 1_000_000, "before-order")
+		order, err = svc.FinalizeUsage(ctx, identity.CustomerID(early), "USD", from, to)
 		require.NoError(t, err)
-		require.EqualValues(t, 0, inv.AmountDue)
-		require.EqualValues(t, 300_000, inv.TotalAmount)
-		require.EqualValues(t, 300_000, inv.AmountPaid)
-		require.Equal(t, "paid", inv.Status)
+		require.EqualValues(t, 300_000, order.Total)
+		require.EqualValues(t, 300_000, *order.AmountPaid)
+		require.Equal(t, "complete", order.Status)
 	})
 
 	t.Run("refund and chargeback of a lot that repaid owed", func(t *testing.T) {

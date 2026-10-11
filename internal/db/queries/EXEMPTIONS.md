@@ -169,8 +169,8 @@ observes; the set is bounded by the merchant's catalog and PSPs.
 
 - *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
   scans, the reconciliation findings scans, `ListStuckProviderIntents`,
-  `ListInvoicePayers`, `ListChargeableOpenInvoices` and
-  `ListInvoiceThresholdCandidates`.
+  `ListUsagePayers`, `ListChargeableUsageOrders` and
+  `ListUsageThresholdCandidates`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`,
   `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The
   caller's list is bounded but each element's row set is not.

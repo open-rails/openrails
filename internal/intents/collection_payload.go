@@ -15,16 +15,24 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// InvoiceCollectionPayload freezes the charge before submission. The amount
-// is the invoice's amount_due at enqueue, in native precision and rail minor
+// TypeOrderCollection is one charge of a usage order: scheduled, a
+// merchant's retry or the customer's payment.
+const TypeOrderCollection = "order_collection"
+
+// legacyCollectionKind is the kind earlier collections' keys were made under;
+// the ledger keeps them, so their operations keep them too.
+const legacyCollectionKind = "invoice_collection"
+
+// OrderCollectionPayload freezes the charge before submission. The amount is
+// what the usage order had due at enqueue, in native precision and rail minor
 // units; replays never recalculate it. Instrument freezes the method's
 // account and custody: submission requires the method to still match it, and
 // verification and operator resolution judge receipts only against it.
 // payment_method_id also pins the method against custody remap while the
 // operation is unresolved.
-type InvoiceCollectionPayload struct {
+type OrderCollectionPayload struct {
 	Initiator           charge.Initiator           `json:"initiator"`
-	InvoiceID           uuid.UUID                  `json:"invoice_id"`
+	OrderID             uuid.UUID                  `json:"order_id"`
 	CustomerID          uuid.UUID                  `json:"customer_id"`
 	PaymentID           uuid.UUID                  `json:"payment_id"`
 	PaymentMethodID     uuid.UUID                  `json:"payment_method_id"`
@@ -38,25 +46,31 @@ type InvoiceCollectionPayload struct {
 	Description         string                     `json:"description"`
 }
 
-func DecodeInvoiceCollectionPayload(intent gen.BillingProviderIntent) (InvoiceCollectionPayload, error) {
-	var p InvoiceCollectionPayload
+func DecodeOrderCollectionPayload(intent gen.BillingProviderIntent) (OrderCollectionPayload, error) {
+	var p OrderCollectionPayload
 	if len(intent.Payload) == 0 {
-		return p, errors.New("invoice collection intent has no payload")
+		return p, errors.New("order collection intent has no payload")
 	}
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
-		return p, fmt.Errorf("decode invoice collection payload: %w", err)
+		return p, fmt.Errorf("decode order collection payload: %w", err)
 	}
-	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
-		return p, errors.New("invoice collection payload is incomplete")
+	if legacy, ok := legacyOrderID(intent.Payload); ok {
+		if p.OrderID != uuid.Nil {
+			return p, errors.New("order collection payload names its order twice")
+		}
+		p.OrderID = legacy
+	}
+	if p.OrderID == uuid.Nil || p.CustomerID == uuid.Nil || p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
+		return p, errors.New("order collection payload is incomplete")
 	}
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
 		return p, errors.New("collection initiation is not established")
 	}
-	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || (p.Instrument.Custodian != models.CustodianPSP && p.Instrument.Custodian != models.CustodianHyperSwitch) || !charge.CustomerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || (p.Instrument.Custodian != models.CustodianPSP && p.Instrument.Custodian != models.CustodianHyperSwitch) || !(charge.CustomerPaymentKeyValid(TypeOrderCollection, p.CustomerID, intent.IdempotencyKey) || charge.CustomerPaymentKeyValid(legacyCollectionKind, p.CustomerID, intent.IdempotencyKey))) {
 		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {
-		return p, fmt.Errorf("invoice collection payload: %w", err)
+		return p, fmt.Errorf("order collection payload: %w", err)
 	}
 	if p.Instrument.Custodian == models.CustodianHyperSwitch {
 		if p.HyperSwitch == nil || p.HyperSwitch.Validate() != nil || p.Rail != "nmi" {
@@ -66,9 +80,9 @@ func DecodeInvoiceCollectionPayload(intent gen.BillingProviderIntent) (InvoiceCo
 		return p, errors.New("non-HyperSwitch collection carries foreign custody policy")
 	}
 	if intent.PspID == nil || *intent.PspID != p.Instrument.PSPID {
-		return p, errors.New("invoice collection payload's provider account is not the operation's")
+		return p, errors.New("order collection payload's provider account is not the operation's")
 	}
-	if intent.ID == uuid.Nil || intent.MerchantID == uuid.Nil || intent.IntentType != "invoice_collection" || intent.Rail != p.Rail || intent.CustodianID != nil {
+	if intent.ID == uuid.Nil || intent.MerchantID == uuid.Nil || intent.IntentType != TypeOrderCollection || intent.Rail != p.Rail || intent.CustodianID != nil {
 		return p, errors.New("collection operation identity is incomplete or inconsistent")
 	}
 	if p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) {
@@ -90,18 +104,48 @@ func DecodeInvoiceCollectionPayload(intent gen.BillingProviderIntent) (InvoiceCo
 	return p, nil
 }
 
-// InvoiceCollectionRetryKey scopes a merchant retry's opaque key to its invoice.
-func InvoiceCollectionRetryKey(invoiceID uuid.UUID, clientKey string) string {
-	digest := sha256.Sum256([]byte(invoiceID.String() + "\x00" + clientKey))
-	return fmt.Sprintf("invoice_collection:%s:retry:%x", invoiceID, digest[:16])
+// legacyOrderID is the order a collection accepted before usage orders names
+// as invoice_id; its receipts are bound to that payload as it was.
+func legacyOrderID(payload []byte) (uuid.UUID, bool) {
+	var legacy struct {
+		InvoiceID *uuid.UUID `json:"invoice_id"`
+	}
+	if json.Unmarshal(payload, &legacy) != nil || legacy.InvoiceID == nil {
+		return uuid.Nil, false
+	}
+	return *legacy.InvoiceID, true
 }
 
-func InvoiceCollectionRetryKeyValid(invoiceID uuid.UUID, key string) bool {
-	prefix := fmt.Sprintf("invoice_collection:%s:retry:", invoiceID)
-	if invoiceID == uuid.Nil || !strings.HasPrefix(key, prefix) {
+// OrderCollectionRetryKey scopes a merchant retry's opaque key to its order.
+func OrderCollectionRetryKey(orderID uuid.UUID, clientKey string) string {
+	digest := sha256.Sum256([]byte(orderID.String() + "\x00" + clientKey))
+	return fmt.Sprintf("%s:%s:retry:%x", TypeOrderCollection, orderID, digest[:16])
+}
+
+func OrderCollectionRetryKeyValid(orderID uuid.UUID, key string) bool {
+	if orderID == uuid.Nil {
 		return false
 	}
-	encoded := strings.TrimPrefix(key, prefix)
+	var encoded string
+	for _, kind := range []string{TypeOrderCollection, legacyCollectionKind} {
+		if prefix := fmt.Sprintf("%s:%s:retry:", kind, orderID); strings.HasPrefix(key, prefix) {
+			encoded = strings.TrimPrefix(key, prefix)
+		}
+	}
+	if encoded == "" {
+		return false
+	}
 	decoded, err := hex.DecodeString(encoded)
 	return err == nil && len(decoded) == 16 && encoded == strings.ToLower(encoded)
+}
+
+// IsOrderCollectionKey reports whether key was made for an order collection.
+func IsOrderCollectionKey(key string) bool {
+	return strings.HasPrefix(key, TypeOrderCollection+":") || strings.HasPrefix(key, legacyCollectionKind+":")
+}
+
+// OrderCollectionKeyValid reports whether key is a collection key of the
+// payer's order: the customer's own payment or a merchant retry.
+func OrderCollectionKeyValid(payer, order uuid.UUID, key string) bool {
+	return payer != uuid.Nil && (charge.CustomerPaymentKeyValid(TypeOrderCollection, payer, key) || charge.CustomerPaymentKeyValid(legacyCollectionKind, payer, key) || OrderCollectionRetryKeyValid(order, key))
 }

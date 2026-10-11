@@ -1,5 +1,16 @@
 # Changelog
 
+## Usage orders
+
+- Breaking: `listInvoices`, `getInvoice` and `Invoice` are removed. Usage
+  billed in arrears is an order (`origin: usage`): `listOrders({ origin:
+  "usage" })` lists them, and `<OrderCheckout>` pays one with a saved card.
+- `Order` gains `usage` (its period, `due_at`, `amount_paid`, `amount_due`,
+  collection and `delinquent`) and `uncollectible_at`; `status` may be
+  `uncollectible`. A usage line names its `source`; its `price_id` and
+  `product_id` are null.
+- `Order.checkout.expires_at` is read again.
+
 ## Embedded checkout
 
 - `<EmbeddedCheckout url onComplete?>` frames a merchant order's embedded

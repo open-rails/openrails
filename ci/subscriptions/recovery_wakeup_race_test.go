@@ -205,7 +205,7 @@ func (p *pausedRecoveryInserter) InsertTx(ctx context.Context, tx pgx.Tx, args r
 	if err != nil {
 		return result, err
 	}
-	if invoice, ok := args.(riverjobs.InvoiceArgs); ok && invoice.UseMonthlyFloor {
+	if invoice, ok := args.(riverjobs.UsageOrderArgs); ok && invoice.UseMonthlyFloor {
 		p.once.Do(func() { close(p.entered) })
 		select {
 		case <-p.release:

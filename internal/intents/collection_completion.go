@@ -13,14 +13,14 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-var errInvoiceNonexecutionUnproven = errors.New("fenced invoice has no qualified nonexecution proof")
+var errCollectionNonexecutionUnproven = errors.New("fenced collection has no qualified nonexecution proof")
 
-// CompleteInvoiceCollection is called at the end of the domain transaction,
-// after its payer/invoice/attempt locks. It is deliberately collection-specific:
+// CompleteOrderCollection is called at the end of the domain transaction,
+// after its payer/order/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
-func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
-	if in.IntentType != "invoice_collection" {
-		return errors.New("invoice completion received another operation kind")
+func (s *Store) CompleteOrderCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
+	if in.IntentType != TypeOrderCollection {
+		return errors.New("order collection completion received another operation kind")
 	}
 	return s.completeCollectedPayment(ctx, in, outcome, now)
 }
@@ -70,7 +70,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 	}
 	var nonexecution CollectionNonexecutionProof
 	var hasNonexecution bool
-	if current.IntentType == "invoice_collection" || current.IntentType == subscriptions.TypeSubscriptionCollection {
+	if current.IntentType == TypeOrderCollection || current.IntentType == subscriptions.TypeSubscriptionCollection {
 		nonexecution, hasNonexecution, err = LoadCollectionNonexecution(current)
 		if err != nil {
 			return err
@@ -99,7 +99,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 		if found {
 			return errors.New("qualified collected payment cannot become nonexecution or refusal")
 		}
-		if (current.IntentType == "invoice_collection" || current.IntentType == subscriptions.TypeSubscriptionCollection) && outcome.Evidence["not_executed"] == true {
+		if (current.IntentType == TypeOrderCollection || current.IntentType == subscriptions.TypeSubscriptionCollection) && outcome.Evidence["not_executed"] == true {
 			var canonical map[string]json.RawMessage
 			if len(current.ResultEvidence) > 0 {
 				if err := json.Unmarshal(current.ResultEvidence, &canonical); err != nil {
@@ -108,12 +108,12 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 			}
 			_, fenced := canonical["submitted_at"]
 			if fenced && !hasNonexecution {
-				return errInvoiceNonexecutionUnproven
+				return errCollectionNonexecutionUnproven
 			}
 			if hasNonexecution {
 				code, reason := nonexecution.Refusal()
 				if outcome.Evidence["not_executed_code"] != code || outcome.Reason != reason {
-					return errors.New("invoice nonexecution contradicts sealed proof")
+					return errors.New("collection nonexecution contradicts sealed proof")
 				}
 			}
 		}

@@ -86,7 +86,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 			if err != nil {
 				return fmt.Errorf("load credit order line: %w", err)
 			}
-			if payment.OrderID == nil || line.OrderID != *payment.OrderID || line.ProductID != p.ProductID || line.Amount != p.PaidAmount {
+			if payment.OrderID == nil || line.OrderID != *payment.OrderID || line.ProductID == nil || *line.ProductID != p.ProductID || line.Amount != p.PaidAmount {
 				return fmt.Errorf("credit funding does not match its order line")
 			}
 		} else {

@@ -34,7 +34,7 @@ const (
 	Rebill        Kind = "rebill"
 	DunningRetry  Kind = "dunning_retry"
 	CustomerRetry Kind = "customer_retry"
-	Invoice       Kind = "invoice"
+	Collection    Kind = "collection"
 )
 
 // Owner is who collects the subscription an attempt is for.
@@ -94,8 +94,8 @@ type Attempt struct {
 	// or CardSave. Empty for rebills.
 	Target                                                       string
 	SubscriptionID, PaymentMethodID, PaymentID, ProviderIntentID *uuid.UUID
-	// InvoiceID or OrderID is what the attempt tried to pay.
-	InvoiceID, OrderID *uuid.UUID
+	// OrderID is the order the attempt tried to pay.
+	OrderID *uuid.UUID
 	// Step keys an operation's attempts that carry no transaction id.
 	Step      string
 	TokenType string
@@ -164,7 +164,7 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		Kind: string(a.Kind), Owner: string(OwnerNone), CardEntry: "saved", Source: "openrails", ObservedVia: "response",
 		Amount: a.Amount, Currency: optional(strings.ToUpper(a.Currency)), AttemptedAt: a.At.UTC(),
 		SubscriptionID: a.SubscriptionID, PaymentMethodID: a.PaymentMethodID, PaymentID: a.PaymentID,
-		ProviderIntentID: a.ProviderIntentID, Step: a.Step, InvoiceID: a.InvoiceID, OrderID: a.OrderID,
+		ProviderIntentID: a.ProviderIntentID, Step: a.Step, OrderID: a.OrderID,
 		TransactionID: optional(a.TransactionID), ResponseText: optional(truncate(a.Answer.Text, 128)),
 	}
 	c := cardOf(a.Answer)

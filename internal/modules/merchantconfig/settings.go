@@ -11,23 +11,23 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
-// Invoice period boundaries a merchant's settings may name.
+// Billing period boundaries a merchant's settings may name.
 const (
-	InvoiceBoundaryCalendarMonth = "calendar_month"
-	InvoiceBoundaryFixedInterval = "fixed_interval"
-	InvoiceBoundaryAnniversary   = "anniversary"
+	BillingBoundaryCalendarMonth = "calendar_month"
+	BillingBoundaryFixedInterval = "fixed_interval"
+	BillingBoundaryAnniversary   = "anniversary"
 )
 
-// NormalizeInvoiceBoundary canonicalizes a billing_period_boundary; "" is
+// NormalizeBillingBoundary canonicalizes a billing_period_boundary; "" is
 // fixed_interval and an unknown value "".
-func NormalizeInvoiceBoundary(boundary string) string {
+func NormalizeBillingBoundary(boundary string) string {
 	switch strings.ToLower(strings.TrimSpace(boundary)) {
-	case "", InvoiceBoundaryFixedInterval:
-		return InvoiceBoundaryFixedInterval
-	case InvoiceBoundaryCalendarMonth:
-		return InvoiceBoundaryCalendarMonth
-	case InvoiceBoundaryAnniversary:
-		return InvoiceBoundaryAnniversary
+	case "", BillingBoundaryFixedInterval:
+		return BillingBoundaryFixedInterval
+	case BillingBoundaryCalendarMonth:
+		return BillingBoundaryCalendarMonth
+	case BillingBoundaryAnniversary:
+		return BillingBoundaryAnniversary
 	default:
 		return ""
 	}
@@ -60,7 +60,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
 		cfg.Profile.SupportURL, cfg.Profile.SignupURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SignupURL)
 	}
-	for name, v := range map[string]*int64{"collection_threshold": in.InvoiceCollectionThreshold, "monthly_floor": in.InvoiceMonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
+	for name, v := range map[string]*int64{"collection_threshold": in.CollectionThreshold, "monthly_floor": in.MonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
 		if v != nil && *v < 0 {
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
@@ -70,13 +70,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	cfg.InvoiceCollectionThreshold, cfg.InvoiceMonthlyFloor, cfg.ArrearsDelinquencyFloor = in.InvoiceCollectionThreshold, in.InvoiceMonthlyFloor, in.ArrearsDelinquencyFloor
+	cfg.CollectionThreshold, cfg.MonthlyFloor, cfg.ArrearsDelinquencyFloor = in.CollectionThreshold, in.MonthlyFloor, in.ArrearsDelinquencyFloor
 	cfg.RepriceNoticeWindowDays, cfg.RenewalReceiptMinIntervalHours, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.RenewalReceiptMinIntervalHours, in.ArrearsGraceDays
-	if in.InvoiceBillingBoundary != "" {
-		if NormalizeInvoiceBoundary(in.InvoiceBillingBoundary) == "" {
-			return Settings{}, fmt.Errorf("invalid billing_period_boundary %q", in.InvoiceBillingBoundary)
+	if in.BillingPeriodBoundary != "" {
+		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
+			return Settings{}, fmt.Errorf("invalid billing_period_boundary %q", in.BillingPeriodBoundary)
 		}
-		cfg.InvoiceBillingBoundary = in.InvoiceBillingBoundary
+		cfg.BillingPeriodBoundary = in.BillingPeriodBoundary
 	}
 	if in.AlertEmail != nil {
 		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)

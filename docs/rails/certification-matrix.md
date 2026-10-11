@@ -52,7 +52,7 @@ read them, and a request a rail cannot serve is refused, never dropped.
 | Renewals of an imported, provider-scheduled subscription | NMI charges; OpenRails retries its declines | Stripe charges and retries | CCBill charges and retries | n/a |
 | Card entry | Collect.js token, or server card entry when the PSP declares it | Stripe Elements; a hosted redirect for one-off without a publishable key | CCBill's own page | none: a wallet |
 | Saved cards managed through OpenRails | yes | saved through setup; changed in Stripe's billing portal | no | n/a |
-| Charge a saved card for an invoice | yes | yes | no | no |
+| Charge a saved card for a usage order | yes | yes | no | no |
 | Customer cancel | reversible until the scheduled delete runs | reversible until period end | final; access runs to the paid date | signed by the customer's wallet |
 | Merchant cancel | yes | yes | yes | no: `customer_action_required` |
 | Tier change | upgrade now with proration, downgrade at period end | upgrade now with proration, downgrade at period end | upgrade by redirect; no downgrade | signed by the customer's wallet |

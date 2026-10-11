@@ -1,0 +1,237 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/providerrecovery"
+	"github.com/open-rails/openrails/internal/shared/apperr"
+)
+
+// A usage order (origin usage) bills owed usage in arrears. Its customer
+// pays what it still owes with a saved card, present; the merchant retries
+// its collection, voids it, writes it off or records a remittance.
+
+var (
+	errUsageSavedCard      = apperr.Invalidf("a usage order is paid with a saved card: payment.payment_method_id").WithParam("payment")
+	errUsageCardRequired   = apperr.Invalidf("payment_method_id required").WithParam("payment_method_id")
+	errUsageActionRefused  = apperr.New(http.StatusConflict, billing.CodeOrderActionNotAllowed, "The order's origin or status does not allow this action.")
+	errUsageNotCollectible = apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "The usage order takes no collection now.")
+	errBillingPaused       = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
+)
+
+// payUsage pays what the open usage order still owes. replayed: key's
+// collection already existed.
+func (s *Service) payUsage(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, bool, error) {
+	if pay.method == uuid.Nil {
+		return checkout.OrderCharge{}, false, errUsageSavedCard
+	}
+	// The collection decides: a key's earlier collection answers again
+	// whatever the order's state is now.
+	rt, err := s.runtime()
+	if err != nil {
+		return checkout.OrderCharge{}, false, err
+	}
+	if rt.MoneyCharger == nil {
+		return checkout.OrderCharge{}, false, fmt.Errorf("usage collection charger not configured")
+	}
+	collectKey := orderPayKey(order.ID, key)
+	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, collectKey); err != nil {
+		return checkout.OrderCharge{}, false, err
+	}
+	result, err := s.moneyService().PayUsageNow(ctx, rt.IntentRunner(), actor.Principal, money.UsageCollectionRequest{OrderID: order.ID, IdempotencyKey: collectKey, PaymentMethodID: pay.method})
+	if err != nil {
+		return checkout.OrderCharge{}, false, usageRefusal(err)
+	}
+	return collectionCharge(result.Operation), result.Replayed, nil
+}
+
+// collectionCharge is how an order collection ended: failed, and whether
+// the card was declined.
+func collectionCharge(op gen.BillingProviderIntent) checkout.OrderCharge {
+	if op.Status != intents.StatusFailedTerminal {
+		return checkout.OrderCharge{}
+	}
+	var evidence struct {
+		Declined bool `json:"declined"`
+	}
+	_ = json.Unmarshal(op.ResultEvidence, &evidence)
+	return checkout.OrderCharge{Failed: true, Declined: evidence.Declined}
+}
+
+// usageRefusal answers a collection the usage order refused.
+func usageRefusal(err error) error {
+	switch {
+	case errors.Is(err, money.ErrCustomerSessionRequired):
+		return errOrderSessionNeeded
+	case errors.Is(err, money.ErrCollectionInProgress), errors.Is(err, money.ErrCollectionOutcomeUnknown):
+		return orders.ErrInProgress
+	case errors.Is(err, money.ErrCollectionIdempotencyConflict):
+		return errOrderKeyReused
+	case errors.Is(err, money.ErrUsageNotCollectible):
+		return errUsageNotCollectible
+	case errors.Is(err, money.ErrUsageActionNotAllowed):
+		return errUsageActionRefused
+	case errors.Is(err, money.ErrCustomerPaymentUnsupported), errors.Is(err, money.ErrDefaultPaymentMethodInvalid):
+		return orders.ErrOptionMissing
+	case errors.Is(err, providerrecovery.ErrPending), errors.Is(err, money.ErrUsageRecoveryHeld):
+		return errBillingPaused
+	}
+	return err
+}
+
+// usageOptions is how a usage order is paid: a saved card.
+func (s *Service) usageOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
+	methods, err := s.rt.DB.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID, Rails: []string{"nmi"}})
+	if err != nil {
+		return nil, err
+	}
+	seen := map[uuid.UUID]bool{}
+	out := []billing.OrderPaymentOption{}
+	for _, m := range methods {
+		if m.PspID == nil || seen[*m.PspID] || m.Status != "active" {
+			continue
+		}
+		seen[*m.PspID] = true
+		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(*m.PspID), Rail: m.Rail, Accepts: []string{"saved_card"}})
+	}
+	return out, nil
+}
+
+// VoidMerchantOrder voids an unpaid usage order: what it still owes is
+// written off and no longer collected.
+func (s *Service) VoidMerchantOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
+	return s.usageAction(ctx, id, s.moneyService().VoidUsageOrder)
+}
+
+// MarkMerchantOrderUncollectible writes an open usage order off: the debt
+// stands, and collecting the order again reopens it.
+func (s *Service) MarkMerchantOrderUncollectible(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
+	return s.usageAction(ctx, id, s.moneyService().MarkUsageOrderUncollectible)
+}
+
+func (s *Service) usageAction(ctx context.Context, id billing.OrderID, act func(context.Context, uuid.UUID) error) (*billing.Order, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := act(ctx, id.UUID()); err != nil {
+		switch {
+		case errors.Is(err, money.ErrUsageActionNotAllowed):
+			return nil, errUsageActionRefused
+		case db.IsNotFound(err):
+			return nil, orders.ErrNotFound
+		}
+		return nil, err
+	}
+	return s.usageOrderView(ctx, id)
+}
+
+// RetryOrderCollection charges what a usage order still owes to one of its
+// customer's cards: an uncollectible order, or an open one past due or
+// declined before. One key is one collection; a decline answers 402.
+func (s *Service) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams) (OrderAnswer, error) {
+	if params.PaymentMethodID.IsZero() {
+		return OrderAnswer{}, errUsageCardRequired
+	}
+	key := strings.TrimSpace(params.IdempotencyKey)
+	if key == "" {
+		return OrderAnswer{}, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
+	}
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	defer release()
+	rt, err := s.runtime()
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	if rt.MoneyCharger == nil {
+		return OrderAnswer{}, fmt.Errorf("usage collection charger not configured")
+	}
+	ort, err := s.orderRuntime()
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	order, err := ort.Orders.Get(ctx, id.UUID())
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	if order.Origin != string(billing.OrderOriginUsage) {
+		return OrderAnswer{}, errUsageActionRefused
+	}
+	result, err := s.moneyService().RetryUsageCollection(ctx, rt.IntentRunner(), identity.CustomerID(order.CustomerID), money.UsageCollectionRequest{
+		OrderID: order.ID, IdempotencyKey: key, PaymentMethodID: params.PaymentMethodID.UUID(),
+	})
+	if err != nil {
+		return OrderAnswer{}, usageRefusal(err)
+	}
+	view, err := s.usageOrderView(ctx, id)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	out := OrderAnswer{Order: view, Status: http.StatusOK, Replayed: result.Replayed}
+	if charged := collectionCharge(result.Operation); charged.Failed {
+		out.Status, out.Code = http.StatusPaymentRequired, billing.CodePaymentFailed
+		if charged.Declined {
+			out.Code = billing.CodeCardDeclined
+		}
+	}
+	return out, nil
+}
+
+// FinalizeUsage bills one customer's owed usage of [from, to) in currency
+// as a usage order. Idempotent per period.
+func (s *Service) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*billing.Order, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	cur, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+	order, err := s.moneyService().FinalizeUsage(ctx, payer, cur, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return s.usageOrderView(ctx, billing.OrderID(order.ID))
+}
+
+// usageOrderView is an order as the merchant reads it, marked delinquent.
+func (s *Service) usageOrderView(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
+	rt, err := s.orderRuntime()
+	if err != nil {
+		return nil, err
+	}
+	order, err := rt.Orders.Get(ctx, id.UUID())
+	if err != nil {
+		return nil, err
+	}
+	view, err := s.merchantOrderView(ctx, order)
+	if err != nil {
+		return nil, err
+	}
+	return view, s.markDelinquent(ctx, view)
+}

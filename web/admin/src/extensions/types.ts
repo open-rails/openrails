@@ -54,7 +54,7 @@ export interface ConsoleNavItem {
 }
 
 export interface ConsoleRoute {
-  // A console path, optionally with params: "/account", "/invoices/:id".
+  // A console path, optionally with params: "/account", "/orders/:id".
   path: string
   scope: ConsoleScope
   lazy: () => Promise<{ Component: ComponentType }>

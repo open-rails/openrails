@@ -39,7 +39,7 @@ import { BillingStatusBadge } from "./status-badge"
 export interface PaymentMethodsPanelProps {
   /**
    * Offers to make a card the default for this currency: it pays the
-   * currency's invoices and every subscription in it without its own card.
+   * currency's usage orders and every subscription in it without its own card.
    */
   defaultCurrency?: string
   /** Billing country to preselect when adding a card. */

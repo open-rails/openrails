@@ -1,0 +1,67 @@
+{
+  "data": [
+    {
+      "id": "ord_99999999-9999-4999-8999-999999999998",
+      "customer_id": "22222222-2222-2222-2222-222222222222",
+      "origin": "usage",
+      "status": "open",
+      "number": null,
+      "currency": "USD",
+      "total": "9223372036854775807",
+      "lines": [
+        {
+          "id": "oli_99999999-9999-4999-8999-999999999997",
+          "price_id": null,
+          "product_id": null,
+          "source": "metered:tokens",
+          "description": "tokens",
+          "quantity": 1,
+          "unit_amount": "9223372036854775807",
+          "amount": "9223372036854775807",
+          "ownership": null,
+          "billing_interval_hours": null,
+          "access_duration_hours": null,
+          "subscription_id": null,
+          "product_access_id": null
+        }
+      ],
+      "payment": {
+        "status": "requires_payment_method",
+        "next_action": null,
+        "last_payment_error": null,
+        "payment_method_id": null,
+        "payment_id": null
+      },
+      "payment_options": [],
+      "checkout": null,
+      "renewal": null,
+      "usage": {
+        "period_starts_at": "2026-09-16T00:00:00.123456789Z",
+        "period_ends_at": "2026-09-16T00:00:00.123456789Z",
+        "due_at": "2026-09-16T00:00:00.123456789Z",
+        "amount_paid": "0",
+        "amount_due": "9223372036854775807",
+        "collection_method": "charge_automatically",
+        "next_collection_attempt_at": null,
+        "po_number": null,
+        "memo": null,
+        "tax": {},
+        "billing_contacts": [
+          {
+            "name": "Ops",
+            "email": "ops@example.test"
+          }
+        ],
+        "delinquent": true
+      },
+      "expires_at": null,
+      "completed_at": null,
+      "canceled_at": null,
+      "expired_at": null,
+      "voided_at": null,
+      "uncollectible_at": null,
+      "created_at": "2026-09-16T00:00:00.123456789Z"
+    }
+  ],
+  "next_cursor": "cursor-2"
+}

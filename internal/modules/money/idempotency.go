@@ -42,11 +42,11 @@ const (
 	OpCreditRevoke    = ledger.OpCreditRevoke
 	OpCreditReinstate = ledger.OpCreditReinstate
 
-	OpArrearsAccrual   = ledger.OpArrearsAccrual
-	OpMeteredRating    = ledger.OpMeteredRating
-	OpInvoicePayment   = ledger.OpInvoicePayment
-	OpManualInvoicePay = ledger.OpManualInvoicePay
-	OpInvoiceVoid      = ledger.OpInvoiceVoid
+	OpArrearsAccrual     = ledger.OpArrearsAccrual
+	OpMeteredRating      = ledger.OpMeteredRating
+	OpOrderPayment       = ledger.OpOrderPayment
+	OpManualOrderPayment = ledger.OpManualOrderPayment
+	OpOrderVoid          = ledger.OpOrderVoid
 )
 
 // UsageOperation is the operation kind of a metered usage charge (usage:<event_type>).
@@ -158,11 +158,11 @@ func (k IdempotencyKey) requireSameAmount(ctx context.Context, q *gen.Queries, m
 	return true, nil
 }
 
-// invoiceItemSourceID is the pending-invoice-item key for this coordinate.
+// owedItemSourceID is the pending-invoice-item key for this coordinate.
 // invoice_items_customer_id_currency_source_type_source_id_key is (merchant, customer, currency, source_type,
 // source_id), so the OPERATION has to be in the string for the same reason it
 // is in the ledger coordinate — otherwise a capture's owed leg and a usage
 // charge's owed leg at one (source, source_id) collide into one accrued item.
-func (k IdempotencyKey) invoiceItemSourceID() string {
+func (k IdempotencyKey) owedItemSourceID() string {
 	return string(k.coord.Operation) + ":" + k.coord.Source + ":" + k.coord.SourceID
 }

@@ -29,7 +29,7 @@ func TestMerchantFileRoundTrip(t *testing.T) {
 			"mobius": NMIPSP{AccountID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
 			"wallet": SolanaPSP{TransitKey: "transit", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m", Name: "Xyz"}}}.PSPConfig(),
 		},
-		Settings: billing.MerchantSettings{InvoiceBillingBoundary: "calendar_month"},
+		Settings: billing.MerchantSettings{BillingPeriodBoundary: "calendar_month"},
 	}
 	raw, err := yaml.Marshal(struct {
 		Slug                string `yaml:"slug"`

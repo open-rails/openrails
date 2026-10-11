@@ -39,10 +39,10 @@ type Engine struct {
 	// a note; an unavailable history source is never a run error.
 	History HistoryEventSource
 
-	// RecoverInvoicePayment qualifies an observed NMI invoice receipt through
-	// its canonical financial writer before the generic subscription diff.
-	// Nil leaves missing invoice receipts as visible findings.
-	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
+	// RecoverUsagePayment qualifies an observed NMI receipt of a usage order
+	// through its canonical financial writer before the generic subscription
+	// diff. Nil leaves those receipts as visible findings.
+	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
 
 	// Notifier bridges persisted findings into the operator notification
 	// store. Optional; nil is a no-op. Best-effort: a notify failure is
@@ -456,7 +456,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
 	recoveryErrors := map[string]error{}
-	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverInvoicePayment != nil {
+	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil {
 		known := make(map[string]bool, len(localPayments))
 		for _, payment := range localPayments {
 			known[payment.TransactionID] = true
@@ -469,7 +469,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			if json.Unmarshal(transaction.Raw, &raw) != nil || known[transaction.TransactionID] || transaction.Type != TransactionTypeSale || !transaction.Success || !strings.HasPrefix(raw.OrderDescription, "invoice") {
 				continue
 			}
-			if err := e.RecoverInvoicePayment(ctx, binding.ID, transaction.TransactionID); err != nil {
+			if err := e.RecoverUsagePayment(ctx, binding.ID, transaction.TransactionID); err != nil {
 				recoveryErrors[transaction.TransactionID] = err
 			} else {
 				recovered = true

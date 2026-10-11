@@ -124,34 +124,3 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	}
 	return out, nil
 }
-
-// FinalizeInvoice closes the rating window [from, to) for one payer: reported
-// usage is rated through the catalog rate cards (allowances, per-period
-// watermarks) and the statement finalized as an invoice. Idempotent per window.
-func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*billing.Invoice, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	cur, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	inv, err := s.moneyService().FinalizeInvoice(ctx, payer, cur, from, to)
-	if err != nil {
-		return nil, err
-	}
-	out := InvoiceView(inv, s.now())
-	if err := s.markDelinquent(ctx, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

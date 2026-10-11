@@ -15,8 +15,8 @@ import (
 
 // River decodes a job by kind into the worker's args type, so the public args
 // must mirror the engine job field for field or host inserts silently drop data.
-func TestInvoiceSweepArgsMirrorEngineInvoiceJob(t *testing.T) {
-	public, internal := reflect.TypeOf(InvoiceSweepArgs{}), reflect.TypeOf(riverjobs.InvoiceArgs{})
+func TestUsageSweepArgsMirrorEngineJob(t *testing.T) {
+	public, internal := reflect.TypeOf(UsageSweepArgs{}), reflect.TypeOf(riverjobs.UsageOrderArgs{})
 	require.Equal(t, internal.NumField(), public.NumField())
 	for i := range internal.NumField() {
 		want := internal.Field(i)
@@ -25,8 +25,8 @@ func TestInvoiceSweepArgsMirrorEngineInvoiceJob(t *testing.T) {
 		require.Equal(t, want.Type, got.Type, want.Name)
 		require.Equal(t, want.Tag, got.Tag, want.Name)
 	}
-	require.Equal(t, riverjobs.InvoiceArgs{}.Kind(), InvoiceSweepArgs{}.Kind())
-	require.Equal(t, QueueBilling, InvoiceSweepArgs{}.InsertOpts().Queue)
+	require.Equal(t, riverjobs.UsageOrderArgs{}.Kind(), UsageSweepArgs{}.Kind())
+	require.Equal(t, QueueBilling, UsageSweepArgs{}.InsertOpts().Queue)
 }
 
 // Hosting operations refuse a remote client instead of pretending.

@@ -15,7 +15,7 @@ import (
 )
 
 // Unified credit-line model. An account spends prepaid balance first, then
-// creates pending invoice items up to its admin-set credit_limit_amount.
+// creates pending owed items up to its admin-set credit_limit_amount.
 // Prepay-only = credit limit 0; arrears = explicit credit line.
 
 // SpendParams is a unified immediate spend (balance first, then owed). Key is
@@ -194,7 +194,7 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 
 // spendBalanceThenOwedTx debits amount within an existing tx: prepaid balance
 // first (FIFO credit lots → ledger spend transfers), any remainder accrued to
-// pending invoice items + an arrears-liability transfer. The caller has locked
+// pending owed items + an arrears-liability transfer. The caller has locked
 // the balance row and handled idempotency. Returns the amounts drawn from
 // balance and accrued to owed (either may be 0).
 //
@@ -213,7 +213,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, fmt.Errorf("amount must be positive")
 	}
 	// Every leg below carries this key: the ledger transfers and the pending
-	// invoice item. The ledger never mints a key for a caller: a fresh one
+	// owed item. The ledger never mints a key for a caller: a fresh one
 	// would make every replay accrue a new item.
 	if key.IsZero() {
 		return 0, 0, false, fmt.Errorf("spend: idempotency key required")
@@ -315,7 +315,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return 0, 0, false, aerr
 		}
 		applied = applied || owedApplied
-		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.invoiceItemSourceID(), fromOwed, now, map[string]any{
+		if err := insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.owedItemSourceID(), fromOwed, now, map[string]any{
 			"operation": string(key.Operation()),
 			"source":    key.Source(),
 		}); err != nil {

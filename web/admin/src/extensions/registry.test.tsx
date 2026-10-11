@@ -74,7 +74,7 @@ describe("console navigation", () => {
             "Customers",
             "Subscriptions",
             "Payments",
-            "Invoices",
+            "Orders",
             "Catalog",
             "Ops",
             "Settings",

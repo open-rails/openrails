@@ -9,7 +9,7 @@ import {
   nativeAmountFromInput, nativeAmountToInput, unitsToDecimal,
 } from "./format"
 import { canRevokeCredit, creditGrantInput } from "@/pages/customers/credit-form"
-import { invoicePaymentAmount } from "@/pages/invoices/model"
+import { usagePaymentAmount } from "@/pages/orders/model"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import type { CreditGrant } from "@/lib/api/credit-types"
 import { MAX_INT64 as MAX, MIN_INT64 as MIN, UNSAFE } from "@/test/harness"
@@ -200,13 +200,13 @@ describe("money submitted by console forms", () => {
     expect(canRevokeCredit({ ...grant, state: "scheduled" })).toBe(true)
   })
 
-  it("remits invoices at the invoice's own scale, never beyond the balance", () => {
-    expect(invoicePaymentAmount("12", "120000", 4)).toBe("120000")
-    expect(invoicePaymentAmount("2", "120000", 4)).toBe("20000")
-    expect(invoicePaymentAmount("9007199254.740993", MAX, 6)).toBe(UNSAFE)
-    expect(invoicePaymentAmount("9223372036854.775807", MAX, 6)).toBe(MAX)
+  it("remits a usage order at its own scale, never beyond what it owes", () => {
+    expect(usagePaymentAmount("12", "120000", 4)).toBe("120000")
+    expect(usagePaymentAmount("2", "120000", 4)).toBe("20000")
+    expect(usagePaymentAmount("9007199254.740993", MAX, 6)).toBe(UNSAFE)
+    expect(usagePaymentAmount("9223372036854.775807", MAX, 6)).toBe(MAX)
     for (const over of ["0.00001", "13", "0", "9223372036854.775808", UNSAFE])
-      expect(() => invoicePaymentAmount(over, "120000", 4)).toThrow()
+      expect(() => usagePaymentAmount(over, "120000", 4)).toThrow()
   })
 
   it("reads a price as a cadence or a stretch of access", () => {

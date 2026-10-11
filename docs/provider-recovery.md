@@ -8,8 +8,8 @@ Explicit readonly mode is never automatically changed to full mode.
 
 Provider refresh runs every two hours. An established NMI or Stripe account
 that has missed a whole refresh cycle (completed financial coverage older than
-four hours plus the five-minute provider window delay) holds renewal/invoice
-dispatch and destructive work. A refresh that is due or still running holds
+four hours plus the five-minute provider window delay) holds renewal and usage
+collection dispatch and destructive work. A refresh that is due or still running holds
 nothing: coverage ends at a refresh's start, and each cycle staggers its
 merchants. A new account without older
 billing facts can serve its initial checkout. A fresh row never hides an older
@@ -21,7 +21,7 @@ Starting another replica does not reset healthy shared-database coverage.
 CCBill and Solana retain their existing webhook and destructive-policy behavior;
 this delivery does not give them an automatic stale-backup recovery guarantee.
 Completion durably wakes recovery-held operations and requests the merchant's
-normal renewal and invoice scans, including invoices refused before admission.
+normal renewal and usage order scans, including orders refused before admission.
 Issuer retry dates and monthly collection cadence remain unchanged. A verifier
 that commits its hold just after completion rechecks readiness after commit, so
 its live lease cannot strand the operation on the former recovery delay.
@@ -51,7 +51,7 @@ only when its actual transaction is observed and now matches local facts.
 
 When applied progress exists, recovery continues from that cursor. On first
 upgrade without it, the lower bound comes from relevant current subscriptions,
-unpaid invoice periods and unresolved accepted operations, not every historical
+unpaid usage order periods and unresolved accepted operations, not every historical
 completed payment. Long billing periods are read in bounded batches from their
 relevant obligation floor. Unavailable provider history remains an error; the
 read is not truncated and an operator flag cannot manufacture its proof.
@@ -59,9 +59,9 @@ read is not truncated and an operator flag cannot manufacture its proof.
 Native renewals recover through their accepted operation and normal settlement
 path. A restored copy may admit local recovery work and verify a positive
 stable-obligation receipt without pretending it previously submitted a charge.
-A known invoice whose accepted operation was lost can recover a verified NMI
-receipt carrying its exact invoice description, account, payer, currency and
-full remaining amount. Partial, reversed, ambiguous or contradictory receipts
+A known usage order whose accepted operation was lost can recover a verified
+NMI receipt carrying its exact order description (`invoice <order id>`),
+account, payer, currency and full remaining amount. Partial, reversed, ambiguous or contradictory receipts
 remain held. Existing accepted operations retain their canonical authority;
 recovery never creates a fake dispatched operation or a manual payment.
 

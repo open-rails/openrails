@@ -9,7 +9,7 @@ changes them against that revision where Vault holds the configuration
 configuration is a file declares the same document under `settings:` in its
 YAML.
 
-The settings hold the profile, invoice/arrears policy, checkout routing, the
+The settings hold the profile, usage billing and arrears policy, checkout routing, the
 dunning policy, named billing policies, default/tier bindings and delegated
 wasted-spend limits. An update changes only the fields it names; an explicit
 empty list removes those declarations. Unknown fields are rejected.
@@ -29,7 +29,7 @@ refused, and the previous settings stay.
 `credit_limits` and `trust_levels` by currency, `billing_policy` and
 `invoice_profile`. A field at its default is absent: no entry for a currency
 without a limit or level, a null `billing_policy` inherits the tier's or the
-default policy, and a null `invoice_profile` invoices at net 0, charged
+default policy, and a null `invoice_profile` bills usage at net 0, charged
 automatically.
 
 - `Client.GetCustomer` (`GET /v1/admin/customers/{customer_id}`) answers

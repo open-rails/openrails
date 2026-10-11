@@ -107,10 +107,10 @@ func TestClientRequestShapes(t *testing.T) {
 			}
 			return err
 		}, http.MethodGet, "/v1/admin/customers", "ids=" + customer + "%2C" + customer, nil},
-		{"overdue invoices", func() error {
-			_, err := client.ListInvoices(t.Context(), billing.InvoiceListParams{Overdue: true})
+		{"overdue orders", func() error {
+			_, err := client.ListOrders(t.Context(), billing.OrderListParams{Overdue: true})
 			return err
-		}, http.MethodGet, "/v1/admin/invoices", "overdue=true", nil},
+		}, http.MethodGet, "/v1/admin/orders", "overdue=true", nil},
 		{"subscriptions in dunning", func() error {
 			_, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{Dunning: true})
 			return err
@@ -246,14 +246,13 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
 	typed := map[string]func() error{
-		"invoice":      func() error { _, err := c.GetInvoice(ctx, billing.InvoiceID{}); return err },
-		"void invoice": func() error { _, err := c.VoidInvoice(ctx, billing.InvoiceID{}); return err },
-		"uncollectible invoice": func() error {
-			_, err := c.MarkInvoiceUncollectible(ctx, billing.InvoiceID{})
+		"void order": func() error { _, err := c.VoidOrder(ctx, billing.OrderID{}); return err },
+		"uncollectible order": func() error {
+			_, err := c.MarkOrderUncollectible(ctx, billing.OrderID{})
 			return err
 		},
-		"retry invoice": func() error {
-			_, err := c.RetryInvoiceCollection(ctx, billing.InvoiceID{}, billing.RetryInvoiceCollectionParams{IdempotencyKey: "k"})
+		"retry order": func() error {
+			_, err := c.RetryOrderCollection(ctx, billing.OrderID{}, billing.RetryOrderCollectionParams{IdempotencyKey: "k"})
 			return err
 		},
 		"payment methods customer": func() error {
@@ -347,7 +346,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"list ids zero": func() error {
-			_, err := c.ListInvoices(ctx, billing.InvoiceListParams{IDs: []billing.InvoiceID{{}}})
+			_, err := c.ListOrders(ctx, billing.OrderListParams{IDs: []billing.OrderID{{}}})
 			return err
 		},
 		"release empty": func() error {

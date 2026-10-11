@@ -144,7 +144,7 @@ for _, p := range client.Probes() { // openrails_vault, openrails_psp_posture, o
 }
 ```
 
-River is required: renewals, dunning, invoices, reconciliation and provider
+River is required: renewals, dunning, usage orders, reconciliation and provider
 intents are River jobs. Jobs queue in `Config.Database.RiverSchema` from `New`
 on and wait there; `Start` runs them, and `Ready` fails until it does. Without
 options `Start` builds and runs OpenRails' own River client there:
@@ -177,9 +177,9 @@ second `Start` is refused too. Cancelling `Start`'s context stops nothing:
 also watches the fleet from outside River: `openrails_job_progress` fails while
 it is stalled.
 
-**Inserting an engine job.** The one job a host inserts itself is the invoice
-sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
-finalizes the previous period of every customer active in it now; `Collect: true` runs the
+**Inserting an engine job.** The one job a host inserts itself is the usage
+sweep: `workers.Insert(ctx, openrails.UsageSweepArgs{FinalizePreviousMonth: true}, nil)`
+bills the previous period of every customer active in it now; `Collect: true` runs the
 collection pass. Runs are idempotent.
 
 **No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
@@ -202,7 +202,7 @@ cfg.Merchant = openrails.MerchantDeclaration{
     DisplayName: "My App",
     Settings: billing.MerchantSettings{
         Profile:                &billing.MerchantProfile{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
-        InvoiceBillingBoundary: "calendar_month",
+        BillingPeriodBoundary:  "calendar_month",
     },
     PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
         "my-nmi-sandbox": openrails.NMIPSP{
@@ -395,7 +395,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
 | (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay, the captcha, the customer routes (`/v1/me/*` for `Config.Merchant`) and signature-checked provider callbacks. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`) |
 | `Auth` | Your auth (above); required. A checkout session shows saved cards only to its own customer, admitted by it |
-| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, invoices, credits, access, usage, operations, checkout sessions; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations, checkout sessions; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
@@ -444,9 +444,8 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Catalog (API hosts) | `ListOffers` (programmatic: what a customer may buy, by entitlement or product key), `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |
 | Checkout | `CreateCheckoutSession`, `ListCheckoutOptions` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
-| Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read). Only the customer pays |
+| Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `VoidOrder`, `MarkOrderUncollectible`, `RetryOrderCollection` (usage orders). Only the customer pays with a card they enter |
 | Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
-| Invoices | `ListInvoices`, `GetInvoice`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice` |
 | Provider obligations | `OpenProviderOperation`, `IncrementProviderOperation`, `ReleaseProviderOperation`, `RecordProviderBillingObservation`, `ListProviderOperations`, `GetProviderOperation`, `CloseProviderOperation` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 

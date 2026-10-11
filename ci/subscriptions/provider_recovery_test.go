@@ -268,7 +268,7 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			armMerchant(t, source, mid)
 			source.start()
 			source.pull()
-			status, body := customer.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "after-backup", map[string]string{"payment_method_id": method})
+			status, body := customer.call(http.MethodPost, "/orders/"+invoice.String()+"/pay", "after-backup", source.usagePay(invoice, method))
 			require.Equal(t, http.StatusOK, status, body)
 			source.settle()
 			require.Len(t, source.nmi.Ledger(""), 1)
@@ -289,16 +289,16 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			require.ErrorIs(t, providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), source.psp["nmi"].UUID(), target.clock.Now()), providerrecovery.ErrPending, "old unpaid invoice alone is an established book")
 			target.start()
 			require.Eventually(t, func() bool {
-				paid, err := target.client[embedded].GetInvoice(t.Context(), invoice)
-				return err == nil && paid.Status == billing.InvoicePaid && paid.AmountDue == 0
+				paid, err := target.client[embedded].GetOrder(t.Context(), invoice)
+				return err == nil && paid.Status == billing.OrderComplete && paid.Usage.AmountDue == 0
 			}, 60*time.Second, 50*time.Millisecond, "normal startup refresh allocates the verified receipt without inventing an operation")
 			require.Eventually(t, func() bool {
 				return providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()) == nil
 			}, 60*time.Second, 50*time.Millisecond, "positive invoice recovery completes financial catch-up")
 			var operations, allocations int
-			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
+			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection'`)).Scan(&operations))
 			require.Zero(t, operations)
-			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND invoice_id=$1`), invoice.UUID()).Scan(&allocations))
+			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND order_id=$1`), invoice.UUID()).Scan(&allocations))
 			require.Equal(t, 1, allocations)
 			require.Len(t, target.nmi.Attempts(), 1)
 			require.Len(t, target.nmi.Ledger(""), 1)

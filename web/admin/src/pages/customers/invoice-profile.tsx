@@ -5,13 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { invoiceQueries, invoiceProfileMutation } from "@/lib/invoice-queries"
+import { orderQueries, invoiceProfileMutation } from "@/lib/order-queries"
 import type { InvoiceProfile } from "@/lib/api/generated/wire"
 import {
   invoiceProfileValues,
   invoiceProfileRequest,
   type ProfileFormValues,
-} from "../invoices/model"
+} from "./invoice-profile-model"
 import { useAdminUpdates } from "@/lib/capabilities"
 
 export function CustomerInvoiceProfileSection({
@@ -20,7 +20,7 @@ export function CustomerInvoiceProfileSection({
   customerId: string
 }) {
   const canUpdate = useAdminUpdates()
-  const query = useQuery(invoiceQueries.profile(customerId))
+  const query = useQuery(orderQueries.profile(customerId))
   return (
     <Card>
       <CardHeader>
@@ -29,9 +29,9 @@ export function CustomerInvoiceProfileSection({
       <CardContent>
         <Link
           className="text-sm underline"
-          to={`/invoices?customer_id=${customerId}`}
+          to={`/orders?customer_id=${customerId}&origin=usage`}
         >
-          View customer invoices
+          View customer usage orders
         </Link>
         {query.isPending ? (
           <p>Loading invoice profile…</p>
@@ -94,8 +94,9 @@ export function InvoiceProfileEditor({
       }}
     >
       <p className="text-sm text-muted-foreground">
-        Terms and billing facts for future invoices. Issued invoices keep their
-        original snapshots. Tax details are recorded; no tax is calculated.
+        Terms and billing facts for future usage orders. Billed orders keep
+        their original snapshots. Tax details are recorded; no tax is
+        calculated.
       </p>
       <fieldset disabled={readOnly || mutation.isPending} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -256,7 +257,7 @@ export function InvoiceProfileEditor({
       )}
       {saved && (
         <p role="status" className="text-sm">
-          Invoice profile saved. Issued invoices were not changed.
+          Invoice profile saved. Billed orders were not changed.
         </p>
       )}
       {!readOnly && (

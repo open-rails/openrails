@@ -5,7 +5,7 @@ INSERT INTO billing.payment_attempts (
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
-    card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id, invoice_id, order_id
+    card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id, order_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
     sqlc.arg(rail)::text, sqlc.arg(kind)::text, sqlc.arg(owner)::text, sqlc.arg(card_entry)::text,
@@ -19,7 +19,7 @@ INSERT INTO billing.payment_attempts (
     sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid,
     sqlc.narg(card_bin)::text, sqlc.narg(issuer_code)::text, sqlc.narg(issuer_text)::text,
     sqlc.narg(enriched_at)::timestamptz, sqlc.narg(mandate_id)::uuid, sqlc.narg(sent_initial_transaction_id)::text,
-    sqlc.narg(invoice_id)::uuid, sqlc.narg(order_id)::uuid
+    sqlc.narg(order_id)::uuid
 )
 ON CONFLICT DO NOTHING;
 
@@ -100,7 +100,6 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(psp_id)::uuid IS NULL OR a.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(customer_id)::uuid IS NULL OR a.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(payment_id)::uuid IS NULL OR a.payment_id = sqlc.narg(payment_id)::uuid)
-  AND (sqlc.narg(invoice_id)::uuid IS NULL OR a.invoice_id = sqlc.narg(invoice_id)::uuid)
   AND (sqlc.narg(order_id)::uuid IS NULL OR a.order_id = sqlc.narg(order_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR a.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(cycle_id)::uuid IS NULL OR a.cycle_id = sqlc.narg(cycle_id)::uuid)
@@ -137,9 +136,9 @@ WHERE id IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- name: LatestInvoiceAttempt :one
--- The newest answer to an invoice's collection: its standing.
+-- name: LatestOrderAttempt :one
+-- The newest answer to an order's payment: its standing.
 SELECT * FROM billing.payment_attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND invoice_id = sqlc.arg(invoice_id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
 ORDER BY attempted_at DESC, id DESC
 LIMIT 1;

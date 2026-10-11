@@ -32,7 +32,7 @@ func TestNMICurrencyInvoiceReceiptMatchesBulkObservation(t *testing.T) {
 			require.Len(t, snapshot.Transactions, 1)
 			require.Equal(t, tc.minor, snapshot.Transactions[0].AmountCents, "bulk and exact receipt readers use the same rail units")
 			invoice := uuid.New()
-			known := LocalPayment{ID: uuid.New(), CustomerID: uuid.New(), InvoiceID: &invoice, TransactionID: "paid-invoice", AmountCents: tc.minor, Currency: tc.currency, Status: "settled"}
+			known := LocalPayment{ID: uuid.New(), CustomerID: uuid.New(), UsageOrderID: &invoice, TransactionID: "paid-invoice", AmountCents: tc.minor, Currency: tc.currency, Status: "settled"}
 			require.Empty(t, diffProvider(ProviderNMI, snapshot, &LocalState{}, []LocalPayment{known}, time.Now(), diffOptions{}), "a valid receipt must not create a conflict that holds freshness forever")
 		})
 	}

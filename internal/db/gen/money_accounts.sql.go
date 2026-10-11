@@ -171,13 +171,13 @@ FROM (
     SELECT currency FROM billing.money_settings
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
     UNION
-    SELECT currency FROM billing.invoice_items
+    SELECT currency FROM billing.owed_items
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND invoice_id IS NULL AND status = 'pending'
+      AND order_id IS NULL AND status = 'pending'
     UNION
-    SELECT currency FROM billing.invoices
+    SELECT currency FROM billing.orders
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND status = 'open' AND amount_due > 0
+      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
 ) currencies
 ORDER BY currency
 `
@@ -187,7 +187,7 @@ type ListCustomerBalanceCurrenciesParams struct {
 	CustomerID uuid.UUID
 }
 
-// Every currency a customer holds a balance, settings, pending items or an open invoice in.
+// Every currency a customer holds a balance, settings, pending charges or an unpaid usage order in.
 func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCustomerBalanceCurrenciesParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listCustomerBalanceCurrencies, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -266,13 +266,13 @@ FROM (
     SELECT customer_id, currency FROM billing.money_settings
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
     UNION ALL
-    SELECT customer_id, currency FROM billing.invoice_items
+    SELECT customer_id, currency FROM billing.owed_items
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
-      AND invoice_id IS NULL AND status = 'pending'
+      AND order_id IS NULL AND status = 'pending'
     UNION ALL
-    SELECT customer_id, currency FROM billing.invoices
+    SELECT customer_id, currency FROM billing.orders
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
-      AND status = 'open' AND amount_due > 0
+      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
 ) currencies
 ORDER BY customer_id, currency
 LIMIT $3::int

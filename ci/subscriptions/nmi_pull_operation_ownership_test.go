@@ -47,7 +47,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			}, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("temporarily unavailable")), Request: r}, nil
 			})
-			var invoice billing.InvoiceID
+			var invoice billing.OrderID
 			if invoiceMode {
 				_, err := w.client[remote].UpdateCustomer(t.Context(), e.c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
 				require.NoError(t, err)
@@ -57,31 +57,20 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 				job, err := w.jobs.Insert(t.Context(), monthlyInvoicePass{FinalizePreviousMonth: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				w.waitJob(job.Job.ID)
-				list, err := w.client[remote].ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: e.c.cid()})
+				list, err := w.client[remote].ListOrders(t.Context(), billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: e.c.cid()})
 				require.NoError(t, err)
-				for _, candidate := range list.Items {
-					requested := false
-					for _, line := range candidate.LineItems {
-						requested = requested || line.EventType == "pull-invoice" && line.Amount == 50_000_000 && line.Count == 1
-					}
-					if requested {
-						require.True(t, invoice.IsZero(), "one statement contains the requested usage")
-						require.Equal(t, "USD", candidate.Currency)
-						require.Equal(t, int64(50_000_000), candidate.TotalAmount)
-						require.Equal(t, candidate.TotalAmount, candidate.AmountDue)
-						invoice = candidate.ID
-					} else {
-						require.Zero(t, candidate.TotalAmount, "other monthly statements carry no charge")
-						require.Zero(t, candidate.AmountPaid)
-						require.Zero(t, candidate.AmountDue)
-						require.Equal(t, billing.InvoicePaid, candidate.Status)
-					}
-				}
-				require.False(t, invoice.IsZero(), "the requested usage was invoiced")
+				require.Len(t, list.Items, 1, "one usage order bills the requested usage; nothing owed bills none")
+				candidate := list.Items[0]
+				require.Equal(t, "USD", candidate.Currency)
+				require.Equal(t, int64(50_000_000), candidate.Total)
+				require.Equal(t, candidate.Total, candidate.Usage.AmountDue)
+				invoice = candidate.ID
+				require.False(t, invoice.IsZero(), "the requested usage was billed")
 				w.refreshProviders()
 				w.settleCollectionScans()
-				status, body := e.c.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "pull-invoice", map[string]string{"payment_method_id": e.method})
-				require.Equal(t, http.StatusAccepted, status, body)
+				status, body := e.c.call(http.MethodPost, "/orders/"+invoice.String()+"/pay", "pull-invoice", map[string]any{"payment": map[string]string{"payment_method_id": e.method}, "expected_total": "50000000"})
+				require.Equal(t, http.StatusOK, status, body)
+				require.Equal(t, "processing", body["status"], "the charge's outcome is not yet read")
 			} else {
 				e.toPeriodEnd()
 				w.runRenewals()
@@ -107,22 +96,22 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.reconciliation_findings WHERE finding_type='pull.charge.missing' AND subject_key=$1`), transaction).Scan(&finding))
 			require.Equal(t, "requires_review", finding)
 			if invoiceMode {
-				inv, err := w.client[remote].GetInvoice(t.Context(), invoice)
+				inv, err := w.client[remote].GetOrder(t.Context(), invoice)
 				require.NoError(t, err)
-				require.Equal(t, int64(50_000_000), inv.AmountDue)
+				require.Equal(t, int64(50_000_000), inv.Usage.AmountDue)
 			}
 			w.nmi.ClearIntercepts()
 			w.advance(time.Hour)
 			w.wake()
 			w.settle()
 			if invoiceMode {
-				inv, err := w.client[remote].GetInvoice(t.Context(), invoice)
+				inv, err := w.client[remote].GetOrder(t.Context(), invoice)
 				require.NoError(t, err)
-				require.Equal(t, billing.InvoicePaid, inv.Status)
+				require.Equal(t, billing.OrderComplete, inv.Status)
 				require.True(t, e.periodEnd().Equal(end))
 				paid := completed(w.payments(remote, e.c.id))
 				require.Len(t, paid, 2, "the settled collection is the invoice's payment")
-				require.Equal(t, invoice, *paid[0].InvoiceID)
+				require.Equal(t, invoice, *paid[0].OrderID)
 				require.Equal(t, transaction, paid[0].TransactionID)
 			} else {
 				require.True(t, e.periodEnd().Equal(end.Add(monthHours*time.Hour)))

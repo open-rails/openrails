@@ -333,12 +333,16 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
-		return OrderAnswer{}, err
-	}
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id.UUID())
 	if err != nil {
 		return OrderAnswer{}, err
+	}
+	// A usage order's collection is a durable operation that waits out
+	// disabled writes and provider recovery itself.
+	if order.Origin != string(billing.OrderOriginUsage) {
+		if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
+			return OrderAnswer{}, err
+		}
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -364,6 +368,8 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 		err = orders.ErrTotalChanged
 	case order.Origin == string(billing.OrderOriginSubscription):
 		charged, replayed, err = s.payRenewal(work, actor, order, pay, key)
+	case order.Origin == string(billing.OrderOriginUsage):
+		charged, replayed, err = s.payUsage(work, actor, order, pay, key)
 	default:
 		_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: checkout.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
 		replayed = attemptErr == nil
@@ -475,7 +481,7 @@ func (s *Service) GetMerchantOrder(ctx context.Context, id billing.OrderID) (*bi
 		return nil, err
 	}
 	view := order.View(nil, nil)
-	return &view, nil
+	return &view, s.markDelinquent(ctx, &view)
 }
 
 func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams) (billing.ListPage[billing.Order], error) {
@@ -503,7 +509,7 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 				out.Items = append(out.Items, o.View(nil, nil))
 			}
 		}
-		return out, nil
+		return out, s.markDelinquentPage(ctx, out.Items)
 	}
 	var filter orders.ListFilter
 	if !params.CustomerID.IsZero() {
@@ -532,7 +538,7 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	for i, o := range page.Items {
 		out.Items[i] = o.View(nil, nil)
 	}
-	return out, nil
+	return out, s.markDelinquentPage(ctx, out.Items)
 }
 
 // orderView is the order as its customer reads it, with the next action of a
@@ -554,7 +560,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 		return nil, err
 	}
 	view := order.View(next, options)
-	return &view, nil
+	return &view, s.markDelinquent(ctx, &view)
 }
 
 // openOrderOptions are what can pay an open order; none for any other.
@@ -564,6 +570,8 @@ func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]
 		return nil, nil
 	case order.Origin == string(billing.OrderOriginSubscription):
 		return s.renewalOptions(ctx, order)
+	case order.Origin == string(billing.OrderOriginUsage):
+		return s.usageOptions(ctx, order)
 	}
 	quote, err := s.frozenQuote(ctx, order)
 	if err != nil {
@@ -581,11 +589,14 @@ type frozenLines struct {
 func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenLines, error) {
 	var out frozenLines
 	for _, l := range order.Lines {
-		price, err := s.rt.PriceService.GetByID(ctx, l.PriceID)
+		if l.PriceID == nil || l.ProductID == nil {
+			return out, orders.ErrNotPayable
+		}
+		price, err := s.rt.PriceService.GetByID(ctx, *l.PriceID)
 		if err != nil {
 			return out, err
 		}
-		product, err := s.rt.ProductService.GetByID(ctx, l.ProductID)
+		product, err := s.rt.ProductService.GetByID(ctx, *l.ProductID)
 		if err != nil {
 			return out, err
 		}
@@ -682,20 +693,28 @@ func orderDigest(v any) []byte {
 }
 
 // RecordPayment records money the merchant received outside OpenRails for an
-// invoice or an order. created is false when the same remittance was already
-// recorded.
+// order: part or all of what a usage order owes, or another order's total.
+// created is false when the same remittance was already recorded.
 func (s *Service) RecordPayment(ctx context.Context, params billing.CreatePaymentParams) (payment *models.Payment, created bool, err error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	defer release()
-	if params.InvoiceID != nil {
-		return s.moneyService().RecordInvoiceRemittance(ctx, money.InvoiceRemittance{InvoiceID: params.InvoiceID.UUID(), Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
-	}
 	rt, err := s.orderRuntime()
 	if err != nil {
 		return nil, false, err
+	}
+	order, err := rt.Orders.Get(ctx, params.OrderID.UUID())
+	if err != nil {
+		return nil, false, err
+	}
+	if order.Origin == string(billing.OrderOriginUsage) {
+		payment, created, err = s.moneyService().RecordUsageRemittance(ctx, money.UsageRemittance{OrderID: order.ID, Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
+		if errors.Is(err, money.ErrUsageActionNotAllowed) {
+			err = errUsageActionRefused
+		}
+		return payment, created, err
 	}
 	return rt.Orders.RecordRemittance(ctx, orders.Remittance{OrderID: params.OrderID.UUID(), Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
 }

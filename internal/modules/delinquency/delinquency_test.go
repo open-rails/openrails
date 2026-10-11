@@ -14,7 +14,7 @@ func TestClassify(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	policy := Policy{GraceDays: 7, AmountFloor: 1_000_000}
 	overdue := func(age time.Duration, amount int64, invoices int) Exposure {
-		return Exposure{OverdueStartedAt: now.Add(-age), OverdueAmount: amount, OverdueInvoices: invoices}
+		return Exposure{OverdueStartedAt: now.Add(-age), OverdueAmount: amount, OverdueOrders: invoices}
 	}
 	cases := []struct {
 		name   string
@@ -40,7 +40,7 @@ func TestClassify(t *testing.T) {
 
 func TestPolicyFromConfig(t *testing.T) {
 	// A debt too small to bother collecting is too small to cut anyone off for.
-	require.Equal(t, money.DefaultInvoiceMonthlyFloorAmount, DefaultAmountFloor)
+	require.Equal(t, money.DefaultMonthlyFloorAmount, DefaultAmountFloor)
 
 	grace, zero, neg := 30, 0, -1
 	floor, monthly, negFloor := int64(25_000_000), int64(3_000_000), int64(-1)
@@ -52,9 +52,9 @@ func TestPolicyFromConfig(t *testing.T) {
 		wantErr bool
 	}{
 		{"defaults", models.MerchantConfiguration{}, defaults, false},
-		{"floor derived from invoice monthly floor", models.MerchantConfiguration{InvoiceMonthlyFloor: &monthly},
+		{"floor derived from monthly floor", models.MerchantConfiguration{MonthlyFloor: &monthly},
 			Policy{GraceDays: DefaultGraceDays, AmountFloor: monthly}, false},
-		{"explicit floor wins", models.MerchantConfiguration{InvoiceMonthlyFloor: &monthly, ArrearsDelinquencyFloor: &floor},
+		{"explicit floor wins", models.MerchantConfiguration{MonthlyFloor: &monthly, ArrearsDelinquencyFloor: &floor},
 			Policy{GraceDays: DefaultGraceDays, AmountFloor: floor}, false},
 		{"declared grace", models.MerchantConfiguration{ArrearsGraceDays: &grace}, Policy{GraceDays: 30, AmountFloor: DefaultAmountFloor}, false},
 		{"zero grace kept", models.MerchantConfiguration{ArrearsGraceDays: &zero}, Policy{AmountFloor: DefaultAmountFloor}, false},

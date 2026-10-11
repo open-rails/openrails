@@ -33,7 +33,7 @@ tests of several instances sharing limits and the card-attack captcha tests.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
   catalog and merchant isolation, checkout sessions and attempts, signed
-  webhook replay, credits, usage and admissions, invoices, merchant
+  webhook replay, credits, usage and admissions, usage orders, merchant
   configuration, retention and partitioning, and exact integer money.
 - `ci/subscriptions` covers engine-owned and provider-owned subscriptions on
   NMI and Stripe (confirmation, renewals, declines and dunning, card

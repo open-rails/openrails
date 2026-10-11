@@ -21,7 +21,7 @@ import {
   setSelectedMerchant,
 } from "@/lib/api/client"
 import type {
-  Invoice,
+  Order,
   Payment,
   PaymentMethod,
   Price,
@@ -174,7 +174,7 @@ export const aPrice = (id: string, productId: string, overrides: Partial<Price> 
 
 export const aPayment = (id: string, overrides: Partial<Payment> = {}): Payment => ({
   id, kind: "charge", status: "succeeded", amount: "20000000", amount_refunded: "0",
-  currency: "USD", customer_id: "cus_1", subscription_id: null, order_id: null, invoice_id: null, price_id: "price_1",
+  currency: "USD", customer_id: "cus_1", subscription_id: null, order_id: null, price_id: "price_1",
   price: null, product: null, channel: "rail", rail: "nmi", psp_id: "psp_1",
   transaction_id: `txn_${id}`, card: null, failure: null, refunded_payment_id: null,
   reason: null, refunds: [], quantity: null, created_at: WHEN,
@@ -188,17 +188,16 @@ export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {
   health: { expiry_status: "valid", last_charged_at: null, last_charge_outcome: null, active: true },
   ...overrides,
 })
-export const anInvoice = (id: string, overrides: Partial<Invoice> = {}): Invoice => ({
-  id, customer_id: "cus_1", currency: "USD", invoice_number: null,
-  period_starts_at: "2026-09-01T00:00:00Z", period_ends_at: "2026-10-01T00:00:00Z",
-  usage_total: "0", deposits_total: "0", owed_accrued: "0", owed_paid: "0", closing_balance: "0",
-  subtotal_amount: "0", total_amount: "0", amount_paid: "0", amount_due: "0",
-  line_items: [], money_movements: null, po_number: null, tax: null, billing_contacts: [],
-  memo: null, status: "open", collection_method: "charge_automatically", issued_at: null,
-  due_at: null, delinquent: false, paid_at: null, voided_at: null, uncollectible_at: null, finalized_at: null,
-  external_invoice_id: null, collection_failure_count: 0, collection_failed_at: null,
-  next_collection_attempt_at: null, last_collection_failure_code: null, recovery: null,
-  available_actions: [], created_at: WHEN,
+export const aUsageOrder = (id: string, overrides: Partial<Order> = {}): Order => ({
+  id, customer_id: "cus_1", origin: "usage", status: "open", number: null, currency: "USD", total: "0",
+  lines: [], payment: { status: "requires_payment_method", next_action: null, last_payment_error: null, payment_method_id: null, payment_id: null },
+  payment_options: [], checkout: null, renewal: null,
+  usage: {
+    period_starts_at: "2026-09-01T00:00:00Z", period_ends_at: "2026-10-01T00:00:00Z", due_at: "2026-10-01T00:00:00Z",
+    amount_paid: "0", amount_due: "0", collection_method: "charge_automatically", next_collection_attempt_at: null,
+    po_number: null, memo: null, tax: {}, billing_contacts: [], delinquent: false,
+  },
+  expires_at: null, completed_at: null, canceled_at: null, expired_at: null, voided_at: null, uncollectible_at: null, created_at: WHEN,
   ...overrides,
 })
 

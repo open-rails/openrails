@@ -479,7 +479,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		}
 	case OutcomeRetryable:
 		next := now.Add(handler.Backoff(intent.Attempts))
-		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == "invoice_collection") {
+		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == TypeOrderCollection) {
 			submitted, malformed := hasSubmissionEvidence(intent)
 			if !submitted && malformed == nil {
 				if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
@@ -727,7 +727,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // the write gate remains closed, without issuing another provider mutation.
 func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string, recovery bool) {
 	submitted, malformed := hasSubmissionEvidence(in)
-	if in.IntentType == "subscription_collection" || in.IntentType == "invoice_collection" || submitted || malformed != nil {
+	if in.IntentType == "subscription_collection" || in.IntentType == TypeOrderCollection || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		var evidence map[string]any

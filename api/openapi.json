@@ -1546,6 +1546,180 @@
         ]
       }
     },
+    "/v1/admin/orders/{id}/void": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-sensitive": true,
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "order_action_not_allowed",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/admin/orders/{id}/mark-uncollectible": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-sensitive": true,
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "order_action_not_allowed",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/admin/orders/{id}/retry-collection": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryOrderCollectionParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-sensitive": true,
+        "x-openrails-operation-limit": "off_channel",
+        "x-openrails-errors": [
+          "card_declined",
+          "idempotency_key_required",
+          "idempotency_key_reused",
+          "invalid_param",
+          "order_action_not_allowed",
+          "order_not_payable",
+          "order_payment_in_progress",
+          "payment_failed",
+          "payment_method_stale",
+          "payment_option_unavailable",
+          "payment_provider_rejected",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/me/cart": {
       "get": {
         "tags": [
@@ -6572,560 +6746,6 @@
         ]
       }
     },
-    "/v1/admin/invoices": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "overdue",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "period_starts_after",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "period_starts_before",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Invoice"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/invoices/{id}": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Invoice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/invoices/{id}/void": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Invoice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
-        "x-openrails-sensitive": true,
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "invalid_param",
-          "invoice_action_not_allowed",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/invoices/{id}/mark-uncollectible": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Invoice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
-        "x-openrails-sensitive": true,
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "invalid_param",
-          "invoice_action_not_allowed",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/invoices/{id}/retry-collection": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetryInvoiceCollectionParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoiceCollection"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoiceCollection"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
-        "x-openrails-sensitive": true,
-        "x-openrails-operation-limit": "off_channel",
-        "x-openrails-errors": [
-          "card_declined",
-          "default_payment_method_invalid",
-          "default_payment_method_required",
-          "idempotency_key_reused",
-          "invalid_param",
-          "invoice_not_retryable",
-          "invoice_retry_idempotency_conflict",
-          "invoice_retry_in_progress",
-          "invoice_retry_outcome_unknown",
-          "payment_method_required",
-          "payment_provider_rejected",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/invoices": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Invoice"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/invoices/{id}": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Invoice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/invoices/{id}/pay-now": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PayInvoiceParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoicePayNow"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoicePayNow"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_declined",
-          "customer_action_required",
-          "customer_payment_unsupported",
-          "invalid_param",
-          "invalid_payment_method",
-          "payment_idempotency_conflict",
-          "payment_in_progress",
-          "payment_method_required",
-          "payment_not_retryable",
-          "payment_provider_rejected",
-          "rebill_terms_committed",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
     "/v1/admin/payments": {
       "post": {
         "tags": [
@@ -7177,7 +6797,7 @@
         "x-openrails-errors": [
           "idempotency_key_reused",
           "invalid_param",
-          "invoice_action_not_allowed",
+          "order_action_not_allowed",
           "order_has_recurring_line",
           "order_not_payable",
           "order_payment_in_progress",
@@ -7221,13 +6841,6 @@
               },
               "minItems": 1,
               "maxItems": 100
-            }
-          },
-          {
-            "name": "invoice_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
             }
           },
           {
@@ -7527,13 +7140,6 @@
               },
               "minItems": 1,
               "maxItems": 100
-            }
-          },
-          {
-            "name": "invoice_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
             }
           },
           {
@@ -8035,13 +7641,6 @@
         "parameters": [
           {
             "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "invoice_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -14344,9 +13943,6 @@
       "CreatePaymentParams": {
         "type": "object",
         "properties": {
-          "invoice_id": {
-            "type": "string"
-          },
           "order_id": {
             "type": "string"
           },
@@ -15591,7 +15187,7 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "overdue_invoices": {
+          "overdue_orders": {
             "type": "integer"
           },
           "grace_days": {
@@ -15608,7 +15204,7 @@
           "from_state",
           "to_state",
           "overdue_amount",
-          "overdue_invoices",
+          "overdue_orders",
           "grace_days",
           "amount_floor"
         ]
@@ -16353,357 +15949,6 @@
           }
         }
       },
-      "Invoice": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "invoice_number": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "period_starts_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period_ends_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "usage_total": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "deposits_total": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "owed_accrued": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "owed_paid": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "closing_balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "subtotal_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "total_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount_paid": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount_due": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "line_items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceLineItem"
-            }
-          },
-          "money_movements": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "po_number": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tax": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "billing_contacts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceContact"
-            }
-          },
-          "memo": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "open",
-              "paid",
-              "uncollectible",
-              "voided"
-            ]
-          },
-          "collection_method": {
-            "type": "string",
-            "enum": [
-              "charge_automatically",
-              "send_invoice"
-            ]
-          },
-          "issued_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "due_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "delinquent": {
-            "type": "boolean"
-          },
-          "paid_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "voided_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "uncollectible_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "finalized_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "external_invoice_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "collection_failure_count": {
-            "type": "integer"
-          },
-          "collection_failed_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "next_collection_attempt_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_collection_failure_code": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "recovery": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PaymentRecovery"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "available_actions": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "mark_uncollectible",
-                "record_payment",
-                "retry_collection",
-                "void"
-              ]
-            }
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "customer_id",
-          "currency",
-          "invoice_number",
-          "period_starts_at",
-          "period_ends_at",
-          "usage_total",
-          "deposits_total",
-          "owed_accrued",
-          "owed_paid",
-          "closing_balance",
-          "subtotal_amount",
-          "total_amount",
-          "amount_paid",
-          "amount_due",
-          "line_items",
-          "money_movements",
-          "po_number",
-          "tax",
-          "billing_contacts",
-          "memo",
-          "status",
-          "collection_method",
-          "issued_at",
-          "due_at",
-          "delinquent",
-          "paid_at",
-          "voided_at",
-          "uncollectible_at",
-          "finalized_at",
-          "external_invoice_id",
-          "collection_failure_count",
-          "collection_failed_at",
-          "next_collection_attempt_at",
-          "last_collection_failure_code",
-          "recovery",
-          "available_actions",
-          "created_at"
-        ]
-      },
-      "InvoiceCollection": {
-        "type": "object",
-        "properties": {
-          "invoice": {
-            "$ref": "#/components/schemas/Invoice"
-          },
-          "payment_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "operation": {
-            "$ref": "#/components/schemas/PaymentOperation"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "invoice",
-          "payment_id",
-          "operation",
-          "replayed"
-        ]
-      },
       "InvoiceContact": {
         "type": "object",
         "properties": {
@@ -16717,70 +15962,6 @@
         "required": [
           "name",
           "email"
-        ]
-      },
-      "InvoiceLineItem": {
-        "type": "object",
-        "properties": {
-          "event_type": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "count": {
-            "type": "integer"
-          },
-          "dimensions": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "event_type",
-          "amount",
-          "count",
-          "dimensions"
-        ]
-      },
-      "InvoicePayNow": {
-        "type": "object",
-        "properties": {
-          "invoice": {
-            "$ref": "#/components/schemas/Invoice"
-          },
-          "payment_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "operation": {
-            "$ref": "#/components/schemas/PaymentOperation"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "invoice",
-          "payment_id",
-          "operation",
-          "replayed"
         ]
       },
       "InvoiceProfile": {
@@ -18032,7 +17213,7 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "overdue_invoices": {
+          "overdue_orders": {
             "type": "integer"
           },
           "overdue_started_at": {
@@ -18043,12 +17224,6 @@
             "type": "string"
           },
           "to_state": {
-            "type": "string"
-          },
-          "invoice_id": {
-            "type": "string"
-          },
-          "invoice_number": {
             "type": "string"
           },
           "amount_due": {
@@ -18163,7 +17338,8 @@
             "enum": [
               "customer",
               "merchant",
-              "subscription"
+              "subscription",
+              "usage"
             ]
           },
           "status": {
@@ -18174,6 +17350,7 @@
               "expired",
               "open",
               "processing",
+              "uncollectible",
               "void"
             ]
           },
@@ -18223,6 +17400,16 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/OrderRenewal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderUsage"
               },
               {
                 "type": "null"
@@ -18284,6 +17471,17 @@
               }
             ]
           },
+          "uncollectible_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -18302,11 +17500,13 @@
           "payment_options",
           "checkout",
           "renewal",
+          "usage",
           "expires_at",
           "completed_at",
           "canceled_at",
           "expired_at",
           "voided_at",
+          "uncollectible_at",
           "created_at"
         ]
       },
@@ -18402,6 +17602,7 @@
               "expired",
               "open",
               "processing",
+              "uncollectible",
               "void"
             ]
           },
@@ -18460,10 +17661,34 @@
             "type": "string"
           },
           "price_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "product_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "type": "string"
@@ -18487,11 +17712,18 @@
             "description": "A number as a decimal string."
           },
           "ownership": {
-            "type": "string",
-            "enum": [
-              "consumable",
-              "extend",
-              "unique"
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "consumable",
+                  "extend",
+                  "unique"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "billing_interval_hours": {
@@ -18539,6 +17771,7 @@
           "id",
           "price_id",
           "product_id",
+          "source",
           "description",
           "quantity",
           "unit_amount",
@@ -18844,6 +18077,103 @@
           "period_starts_at",
           "period_ends_at",
           "due_at"
+        ]
+      },
+      "OrderUsage": {
+        "type": "object",
+        "properties": {
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount_paid": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "amount_due": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "collection_method": {
+            "type": "string",
+            "enum": [
+              "charge_automatically",
+              "send_invoice"
+            ]
+          },
+          "next_collection_attempt_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "po_number": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memo": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tax": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceContact"
+            }
+          },
+          "delinquent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "period_starts_at",
+          "period_ends_at",
+          "due_at",
+          "amount_paid",
+          "amount_due",
+          "collection_method",
+          "next_collection_attempt_at",
+          "po_number",
+          "memo",
+          "tax",
+          "billing_contacts",
+          "delinquent"
         ]
       },
       "PSP": {
@@ -19220,14 +18550,6 @@
           }
         }
       },
-      "PayInvoiceParams": {
-        "type": "object",
-        "properties": {
-          "payment_method_id": {
-            "type": "string"
-          }
-        }
-      },
       "PayOrderParams": {
         "type": "object",
         "properties": {
@@ -19293,16 +18615,6 @@
             ]
           },
           "order_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "invoice_id": {
             "oneOf": [
               {
                 "type": "string"
@@ -19443,7 +18755,6 @@
           "customer_id",
           "subscription_id",
           "order_id",
-          "invoice_id",
           "quantity",
           "price_id",
           "price",
@@ -19586,16 +18897,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "invoice_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "order_id": {
             "oneOf": [
               {
@@ -19697,7 +18998,6 @@
           "amount",
           "currency",
           "attempted_at",
-          "invoice_id",
           "order_id",
           "cycle_id",
           "subscription_id",
@@ -22175,7 +21475,7 @@
           "override_params": {}
         }
       },
-      "RetryInvoiceCollectionParams": {
+      "RetryOrderCollectionParams": {
         "type": "object",
         "properties": {
           "payment_method_id": {
@@ -24214,31 +23514,6 @@
       "type": "invalid_request_error",
       "meaning": "A settlement status read needs a customer and a price."
     },
-    "invoice_action_not_allowed": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The invoice's status does not allow this action."
-    },
-    "invoice_not_retryable": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The invoice cannot be collected again."
-    },
-    "invoice_retry_idempotency_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The idempotency key names a different collection attempt."
-    },
-    "invoice_retry_in_progress": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "A collection attempt on this invoice is unresolved."
-    },
-    "invoice_retry_outcome_unknown": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The last collection attempt's outcome is unknown."
-    },
     "invoker_scoped_principal": {
       "status": 403,
       "type": "authorization_error",
@@ -24324,6 +23599,11 @@
       "type": "authorization_error",
       "meaning": "The openrails.dev account has not accepted the network terms."
     },
+    "order_action_not_allowed": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The order's origin or status does not allow this action."
+    },
     "order_has_recurring_line": {
       "status": 409,
       "type": "invalid_request_error",
@@ -24362,7 +23642,7 @@
     "payment_exceeds_due": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The recorded payment exceeds what the invoice has due, or is not the order's total."
+      "meaning": "The recorded payment exceeds what the usage order has due, or is not the order's total."
     },
     "payment_failed": {
       "status": 402,

@@ -46,7 +46,7 @@ function areaOf(
   if (under("/payments/health"))
     return { name: "payment health", allowed: access.metrics }
   if (
-    ["/customers", "/subscriptions", "/payments", "/invoices", "/ops"].some(
+    ["/customers", "/subscriptions", "/payments", "/orders", "/ops"].some(
       under
     )
   )

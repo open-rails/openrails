@@ -9,7 +9,9 @@ import (
 // OrderStatus is where an order stands, as Stripe's Order: open (it takes
 // payment or awaits the customer's action), processing (the provider has its
 // payment), complete (paid and fulfilled), canceled or expired (a purchase
-// closed unpaid), or void (a renewal its subscription's end left unowed).
+// closed unpaid), void (a renewal its subscription's end left unowed, or a
+// usage order the merchant voided) or uncollectible (a usage order the
+// merchant wrote off; collecting it reopens it).
 type OrderStatus string
 
 const (
@@ -19,6 +21,8 @@ const (
 	OrderCanceled   OrderStatus = "canceled"
 	OrderExpired    OrderStatus = "expired"
 	OrderVoid       OrderStatus = "void"
+	// OrderUncollectible is a usage order written off.
+	OrderUncollectible OrderStatus = "uncollectible"
 )
 
 // OrderPaymentStatus is where an order's payment stands, as a Stripe
@@ -45,6 +49,11 @@ const (
 	// retries are its attempts; a failed one leaves it open for the customer
 	// to pay.
 	OrderOriginSubscription OrderOrigin = "subscription"
+	// OrderOriginUsage is owed usage billed in arrears: one per customer,
+	// currency and period (or, past the customer's threshold, the period so
+	// far), one line per accrual source, due after the customer's net terms.
+	// A funded balance and remittances may pay part of it.
+	OrderOriginUsage OrderOrigin = "usage"
 )
 
 // MaxOrderLines bounds one order.
@@ -139,6 +148,14 @@ type PayOrderParams struct {
 	Reusable      *bool              `json:"reusable,omitempty"`
 }
 
+// RetryOrderCollectionParams charges what a usage order still owes to one
+// of its customer's saved cards. IdempotencyKey is required: a retry with it
+// answers the same collection.
+type RetryOrderCollectionParams struct {
+	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+	IdempotencyKey  string          `json:"-"`
+}
+
 // Order is one purchase: frozen lines and total. It is read and paid by its
 // own customer; its id is not a credential.
 type Order struct {
@@ -157,15 +174,20 @@ type Order struct {
 	// Checkout is the order's hosted checkout; null without one.
 	Checkout *OrderCheckout `json:"checkout"`
 	// Renewal is the subscription period a renewal order (origin
-	// subscription) bills; null on a purchase.
+	// subscription) bills; null on any other.
 	Renewal *OrderRenewal `json:"renewal"`
+	// Usage is a usage order's period, collection and document fields; null
+	// on any other.
+	Usage *OrderUsage `json:"usage"`
 	// ExpiresAt is when an unpaid purchase expires; a renewal has none.
 	ExpiresAt   *time.Time `json:"expires_at"`
 	CompletedAt *time.Time `json:"completed_at"`
 	CanceledAt  *time.Time `json:"canceled_at"`
 	ExpiredAt   *time.Time `json:"expired_at"`
 	VoidedAt    *time.Time `json:"voided_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// UncollectibleAt is when a usage order was written off.
+	UncollectibleAt *time.Time `json:"uncollectible_at"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // OrderRenewal is the period of a subscription a renewal order bills. It is
@@ -175,6 +197,29 @@ type OrderRenewal struct {
 	PeriodStartsAt time.Time      `json:"period_starts_at"`
 	PeriodEndsAt   time.Time      `json:"period_ends_at"`
 	DueAt          time.Time      `json:"due_at"`
+}
+
+// OrderUsage is what a usage order bills and how it is collected: the
+// period of its charges, when it is due, how much of its total is paid
+// (a funded balance and remittances pay part of it), and the document fields
+// of the customer's invoice profile when it was billed.
+type OrderUsage struct {
+	PeriodStartsAt time.Time `json:"period_starts_at"`
+	PeriodEndsAt   time.Time `json:"period_ends_at"`
+	DueAt          time.Time `json:"due_at"`
+	AmountPaid     int64     `json:"amount_paid,string"`
+	AmountDue      int64     `json:"amount_due,string"`
+	// CollectionMethod is charge_automatically (the currency's collection
+	// card is charged) or send_invoice (the customer remits).
+	CollectionMethod        InvoiceCollectionMethod `json:"collection_method"`
+	NextCollectionAttemptAt *time.Time              `json:"next_collection_attempt_at"`
+	PONumber                *string                 `json:"po_number"`
+	Memo                    *string                 `json:"memo"`
+	Tax                     map[string]any          `json:"tax"`
+	BillingContacts         []InvoiceContact        `json:"billing_contacts"`
+	// Delinquent: the order is overdue and its customer's grace has run out,
+	// so their new usage in its currency is refused.
+	Delinquent bool `json:"delinquent"`
 }
 
 // OrderPayment is an order's payment, as a Stripe PaymentIntent reads.
@@ -193,15 +238,18 @@ type OrderPayment struct {
 
 // OrderLine is one line of an order, and what paying it produced.
 type OrderLine struct {
-	ID          OrderLineID `json:"id"`
-	PriceID     PriceID     `json:"price_id"`
-	ProductID   ProductID   `json:"product_id"`
-	Description string      `json:"description"`
+	ID OrderLineID `json:"id"`
+	// PriceID, ProductID and Ownership are what a purchased line sold; null
+	// on a usage line, whose Source names its accrual source instead.
+	PriceID     *PriceID   `json:"price_id"`
+	ProductID   *ProductID `json:"product_id"`
+	Source      *string    `json:"source"`
+	Description string     `json:"description"`
 	// Quantity is null on a recurring line of a price without seats.
-	Quantity   *int              `json:"quantity"`
-	UnitAmount int64             `json:"unit_amount,string"`
-	Amount     int64             `json:"amount,string"`
-	Ownership  catalog.Ownership `json:"ownership"`
+	Quantity   *int               `json:"quantity"`
+	UnitAmount int64              `json:"unit_amount,string"`
+	Amount     int64              `json:"amount,string"`
+	Ownership  *catalog.Ownership `json:"ownership"`
 	// BillingIntervalHours is set on a recurring line, whose subscription
 	// renews every interval (for Quantity seats on a per-seat price).
 	BillingIntervalHours *int             `json:"billing_interval_hours"`

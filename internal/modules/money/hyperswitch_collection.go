@@ -25,7 +25,7 @@ type hyperSwitchCollectionAdapter struct {
 }
 
 // PrepareHyperSwitchCharge reuses the existing scoped account/credential armer
-// without invoking invoice preparation or choosing an unscheduled agreement.
+// without invoking usage order preparation or choosing an unscheduled agreement.
 // The caller rechecks method ownership against its frozen instrument and owns
 // the durable submission fence. This helper compares the retained HS binding.
 func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.BillingPaymentMethod, psp uuid.UUID, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
@@ -80,14 +80,14 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 
 func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil || config.IsProviderReadOnly(b.Config) {
-		return nil, fmt.Errorf("HyperSwitch invoice collection is not armed")
+		return nil, fmt.Errorf("HyperSwitch usage collection is not armed")
 	}
 	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != scope.Environment || scope.Environment != config.ExpectedProviderEnvironment(b.testMode()) {
-		return nil, fmt.Errorf("HyperSwitch invoice custody does not match the accepted account")
+		return nil, fmt.Errorf("HyperSwitch collection custody does not match the accepted account")
 	}
 	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
 	if err != nil {

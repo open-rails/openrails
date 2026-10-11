@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (191), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -65,9 +65,6 @@ A customer acting on its own account.
 | GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
-| GET | `/v1/me/invoices` | customer | — | — | 200 `ListPage<Invoice>` |  |
-| GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `Invoice` |  |
-| POST | `/v1/me/invoices/{id}/pay-now` | customer | — | `PayInvoiceParams` | 200 `InvoicePayNow`<br>202 `InvoicePayNow` | `Idempotency-Key` |
 | GET | `/v1/me/payment-operations/{id}/authentication` | customer | — | — | 200 `StripeEngineAuthentication` |  |
 | POST | `/v1/me/payment-operations/{id}/authentication/confirm` | customer | — | — | 200 `PaymentOperation` |  |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
@@ -93,6 +90,9 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/checkout-options` | merchant | `AdminRead` | — | 200 `ListPage<CheckoutOption>` |  |
 | GET | `/v1/admin/orders` | merchant | `AdminRead` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `AdminRead` | — | 200 `Order` |  |
+| POST | `/v1/admin/orders/{id}/void` | merchant | `AdminUpdate` | — | 200 `Order` | sensitive; limit `destructive` |
+| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `AdminUpdate` | — | 200 `Order` | sensitive; limit `destructive` |
+| POST | `/v1/admin/orders/{id}/retry-collection` | merchant | `AdminUpdate` | `RetryOrderCollectionParams` | 200 `Order` | sensitive; limit `off_channel`; `Idempotency-Key` |
 | GET | `/v1/admin/subscriptions` | merchant | `AdminRead` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `AdminRead` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `AdminUpdate` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
@@ -116,11 +116,6 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/provider-operations` | merchant | `AdminRead` | — | 200 `ListPage<ProviderOperation>` |  |
 | GET | `/v1/admin/provider-operations/{operation_id}` | merchant | `AdminRead` | — | 200 `ProviderOperation` |  |
 | POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminUpdate` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
-| GET | `/v1/admin/invoices` | merchant | `AdminRead` | — | 200 `ListPage<Invoice>` |  |
-| GET | `/v1/admin/invoices/{id}` | merchant | `AdminRead` | — | 200 `Invoice` |  |
-| POST | `/v1/admin/invoices/{id}/void` | merchant | `AdminUpdate` | — | 200 `Invoice` | sensitive; limit `destructive` |
-| POST | `/v1/admin/invoices/{id}/mark-uncollectible` | merchant | `AdminUpdate` | — | 200 `Invoice` | sensitive; limit `destructive` |
-| POST | `/v1/admin/invoices/{id}/retry-collection` | merchant | `AdminUpdate` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/admin/payments` | merchant | `AdminUpdate` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `AdminRead` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `AdminRead` | — | 200 `Payment` |  |

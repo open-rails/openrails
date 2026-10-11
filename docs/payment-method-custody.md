@@ -160,10 +160,10 @@ money path.
 
 A checkout or pay-now names its method (`payment_method_id` or a new card);
 naming neither is `payment_method_required` (400). Renewals and automatic
-invoice collection charge by a two-level default: a subscription's own card,
+usage order collection charge by a two-level default: a subscription's own card,
 else the customer's default card for its currency
 (`PUT /v1/me/default-payment-methods/{currency}`, listed in that card's
-`default_currencies`), which also collects their invoices there. A renewal
+`default_currencies`), which also collects their usage orders there. A renewal
 with neither, or whose card carries no active recurring agreement, waits for
 the customer (`awaiting_method`); it never charges another card.
 

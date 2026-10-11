@@ -2234,7 +2234,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, invoice_id
+       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
   AND deleted_at IS NULL
@@ -2260,7 +2260,8 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
-	InvoiceID         *uuid.UUID
+	OrderID           *uuid.UUID
+	LedgerTransferID  *uuid.UUID
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
@@ -2288,7 +2289,8 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.SubscriptionID,
 			&i.RefundedPaymentID,
 			&i.PurchasedAt,
-			&i.InvoiceID,
+			&i.OrderID,
+			&i.LedgerTransferID,
 		); err != nil {
 			return nil, err
 		}
@@ -2594,7 +2596,7 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement, order_id, invoice_id
+    customer_id, psp_id, reversal_kind, money_movement, order_id
 ) VALUES (
     $1::uuid,
     $2, 'rail', $3::text,
@@ -2607,8 +2609,7 @@ INSERT INTO billing.payments (
     -- feed excludes it on amount/refunded_payment_id, not on this.
     $11, $12::uuid, 'refund', 'rail',
     -- A refund names what its charge paid.
-    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid),
-    (SELECT o.invoice_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid)
+    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid)
 )
 ON CONFLICT DO NOTHING
 `

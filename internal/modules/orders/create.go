@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -396,21 +397,7 @@ func (s *Service) event(ctx context.Context, q *gen.Queries, order *gen.BillingO
 
 // orderEvent records one order transition as a host event.
 func orderEvent(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, kind string, at time.Time, extra map[string]any) error {
-	data := map[string]any{"customer_id": order.CustomerID.String(), "status": order.Status, "payment_status": order.PaymentStatus}
-	for k, v := range extra {
-		data[k] = v
-	}
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	dedupe := kind + ":" + order.ID.String()
-	if order.AttemptID != nil && (kind == "order.requires_action" || kind == "order.payment_failed") {
-		dedupe += ":" + order.AttemptID.String()
-	}
-	_, err = q.EnqueueOrderHostEvent(ctx, gen.EnqueueOrderHostEventParams{MerchantID: order.MerchantID, EventType: kind, OrderID: order.ID,
-		Amount: order.Total, Currency: order.Currency, OccurredAt: at, Data: raw, DedupeKey: dedupe})
-	return err
+	return orderevent.Enqueue(ctx, q, order, kind, at, extra)
 }
 
 // ExpireDue expires the merchant's live orders past their expiry, at most

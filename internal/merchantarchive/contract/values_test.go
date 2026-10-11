@@ -121,8 +121,6 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 		{"unfinished webhook", "webhook_events", map[string]string{"op": "x"}, false},
 		{"finished webhook", "webhook_events", map[string]string{"op": "x", "completed_at": done}, true},
 		{"undelivered host event", "host_outbox", map[string]string{"event_type": "delinquency.entered"}, false},
-		{"live invoice collection", "invoices", map[string]string{"collection_intent_id": testMerchant}, false},
-		{"resolved invoice", "invoices", map[string]string{"status": "paid"}, true},
 	})
 }
 
@@ -214,7 +212,7 @@ func TestJSONContracts(t *testing.T) {
 func TestApplicationMetadata(t *testing.T) {
 	fields := []string{
 		"payments.metadata", "payments.discount_metadata", "payment_methods.metadata",
-		"usage_events.metadata", "invoice_items.metadata", "checkout_attempts.metadata",
+		"usage_events.metadata", "owed_items.metadata", "checkout_attempts.metadata",
 		"subscriptions.gateway_response",
 	}
 	valid := []string{

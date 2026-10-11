@@ -58,8 +58,8 @@ const (
 	CreditReinstate TransferType = "credit_reinstate"
 	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> arrears liability
 	OwedPayment     TransferType = "owed_payment" // arrears settled by an external charge
-	// OwedWriteoff cancels accrued debt without money moving when an invoice is
-	// voided: the inverse of OwedAccrual. OwedPayment means a rail collected.
+	// OwedWriteoff cancels accrued debt without money moving when a usage order
+	// is voided: the inverse of OwedAccrual. OwedPayment means a rail collected.
 	OwedWriteoff TransferType = "owed_writeoff"
 	// OwedRepayment pays debt from a newly funded credit lot (customer balance
 	// -> arrears liability), carrying that lot's grant_id.
@@ -89,11 +89,13 @@ const (
 	OpCreditRevoke    Operation = "credit_revoke"
 	OpCreditReinstate Operation = "credit_reinstate"
 
-	OpArrearsAccrual   Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpMeteredRating    Operation = "metered_rating"  // rate-card sweep accrual
-	OpInvoicePayment   Operation = "invoice_payment" // arrears settled by a rail charge
-	OpManualInvoicePay Operation = "manual_invoice_payment"
-	OpInvoiceVoid      Operation = "invoice_void"
+	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
+	OpMeteredRating  Operation = "metered_rating"  // rate-card sweep accrual
+	// A usage order's owed payment and write-off. The stored names predate
+	// usage orders; the ledger is append-only, so history keeps them.
+	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge
+	OpManualOrderPayment Operation = "manual_invoice_payment"
+	OpOrderVoid          Operation = "invoice_void"
 
 	usageOpPrefix = "usage:"
 )
@@ -195,7 +197,7 @@ func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUI
 // OutstandingOwed is the customer's unpaid arrears in this currency as a
 // positive amount, read O(1) from the arrears account's counters (debt makes
 // that balance negative). Zero without an arrears account. It is the only
-// exposure source: invoices lag the ledger and only mirror its accruals.
+// exposure source: usage orders lag the ledger and only mirror its accruals.
 func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
 	acc, found, err := l.CustomerArrearsAccountID(ctx, customer, currency)
 	if err != nil || !found {
@@ -264,7 +266,7 @@ type Transfer struct {
 	GrantID           *uuid.UUID
 	Customer          *uuid.UUID
 	Invoker, Resource *string
-	Invoice           *uuid.UUID
+	Order             *uuid.UUID
 	// AllowDebitNegativeUpTo relaxes the debit account's
 	// debits_must_not_exceed_credits floor (e.g. an arrears credit line).
 	AllowDebitNegativeUpTo int64
@@ -306,7 +308,7 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		CustomerID:             t.Customer,
 		InvokerID:              t.Invoker,
 		Resource:               t.Resource,
-		InvoiceID:              t.Invoice,
+		OrderID:                t.Order,
 	})
 	if err == nil {
 		return tr, true, nil
@@ -387,14 +389,14 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 // arrears account (DR arrears_liability / CR platform_revenue), leaving the
 // balance untouched; PayOwed settles it. The arrears account's negative
 // balance is the owed exposure.
-func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	tr, _, err := l.AccrueOwedIdempotent(ctx, customer, currency, amount, coord, invoice)
+func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	tr, _, err := l.AccrueOwedIdempotent(ctx, customer, currency, amount, coord, order)
 	return tr, err
 }
 
 // AccrueOwedIdempotent is AccrueOwed reporting whether the accrual actually
 // posted, or replayed a coordinate already committed.
-func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, bool, error) {
+func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, bool, error) {
 	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, false, err
@@ -406,14 +408,14 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 	c := customer
 	return l.ApplyIdempotent(ctx, Transfer{
 		Debit: liab, Credit: rev, Amount: amount, Currency: currency, Type: OwedAccrual,
-		Coord: coord, Customer: &c, Invoice: invoice,
+		Coord: coord, Customer: &c, Order: order,
 	})
 }
 
 // WriteOffOwed cancels accrued arrears without money moving (DR
 // platform_revenue / CR arrears_liability), the inverse of AccrueOwed. Posted
-// when an invoice is voided, so the ledger stops counting it as owed.
-func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+// when a usage order is voided, so the ledger stops counting it as owed.
+func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
@@ -425,13 +427,13 @@ func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency 
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: rev, Credit: liab, Amount: amount, Currency: currency, Type: OwedWriteoff,
-		Coord: coord, Customer: &c, Invoice: invoice,
+		Coord: coord, Customer: &c, Order: order,
 	})
 }
 
 // PayOwed settles accrued arrears via an external charge (DR processor_clearing /
 // CR arrears_liability), bringing the liability account back toward zero.
-func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
@@ -443,13 +445,13 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: clearing, Credit: liab, Amount: amount, Currency: currency, Type: OwedPayment,
-		Coord: coord, Customer: &c, Invoice: invoice,
+		Coord: coord, Customer: &c, Order: order,
 	})
 }
 
 // RepayOwed pays a customer's debt from their balance (DR customer_balance /
 // CR arrears_liability), attributed to the funding credit lot.
-func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
@@ -461,6 +463,6 @@ func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency str
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: cust, Credit: liab, Amount: amount, Currency: currency, Type: OwedRepayment,
-		Coord: coord, GrantID: &lot, Customer: &c, Invoice: invoice,
+		Coord: coord, GrantID: &lot, Customer: &c, Order: order,
 	})
 }

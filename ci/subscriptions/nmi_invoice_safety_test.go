@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,12 +45,12 @@ func invoicePasses(f *fleet, collect bool, on ...*world) []pass {
 
 // Usage enters through the admin API and the ordinary invoice worker closes
 // it. Provider and financial tables are observed, never fabricated or edited.
-func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
+func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.OrderID {
 	f.t.Helper()
 	client := f.any().client[remote]
-	previous, err := client.ListInvoices(f.t.Context(), billing.InvoiceListParams{CustomerID: c.cid()})
+	previous, err := client.ListOrders(f.t.Context(), billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(f.t, err)
-	existing := make(map[billing.InvoiceID]bool, len(previous.Items))
+	existing := make(map[billing.OrderID]bool, len(previous.Items))
 	for _, invoice := range previous.Items {
 		existing[invoice.ID] = true
 	}
@@ -59,14 +60,14 @@ func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
 	require.NoError(f.t, err)
 	f.advance(time.Minute)
 	f.waitPassJobs(invoicePasses(f, false, on...))
-	list, err := client.ListInvoices(f.t.Context(), billing.InvoiceListParams{CustomerID: c.cid()})
+	list, err := client.ListOrders(f.t.Context(), billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(f.t, err)
-	var selected billing.InvoiceID
+	var selected billing.OrderID
 	for _, invoice := range list.Items {
-		if invoice.AmountDue > 0 && !existing[invoice.ID] {
+		if invoice.Usage.AmountDue > 0 && !existing[invoice.ID] {
 			require.True(f.t, selected.IsZero())
 			selected = invoice.ID
-			require.Equal(f.t, nmiInvoiceAmount, invoice.AmountDue)
+			require.Equal(f.t, nmiInvoiceAmount, invoice.Usage.AmountDue)
 		}
 	}
 	require.False(f.t, selected.IsZero())
@@ -79,9 +80,16 @@ type invoiceAnswer struct {
 	err    error
 }
 
-func payNMIInvoice(ctx context.Context, r *world, c *customer, invoice billing.InvoiceID, method, key string) invoiceAnswer {
-	raw, _ := json.Marshal(billing.PayInvoiceParams{PaymentMethodID: pmid(method)})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.server.URL+mountPrefix+"/v1/me/invoices/"+invoice.String()+"/pay-now", bytes.NewReader(raw))
+// payNMIInvoice is the customer paying the usage order with a saved card:
+// POST /v1/me/orders/{id}/pay, expecting the order's total.
+func payNMIInvoice(ctx context.Context, r *world, c *customer, invoice billing.OrderID, method, key string) invoiceAnswer {
+	order, err := r.client[remote].GetOrder(ctx, invoice)
+	if err != nil {
+		return invoiceAnswer{err: err}
+	}
+	card := pmid(method)
+	raw, _ := json.Marshal(billing.PayOrderParams{Payment: billing.OrderPaymentParams{PaymentMethodID: &card}, ExpectedTotal: order.Total})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.server.URL+mountPrefix+"/v1/me/orders/"+invoice.String()+"/pay", bytes.NewReader(raw))
 	if err != nil {
 		return invoiceAnswer{err: err}
 	}
@@ -103,28 +111,28 @@ func payNMIInvoice(ctx context.Context, r *world, c *customer, invoice billing.I
 	return invoiceAnswer{status: res.StatusCode, body: body}
 }
 
-func requireInvoicePaidOnce(f *fleet, id billing.InvoiceID, sales, requests int, amount int64, manual int) {
+func requireInvoicePaidOnce(f *fleet, id billing.OrderID, sales, requests int, amount int64, manual int) {
 	f.t.Helper()
-	invoice, err := f.any().client[remote].GetInvoice(f.t.Context(), id)
+	invoice, err := f.any().client[remote].GetOrder(f.t.Context(), id)
 	require.NoError(f.t, err)
-	require.Equal(f.t, billing.InvoicePaid, invoice.Status)
-	require.Zero(f.t, invoice.AmountDue)
-	require.Equal(f.t, nmiInvoiceAmount, invoice.AmountPaid)
+	require.Equal(f.t, billing.OrderComplete, invoice.Status)
+	require.Zero(f.t, invoice.Usage.AmountDue)
+	require.Equal(f.t, nmiInvoiceAmount, invoice.Usage.AmountPaid)
 	require.Len(f.t, f.base.nmi.ledger(""), sales)
 	require.Len(f.t, f.base.nmi.Attempts(), requests, "same shared database never resends the accepted collection")
-	payments, err := f.any().client[remote].ListPayments(f.t.Context(), billing.PaymentListParams{InvoiceID: id})
+	payments, err := f.any().client[remote].ListPayments(f.t.Context(), billing.PaymentListParams{OrderID: id})
 	require.NoError(f.t, err)
 	require.Len(f.t, payments.Items, 1+manual)
 	var count int
 	var total int64
-	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT count(*),COALESCE(sum(amount),0) FROM billing.ledger_transfers WHERE invoice_id=$1 AND operation='invoice_payment'`), id.UUID()).Scan(&count, &total))
+	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT count(*),COALESCE(sum(amount),0) FROM billing.ledger_transfers WHERE order_id=$1 AND operation='invoice_payment'`), id.UUID()).Scan(&count, &total))
 	require.Equal(f.t, 1, count)
 	require.Equal(f.t, amount, total)
 	var operations int
-	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection' AND payload->>'invoice_id'=$1`), id.UUID().String()).Scan(&operations))
+	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1`), id.UUID().String()).Scan(&operations))
 	require.Equal(f.t, 1, operations, "one durable provider operation owns this invoice")
 	var operationID, status string
-	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT id::text,status FROM billing.provider_intents WHERE intent_type='invoice_collection' AND payload->>'invoice_id'=$1`), id.UUID().String()).Scan(&operationID, &status))
+	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT id::text,status FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1`), id.UUID().String()).Scan(&operationID, &status))
 	require.Equal(f.t, "succeeded", status)
 	matched := 0
 	for _, request := range f.base.nmi.Attempts() {
@@ -167,21 +175,22 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 	gate.wait()
 	gate.release()
 	firstRequests.Wait()
-	var operation billing.PaymentOperationID
+	// One request runs the key; the others meet it running, across replicas.
+	answered := 0
 	for _, answer := range initial {
 		require.NoError(t, answer.err)
-		require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status, string(answer.body))
-		var accepted billing.InvoicePayNow
-		require.NoError(t, json.Unmarshal(answer.body, &accepted))
-		if operation.IsZero() {
-			operation = accepted.Operation.ID
+		if answer.status == http.StatusConflict {
+			require.Contains(t, string(answer.body), billing.CodeIdempotencyKeyInUse)
+			continue
 		}
-		require.Equal(t, operation, accepted.Operation.ID, "same customer key replays the same durable operation across replicas")
+		require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+		answered++
 	}
+	require.Positive(t, answered)
 	f.settle()
 	requireInvoicePaidOnce(f, first, 1, 1, nmiInvoiceAmount, 0)
 	invoice := newNMIInvoice(f, c)
-	_, err := f.any().client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &invoice, Amount: 25_000_000, TransactionID: "bank-partial"})
+	_, err := f.any().client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: invoice, Amount: 25_000_000, TransactionID: "bank-partial"})
 	require.NoError(t, err)
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	// Every process is off for five days; clocks advance while none can submit.
@@ -254,10 +263,13 @@ func TestNMIInvoiceReplicasAmbiguousFiveDayRestart(t *testing.T) {
 			}
 			answer := payNMIInvoice(t.Context(), f.any(), c, invoice, method, "uncertain")
 			require.NoError(t, answer.err)
-			require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
+			require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+			var pending billing.Order
+			require.NoError(t, json.Unmarshal(answer.body, &pending))
+			require.Equal(t, billing.OrderProcessing, pending.Status, "an unresolved charge leaves the order processing")
 			f.settle()
 			var operationID string
-			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT id::text FROM billing.provider_intents WHERE intent_type='invoice_collection' AND payload->>'invoice_id'=$1 AND result_evidence ? 'submitted_at'`), invoice.UUID().String()).Scan(&operationID))
+			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT id::text FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1 AND result_evidence ? 'submitted_at'`), invoice.UUID().String()).Scan(&operationID))
 			before := len(f.base.nmi.Attempts())
 			if committed {
 				require.Equal(t, 1, before)
@@ -292,10 +304,11 @@ func TestNMIInvoiceReplicasAmbiguousFiveDayRestart(t *testing.T) {
 			var status string
 			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT status FROM billing.provider_intents WHERE id=$1`), operationID).Scan(&status))
 			require.Equal(t, "unknown_needs_verify", status)
-			current, err := f.any().client[remote].GetInvoice(t.Context(), invoice)
+			current, err := f.any().client[remote].GetOrder(t.Context(), invoice)
 			require.NoError(t, err)
-			require.Equal(t, nmiInvoiceAmount, current.AmountDue)
-			require.Zero(t, current.CollectionFailureCount, "unknown submission is not a decline or a new retry allowance")
+			require.Equal(t, nmiInvoiceAmount, current.Usage.AmountDue)
+			require.Nil(t, current.Payment.LastPaymentError, "unknown submission is not a decline or a new retry allowance")
+			require.Equal(t, billing.OrderProcessing, current.Status)
 			if !committed {
 				require.Equal(t, 1, f.base.nmi.Lost(), "one ambiguous submission was lost before reaching the gateway")
 				require.Empty(t, f.base.nmi.ledger(""))
@@ -351,10 +364,18 @@ func TestNMIInvoiceReplicaCrashAfterProviderCommit(t *testing.T) {
 	f.wake()
 	f.settle()
 	requireInvoicePaidOnce(f, invoice, 1, 1, nmiInvoiceAmount, 0)
+	// The crashed request's key is running until its lease lapses; then it
+	// answers its own collection.
 	for _, r := range f.replicas {
-		reply := payNMIInvoice(t.Context(), r, c, invoice, method, "crashed")
-		require.NoError(t, reply.err)
-		require.Equal(t, http.StatusOK, reply.status, string(reply.body))
+		require.Eventually(t, func() bool {
+			reply := payNMIInvoice(t.Context(), r, c, invoice, method, "crashed")
+			require.NoError(t, reply.err)
+			if reply.status == http.StatusConflict && strings.Contains(string(reply.body), billing.CodeIdempotencyKeyInUse) {
+				return false
+			}
+			require.Equal(t, http.StatusOK, reply.status, string(reply.body))
+			return true
+		}, time.Minute, 500*time.Millisecond)
 	}
 	requireInvoicePaidOnce(f, invoice, 1, 1, nmiInvoiceAmount, 0)
 }
@@ -375,12 +396,13 @@ func TestNMIInvoiceAcceptedBeforeFiveDayRestart(t *testing.T) {
 	}
 	answer := payNMIInvoice(t.Context(), f.any(), c, invoice, method, "accepted-readonly")
 	require.NoError(t, answer.err)
-	require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
-	var before billing.InvoicePayNow
+	require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+	var before billing.Order
 	require.NoError(t, json.Unmarshal(answer.body, &before))
-	require.False(t, before.Operation.ID.IsZero())
+	require.Equal(t, billing.OrderProcessing, before.Status, "accepted while writes are off: the order awaits its charge")
+	var operation string
 	var submitted bool
-	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT COALESCE(result_evidence ? 'submitted_at',false) FROM billing.provider_intents WHERE id=$1`), before.Operation.ID.UUID()).Scan(&submitted))
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT id::text, COALESCE(result_evidence ? 'submitted_at',false) FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1`), invoice.UUID().String()).Scan(&operation, &submitted))
 	require.False(t, submitted)
 	require.Empty(t, f.base.nmi.Attempts())
 	for _, r := range f.replicas {
@@ -398,8 +420,8 @@ func TestNMIInvoiceAcceptedBeforeFiveDayRestart(t *testing.T) {
 	replay := payNMIInvoice(t.Context(), f.replicas[1], c, invoice, method, "accepted-readonly")
 	require.NoError(t, replay.err)
 	require.Equal(t, http.StatusOK, replay.status, string(replay.body))
-	var after billing.InvoicePayNow
-	require.NoError(t, json.Unmarshal(replay.body, &after))
-	require.Equal(t, before.Operation.ID, after.Operation.ID)
+	var after string
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT id::text FROM billing.provider_intents WHERE intent_type='order_collection' AND payload->>'order_id'=$1`), invoice.UUID().String()).Scan(&after))
+	require.Equal(t, operation, after, "the accepted operation, executed")
 	requireInvoicePaidOnce(f, invoice, 1, 1, nmiInvoiceAmount, 0)
 }

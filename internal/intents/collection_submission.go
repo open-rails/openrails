@@ -27,7 +27,7 @@ func (p CollectionNonexecutionProof) permits(in gen.BillingProviderIntent) bool 
 
 // BeginCollectedPayment mints authority only for the writer of a fresh fence.
 func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.BillingProviderIntent, now time.Time) (CollectionNonexecutionProof, bool, error) {
-	if in.IntentType != "invoice_collection" && in.IntentType != subscriptions.TypeSubscriptionCollection {
+	if in.IntentType != TypeOrderCollection && in.IntentType != subscriptions.TypeSubscriptionCollection {
 		return CollectionNonexecutionProof{}, false, errors.New("submission received an unsupported collected-payment kind")
 	}
 	binding, err := collectionBinding(in)
@@ -47,8 +47,8 @@ func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.BillingProvide
 func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.BillingProviderIntent, verifier interface {
 	ConfirmCollectionNotExecuted(context.Context, gen.BillingProviderIntent) error
 }) (CollectionNonexecutionProof, error) {
-	if verifier == nil || (in.IntentType != "invoice_collection" && in.IntentType != subscriptions.TypeSubscriptionCollection) {
-		return CollectionNonexecutionProof{}, errors.New("invoice nonexecution verifier is unavailable")
+	if verifier == nil || (in.IntentType != TypeOrderCollection && in.IntentType != subscriptions.TypeSubscriptionCollection) {
+		return CollectionNonexecutionProof{}, errors.New("collection nonexecution verifier is unavailable")
 	}
 	current, err := s.Get(ctx, in.ID)
 	if err != nil {
@@ -63,10 +63,10 @@ func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.B
 		return CollectionNonexecutionProof{}, err
 	}
 	if binding != expected {
-		return CollectionNonexecutionProof{}, errors.New("invoice confirmation changed operation binding")
+		return CollectionNonexecutionProof{}, errors.New("collection confirmation changed operation binding")
 	}
 	if EvidenceString(current, "submitted_at") == "" {
-		return CollectionNonexecutionProof{}, errors.New("unsubmitted invoice must use atomic unsent resolution")
+		return CollectionNonexecutionProof{}, errors.New("an unsubmitted collection must use atomic unsent resolution")
 	}
 	if err := verifier.ConfirmCollectionNotExecuted(ctx, current); err != nil {
 		return CollectionNonexecutionProof{}, err
@@ -75,7 +75,7 @@ func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.B
 }
 
 // Both collected-payment kinds share this sealed-proof key.
-const qualifiedCollectionNonexecutionKey = "qualified_invoice_nonexecution"
+const qualifiedCollectionNonexecutionKey = "qualified_collection_nonexecution"
 
 type collectionNonexecution struct {
 	Binding     receiptBinding `json:"binding"`
@@ -105,7 +105,7 @@ func LoadCollectionNonexecution(in gen.BillingProviderIntent) (CollectionNonexec
 	}
 	proof := CollectionNonexecutionProof{binding: fact.Binding, submittedAt: fact.SubmittedAt, code: fact.Code, reason: fact.Reason}
 	if fact.SubmittedAt == "" || !proof.permits(in) || !validCollectionNonexecutionCode(fact.Code) || fact.Reason == "" {
-		return CollectionNonexecutionProof{}, true, errors.New("invalid invoice nonexecution custody")
+		return CollectionNonexecutionProof{}, true, errors.New("invalid collection nonexecution custody")
 	}
 	return proof, true, nil
 }
@@ -124,7 +124,7 @@ func (s *Store) RetainCollectionNonexecution(ctx context.Context, in gen.Billing
 		return err
 	}
 	if binding != proof.binding || !validCollectionNonexecutionCode(code) || reason == "" {
-		return errors.New("invalid invoice nonexecution capability")
+		return errors.New("invalid collection nonexecution capability")
 	}
 	current, err := s.retainQualifiedEvidence(ctx, in, qualifiedCollectionNonexecutionKey, collectionNonexecution{proof.binding, proof.submittedAt, code, reason})
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *Store) RetainCollectionNonexecution(ctx context.Context, in gen.Billing
 		return err
 	}
 	if !found {
-		return errors.New("invoice nonexecution custody disappeared")
+		return errors.New("collection nonexecution custody disappeared")
 	}
 	return nil
 }

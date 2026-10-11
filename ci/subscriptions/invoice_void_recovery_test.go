@@ -80,12 +80,12 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 			require.True(t, completedBefore.Equal(completedAfter), "void did not advance financial completion")
 			ctx := merchant.WithID(t.Context(), mid)
 			require.ErrorIs(t, providerrecovery.CheckPSP(ctx, engine.Graph(w.rt).Runtime.DB, mid.UUID(), psp.UUID(), w.clock.Now()), providerrecovery.ErrPending)
-			current, err := w.client[remote].GetInvoice(t.Context(), invoice)
+			current, err := w.client[remote].GetOrder(t.Context(), invoice)
 			require.NoError(t, err)
 			if recorded {
-				require.Equal(t, billing.InvoicePaid, current.Status, "review did not invent an accounting reversal")
+				require.Equal(t, billing.OrderComplete, current.Status, "review did not invent an accounting reversal")
 			} else {
-				require.Equal(t, int64(50_000_000), current.AmountDue, "void granted no payment or credit")
+				require.Equal(t, int64(50_000_000), current.Usage.AmountDue, "void granted no payment or credit")
 			}
 			var refunds int
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments WHERE amount<0 OR refunded_payment_id IS NOT NULL`)).Scan(&refunds))

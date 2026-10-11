@@ -136,7 +136,6 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
-		InvoiceID:           p.InvoiceID,
 		Quantity:            quantity,
 	}, nil
 }
@@ -230,7 +229,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	// An order's or invoice's payment names no price.
+	// An order's payment names no price.
 	if err := r.attachPaymentRelations(ctx, []*models.Payment{payment}); err != nil {
 		return nil, nil, err
 	}
@@ -575,10 +574,6 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 	if !p.SubscriptionID.IsZero() {
 		id := p.SubscriptionID.UUID()
 		params.SubscriptionID = &id
-	}
-	if !p.InvoiceID.IsZero() {
-		id := p.InvoiceID.UUID()
-		params.InvoiceID = &id
 	}
 	if !p.OrderID.IsZero() {
 		id := p.OrderID.UUID()

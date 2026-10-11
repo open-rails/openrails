@@ -383,7 +383,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtimeRef = runtime
 	runtime.CollectionResolver = collectionResolver
-	runtime.MoneyService.SetInvoiceRecoveryResolver(collectionResolver)
+	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
 	moneyCharger.SetAdapterResolver(collectionResolver)
 	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
 	// NMI client through the shared factory.

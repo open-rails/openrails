@@ -8,12 +8,12 @@
 -- name: ListDelinquencyWorkMerchants :many
 SELECT q.merchant_id
 FROM (
-    SELECT i.merchant_id
-      FROM billing.invoices i
-     WHERE i.status = 'open'
-       AND i.amount_due > 0
-       AND i.due_at IS NOT NULL
-       AND i.due_at < sqlc.arg(now)::timestamptz
+    SELECT o.merchant_id
+      FROM billing.orders o
+     WHERE o.origin = 'usage'
+       AND o.status IN ('open', 'processing')
+       AND o.amount_paid < o.total
+       AND o.due_at < sqlc.arg(now)::timestamptz
     UNION
     SELECT d.merchant_id
       FROM billing.customer_delinquency d
@@ -21,11 +21,11 @@ FROM (
 ) q
 LIMIT sqlc.arg(merchant_limit)::int;
 
--- name: ListOverdueInvoiceAggregates :many
+-- name: ListOverdueOrderAggregates :many
 -- The ENTER leg of the evaluation: per (payer, currency), how much is overdue
 -- and since when. This is the whole derivation input — delinquency is a reading
--- of invoice truth against the merchant's policy, not a separately-maintained
--- fact. Rides invoices_customer_id_currency_due_at_idx (partial on exactly the open, still-owed set).
+-- of usage order truth against the merchant's policy, not a separately
+-- maintained fact. Rides orders_usage_open_idx.
 --
 -- OLDEST DEBT FIRST, and capped: one pass is bounded work. If a merchant ever
 -- has more overdue payers than the cap, the ones who have owed longest are the
@@ -39,15 +39,15 @@ LIMIT sqlc.arg(merchant_limit)::int;
 SELECT i.customer_id,
        i.currency,
        MIN(i.due_at)::timestamptz AS overdue_started_at,
-       COALESCE(SUM(i.amount_due), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_invoices,
+       COALESCE(SUM(i.total - i.amount_paid), 0)::bigint AS overdue_amount,
+       COUNT(*)::bigint AS overdue_orders,
        -- -1 = NO OVERRIDE (fall back to the merchant-wide policy). An explicit
        -- sentinel, not a guess: both values are validated non-negative, so -1
        -- cannot collide with a declared one, and a nullable LATERAL column
        -- would be inferred non-null by sqlc and mis-scan.
        COALESCE(pol.grace_days, -1)::int AS grace_days,
        COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
-FROM billing.invoices i
+FROM billing.orders i
 JOIN billing.customers c ON c.merchant_id = i.merchant_id AND c.id = i.customer_id
 LEFT JOIN billing.money_settings ms
   ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
@@ -62,36 +62,36 @@ CROSS JOIN LATERAL (
            (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
 ) pol
 WHERE i.merchant_id = sqlc.arg(merchant_id)
-  AND i.status = 'open'
-  AND i.amount_due > 0
-  AND i.due_at IS NOT NULL
+  AND i.origin = 'usage'
+  AND i.status IN ('open', 'processing')
+  AND i.amount_paid < i.total
   AND i.due_at < sqlc.arg(now)::timestamptz
 GROUP BY i.customer_id, i.currency, pol.grace_days, pol.amount_floor
 ORDER BY MIN(i.due_at), i.customer_id, i.currency
 LIMIT sqlc.arg(row_limit);
 
--- name: GetOverdueInvoiceAggregate :one
+-- name: GetOverdueOrderAggregate :one
 -- One payer's overdue aggregate — the live recompute the admission gate runs
 -- before it agrees with a stored `delinquent`, so a payer who has since settled
 -- is never refused on a stale projection.
 --
 -- overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
--- overdue_invoices = 0, and every caller reads the count first.
+-- overdue_orders = 0, and every caller reads the count first.
 SELECT COALESCE(MIN(due_at), sqlc.arg(now)::timestamptz) AS overdue_started_at,
-       COALESCE(SUM(amount_due), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_invoices
-FROM billing.invoices
+       COALESCE(SUM(total - amount_paid), 0)::bigint AS overdue_amount,
+       COUNT(*)::bigint AS overdue_orders
+FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND currency = sqlc.arg(currency)
-  AND status = 'open'
-  AND amount_due > 0
-  AND due_at IS NOT NULL
+  AND origin = 'usage'
+  AND status IN ('open', 'processing')
+  AND amount_paid < total
   AND due_at < sqlc.arg(now)::timestamptz;
 
 -- name: ListNonCurrentDelinquency :many
 -- The EXIT leg: payers already parked in grace/delinquent. Small by
--- construction, and the only way a cleared debt gets noticed — an invoice that
+-- construction, and the only way a cleared debt gets noticed — an order that
 -- was paid no longer appears in the enter scan at all.
 SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
@@ -130,27 +130,27 @@ WITH previous AS (
 ), upserted AS (
     INSERT INTO billing.customer_delinquency AS d (
         merchant_id, customer_id, currency, state, overdue_started_at, overdue_amount,
-        overdue_invoices, entered_at, transition_seq, evaluated_at, created_at, updated_at)
+        overdue_orders, entered_at, transition_seq, evaluated_at, created_at, updated_at)
     VALUES (
         sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(state)::text,
         sqlc.narg(overdue_started_at)::timestamptz, sqlc.arg(overdue_amount)::bigint,
-        sqlc.arg(overdue_invoices)::bigint, sqlc.arg(now)::timestamptz, 1,
+        sqlc.arg(overdue_orders)::bigint, sqlc.arg(now)::timestamptz, 1,
         sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
     ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
     SET state = EXCLUDED.state,
         overdue_started_at = EXCLUDED.overdue_started_at,
         overdue_amount = EXCLUDED.overdue_amount,
-        overdue_invoices = EXCLUDED.overdue_invoices,
+        overdue_orders = EXCLUDED.overdue_orders,
         entered_at = CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN EXCLUDED.entered_at ELSE d.entered_at END,
         transition_seq = d.transition_seq + (CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN 1 ELSE 0 END),
         evaluated_at = EXCLUDED.evaluated_at,
         updated_at = EXCLUDED.updated_at
-    RETURNING d.state, d.overdue_started_at, d.overdue_amount, d.overdue_invoices, d.entered_at, d.transition_seq
+    RETURNING d.state, d.overdue_started_at, d.overdue_amount, d.overdue_orders, d.entered_at, d.transition_seq
 )
 SELECT upserted.state,
        upserted.overdue_started_at,
        upserted.overdue_amount,
-       upserted.overdue_invoices,
+       upserted.overdue_orders,
        upserted.entered_at,
        upserted.transition_seq,
        COALESCE((SELECT previous.state FROM previous), '')::text AS previous_state

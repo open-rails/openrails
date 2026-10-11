@@ -193,14 +193,14 @@ type nilPerm struct{}
 func (*nilPerm) String() string { panic("never called") }
 
 func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
-	const target = "/api/pay/v1/me/invoices/inv%2F1?view=raw"
+	const target = "/api/pay/v1/me/orders/ord%2F1?view=raw"
 	const body = "{ \"signed\" : \"unaltered\" }\n"
 	calls := 0
 	verifier := hookAuth{admit: func(r *http.Request) bool {
 		calls++
 		require.Equal(t, target, r.RequestURI)
-		require.Equal(t, "/api/pay/v1/me/invoices/inv%2F1", r.URL.RawPath)
-		require.Equal(t, "inv/1", r.PathValue("id"))
+		require.Equal(t, "/api/pay/v1/me/orders/ord%2F1", r.URL.RawPath)
+		require.Equal(t, "ord/1", r.PathValue("id"))
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, body, string(raw))
@@ -257,7 +257,7 @@ func TestRoutesNeedAuth(t *testing.T) {
 // Permissions.
 func TestCustomerRoutesAlwaysMounted(t *testing.T) {
 	mux := mountAt(t, httpRuntime(), config.Routes{Auth: &authtest.Fake{}}, "/api/pay")
-	for _, path := range []string{"/payments", "/invoices", "/subscriptions", "/payment-methods"} {
+	for _, path := range []string{"/payments", "/orders", "/subscriptions", "/payment-methods"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
 	}
 	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodPost, "/api/pay/v1/me/checkout-sessions", "").Code)

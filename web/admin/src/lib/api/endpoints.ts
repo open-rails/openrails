@@ -247,7 +247,6 @@ export const changeSubscription = (
 export interface PaymentFilters {
   customer_id?: string
   subscription_id?: string
-  invoice_id?: string
   order_id?: string
   status?: Payment["status"]
   rail?: string
@@ -309,7 +308,6 @@ export const ATTEMPT_FILTERS = [
   "psp_id",
   "customer_id",
   "payment_id",
-  "invoice_id",
   "order_id",
   "subscription_id",
   "cycle_id",

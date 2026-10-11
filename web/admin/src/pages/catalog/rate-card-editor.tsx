@@ -416,7 +416,7 @@ export function RateCardEditor({
           <AlertDialogHeader>
             <AlertDialogTitle>Replace the default rate?</AlertDialogTitle>
             <AlertDialogDescription>
-              Finalized invoices and amounts already accrued do not change. The
+              Billed usage orders and amounts already accrued do not change. The
               new rate can only affect the remaining positive delta in the
               current unfinalized period and future periods.
             </AlertDialogDescription>

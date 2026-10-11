@@ -29,8 +29,8 @@ import (
 // subscription's; a card whose brand changed is verified first.
 
 var (
-	errRenewalSavedCard     = apperr.Invalidf("a renewal is paid with a saved card: payment.payment_method_id").WithParam("payment")
-	errRenewalSessionNeeded = apperr.New(http.StatusForbidden, billing.CodeCustomerActionRequired, "Paying a renewal needs the customer's own session.")
+	errRenewalSavedCard   = apperr.Invalidf("a renewal is paid with a saved card: payment.payment_method_id").WithParam("payment")
+	errOrderSessionNeeded = apperr.New(http.StatusForbidden, billing.CodeCustomerActionRequired, "Paying a renewal or usage order needs the customer's own session.")
 )
 
 // payRenewal pays the open renewal order. replayed: key's collection already
@@ -53,7 +53,7 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 		return checkout.OrderCharge{}, false, err
 	}
 	customer := actor.Customer.UUID()
-	admitKey := renewalPayKey(order.ID, key)
+	admitKey := orderPayKey(order.ID, key)
 	if err := s.reconsentPaying(ctx, customer, pay.method, admitKey); err != nil {
 		return checkout.OrderCharge{}, false, err
 	}
@@ -93,8 +93,9 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 	return checkout.OrderCharge{Failed: true, Declined: evidence.Declined}, replayed, nil
 }
 
-// renewalPayKey is the collection key of one /pay request on a renewal order.
-func renewalPayKey(order uuid.UUID, key string) string {
+// orderPayKey is the collection key of one /pay request on a renewal or
+// usage order.
+func orderPayKey(order uuid.UUID, key string) string {
 	sum := sha256.Sum256([]byte(order.String() + "\x00" + key))
 	return "order:" + hex.EncodeToString(sum[:])
 }
@@ -103,7 +104,7 @@ func renewalPayKey(order uuid.UUID, key string) string {
 func renewalRefusal(err error) error {
 	switch {
 	case errors.Is(err, money.ErrCustomerSessionRequired):
-		return errRenewalSessionNeeded
+		return errOrderSessionNeeded
 	case errors.Is(err, intents.ErrRebillInProgress), errors.Is(err, subscriptions.ErrRenewalHeldByUpgrade):
 		return orders.ErrInProgress
 	case errors.Is(err, intents.ErrRebillKeyConflict):

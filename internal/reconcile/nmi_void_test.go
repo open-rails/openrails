@@ -39,7 +39,7 @@ func TestNMIVoidCannotUsePaymentStatusAsReversalProof(t *testing.T) {
 					payment := LocalPayment{ID: uuid.New(), TransactionID: "voided-sale", AmountCents: 999, Currency: "USD", Status: "succeeded"}
 					if localState == "invoice" {
 						invoice := uuid.New()
-						payment.InvoiceID, payment.Status = &invoice, "settled"
+						payment.UsageOrderID, payment.Status = &invoice, "settled"
 					}
 					if localState == "partially_refunded" {
 						payment.Status = "partially_refunded"

@@ -4,11 +4,11 @@ Two real businesses cap different things.
 
 An **API business** caps *outstanding owed*: a $200 credit line, $155 unpaid
 means $45 more spend, deny at the cap. A **cloud business** caps *new spend per
-window*: $2k a month regardless of unpaid prior invoices — nonpayment feeds
+window*: $2k a month regardless of unpaid prior bills — nonpayment feeds
 [delinquency](arrears-delinquency.md) and your own shutoff instead.
 
-Both are measured from the double-entry ledger. Never from invoices (those are
-presentation and collection artifacts, and they lag) and never from numbers you
+Both are measured from the double-entry ledger. Never from usage orders (those
+are presentation and collection artifacts, and they lag) and never from numbers you
 send us.
 
 | | Owner |
@@ -31,7 +31,7 @@ which cap applies and moves no money.
 | `accrual_rate_cap` | The measured accrual RATE, in micros **per hour** — the cloud quota. Prior debt does not gate it either. | `accrual_rate_cap_reached` |
 
 `outstanding_cap_reached` is deliberately distinct from `insufficient_credit`
-("this one request does not fit") and from `delinquent_unpaid_invoice` (the time
+("this one request does not fit") and from `delinquent_unpaid_order` (the time
 axis — the debt may not even be due yet). A host that cannot tell them apart
 cannot say anything useful to the customer.
 
@@ -158,7 +158,7 @@ next admission in every runtime, without waiting for a process-local cache TTL.
 | Field | Applies to | Meaning |
 |---|---|---|
 | `bad_spend_windows` | any kind | Per-customer grace for failed usage: at most `limit` of usage events recorded with `outcome: failed` is forgiven per window; past it the failure is charged when it is recorded. |
-| `collection_threshold_amount` | any kind | When this customer's accrued arrears is invoiced. Overrides the merchant's `collection_threshold` for customers bound here. |
+| `collection_threshold_amount` | any kind | When this customer's accrued arrears is billed as a usage order. Overrides the merchant's `collection_threshold` for customers bound here. |
 | `delinquency_grace_days` / `delinquency_amount_floor` | any kind | This customer's [delinquency](arrears-delinquency.md) policy. Overrides the merchant's `arrears_grace_days` and `arrears_delinquency_floor`. |
 | `policy_currency` | any kind | Currency for checks whose window carries none. Blank means the request's currency. |
 

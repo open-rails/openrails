@@ -31,7 +31,7 @@ type DelinquencyArgs struct{}
 func (DelinquencyArgs) Kind() string { return KindDelinquency }
 
 // DelinquencyWorker evaluates arrears delinquency and emits the host signal.
-// It is its own job, not a leg of the invoice pass: it moves no money and
+// It is its own job, not a leg of the usage order pass: it moves no money and
 // calls no provider, so it runs with no charger armed and in limited/readonly
 // mode; and its exit half is latency-sensitive (a cleared debt left unnoticed
 // keeps a customer who paid blocked from spending), so it runs on a tighter

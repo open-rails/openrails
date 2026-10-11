@@ -52,13 +52,11 @@ type Payment struct {
 	SubscriptionID *SubscriptionID `json:"subscription_id"`
 	// OrderID is the order the charge paid; its lines say what it bought.
 	OrderID *OrderID `json:"order_id"`
-	// InvoiceID is the invoice the payment paid.
-	InvoiceID *InvoiceID `json:"invoice_id"`
 	// Quantity is the seats a subscription payment billed; null on a payment
 	// that bills no seats.
 	Quantity *int `json:"quantity"`
 	// PriceID, Price and Product are what a one-price charge bought; a
-	// refund names its charge's. Null on an order's or invoice's payment.
+	// refund names its charge's. Null on an order's payment.
 	PriceID           *PriceID        `json:"price_id"`
 	Price             *Price          `json:"price"`
 	Product           *ProductSummary `json:"product"`
@@ -85,7 +83,6 @@ type PaymentListParams struct {
 	IDs            []PaymentID
 	CustomerID     CustomerID
 	SubscriptionID SubscriptionID
-	InvoiceID      InvoiceID
 	OrderID        OrderID
 	Status         PaymentStatus
 	Rail           string
@@ -95,15 +92,14 @@ type PaymentListParams struct {
 }
 
 // CreatePaymentParams records money the merchant received outside OpenRails
-// (cash, a bank transfer) for one invoice or one order; it moves no money.
-// An invoice takes up to what it has due; an order takes its total, and one
-// with a recurring line is refused, since its renewals charge the customer's
-// card. TransactionID is the remittance's identity: recording it again with
-// the same terms answers the first payment, with other terms is
+// (cash, a bank transfer) for one order; it moves no money. A usage order
+// takes up to what it has due; any other order its total, and one with a
+// recurring line is refused, since its renewals charge the customer's card.
+// TransactionID is the remittance's identity: recording it again with the
+// same terms answers the first payment, with other terms is
 // idempotency_key_reused. PaidAt defaults to now.
 type CreatePaymentParams struct {
-	InvoiceID     *InvoiceID `json:"invoice_id,omitempty"`
-	OrderID       *OrderID   `json:"order_id,omitempty"`
+	OrderID       OrderID    `json:"order_id"`
 	Amount        int64      `json:"amount,string"`
 	TransactionID string     `json:"transaction_id"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`

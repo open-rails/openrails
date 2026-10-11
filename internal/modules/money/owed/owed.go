@@ -10,17 +10,16 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/modules/money/statement"
+	"github.com/open-rails/openrails/internal/modules/orders/usage"
 )
 
 // Repay applies min(owed, funded) of a just-funded credit lot to what the
 // customer owes, in the caller's transaction and under its customer lock:
-// first to the invoices that claim the debt, oldest first, then to debt no
-// invoice claims yet. An invoice whose collection is
-// in flight keeps its claim and its amount. Every leg is an owed_repayment
-// transfer on the lot at the funding's coordinate, so the funding's own
-// once-only deposit makes the repayment once-only too. It returns the amount
-// repaid.
+// first to the usage orders that claim the debt, oldest first, then to debt
+// no order claims yet. An order whose collection is in flight keeps its
+// claim and its amount. Every leg is an owed_repayment transfer on the lot at
+// the funding's coordinate, so the funding's own once-only deposit makes the
+// repayment once-only too. It returns the amount repaid.
 func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.BillingGrant, funded int64, now time.Time) (int64, error) {
 	if lot.Currency == nil || funded <= 0 {
 		return 0, nil
@@ -31,14 +30,14 @@ func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.Bi
 	if err != nil || owed <= 0 {
 		return 0, err
 	}
-	claims, err := q.ListOwedInvoiceClaims(ctx, gen.ListOwedInvoiceClaimsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	claims, err := q.ListOwedOrderClaims(ctx, gen.ListOwedOrderClaimsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 	if err != nil {
 		return 0, err
 	}
-	var invoiced, inFlight int64
+	var billed, inFlight int64
 	for _, c := range claims {
-		invoiced += c.AmountDue
-		if c.CollectionIntentID != nil {
+		billed += c.AmountDue
+		if c.Status == "processing" {
 			inFlight += c.AmountDue
 		}
 	}
@@ -53,33 +52,24 @@ func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.Bi
 		if remaining == 0 {
 			break
 		}
-		if c.CollectionIntentID != nil {
+		if c.Status == "processing" {
 			continue
 		}
 		amount := min(remaining, c.AmountDue)
-		invoice := c.ID
+		order := c.ID
 		legCoord := coord
-		legCoord.SourceID = lot.ID.String() + ":" + invoice.String()
-		// The repayment moves no money: its transfer is the invoice's record.
-		if _, err := l.RepayOwed(ctx, customer, currency, amount, legCoord, lot.ID, &invoice); err != nil {
+		legCoord.SourceID = lot.ID.String() + ":" + order.String()
+		// The repayment moves no money: its transfer is the order's record.
+		if _, err := l.RepayOwed(ctx, customer, currency, amount, legCoord, lot.ID, &order); err != nil {
 			return 0, err
 		}
-		n, err := q.ApplyInvoiceBalancePayment(ctx, gen.ApplyInvoiceBalancePaymentParams{
-			MerchantID: merchantID, CustomerID: customer, InvoiceID: invoice, Amount: amount, Now: now,
-		})
-		if err != nil {
-			return 0, err
-		}
-		if n != 1 {
-			return 0, fmt.Errorf("owed repayment: invoice %s changed under the customer lock", invoice)
-		}
-		if err := statement.Follow(ctx, q, merchantID, customer, currency, invoice, now); err != nil {
-			return 0, err
+		if _, err := usage.Pay(ctx, q, merchantID, order, amount, nil, nil, now); err != nil {
+			return 0, fmt.Errorf("owed repayment: order %s: %w", order, err)
 		}
 		remaining -= amount
 		repaid += amount
 	}
-	if amount := min(remaining, max(owed-invoiced, 0)); amount > 0 {
+	if amount := min(remaining, max(owed-billed, 0)); amount > 0 {
 		if _, err := l.RepayOwed(ctx, customer, currency, amount, coord, lot.ID, nil); err != nil {
 			return 0, err
 		}

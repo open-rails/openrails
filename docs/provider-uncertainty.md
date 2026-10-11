@@ -7,7 +7,7 @@ they do not themselves establish provider-enforced idempotency or definitive
 negative/read-after-write semantics.
 
 Checkout sales, recurring enrollment, custodian-proxied sales, manual rebills
-and invoice collection therefore retain unknown state until a positive receipt
+and usage order collection therefore retain unknown state until a positive receipt
 can be reconciled. Resumed intent handlers verify rather than submit another
 mutation. A captured provider receipt survives local finalization failure in
 the existing intent result evidence. Local effects are retried against that
@@ -41,16 +41,16 @@ the reserved amount on the original sale's vault) before local effects commit
 through the normal receipt path. `--not-executed` requires the operation type's supported non-execution proof; it is not an override of provider uncertainty.
 An empty NMI search after possible submission is never that proof: an NMI or
 custodian sale accepts `--not-executed` only when NMI shows a definitive
-decline as the one transaction under the sale's order, and a submitted invoice
+decline as the one transaction under the sale's order, and a submitted order
 collection, rebill or tier-change proration refuses it. Custodian sale receipts
 converge only through the exact order search. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
 
-Invoice collection is an `invoice_collection` operation on the same ledger:
-one per attempt, enqueued atomically with the invoice's `collection_intent_id`
-pointer, which blocks every competing
+Usage order collection is an `order_collection` operation on the same ledger:
+one per attempt, enqueued atomically with the order's live attempt (the order
+is `processing`), which blocks every competing
 collection, void, uncollectible and out-of-band payment until the operation
 ends. The operation id is the provider identity (NMI order id, Stripe
 idempotency-key root), so a client retry key, a restart or a resumed lease
@@ -76,20 +76,20 @@ back approved, in the frozen currency, for the frozen amount, on the
 frozen customer vault (a card frozen as custodian-held has no vault at NMI;
 its read binds approval, currency and amount); Stripe replays the same
 idempotent sequence through the executor while Stripe still holds the key
-(23h) and then waits for operator resolution. The Stripe sequence creates the invoice first,
+(23h) and then waits for operator resolution. The Stripe sequence creates a Stripe invoice first,
 excluding the customer's pending items, and attaches its line by invoice id,
-so nothing it creates can be swept into another invoice; a parsed refusal
-becomes definitive only after every draft/open invoice and pending item
+so nothing it creates can be swept into another Stripe invoice; a parsed refusal
+becomes definitive only after every draft/open Stripe invoice and pending item
 stamped with the operation key has been deleted or voided (a failed cleanup
 keeps the outcome unknown). A confirmed charge whose local settlement fails
 first commits its qualified receipt on the operation and settles from that receipt after restart;
-an invoice that no longer accepts the frozen snapshot fails closed (nothing
-written, pointer kept) until an operator repairs it.
+an order that no longer accepts the frozen snapshot fails closed (nothing
+written, attempt kept) until an operator repairs it.
 The autonomous verifier and `intents resolve --receipt` share that one
 exact-receipt path (`--receipt` additionally requires the named transaction
-to be the order reference's sale). Stripe also reads the invoice's actual captured
+to be the order reference's sale). Stripe also reads the Stripe invoice's actual captured
 charge and checks its customer, payment method, amount and currency. A paid
-invoice or its default payment method alone is not proof of which card paid it.
+Stripe invoice or its default payment method alone is not proof of which card paid it.
 Both readers are bound to the credential plane's immutable merchant/account;
 callers cannot label a reader for account B as account A.
 
@@ -105,21 +105,21 @@ A bare transaction id remains only a candidate; it cannot finalize a payment.
 Generic progress writes cannot replace the receipt, and pruning and portable
 archives retain and revalidate its binding. Receipt custody categorically
 precludes non-execution, including a crash before the safe result projection
-was written. Computed invoice dues round up to provider minor units; the exact
+was written. Computed order dues round up to provider minor units; the exact
 due is settled and the remainder becomes spendable purchased credit in the same
 local transaction. A provider object
 under the operation's identity that contradicts the frozen facts settles
 nothing: it is retained as `provider_contradiction` evidence, the operation
 stays unknown and `--not-executed` is refused until an operator repairs from
 the provider record.
-For a submitted NMI invoice collection, `--not-executed` refuses even when the
+For a submitted NMI order collection, `--not-executed` refuses even when the
 order search is empty: query visibility is not authoritative non-execution.
-The invoice remains owned by its unresolved operation, so no new charge is
+The order remains owned by its unresolved operation, so no new charge is
 admitted. Stripe can close after deleting/voiding the scoped operation's unpaid
 objects and reading back that none remains chargeable; a paid object or a
 retained receipt always refuses. A submission refused because the instrument no longer matches the
 frozen one is provable non-execution (`instrument_changed`): the attempt fails
-without a decline and the invoice is due again, so the next collection freezes
+without a decline and the order is due again, so the next collection freezes
 the instrument as it now is. A `pending` operation that never crossed its
 submission fence (an account that never armed) has no verifier; `intents
 resolve --not-executed` releases it on the strength of the absent fence, and
@@ -158,7 +158,7 @@ Stripe engine renewals may replay the same idempotency key after the five-minute
 observation delay, at most twice and only before its minimum 24-hour retention
 window ends (with clock and provider-call margins). This relies on provider key
 semantics, not a claim that an absent list result proves nothing happened.
-Custodian-held instruments, initial payments, sales, invoices and manual rebills
+Custodian-held instruments, initial payments, sales, order collections and manual rebills
 retain their existing no-automatic-resend rule.
 
 A Stripe tier change is a `stripe_tier_change` operation on the same ledger,

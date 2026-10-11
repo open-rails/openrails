@@ -175,7 +175,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	// The usage month is invoiced by the end of the next month and kept 24
 	// months past that: on the last day of the 25th month it is still there,
 	// a day later it is gone.
-	dropAt := thisMonth.AddDate(0, 1+retention.UsageInvoicingLagMonths+retention.UsageInvoicedMonths, 0)
+	dropAt := thisMonth.AddDate(0, 1+retention.UsageBillingLagMonths+retention.UsageBilledMonths, 0)
 	w.clock.Advance(dropAt.Add(-time.Hour).Sub(w.clock.Now()))
 	w.sweep(0)
 	require.Contains(t, w.partitions("usage_events"), partitionName("usage_events", thisMonth))
@@ -421,7 +421,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.NoError(t, err)
 	permanent := func() map[string]int {
 		out := map[string]int{}
-		for _, table := range []string{"ledger_accounts", "ledger_transfers", "grants", "payments", "invoices", "invoice_items"} {
+		for _, table := range []string{"ledger_accounts", "ledger_transfers", "grants", "payments", "owed_items", "usage_collection_cadence"} {
 			out[table] = w.count(`SELECT count(*) FROM billing.`+table+` WHERE merchant_id = $1`, w.merchant)
 		}
 		return out

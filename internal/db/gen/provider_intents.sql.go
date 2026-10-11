@@ -43,7 +43,7 @@ WHERE id = $2::uuid AND merchant_id = $3::uuid
   AND intent_type = 'subscription_collection'
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND COALESCE(result_evidence, '{}'::jsonb) ? 'submitted_at'
-  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['qualified_receipt', 'rebill_decline', 'stripe_recurring_decline', 'qualified_invoice_nonexecution'])
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['qualified_receipt', 'rebill_decline', 'stripe_recurring_decline', 'qualified_collection_nonexecution'])
   AND COALESCE((result_evidence->>'resend_armed')::int, 0) < $1::int
 `
 
@@ -401,7 +401,7 @@ SET status = $1::text,
     lease_expires_at = NULL,
     updated_at = $4::timestamptz
 WHERE id = $5::uuid AND merchant_id = $6::uuid
-  AND intent_type IN ('invoice_collection', 'manual_rebill', 'subscription_collection')
+  AND intent_type IN ('order_collection', 'manual_rebill', 'subscription_collection')
   AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
@@ -651,43 +651,43 @@ INSERT INTO billing.provider_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN 'pending'
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN 'pending'
         ELSE billing.provider_intents.status
     END,
     next_attempt_at = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE billing.provider_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.payload
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE billing.provider_intents.payload
     END,
     psp_id = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE billing.provider_intents.psp_id
     END,
     origin = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE billing.provider_intents.origin
     END,
     origin_reason = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE billing.provider_intents.origin_reason
     END,
     actor = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE billing.provider_intents.actor
     END,
     subject = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.subject
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.subject
         ELSE billing.provider_intents.subject
     END,
     credential = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.credential
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.credential
         ELSE billing.provider_intents.credential
     END,
     expires_at = CASE
-        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE billing.provider_intents.expires_at
     END,
     attempts = CASE
@@ -794,7 +794,7 @@ SET status = 'expired',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE pi.merchant_id = $1::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
-  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type IN ('order_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND pi.expires_at IS NOT NULL
@@ -835,7 +835,7 @@ SET status = 'expired',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
-  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type IN ('order_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND pi.expires_at IS NOT NULL
@@ -2088,7 +2088,7 @@ func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UU
 const lockProviderIntentForCollectionCompletion = `-- name: LockProviderIntentForCollectionCompletion :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
 WHERE id = $1::uuid AND merchant_id = $2::uuid
-  AND intent_type IN ('invoice_collection', 'manual_rebill', 'subscription_collection')
+  AND intent_type IN ('order_collection', 'manual_rebill', 'subscription_collection')
 FOR UPDATE
 `
 
@@ -2097,8 +2097,8 @@ type LockProviderIntentForCollectionCompletionParams struct {
 	MerchantID uuid.UUID
 }
 
-// Call after acquiring the domain's customer/invoice locks, matching admission's
-// invoice-before-operation order.
+// Call after acquiring the domain's customer/order locks, matching admission's
+// order-before-operation order.
 func (q *Queries) LockProviderIntentForCollectionCompletion(ctx context.Context, arg LockProviderIntentForCollectionCompletionParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, lockProviderIntentForCollectionCompletion, arg.ID, arg.MerchantID)
 	var i BillingProviderIntent
@@ -2287,7 +2287,7 @@ SET status = 'failed_retryable',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
+  AND NOT (intent_type IN ('order_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
            AND NOT (intent_type = 'subscription_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'resend_armed'))
   AND NOT (intent_type = 'nmi_sale' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (intent_type = 'initial_membership' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted')
@@ -2331,7 +2331,7 @@ SET status = 'failed_terminal',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
 `
 
 type MarkProviderIntentFailedTerminalParams struct {
@@ -2373,7 +2373,7 @@ SET status = 'succeeded',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
 `
 
 type MarkProviderIntentSucceededParams struct {
@@ -2469,7 +2469,7 @@ SET status = 'pending',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $4::uuid AND id = $5 AND status = 'in_flight'
-  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type IN ('order_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
   AND (intent_type <> 'initial_membership' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'initial_submitted'))
@@ -2798,8 +2798,8 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('order_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_collection_nonexecution','qualified_initial_refusal']))
        OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
@@ -2809,8 +2809,8 @@ WHERE id = $3::uuid
        OR ($1::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
            AND COALESCE(result_evidence->>'submitted_at','') <> ''
            AND $2::jsonb->>'failure_code'='canceled'
-           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_invoice_nonexecution']))
-       OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
+           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_collection_nonexecution']))
+       OR ($1::text = 'qualified_collection_nonexecution' AND intent_type IN ('order_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
   AND status IN ('in_flight', 'unknown_needs_verify')

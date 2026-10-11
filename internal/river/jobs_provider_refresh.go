@@ -282,8 +282,8 @@ type ProviderRefreshWorker struct {
 	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
-	// Positive invoice recovery does not authorize provider or lifecycle writes.
-	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
+	// Positive usage-order recovery does not authorize provider or lifecycle writes.
+	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
 
 	Window     time.Duration
 	SafetyLag  time.Duration
@@ -588,7 +588,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	}
 
 	engine := reconcile.NewEngine(w.DB, w.Config, w.Contacts, fetchers, w.DeferDelete)
-	engine.RecoverInvoicePayment = w.RecoverInvoicePayment
+	engine.RecoverUsagePayment = w.RecoverUsagePayment
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // nil-check: see runConvergence
@@ -709,10 +709,10 @@ func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp u
 			return nil
 		}
 		merchantID := billing.MerchantID(mid)
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: &merchantID, Collect: true}, InvoiceArgs{MerchantID: &merchantID, Collect: true, UseMonthlyFloor: true}}
+		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, UsageOrderArgs{MerchantID: &merchantID, Collect: true}, UsageOrderArgs{MerchantID: &merchantID, Collect: true, UseMonthlyFloor: true}}
 		for _, args := range jobs {
 			// Do not deduplicate against a scan sleeping on an earlier outage.
-			// Canonical invoice/renewal admission and durable cadence own money.
+			// Canonical usage/renewal admission and durable cadence own money.
 			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
 				return err
 			}

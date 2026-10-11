@@ -4,7 +4,7 @@ package retention
 type Class string
 
 const (
-	// Permanent rows are never pruned: money, grants, invoices, receipts and
+	// Permanent rows are never pruned: money, grants, owed usage, receipts and
 	// the records they depend on.
 	Permanent Class = "permanent"
 	// PartitionedMonthly tables drop whole monthly partitions by the calendar.
@@ -28,14 +28,13 @@ const permanent = "permanent, never pruned."
 // Tables classifies every table of the baseline. A table without an entry
 // fails TestEveryTableHasARetentionClass.
 var Tables = map[string]Table{
-	// Money, grants, invoices and receipts.
+	// Money, grants, owed usage and receipts.
 	"ledger_accounts":                    {Permanent, permanent},
 	"ledger_transfers":                   {Permanent, permanent},
 	"grants":                             {Permanent, permanent},
 	"payments":                           {Permanent, permanent},
-	"invoices":                           {Permanent, permanent},
-	"invoice_collection_cadence":         {Permanent, permanent},
-	"invoice_items":                      {Permanent, permanent},
+	"usage_collection_cadence":           {Permanent, permanent},
+	"owed_items":                         {Permanent, permanent},
 	"operation_authorizations":           {Permanent, permanent},
 	"operation_authorization_extensions": {Permanent, permanent},
 	"cost_qualifications":                {Permanent, permanent},
@@ -57,7 +56,7 @@ var Tables = map[string]Table{
 	"admission_denials_hourly":           {Permanent, permanent},
 	"webhook_health_daily":               {Permanent, permanent},
 
-	"usage_events":         {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was invoiced."},
+	"usage_events":         {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was billed."},
 	"admission_operations": {PartitionedMonthly, "monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days."},
 
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},

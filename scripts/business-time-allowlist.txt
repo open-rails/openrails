@@ -33,7 +33,7 @@ internal/modules/entitlements/entitlement_service.go|return time.Now()|business_
 internal/modules/grants/grants.go|now = func() time.Time { return time.Now().UTC() }|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/grants/grants.go|now:      func() time.Time { return time.Now().UTC() },|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/metrics/validate.go|return ValidateAt(q, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
-internal/modules/money/invoice_items.go|now := time.Now().UTC()|db_audit_timestamp|Pending item created_at; invoice_at is required from the caller|1
+internal/modules/money/owed_items.go|now := time.Now().UTC()|db_audit_timestamp|Pending item created_at; accrued_at is required from the caller|1
 internal/modules/money/money_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/paymentmethods/rail_payment_method_service.go|databaseStartedAt := time.Now()|infrastructure_time|Elapsed provider/database operation duration|1
 internal/modules/paymentmethods/rail_payment_method_service.go|providerStartedAt := time.Now()|infrastructure_time|Elapsed provider/database operation duration|1

@@ -218,7 +218,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 	// Every other route group is off unless you turn it on here.
 	RouteGroups: openrails.RouteGroups{
-		Admin:          true,  // customer support: customers, their subscriptions, payments, refunds and invoices
+		Admin:          true,  // customer support: customers, their subscriptions, payments, refunds and orders
 		Catalog:        true,  // the catalog: update products and prices
 		MerchantConfig: true,  // merchant config: PSPs and their credentials, settings, billing import and export
 		Metrics:        true,  // business metrics, read-only: revenue, sales, the dashboard's charts
@@ -433,7 +433,7 @@ func run(ctx context.Context) error {
 	defer bill.Close(context.WithoutCancel(ctx))
 
 	// Background work. OpenRails runs its own River workers: rebills, retries of
-	// failed payments, invoices.
+	// failed payments, usage orders.
 	if err := ak.Start(ctx); err != nil {
 		return err
 	}
@@ -520,7 +520,7 @@ until `RouteGroups` turns it on:
 - `Prefix`: where the API lives; `/billing` serves `/billing/v1/*`.
 - `RouteGroups.Admin`: customer support, the routes your staff and back office
   call at `/billing/v1/admin` to read and change customers' billing: payments
-  and refunds, subscriptions, invoices, credits, access and usage. Callers need
+  and refunds, subscriptions, orders, credits, access and usage. Callers need
   `Permissions.AdminRead`; changes also need `Permissions.AdminUpdate` (leave it
   out and the group is read-only). OpenRails decides which routes read and which
   change.
@@ -568,7 +568,7 @@ ends after its 3 days; a canceled membership keeps access until its paid term en
 #### Admin dashboard
 
 OpenRails ships a dashboard for your staff, the admin console, with four areas:
-customer support (customers, subscriptions, payments and refunds, invoices,
+customer support (customers, subscriptions, payments and refunds, orders,
 findings), the catalog, merchant config (PSPs, settings) and business metrics.
 It is off by default; `AdminConsole: true` serves it at `/billing/admin`, over
 the routes it drives. This one has only customer support:
@@ -760,8 +760,8 @@ Mounting gives your users these routes under `/billing`:
 |---|---|
 | `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
 | `POST /billing/v1/me/orders/preview`, `POST /billing/v1/me/orders` | price lines; buy them (with a `payment`, in one call) |
-| `GET /billing/v1/me/orders`, `GET /billing/v1/me/orders/{id}` | their orders, subscription renewals included (`?status=`, `?subscription_id=`, `?overdue=true`) |
-| `POST /billing/v1/me/orders/{id}/pay`, `/confirm`, `/cancel` | pay an open order (a renewal with a saved card), finish the bank's challenge, cancel a purchase |
+| `GET /billing/v1/me/orders`, `GET /billing/v1/me/orders/{id}` | their orders, subscription renewals and usage billed in arrears included (`?origin=`, `?status=`, `?subscription_id=`, `?overdue=true`) |
+| `POST /billing/v1/me/orders/{id}/pay`, `/confirm`, `/cancel` | pay an open order (a renewal or usage order with a saved card), finish the bank's challenge, cancel a purchase |
 | `GET`, `DELETE /billing/v1/me/cart` | their cart, priced now with the ways it can be paid; empty it |
 | `PUT /billing/v1/me/cart/lines/{price_id}` | add a price or change its line (quantity 0 removes it); the cart is shared by every site of the merchant |
 | `GET /billing/v1/me/entitlements` | everything they currently have access to |
@@ -778,14 +778,11 @@ Mounting gives your users these routes under `/billing`:
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
 | `PATCH /billing/v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse |
 | `POST /billing/v1/me/payment-methods/{id}/confirm` | finish saving a card after the bank's 3-D Secure step |
-| `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
+| `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its usage orders and every subscription without its own card |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
 | `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
 | `POST /billing/v1/me/stripe/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
-| `GET /billing/v1/me/invoices` | invoices |
-| `GET /billing/v1/me/invoices/{id}` | one invoice |
-| `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
 | `GET /billing/v1/me` | balance per currency, the card that pays each currency, and unread notices |
 | `GET /billing/v1/me/balance/transactions` | its balance transactions |
 | `GET /billing/v1/me/usage` | metered usage |
@@ -1310,7 +1307,7 @@ otherwise change credits already granted.
 Operator side (you, the merchant):
 - Declare your merchant and payment-processor accounts (in `Config`, a YAML manifest, or the API).
 - Declare your catalog: products, the entitlements they grant, and prices. OpenRails charges its own price terms; a processor-side copy is linked only where a rail needs one.
-- Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
+- Call one API for admissions, credits, entitlement checks, subscriptions and orders: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
 - The customer starts a purchase with their own credential: their browser creates a checkout session (`POST /v1/me/checkout-sessions`, billing-ui) and pays it.
@@ -1368,7 +1365,7 @@ More in [products and prices through the Client](docs/catalog-client.md).
   per-user budgets, spend caps, trust levels, prepaid credits or arrears invoicing.
 - **Solana, for real** — one-off USDC payments *and* on-chain recurring subscriptions via
   the official delegation program, devnet-tested like any other sandbox.
-- **Browser-direct self-service** — end-users hit `/v1/me/*` (balance, invoices,
+- **Browser-direct self-service** — end-users hit `/v1/me/*` (balance, orders,
   subscriptions, payment methods, cancellation) straight from your frontend; no proxy
   routes to write or maintain.
 - **Batch import of legacy data** — bring existing subscribers, payments, and vault
@@ -1697,7 +1694,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
 - [Admin console](docs/admin-console.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
-- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [invoice administration](docs/invoice-administration.md), [provider obligations](docs/architecture/provider-obligation-contract.md).
+- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [provider obligations](docs/architecture/provider-obligation-contract.md).
 
 **Operate the deployment** — for whoever keeps it running:
 

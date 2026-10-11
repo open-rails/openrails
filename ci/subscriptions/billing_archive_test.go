@@ -41,7 +41,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2_500_000, balance.BalanceAmount)
 	w.settle()
-	cadence, err := w.jobs.Insert(t.Context(), riverjobs.InvoiceArgs{Collect: true, UseMonthlyFloor: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	cadence, err := w.jobs.Insert(t.Context(), riverjobs.UsageOrderArgs{Collect: true, UseMonthlyFloor: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(cadence.Job.ID)
 	merchantID := client.MerchantID()
@@ -74,8 +74,8 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	for _, insert := range []string{
 		`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount)
 		 VALUES ($1, $2, 'archive-application', 'USD', 'archive-metadata', '{}', 0, 'archive-test', 'usage-metadata', 'host', $3::jsonb, now(), 'failed', 5)`,
-		`INSERT INTO billing.invoice_items (merchant_id, customer_id, currency, source_type, source_id, invoice_at, amount, status, metadata)
-		 VALUES ($1, $2, 'USD', 'archive-test', 'invoice-metadata', now(), 0, 'pending', $3::jsonb)`,
+		`INSERT INTO billing.owed_items (merchant_id, customer_id, currency, source_type, source_id, accrued_at, amount, status, metadata)
+		 VALUES ($1, $2, 'USD', 'archive-test', 'owed-metadata', now(), 0, 'pending', $3::jsonb)`,
 		`INSERT INTO billing.admission_operations (merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, window_keys, state, capture_terms, captured_amount, captured_at)
 		 VALUES ($1, 'capture-metadata', $2, 'USD', 0, 0, '{}', '{}', 'captured', jsonb_build_object('metadata', $3::jsonb), 0, now())`,
 	} {
@@ -124,12 +124,12 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	// Compare stored JSONB, including its exact numeric values and SQL nulls,
 	// independently of archive parsing and without decoding through float64.
 	for _, tc := range []struct{ table, key, fields string }{
-		{"invoice_collection_cadence", "merchant_id", "monthly_period_started_at,completed_at"},
+		{"usage_collection_cadence", "merchant_id", "monthly_period_started_at,completed_at"},
 		{"payments", "id", "metadata,discount_metadata,amount,list_amount,currency,status,subscription_id,transaction_id"},
 		{"payment_methods", "id", "metadata,rail_customer_ref,rail_method_ref,card_last4"},
 		{"checkout_attempts", "id", "metadata,payment_id,subscription_id,status"},
 		{"subscriptions", "id", "gateway_response,status,price_id,current_period_starts_at,current_period_ends_at"},
-		{"invoice_items", "id", "metadata,amount,status"},
+		{"owed_items", "id", "metadata,amount,status"},
 		{"usage_events", "id", "metadata,(metadata IS NULL) AS metadata_is_sql_null,amount,currency"},
 		{"admission_operations", "request_id", "capture_terms,captured_amount,state"},
 		{"grants", "id", "customer_id,payment_id,starts_at,ends_at,amount"},

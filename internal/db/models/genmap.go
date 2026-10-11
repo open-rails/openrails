@@ -107,7 +107,6 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		PriceID:           DerefUUID(p.PriceID),
 		SubscriptionID:    p.SubscriptionID,
 		OrderID:           p.OrderID,
-		InvoiceID:         p.InvoiceID,
 		LedgerTransferID:  p.LedgerTransferID,
 		RefundedPaymentID: p.RefundedPaymentID,
 		Channel:           Channel(p.Channel),

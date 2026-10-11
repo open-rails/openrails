@@ -73,6 +73,7 @@ var (
 	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
 	merchantColumn = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
 	dropTable      = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
+	renameTable    = regexp.MustCompile(`(?m)^ALTER TABLE billing\.(\w+) RENAME TO (\w+);`)
 	restoreList    = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
 	quoted         = regexp.MustCompile(`'(\w+)'`)
 )
@@ -95,6 +96,13 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 			all = append(all, m[1])
 			if merchantColumn.MatchString(m[2]) {
 				scoped = append(scoped, m[1])
+			}
+		}
+		for _, m := range renameTable.FindAllStringSubmatch(string(b), -1) {
+			for _, names := range []*[]string{&all, &scoped} {
+				if i := slices.Index(*names, m[1]); i >= 0 {
+					(*names)[i] = m[2]
+				}
 			}
 		}
 		for _, m := range dropTable.FindAllStringSubmatch(string(b), -1) {

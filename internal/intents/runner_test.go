@@ -342,8 +342,8 @@ func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
 		{"restored renewal without local fence", "subscription_collection", modeFull, nil},
 		{"old retryable submitted operation", "subscription_collection", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
 		{"readonly submitted operation", "subscription_collection", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
-		{"restored invoice without local fence", "invoice_collection", modeFull, nil},
-		{"readonly invoice without local fence", "invoice_collection", modeReadonly, nil},
+		{"restored usage collection without local fence", "order_collection", modeFull, nil},
+		{"readonly usage collection without local fence", "order_collection", modeReadonly, nil},
 		{"stale paid tier change", "nmi_upgrade", modeFull, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
 		{"readonly paid tier change", "nmi_upgrade", modeReadonly, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
 	} {

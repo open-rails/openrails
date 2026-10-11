@@ -46,8 +46,8 @@ it("calls only routes OpenRails mounts for customers", async () => {
         paymentMethodId: "pm_1",
       }),
     () => client.listPayments(),
-    () => client.listInvoices(),
-    () => client.getInvoice("inv_1"),
+    () => client.listOrders({ origin: "usage" }),
+    () => client.getOrder("ord_1"),
     () =>
       checkoutOf(client).createCheckoutSession({
         productKey: "premium",

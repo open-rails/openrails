@@ -593,7 +593,6 @@ export type CreatePaymentMethodParams = {
 }
 
 export type CreatePaymentParams = {
-  invoice_id?: string
   order_id?: string
   amount?: string
   transaction_id?: string
@@ -895,7 +894,7 @@ export type DelinquencyHostEvent = {
   to_state: string
   overdue_started_at?: string
   overdue_amount: string
-  overdue_invoices: number
+  overdue_orders: number
   grace_days: number
   amount_floor: string
 }
@@ -1049,71 +1048,9 @@ export type IncrementProviderOperationParams = {
   overdraft_amount?: string
 }
 
-export type Invoice = {
-  id: string
-  customer_id: string
-  currency: string
-  invoice_number: string | null
-  period_starts_at: string
-  period_ends_at: string
-  usage_total: string
-  deposits_total: string
-  owed_accrued: string
-  owed_paid: string
-  closing_balance: string
-  subtotal_amount: string
-  total_amount: string
-  amount_paid: string
-  amount_due: string
-  line_items: InvoiceLineItem[]
-  money_movements: Record<string, string> | null
-  po_number: string | null
-  tax: Record<string, unknown> | null
-  billing_contacts: InvoiceContact[]
-  memo: string | null
-  status: "draft" | "open" | "paid" | "uncollectible" | "voided"
-  collection_method: "charge_automatically" | "send_invoice"
-  issued_at: string | null
-  due_at: string | null
-  delinquent: boolean
-  paid_at: string | null
-  voided_at: string | null
-  uncollectible_at: string | null
-  finalized_at: string | null
-  external_invoice_id: string | null
-  collection_failure_count: number
-  collection_failed_at: string | null
-  next_collection_attempt_at: string | null
-  last_collection_failure_code: string | null
-  recovery: PaymentRecovery | null
-  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[]
-  created_at: string
-}
-
-export type InvoiceCollection = {
-  invoice: Invoice
-  payment_id: string | null
-  operation: PaymentOperation
-  replayed: boolean
-}
-
 export type InvoiceContact = {
   name: string
   email: string
-}
-
-export type InvoiceLineItem = {
-  event_type: string
-  amount: string
-  count: number
-  dimensions: Record<string, number> | null
-}
-
-export type InvoicePayNow = {
-  invoice: Invoice
-  payment_id: string | null
-  operation: PaymentOperation
-  replayed: boolean
 }
 
 export type InvoiceProfile = {
@@ -1407,12 +1344,10 @@ export type NotificationData = {
   downgrade_applied?: boolean
   new_product?: string
   overdue_amount?: string
-  overdue_invoices?: number
+  overdue_orders?: number
   overdue_started_at?: string
   from_state?: string
   to_state?: string
-  invoice_id?: string
-  invoice_number?: string
   amount_due?: string
   due_at?: string
   failure_code?: string
@@ -1447,8 +1382,8 @@ export type OpenProviderOperationParams = {
 export type Order = {
   id: string
   customer_id: string
-  origin: "customer" | "merchant" | "subscription"
-  status: "canceled" | "complete" | "expired" | "open" | "processing" | "void"
+  origin: "customer" | "merchant" | "subscription" | "usage"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
   number: string | null
   currency: string
   total: string
@@ -1457,11 +1392,13 @@ export type Order = {
   payment_options: OrderPaymentOption[]
   checkout: OrderCheckout | null
   renewal: OrderRenewal | null
+  usage: OrderUsage | null
   expires_at: string | null
   completed_at: string | null
   canceled_at: string | null
   expired_at: string | null
   voided_at: string | null
+  uncollectible_at: string | null
   created_at: string
 }
 
@@ -1485,7 +1422,7 @@ export type OrderCheckoutParams = {
 export type OrderHostEvent = {
   order_id: string
   customer_id: string
-  status: "canceled" | "complete" | "expired" | "open" | "processing" | "void"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
   payment_status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
   total: string
   currency: string
@@ -1495,13 +1432,14 @@ export type OrderHostEvent = {
 
 export type OrderLine = {
   id: string
-  price_id: string
-  product_id: string
+  price_id: string | null
+  product_id: string | null
+  source: string | null
   description: string
   quantity: number | null
   unit_amount: string
   amount: string
-  ownership: "consumable" | "extend" | "unique"
+  ownership: "consumable" | "extend" | "unique" | null
   billing_interval_hours: number | null
   access_duration_hours: number | null
   subscription_id: string | null
@@ -1569,6 +1507,21 @@ export type OrderRenewal = {
   period_starts_at: string
   period_ends_at: string
   due_at: string
+}
+
+export type OrderUsage = {
+  period_starts_at: string
+  period_ends_at: string
+  due_at: string
+  amount_paid: string
+  amount_due: string
+  collection_method: "charge_automatically" | "send_invoice"
+  next_collection_attempt_at: string | null
+  po_number: string | null
+  memo: string | null
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[]
+  delinquent: boolean
 }
 
 export type PSP = {
@@ -1653,10 +1606,6 @@ export type PayCheckoutSessionParams = {
   token_symbol?: string
 }
 
-export type PayInvoiceParams = {
-  payment_method_id?: string
-}
-
 export type PayOrderParams = {
   payment?: OrderPaymentParams
   expected_total?: string
@@ -1673,7 +1622,6 @@ export type Payment = {
   customer_id: string
   subscription_id: string | null
   order_id: string | null
-  invoice_id: string | null
   quantity: number | null
   price_id: string | null
   price: Price | null
@@ -1716,7 +1664,6 @@ export type PaymentAttempt = {
   amount: string
   currency: string
   attempted_at: string
-  invoice_id: string | null
   order_id: string | null
   cycle_id: string | null
   subscription_id: string | null
@@ -2245,7 +2192,7 @@ export type ResolveFindingParams = {
   override_params?: unknown
 }
 
-export type RetryInvoiceCollectionParams = {
+export type RetryOrderCollectionParams = {
   payment_method_id?: string
 }
 

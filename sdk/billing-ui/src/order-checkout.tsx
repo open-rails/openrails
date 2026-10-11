@@ -310,9 +310,12 @@ export function OrderCheckout({
     order.payment.status === "requires_action" &&
     order.payment.next_action?.type === "authenticate"
 
-  const payLabel = `Pay ${money(order.total)}`
+  // A usage order is paid for what it still owes; a written-off one too.
+  const due = order.usage?.amount_due ?? order.total
+  const payLabel = `Pay ${money(due)}`
   const open =
-    order.status === "open" &&
+    (order.status === "open" ||
+      (order.status === "uncollectible" && !!order.usage)) &&
     order.payment.status === "requires_payment_method"
 
   return (
@@ -342,6 +345,14 @@ export function OrderCheckout({
             {money(order.total)}
           </span>
         </div>
+        {order.usage && order.usage.amount_paid !== "0" && (
+          <div className="flex items-start justify-between gap-4 pt-1 text-[13.5px]">
+            <span>Due</span>
+            <span className="whitespace-nowrap tabular-nums">
+              {money(order.usage.amount_due)}
+            </span>
+          </div>
+        )}
       </div>
 
       {awaitingWallet ? (

@@ -197,7 +197,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 // NMI search absence is not authoritative. Stripe objects can be cleaned up
 // under the same operation key, then read back in an unchargeable state.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error {
-	p, err := intents.DecodeInvoiceCollectionPayload(in)
+	p, err := intents.DecodeOrderCollectionPayload(in)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 }
 
 func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
-	if _, err := intents.DecodeInvoiceCollectionPayload(in); err != nil {
+	if _, err := intents.DecodeOrderCollectionPayload(in); err != nil {
 		return nil, err
 	}
 	svc := b.merchants()
@@ -340,7 +340,7 @@ func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Co
 // ReadCollectionReceipt resolves the immutable accepted account before reading
 // provider facts. A boolean reconciliation result cannot settle a collection.
 func (b *MerchantCollectionAdapterBuilder) ReadCollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, reference string) (intents.CollectedReceipt, bool, error) {
-	p, err := intents.DecodeInvoiceCollectionPayload(in)
+	p, err := intents.DecodeOrderCollectionPayload(in)
 	if err != nil {
 		return intents.CollectedReceipt{}, false, err
 	}

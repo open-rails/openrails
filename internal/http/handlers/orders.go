@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -434,13 +435,13 @@ func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListPar
 	}
 	params := billing.OrderListParams{PageRequest: page, Status: billing.OrderStatus(strings.TrimSpace(r.Query("status"))), Origin: billing.OrderOrigin(strings.TrimSpace(r.Query("origin")))}
 	switch params.Status {
-	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired, billing.OrderVoid:
+	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired, billing.OrderVoid, billing.OrderUncollectible:
 	default:
 		r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
 		return params, false
 	}
 	switch params.Origin {
-	case "", billing.OrderOriginCustomer, billing.OrderOriginMerchant, billing.OrderOriginSubscription:
+	case "", billing.OrderOriginCustomer, billing.OrderOriginMerchant, billing.OrderOriginSubscription, billing.OrderOriginUsage:
 	default:
 		r.APIError(api.Coded(billing.CodeInvalidQuery, "origin is invalid").WithParam("origin"))
 		return params, false
@@ -472,4 +473,59 @@ func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListPar
 		}
 	}
 	return params, true
+}
+
+// VoidOrder handles POST /v1/admin/orders/{id}/void: voids an unpaid usage
+// order.
+func VoidOrder(r *httprequest.Request) {
+	usageOrderAction(r, (*billingservice.Service).VoidMerchantOrder)
+}
+
+// MarkOrderUncollectible handles POST /v1/admin/orders/{id}/mark-uncollectible:
+// writes an open usage order off.
+func MarkOrderUncollectible(r *httprequest.Request) {
+	usageOrderAction(r, (*billingservice.Service).MarkMerchantOrderUncollectible)
+}
+
+func usageOrderAction(r *httprequest.Request, act func(*billingservice.Service, context.Context, billing.OrderID) (*billing.Order, error)) {
+	id, ok := orderID(r)
+	svc := orderService(r)
+	if !ok || svc == nil {
+		return
+	}
+	order, err := act(svc, r.Request.Context(), id)
+	if err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	writeOrder(r, order)
+}
+
+// RetryOrderCollection handles POST /v1/admin/orders/{id}/retry-collection:
+// charges what a usage order owes to one of its customer's cards. A failed
+// charge answers 402 with the order.
+func RetryOrderCollection(r *httprequest.Request) {
+	id, ok := orderID(r)
+	if !ok {
+		return
+	}
+	key := orderKey(r)
+	if key == "" {
+		return
+	}
+	var body billing.RetryOrderCollectionParams
+	if !r.BindJSON(&body) {
+		return
+	}
+	svc := orderService(r)
+	if svc == nil {
+		return
+	}
+	body.IdempotencyKey = key
+	answer, err := svc.RetryOrderCollection(r.Request.Context(), id, body)
+	if err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	answerOrder(r, answer)
 }

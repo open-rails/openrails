@@ -108,7 +108,7 @@ SET tier = NULLIF(sqlc.arg(tier)::text, ''), updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 
--- Every currency a customer holds a balance, settings, pending items or an open invoice in.
+-- Every currency a customer holds a balance, settings, pending charges or an unpaid usage order in.
 -- name: ListCustomerBalanceCurrencies :many
 SELECT currency::text AS currency
 FROM (
@@ -119,13 +119,13 @@ FROM (
     SELECT currency FROM billing.money_settings
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
     UNION
-    SELECT currency FROM billing.invoice_items
+    SELECT currency FROM billing.owed_items
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND invoice_id IS NULL AND status = 'pending'
+      AND order_id IS NULL AND status = 'pending'
     UNION
-    SELECT currency FROM billing.invoices
+    SELECT currency FROM billing.orders
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND status = 'open' AND amount_due > 0
+      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
 ) currencies
 ORDER BY currency;
 
@@ -141,13 +141,13 @@ FROM (
     SELECT customer_id, currency FROM billing.money_settings
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
     UNION ALL
-    SELECT customer_id, currency FROM billing.invoice_items
+    SELECT customer_id, currency FROM billing.owed_items
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-      AND invoice_id IS NULL AND status = 'pending'
+      AND order_id IS NULL AND status = 'pending'
     UNION ALL
-    SELECT customer_id, currency FROM billing.invoices
+    SELECT customer_id, currency FROM billing.orders
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-      AND status = 'open' AND amount_due > 0
+      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
 ) currencies
 ORDER BY customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;

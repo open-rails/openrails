@@ -129,9 +129,9 @@ bounds, or metered rate-card fields.
 group_by) and attach `rate_cards:` to a product: each card binds one meter to a charge
 model, with optional `allowance` (included usage netted off first, poolable and
 accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
-products declare no billing cadence — the invoice period is the window: the daily
-period finalize rates reported usage through the cards and invoices every customer with
-ledger or metered activity, including a customer whose only activity is metered usage.
+products declare no billing cadence — the billing period is the window: the daily
+pass rates reported usage through the cards and bills each customer's owed usage as a
+usage order, including a customer whose only activity is metered usage.
 See the metering API documentation for complete rate-card contracts.
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
@@ -227,10 +227,10 @@ reference: [api/routes.md](api/routes.md).
 | Task | Route | Console page |
 |---|---|---|
 | Look up a customer (settings, balances, arrears, default cards) | `GET /v1/admin/customers/{customer_id}` | Customers → search |
-| Find overdue invoices | `GET /v1/admin/invoices?overdue=true` (each says whether it is `delinquent`) | Invoices → Overdue only |
+| Find overdue usage orders | `GET /v1/admin/orders?origin=usage&overdue=true` (each says whether it is `delinquent`) | Orders → Overdue only |
 | Follow failed renewals | `GET /v1/admin/subscriptions?dunning=true` (each with its `dunning`) | Subscriptions → Dunning |
 | Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `POST /v1/admin/product-access/{id}/revoke` | Customers → profile |
-| Record money received outside OpenRails for an invoice or an order | `POST /v1/admin/payments` | Invoices → detail |
+| Record money received outside OpenRails for an order | `POST /v1/admin/payments` | Orders → detail |
 | List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/admin/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
 | List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |

@@ -78,7 +78,7 @@ func TestBillingPolicyRungs(t *testing.T) {
 	require.Equal(t, 1, findings)
 
 	invoiced := func(p payer) int {
-		page, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: p.c.cid()})
+		page, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: p.c.cid()})
 		require.NoError(t, err)
 		return len(page.Items)
 	}
@@ -107,10 +107,10 @@ func TestBillingPolicyRungs(t *testing.T) {
 	// Grace follows the same rung: a day for its own policy, two for the
 	// tier's, three for the default's (the dangling assignment's too).
 	due := func(p payer) time.Time {
-		page, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: p.c.cid()})
+		page, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: p.c.cid()})
 		require.NoError(t, err)
-		require.NotNil(t, page.Items[0].DueAt)
-		return *page.Items[0].DueAt
+		require.NotNil(t, page.Items[0].Usage.DueAt)
+		return page.Items[0].Usage.DueAt
 	}
 	latest := due(own)
 	for _, p := range everyone {
@@ -119,9 +119,9 @@ func TestBillingPolicyRungs(t *testing.T) {
 		}
 	}
 	delinquent := func(p payer) bool {
-		page, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: p.c.cid()})
+		page, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: p.c.cid()})
 		require.NoError(t, err)
-		return page.Items[0].Delinquent
+		return page.Items[0].Usage.Delinquent
 	}
 	w.advanceTo(latest.Add(36 * time.Hour))
 	w.runPass(delinquencyPass{})

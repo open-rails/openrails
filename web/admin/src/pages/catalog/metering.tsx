@@ -575,7 +575,7 @@ function DefaultRateSection({
                 <AlertDialogTitle>Remove the default rate?</AlertDialogTitle>
                 <AlertDialogDescription>
                   New usage for this meter will stop being rated after removal.
-                  Historical invoices and accrued amounts remain unchanged.
+                  Billed usage orders and accrued amounts remain unchanged.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

@@ -148,7 +148,6 @@ var priceBindingConfigurationJSON = object(map[string]jsonRule{
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
 var operatorResolutionJSON = object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "not_executed": booleanValue, "provider_reference": textValue})
-var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
 var rateJSON = object(map[string]jsonRule{
 	"model": textValue, "currency": textValue,
 	"flat": object(map[string]jsonRule{"amount": moneyStringValue}),
@@ -202,20 +201,21 @@ var jsonRules = map[string]jsonRule{
 
 	// The completed collection operation retains its frozen instrument and
 	// accepted terms for replay; none of these fields contains card data.
-	"provider_intents.invoice_collection.payload": object(map[string]jsonRule{
-		"initiator":  textValue,
-		"invoice_id": uuidValue, "customer_id": uuidValue, "payment_id": uuidValue, "payment_method_id": uuidValue,
+	"provider_intents.order_collection.payload": object(map[string]jsonRule{
+		"initiator": textValue,
+		"order_id":  uuidValue, "invoice_id": uuidValue, "customer_id": uuidValue, "payment_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON}),
 	}),
-	"provider_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
+	"provider_intents.order_collection.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON,
 
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
-		"operator_resolution": operatorResolutionJSON,
+		"operator_resolution":               operatorResolutionJSON,
+		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
 	})),
 	"provider_intents.subscription_collection.payload": object(map[string]jsonRule{
 		"initiator": textValue, "requested_payment_method_id": uuidValue,
@@ -229,10 +229,10 @@ var jsonRules = map[string]jsonRule{
 		"failure_code":             textValue, "stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
 		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
 		"submitted_at": textValue, "declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "not_executed_code": textValue,
-		"operator_resolution":            operatorResolutionJSON,
-		"collection_candidate":           object(map[string]jsonRule{"binding": receiptBindingJSON, "transaction_id": textValue, "external_invoice_id": textValue}),
-		"rebill_decline":                 object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
-		"qualified_invoice_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
+		"operator_resolution":               operatorResolutionJSON,
+		"collection_candidate":              object(map[string]jsonRule{"binding": receiptBindingJSON, "transaction_id": textValue, "external_invoice_id": textValue}),
+		"rebill_decline":                    object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
+		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
 	})),
 	"provider_intents.manual_rebill.payload": object(map[string]jsonRule{
 		"initiator": textValue, "requested_payment_method_id": uuidValue,
@@ -255,7 +255,7 @@ var jsonRules = map[string]jsonRule{
 	"payments.discount_metadata": metadataJSON,
 	"payment_methods.metadata":   metadataJSON,
 	"usage_events.metadata":      metadataJSON,
-	"invoice_items.metadata":     metadataJSON,
+	"owed_items.metadata":        metadataJSON,
 	// Successful checkout intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
 	"provider_intents.nmi_sale.payload": object(map[string]jsonRule{
@@ -303,7 +303,7 @@ var jsonRules = map[string]jsonRule{
 	"catalog_rate_cards.filter":         nullable(dictionary(array(textValue))),
 	"catalog_rate_cards.allowance":      nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
 	"catalog_rate_cards.price":          rateJSON,
-	"invoices.line_items":               invoiceLineJSON, "invoices.money_movements": dictionary(integerValue), "invoices.tax": emptyObject, "invoices.billing_contacts": contactsJSON,
+	"orders.tax":                        nullable(emptyObject), "orders.billing_contacts": nullable(contactsJSON),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
@@ -320,7 +320,7 @@ var jsonRules = map[string]jsonRule{
 		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
 	}, "accepted_purchase": acceptedPurchaseJSON, "customer_selected": booleanValue, "purchase_submitted": booleanValue, "provider_closed": booleanValue, "requested_entitlement": textValue, "requested_offer_kind": func(v any) bool { return v == "permanent" || v == "finite" || v == "recurring" }, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
 	"checkout_attempts.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
-	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
+	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"provider_intents.payload":           nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":   nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":         object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),

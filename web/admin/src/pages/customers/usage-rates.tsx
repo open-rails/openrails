@@ -248,7 +248,7 @@ function RemoveOverrideButton({
           <AlertDialogTitle>Remove the negotiated rate?</AlertDialogTitle>
           <AlertDialogDescription>
             This customer will resume the merchant default for {meterKey}.
-            Finalized invoices and amounts already accrued remain unchanged.
+            Billed usage orders and amounts already accrued remain unchanged.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -56,8 +56,8 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	grace, floor, threshold := 7, int64(5_000_000), int64(50_000_000)
 	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"mobius"}}}
 	declared := billing.MerchantSettings{
-		Profile:                    &billing.MerchantProfile{FromEmail: "billing@declared.example"},
-		InvoiceCollectionThreshold: &threshold, InvoiceBillingBoundary: "calendar_month",
+		Profile:             &billing.MerchantProfile{FromEmail: "billing@declared.example"},
+		CollectionThreshold: &threshold, BillingPeriodBoundary: "calendar_month",
 		ArrearsGraceDays: &grace, ArrearsDelinquencyFloor: &floor,
 		CheckoutRouting:                   &routing,
 		BillingPolicies:                   []billing.BillingPolicy{{Name: "line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
@@ -74,8 +74,8 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.Equal(t, "Declared", got.DisplayName)
 	s := got.Settings
 	require.Equal(t, "billing@declared.example", s.Profile.FromEmail)
-	require.Equal(t, threshold, *s.InvoiceCollectionThreshold)
-	require.Equal(t, "calendar_month", s.InvoiceBillingBoundary)
+	require.Equal(t, threshold, *s.CollectionThreshold)
+	require.Equal(t, "calendar_month", s.BillingPeriodBoundary)
 	require.Equal(t, grace, *s.ArrearsGraceDays)
 	require.Equal(t, floor, *s.ArrearsDelinquencyFloor)
 	require.Equal(t, routing, *s.CheckoutRouting)
@@ -167,13 +167,13 @@ func TestVaultDocumentsServe(t *testing.T) {
 	threshold := int64(25_000_000)
 	w := prepareWorld(t, 12)
 	w.vault = vaulttest.New(t)
-	w.settings = billing.MerchantSettings{InvoiceCollectionThreshold: &threshold}
+	w.settings = billing.MerchantSettings{CollectionThreshold: &threshold}
 	w.start()
 	ctx := t.Context()
 	got, err := w.client[remote].GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Equal(t, w.slug, got.DisplayName)
-	require.Equal(t, threshold, *got.Settings.InvoiceCollectionThreshold)
+	require.Equal(t, threshold, *got.Settings.CollectionThreshold)
 	psps, err := w.client[remote].ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
 	var keys []string

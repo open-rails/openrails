@@ -81,14 +81,15 @@ func (s *LocalSubscription) IsLive() bool {
 
 // LocalPayment is the slice of billing.payments the diff engine consumes.
 type LocalPayment struct {
-	ID                uuid.UUID
-	CustomerID        uuid.UUID
-	Rail              string
-	TransactionID     string
-	AmountCents       int64
-	Currency          string
-	Status            string
-	InvoiceID         *uuid.UUID
+	ID            uuid.UUID
+	CustomerID    uuid.UUID
+	Rail          string
+	TransactionID string
+	AmountCents   int64
+	Currency      string
+	Status        string
+	// UsageOrderID is the usage order a ledger-settled payment paid.
+	UsageOrderID      *uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -316,10 +317,12 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,
 			PurchasedAt:       row.PurchasedAt,
-			InvoiceID:         row.InvoiceID,
 		}
 		if row.Rail != nil {
 			p.Rail = *row.Rail
+		}
+		if row.LedgerTransferID != nil {
+			p.UsageOrderID = row.OrderID
 		}
 		out = append(out, p)
 	}

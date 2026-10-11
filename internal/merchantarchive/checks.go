@@ -77,7 +77,7 @@ var excludedColumns = map[string]string{
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"admission_denials_hourly":      "merchant_id customer_id denial_reason hour_at denials updated_at",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
-	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id invoice_id order_id",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id order_id",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"checkout_sessions":             "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
@@ -258,7 +258,6 @@ var preflightChecks = []rowCheck{
 	{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 	{"payments", "status='pending'"},
-	{"invoices", "collection_intent_id IS NOT NULL"},
 	{"admission_operations", "state='open'"},
 	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
@@ -324,7 +323,7 @@ var referenceChecks = []rowCheck{
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
-	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
+	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id AND o.currency=ledger_transfers.currency))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier
 	// derivation and product-update guards. Include remaining paid access.
@@ -332,11 +331,11 @@ var referenceChecks = []rowCheck{
 	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
 	{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
-	{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
+	{"ledger_transfers", `(source_id LIKE 'order_collection:%' OR source_id LIKE 'invoice_collection:%') AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
 	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1
 	 AND a.ledger_transfer_id=ledger_transfers.id
-	 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
+	 AND a.customer_id=ledger_transfers.customer_id AND a.order_id=ledger_transfers.order_id
 	 AND a.currency=ledger_transfers.currency AND a.status='succeeded'))`},
 	{"provider_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=provider_intents.subscription_id))
 	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=provider_intents.payment_id))
@@ -389,7 +388,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	}
 	var after *uuid.UUID
 	for {
-		rows, err := gen.New(tx).ListInvoiceCollectionsForArchive(ctx, gen.ListInvoiceCollectionsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
+		rows, err := gen.New(tx).ListOrderCollectionsForArchive(ctx, gen.ListOrderCollectionsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
 		if err != nil {
 			return err
 		}
@@ -397,8 +396,8 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 			return nil
 		}
 		for _, row := range rows {
-			if !invoiceCollectionCanonical(row) {
-				return &Error{Code: "unsupported_state", Table: "payments", Err: fmt.Errorf("invoice collection %s does not name its canonical payment", row.BillingProviderIntent.ID)}
+			if !orderCollectionCanonical(row) {
+				return &Error{Code: "unsupported_state", Table: "payments", Err: fmt.Errorf("order collection %s does not name its canonical payment", row.BillingProviderIntent.ID)}
 			}
 		}
 		next := rows[len(rows)-1].BillingProviderIntent.ID
@@ -406,16 +405,16 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	}
 }
 
-// invoiceCollectionCanonical reports whether a terminal invoice collection and
+// orderCollectionCanonical reports whether a terminal order collection and
 // the payment its payload names agree: a settled one wrote exactly its
 // receipt's payment and owed-payment transfer, any other wrote none.
-func invoiceCollectionCanonical(row gen.ListInvoiceCollectionsForArchiveRow) bool {
+func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 	operation := row.BillingProviderIntent
-	p, err := intents.DecodeInvoiceCollectionPayload(operation)
+	p, err := intents.DecodeOrderCollectionPayload(operation)
 	if err != nil {
 		return false
 	}
-	origin := p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) ||
+	origin := p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.OrderCollectionRetryKeyValid(p.OrderID, operation.IdempotencyKey) ||
 		p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)
 	receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
 	charged, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
@@ -426,7 +425,7 @@ func invoiceCollectionCanonical(row gen.ListInvoiceCollectionsForArchiveRow) boo
 		return row.PaymentID == nil && !collected
 	}
 	return collected && row.PaymentID != nil && *row.PaymentID == p.PaymentID && row.PaymentCustomerID != nil && *row.PaymentCustomerID == p.CustomerID &&
-		row.PaymentInvoiceID != nil && *row.PaymentInvoiceID == p.InvoiceID && row.PaymentPspID != nil && *row.PaymentPspID == p.Instrument.PSPID &&
+		row.PaymentOrderID != nil && *row.PaymentOrderID == p.OrderID && row.PaymentPspID != nil && *row.PaymentPspID == p.Instrument.PSPID &&
 		row.PaymentRail != nil && *row.PaymentRail == p.Rail && row.PaymentTransactionID != nil && *row.PaymentTransactionID == receipt.TransactionID() &&
 		row.PaymentAmount != nil && *row.PaymentAmount == charged && row.PaymentCurrency != nil && *row.PaymentCurrency == p.Currency &&
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount

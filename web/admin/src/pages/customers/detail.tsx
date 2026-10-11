@@ -134,9 +134,9 @@ export function CustomerDetailPage() {
         <p className="text-sm">
           <Link
             className="underline-offset-2 hover:underline"
-            to={`/invoices?customer_id=${customer.id}&overdue=true`}
+            to={`/orders?customer_id=${customer.id}&origin=usage&overdue=true`}
           >
-            Overdue invoices
+            Overdue usage orders
           </Link>
         </p>
       )}

@@ -317,7 +317,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, invoice_id
+       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id
 FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
@@ -376,7 +376,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement, order_id, invoice_id
+    customer_id, psp_id, reversal_kind, money_movement, order_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.narg(price_id), 'rail', sqlc.arg(rail)::text,
@@ -389,8 +389,7 @@ INSERT INTO billing.payments (
     -- feed excludes it on amount/refunded_payment_id, not on this.
     sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail',
     -- A refund names what its charge paid.
-    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid),
-    (SELECT o.invoice_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid)
+    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid)
 )
 ON CONFLICT DO NOTHING;
 

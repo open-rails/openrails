@@ -288,15 +288,15 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			f.settle()
 			requireInvoicePaidOnce(f, initial, 1, 1, nmiInvoiceAmount, 0)
 			c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
-			smallInvoice := func() billing.InvoiceID {
+			smallInvoice := func() billing.OrderID {
 				id := newNMIInvoice(f, c)
-				_, err := w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &id, Amount: 90_000_000, TransactionID: "partial-" + id.String()})
+				_, err := w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: id, Amount: 90_000_000, TransactionID: "partial-" + id.String()})
 				require.NoError(t, err)
 				return id
 			}
 			invoice := smallInvoice() // $10: below the $50 hourly threshold, above the $1 monthly floor.
 			var previousPeriod time.Time
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&previousPeriod))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.usage_collection_cadence`)).Scan(&previousPeriod))
 			require.True(t, previousPeriod.Equal(w.clock.Now().UTC().Truncate(30*day)), "healthy setup already completed this month's collection scan")
 			w.stop()
 			gateway := httptest.NewServer(w.nmi)
@@ -318,14 +318,14 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			second := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			require.Eventually(t, func() bool {
 				var status string
-				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), invoice.UUID()).Scan(&status)
-				return err == nil && status == "paid"
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.orders WHERE id=$1`), invoice.UUID()).Scan(&status)
+				return err == nil && status == "complete"
 			}, 30*time.Second, 50*time.Millisecond, "ordinary startup recovers monthly-floor invoice collection")
 			require.Eventually(t, func() bool {
 				var completed int
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
 				var period time.Time
-				cadenceErr := w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&period)
+				cadenceErr := w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.usage_collection_cadence`)).Scan(&period)
 				return err == nil && completed > 0 && cadenceErr == nil && period.Equal(w.clock.Now().UTC().Truncate(30*day))
 			}, 15*time.Second, 50*time.Millisecond, "the complete monthly scan retains its cadence before shutdown")
 			first.kill(t)
@@ -342,7 +342,7 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed))
 			require.Zero(t, completed, "GC removed every completed monthly scan")
 			var retainedPeriod, retainedCompletion time.Time
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&retainedPeriod, &retainedCompletion))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.usage_collection_cadence`)).Scan(&retainedPeriod, &retainedCompletion))
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
 			require.NoError(t, err)
 			// The day that pruning models also ages the queue: a monthly scan
@@ -373,13 +373,13 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.Empty(t, busy, "the restarted worker is idle before shutdown")
 			third.kill(t)
 			var checkedPeriod, checkedCompletion time.Time
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&checkedPeriod, &checkedCompletion))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.usage_collection_cadence`)).Scan(&checkedPeriod, &checkedCompletion))
 			require.True(t, retainedPeriod.Equal(checkedPeriod) && retainedCompletion.Equal(checkedCompletion), "post-GC scanning preserves the completed billing cadence")
 			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
 			w.start()
-			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
+			unpaid, err := w.client[remote].GetOrder(t.Context(), next)
 			require.NoError(t, err)
-			require.Equal(t, int64(10_000_000), unpaid.AmountDue)
+			require.Equal(t, int64(10_000_000), unpaid.Usage.AmountDue)
 			w.stop()
 			f.advance(32 * day)
 			ageRestartQueue(t, w, 32*day)
@@ -390,8 +390,8 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			// rescue pass, as the post-GC scan may.
 			require.Eventually(t, func() bool {
 				var status string
-				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), next.UUID()).Scan(&status)
-				return err == nil && status == "paid"
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.orders WHERE id=$1`), next.UUID()).Scan(&status)
+				return err == nil && status == "complete"
 			}, 90*time.Second, 50*time.Millisecond, "the next monthly period recovers the remaining small invoice")
 			// The scan records its cadence after paying; killing the worker in
 			// between would leave the period for the next pass to close.
@@ -404,7 +404,7 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			w.start()
 			requireInvoicePaidOnce(f, next, 3, 3, 10_000_000, 1)
 			var period time.Time
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&period))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.usage_collection_cadence`)).Scan(&period))
 			require.True(t, period.Equal(w.clock.Now().UTC().Truncate(30*day)), "cadence advanced only after the complete scan")
 		})
 	}

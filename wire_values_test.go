@@ -64,24 +64,20 @@ func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	require.NotContains(t, string(raw), "driver")
 }
 
-func TestInvoiceMoneyWireIsLossless(t *testing.T) {
+func TestUsageOrderMoneyWireIsLossless(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, 0, 9007199254740993, math.MaxInt64} {
-		invoice := billing.Invoice{AmountDue: amount, TotalAmount: amount, MoneyMovements: billing.AmountMap{"deposit": amount}, LineItems: []billing.InvoiceLineItem{{Amount: amount}}}
-		raw, err := json.Marshal(invoice)
+		order := billing.Order{Total: amount, Lines: []billing.OrderLine{{Amount: amount, UnitAmount: amount}}, Usage: &billing.OrderUsage{AmountPaid: amount, AmountDue: amount}}
+		raw, err := json.Marshal(order)
 		require.NoError(t, err)
 		var browser map[string]any
 		require.NoError(t, json.Unmarshal(raw, &browser))
-		require.IsType(t, "", browser["amount_due"])
-		var read billing.Invoice
+		require.IsType(t, "", browser["total"])
+		require.IsType(t, "", browser["usage"].(map[string]any)["amount_due"])
+		var read billing.Order
 		require.NoError(t, json.Unmarshal(raw, &read))
-		require.Equal(t, invoice.AmountDue, read.AmountDue)
-		require.Equal(t, invoice.TotalAmount, read.TotalAmount)
-		require.Equal(t, invoice.MoneyMovements, read.MoneyMovements)
-		require.Equal(t, amount, read.LineItems[0].Amount)
-	}
-	for _, raw := range []string{`{"deposit":9007199254740993}`, `{"deposit":"9223372036854775808"}`, `{"deposit":"1.5"}`} {
-		var out billing.AmountMap
-		require.Error(t, json.Unmarshal([]byte(raw), &out), raw)
+		require.Equal(t, order.Total, read.Total)
+		require.Equal(t, *order.Usage, *read.Usage)
+		require.Equal(t, amount, read.Lines[0].Amount)
 	}
 }
 
@@ -228,15 +224,15 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := int64(2), int64(9007199254740993)
 	params := billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
-		InvoiceCollectionThreshold: &amount,
-		BillingPolicies:            []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
+		CollectionThreshold: &amount,
+		BillingPolicies:     []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"collection_threshold":"9007199254740993"`)
 	decoded, err := billing.ParseMerchantConfigurationYAML(body)
 	require.NoError(t, err)
-	require.Equal(t, amount, *decoded.Settings.InvoiceCollectionThreshold)
+	require.Equal(t, amount, *decoded.Settings.CollectionThreshold)
 	require.NotNil(t, decoded.Settings.BillingPolicies)
 	require.NotNil(t, decoded.Settings.BillingPolicyBindings)
 	require.NotNil(t, decoded.Settings.DelegatedInvokerWastedSpendLimits)

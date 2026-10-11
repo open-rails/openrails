@@ -58,13 +58,13 @@ const DefaultGraceDays = 14
 
 // DefaultAmountFloor is the smallest overdue balance (micros) that can make a
 // payer delinquent when the merchant declared neither a delinquency nor an
-// invoice monthly floor. It equals money.DefaultInvoiceMonthlyFloorAmount
+// monthly floor. It equals money.DefaultMonthlyFloorAmount
 // (pinned by a test): too small to collect is too small to cut anyone off for.
 const DefaultAmountFloor int64 = 1_000_000
 
 // Policy is the merchant's declared delinquency policy.
 type Policy struct {
-	// GraceDays is how long past an invoice's due_at the payer keeps grace.
+	// GraceDays is how long past a usage order's due_at the payer keeps grace.
 	// Zero is a valid explicit choice: delinquent the moment it is overdue.
 	GraceDays int
 	// AmountFloor (micros) is the smallest overdue balance that can escalate to
@@ -87,18 +87,18 @@ func (p Policy) Validate() error {
 	return nil
 }
 
-// Exposure is the invoice-derived input to a delinquency decision: how much a
-// payer owes past its due date, since when, and across how many invoices.
+// Exposure is the usage-order-derived input to a delinquency decision: how much a
+// payer owes past its due date, since when, and across how many usage orders.
 type Exposure struct {
 	OverdueStartedAt time.Time
 	OverdueAmount    int64
-	OverdueInvoices  int
+	OverdueOrders    int
 }
 
 // Owes reports whether there is any overdue debt at all.
-func (e Exposure) Owes() bool { return e.OverdueInvoices > 0 && e.OverdueAmount > 0 }
+func (e Exposure) Owes() bool { return e.OverdueOrders > 0 && e.OverdueAmount > 0 }
 
-// Classify is the decision: a pure function of invoice truth and policy. The
+// Classify is the decision: a pure function of usage order truth and policy. The
 // stored row only remembers when a state started and whether it was announced.
 // A debt below the floor is grace however old, so a rounding remnant never
 // cuts anyone off.

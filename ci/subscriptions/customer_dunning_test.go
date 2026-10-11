@@ -77,7 +77,7 @@ func TestCustomerRead(t *testing.T) {
 // An unpaid invoice is overdue from its due date until it is paid, voided or
 // written off. Past the merchant's grace it is delinquent: the customer's new
 // usage in its currency is refused.
-func TestOverdueInvoices(t *testing.T) {
+func TestOverdueUsageOrders(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, client := t.Context(), w.client[remote]
@@ -92,55 +92,55 @@ func TestOverdueInvoices(t *testing.T) {
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	w.runPass(invoicePass{})
-	invoices, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: debtor.cid()})
+	invoices, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: debtor.cid()})
 	require.NoError(t, err)
 	require.Len(t, invoices.Items, 1)
 	invoice := invoices.Items[0]
-	require.Equal(t, billing.InvoiceOpen, invoice.Status)
-	require.NotNil(t, invoice.DueAt)
-	overdue := func(tp topology) []billing.Invoice {
-		page, err := w.client[tp].ListInvoices(ctx, billing.InvoiceListParams{Overdue: true})
+	require.Equal(t, billing.OrderOpen, invoice.Status)
+	require.False(t, invoice.Usage.DueAt.IsZero())
+	overdue := func(tp topology) []billing.Order {
+		page, err := w.client[tp].ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, Overdue: true})
 		require.NoError(t, err)
 		return page.Items
 	}
 	require.Empty(t, overdue(remote), "not overdue before its due date")
 
 	// In grace it is overdue and still open; usage is still admitted.
-	w.advanceTo(invoice.DueAt.Add(time.Hour))
+	w.advanceTo(invoice.Usage.DueAt.Add(time.Hour))
 	w.runPass(delinquencyPass{})
 	late := overdue(remote)
 	require.Len(t, late, 1)
 	require.Equal(t, invoice.ID, late[0].ID)
-	require.Equal(t, billing.InvoiceOpen, late[0].Status, "overdue is a filter, not a status")
-	require.False(t, late[0].Delinquent, "inside grace")
+	require.Equal(t, billing.OrderOpen, late[0].Status, "overdue is a filter, not a status")
+	require.False(t, late[0].Usage.Delinquent, "inside grace")
 
 	// Past grace it is delinquent, and the customer's new usage is refused.
-	w.advanceTo(invoice.DueAt.Add(15 * day))
+	w.advanceTo(invoice.Usage.DueAt.Add(15 * day))
 	w.runPass(delinquencyPass{})
 	for _, tp := range []topology{embedded, remote} {
 		late = overdue(tp)
 		require.Len(t, late, 1)
-		require.True(t, late[0].Delinquent)
-		read, err := w.client[tp].GetInvoice(ctx, invoice.ID)
+		require.True(t, late[0].Usage.Delinquent)
+		read, err := w.client[tp].GetOrder(ctx, invoice.ID)
 		require.NoError(t, err)
-		require.True(t, read.Delinquent)
+		require.True(t, read.Usage.Delinquent)
 	}
 	expires := w.clock.Now().Add(time.Hour)
 	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: debtor.cid(), Invoker: debtor.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 1, RequestID: uuid.NewString(), ExpiresAt: &expires}})
 	require.NoError(t, err)
 	require.False(t, verdicts[0].Allowed())
-	require.Equal(t, "delinquent_unpaid_invoice", *verdicts[0].Admission.DenyCode)
-	status, body := w.staffJSON(http.MethodGet, "/v1/admin/invoices?overdue=perhaps", nil)
+	require.Equal(t, "delinquent_unpaid_order", *verdicts[0].Admission.DenyCode)
+	status, body := w.staffJSON(http.MethodGet, "/v1/admin/orders?overdue=perhaps", nil)
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	status, body = w.staffJSON(http.MethodGet, "/v1/admin/invoices?status=past_due", nil)
-	require.Equal(t, http.StatusBadRequest, status, "past_due is not an invoice status: %v", body)
+	status, body = w.staffJSON(http.MethodGet, "/v1/admin/orders?status=past_due", nil)
+	require.Equal(t, http.StatusBadRequest, status, "past_due is not an order status: %v", body)
 
 	// Paid, it is no longer overdue.
-	_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{InvoiceID: &invoice.ID, Amount: owed, TransactionID: "wire-1"})
+	_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: invoice.ID, Amount: owed, TransactionID: "wire-1"})
 	require.NoError(t, err)
-	paid, err := client.GetInvoice(ctx, invoice.ID)
+	paid, err := client.GetOrder(ctx, invoice.ID)
 	require.NoError(t, err)
-	require.False(t, paid.Delinquent)
+	require.False(t, paid.Usage.Delinquent)
 	require.Empty(t, overdue(remote))
 }
 

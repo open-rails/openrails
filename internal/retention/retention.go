@@ -15,12 +15,12 @@ import (
 const Day = 24 * time.Hour
 
 const (
-	// UsageInvoicedMonths is how long a month of usage is kept after the
-	// invoice that billed it.
-	UsageInvoicedMonths = 24
-	// UsageInvoicingLagMonths is how long after a month ends its usage is
-	// invoiced at the latest: the longest invoice period is one month.
-	UsageInvoicingLagMonths = 1
+	// UsageBilledMonths is how long a month of usage is kept after the
+	// usage order that billed it.
+	UsageBilledMonths = 24
+	// UsageBillingLagMonths is how long after a month ends its usage is
+	// billed at the latest: the longest billing period is one month.
+	UsageBillingLagMonths = 1
 	// UsageIngestWindow is how far back a usage event may be dated when it is
 	// recorded, and how long its idempotency key is honoured after it occurred.
 	UsageIngestWindow = 35 * Day
@@ -111,9 +111,9 @@ func MonthStart(t time.Time) time.Time {
 }
 
 // UsageDropBefore is a month boundary: a usage month goes when the month
-// after it, by whose end it was invoiced, ended UsageInvoicedMonths ago.
+// after it, by whose end it was billed, ended UsageBilledMonths ago.
 func UsageDropBefore(now time.Time) time.Time {
-	return MonthStart(now).AddDate(0, -(UsageInvoicedMonths + UsageInvoicingLagMonths), 0)
+	return MonthStart(now).AddDate(0, -(UsageBilledMonths + UsageBillingLagMonths), 0)
 }
 
 // AdmissionsDropBefore is the oldest admission still kept.

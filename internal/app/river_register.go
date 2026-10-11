@@ -83,17 +83,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NMIClients:    r.NMIClients,
 		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:      r.Verifier,
-		RecoverInvoicePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
+		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
 			if err != nil {
 				return err
 			}
-			receipt, err := money.ReadObservedNMIInvoiceReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
+			receipt, err := money.ReadObservedNMIUsageReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
 			if err != nil {
 				return err
 			}
-			_, err = r.MoneyService.RecoverObservedInvoicePayment(ctx, receipt)
-			var owned *money.InvoiceRecoveryOperationOwned
+			_, err = r.MoneyService.RecoverObservedUsagePayment(ctx, receipt)
+			var owned *money.UsageRecoveryOperationOwned
 			if errors.As(err, &owned) {
 				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
 					return wakeErr
@@ -255,16 +255,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{DB: r.DB, Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
-	// Invoice collection and reconciliation workers. Collection waits until
-	// an off-session charger is configured.
-	if err := addTrackedWorker(r, workers, &riverjobs.InvoiceWorker{
+	// Usage orders: billing, notices and collection, which waits until an
+	// off-session charger is configured.
+	if err := addTrackedWorker(r, workers, &riverjobs.UsageOrderWorker{
 		DB:      r.DB,
 		Money:   r.MoneyService,
 		Intents: r.intentRunner(intentRegistry, clock),
 		Config:  r.Config,
 		Clock:   clock,
 	}); err != nil {
-		return fmt.Errorf("add invoice worker: %w", err)
+		return fmt.Errorf("add usage order worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.DelinquencyWorker{
 		DB:    r.DB,
@@ -331,9 +331,9 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
 		ccbillRefund,
 		rebill,
-		// Invoice collection rides the intent ledger like every other money
+		// Order collection rides the intent ledger like every other money
 		// mover.
-		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
+		money.NewOrderCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
 		// The account-updater batch submit is a paid provider write, so it
 		// rides the intent ledger too.
@@ -719,13 +719,13 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
 	}, &river.PeriodicJobOpts{RunOnStart: true}))
 
-	// Invoice jobs run on start to recover overdue work; period uniqueness keeps
-	// each cadence across replicas and restarts.
-	// Every hour: invoice collection.
+	// Usage-order jobs run on start to recover overdue work; period uniqueness
+	// keeps each cadence across replicas and restarts.
+	// Every hour: collection.
 	jobs = append(jobs, r.healthPeriodic(
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			args := riverjobs.InvoiceArgs{Collect: true}
+			args := riverjobs.UsageOrderArgs{Collect: true}
 			opts := &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
@@ -734,12 +734,12 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
 	))
-	// Monthly invoice sweep: collect the long tail above the merchant's floor
+	// Monthly sweep: collect the long tail above the merchant's floor
 	// that the hourly threshold trigger leaves behind.
 	jobs = append(jobs, r.healthPeriodic(
 		30*24*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			args := riverjobs.InvoiceArgs{
+			args := riverjobs.UsageOrderArgs{
 				Collect:         true,
 				UseMonthlyFloor: true,
 			}
@@ -752,12 +752,12 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
-	// Daily: finalize each customer's previous invoice period. Idempotent per
+	// Daily: bill each customer's previous period. Idempotent per
 	// (customer, currency, period).
 	jobs = append(jobs, r.healthPeriodic(
 		24*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.InvoiceArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
+			return riverjobs.UsageOrderArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}

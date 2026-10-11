@@ -51,7 +51,7 @@ func canonicalWireFixtures() map[string]any {
 			{ID: billing.BalanceTransactionID(uuid.MustParse("33333333-3333-3333-3333-333333333333")), CustomerID: customerFixture, Currency: "JPY", Type: billing.BalanceTransactionSpend, Amount: minMoney, Source: "operator", SourceID: "spend-1", CreatedAt: when},
 		}},
 		"merchant_settings.json": billing.MerchantSettings{
-			InvoiceCollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
+			CollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
 			BillingPolicies: []billing.BillingPolicy{
 				{Name: "credit_line", Kind: "outstanding_cap", OutstandingCapAmount: maxMoney, CollectionThresholdAmount: &minMoney},
 				{Name: "monthly", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: maxMoney, Currency: "USD"}}},
@@ -103,12 +103,14 @@ func canonicalWireFixtures() map[string]any {
 			Subscriptions:     []billing.PaymentMethodSubscription{{ID: subscriptionFixture, DisplayName: "Pro", CreatedAt: when}},
 			DefaultCurrencies: []string{"USD"}, CreatedAt: when,
 		},
-		"page_invoices.json": billing.ListPage[billing.Invoice]{Next: "cursor-2", Items: []billing.Invoice{{
-			ID: invoiceFixture, CustomerID: customerFixture, Currency: "USD", PeriodStartsAt: when, PeriodEndsAt: when, TotalAmount: maxMoney, AmountDue: maxMoney,
-			LineItems: []billing.InvoiceLineItem{{EventType: "tokens", Amount: maxMoney, Count: 3, Dimensions: map[string]int64{"input": 2}}}, MoneyMovements: billing.AmountMap{"usage": maxMoney},
-			Tax: map[string]any{}, BillingContacts: []billing.InvoiceContact{{Name: "Ops", Email: "ops@example.test"}},
-			Status: billing.InvoiceOpen, CollectionMethod: billing.CollectChargeAutomatically, DueAt: &when, Delinquent: true,
-			AvailableActions: []billing.InvoiceAction{billing.InvoiceActionRetryCollection, billing.InvoiceActionVoid}, CreatedAt: when,
+		"page_usage_orders.json": billing.ListPage[billing.Order]{Next: "cursor-2", Items: []billing.Order{{
+			ID: orderFixture, CustomerID: customerFixture, Origin: billing.OrderOriginUsage, Status: billing.OrderOpen, Currency: "USD", Total: maxMoney,
+			Lines:          []billing.OrderLine{{ID: orderLineFixture, Source: ptr("metered:tokens"), Description: "tokens", Quantity: ptr(1), UnitAmount: maxMoney, Amount: maxMoney}},
+			Payment:        billing.OrderPayment{Status: billing.OrderPaymentRequiresPaymentMethod},
+			PaymentOptions: []billing.OrderPaymentOption{},
+			Usage: &billing.OrderUsage{PeriodStartsAt: when, PeriodEndsAt: when, DueAt: when, AmountPaid: zero, AmountDue: maxMoney,
+				CollectionMethod: billing.CollectChargeAutomatically, Tax: map[string]any{}, BillingContacts: []billing.InvoiceContact{{Name: "Ops", Email: "ops@example.test"}}, Delinquent: true},
+			CreatedAt: when,
 		}}},
 	}
 }
@@ -159,7 +161,8 @@ var (
 	methodFixture         = billing.PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	paymentFixture        = billing.PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
 	sessionFixture        = billing.CheckoutAttemptID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
-	invoiceFixture        = billing.InvoiceID(uuid.MustParse("99999999-9999-4999-8999-999999999999"))
+	orderFixture          = billing.OrderID(uuid.MustParse("99999999-9999-4999-8999-999999999998"))
+	orderLineFixture      = billing.OrderLineID(uuid.MustParse("99999999-9999-4999-8999-999999999997"))
 	mandateFixture        = billing.MandateID(uuid.MustParse("12121212-1212-4121-8121-121212121212"))
 )
 

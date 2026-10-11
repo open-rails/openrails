@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
@@ -188,7 +189,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 }
 
 // FormatNumber spells a document number.
-func FormatNumber(n int64) string { return fmt.Sprintf("%06d", n) }
+func FormatNumber(n int64) string { return orderevent.Number(n) }
 
 // reclaim takes a closed order's claims again: it reports false when what a
 // unique line buys is held meanwhile.
@@ -234,7 +235,7 @@ func (s *Service) claimRefusal(ctx context.Context, q *gen.Queries, order *Order
 		if l.ClaimKey == nil {
 			continue
 		}
-		product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: order.MerchantID, ID: l.ProductID})
+		product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: order.MerchantID, ID: models.DerefUUID(l.ProductID)})
 		if err != nil {
 			return nil, err
 		}
@@ -290,12 +291,12 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		interval := time.Duration(*line.BillingIntervalHours) * time.Hour
 		terms := subscriptions.InitialMembershipTerms{
 			CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
-			ProductID: line.ProductID, PriceID: line.PriceID, PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
+			ProductID: models.DerefUUID(line.ProductID), PriceID: models.DerefUUID(line.PriceID), PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
 			AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}
 		sub, _, err := s.Memberships.CreateMembershipTx(db.WithPSPID(ctx, charge.PSPID), d, &subscriptions.CreateMembershipParams{
-			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: line.PriceID, Rail: models.Rail(charge.Rail), PurchasedAt: &now,
+			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
 			PaymentMetadata: map[string]any{"order_id": order.ID.String()},
 		})
 		if err != nil {
@@ -319,14 +320,14 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		}
 		expires := now.AddDate(0, 0, credit.ExpiresAfterDays)
 		if _, err := purchasedcredits.New(d, s.Clock).Fund(ctx, purchasedcredits.Params{
-			CustomerID: identity.CustomerID(order.CustomerID), PaymentID: charge.PaymentID, ProductID: line.ProductID, OrderLineID: line.ID,
+			CustomerID: identity.CustomerID(order.CustomerID), PaymentID: charge.PaymentID, ProductID: models.DerefUUID(line.ProductID), OrderLineID: line.ID,
 			Amount: credit.Amount * int64(seats(line.Quantity)), PaidAmount: line.Amount, Currency: credit.Currency, StartsAt: now, ExpiresAt: &expires,
 			Description: line.Description,
 		}); err != nil {
 			return err
 		}
 	default:
-		params := entitlements.PushAccessParams{UserID: order.CustomerID.String(), CustomerID: order.CustomerID, ProductID: line.ProductID,
+		params := entitlements.PushAccessParams{UserID: order.CustomerID.String(), CustomerID: order.CustomerID, ProductID: models.DerefUUID(line.ProductID),
 			SourceType: models.AccessSourcePurchase, SourceID: line.ID.String()}
 		if charge != nil {
 			params.PaymentID = &charge.PaymentID
@@ -348,7 +349,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			}
 		}
 	}
-	if line.ClaimKey == nil || holderType == "" || catalog.Ownership(line.Ownership) != catalog.OwnershipUnique {
+	if line.ClaimKey == nil || holderType == "" || catalog.Ownership(models.DerefStr(line.Ownership)) != catalog.OwnershipUnique {
 		return nil
 	}
 	_, err := q.HandOverOwnershipClaim(ctx, gen.HandOverOwnershipClaimParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID,

@@ -271,7 +271,7 @@ export const paymentMethodSchema = z.object({
       })
     )
     .nullish(),
-  /** Currencies whose invoices this card collects. */
+  /** Currencies whose usage orders this card pays. */
   default_currencies: z.array(z.string()).nullish(),
   created_at: time.nullish(),
 })
@@ -299,10 +299,15 @@ export const orderNextActionSchema = z.object({
 })
 export type OrderNextAction = z.infer<typeof orderNextActionSchema>
 
+/**
+ * One line of an order. A purchased line names its price and product; a
+ * usage order's line names its accrual source (`metered:<meter>`) instead.
+ */
 export const orderLineSchema = z.object({
   id: z.string(),
-  price_id: z.string(),
-  product_id: z.string(),
+  price_id: z.string().nullish(),
+  product_id: z.string().nullish(),
+  source: z.string().nullish(),
   description: z.string(),
   quantity: z.number().nullish(),
   unit_amount: amount,
@@ -315,11 +320,12 @@ export const orderLineSchema = z.object({
 export type OrderLine = z.infer<typeof orderLineSchema>
 
 /**
- * A purchase, or a subscription's renewal (`origin: subscription`): frozen
- * lines and total, read and paid by its own customer. `status` is the
- * order's (`open | processing | complete | canceled | expired | void`);
- * `payment.status` its payment's (`requires_payment_method |
- * requires_action | processing | succeeded`).
+ * A purchase, a subscription's renewal (`origin: subscription`) or usage
+ * billed in arrears (`origin: usage`): frozen lines and total, read and paid
+ * by its own customer. `status` is the order's (`open | processing |
+ * complete | canceled | expired | void | uncollectible`); `payment.status`
+ * its payment's (`requires_payment_method | requires_action | processing |
+ * succeeded`).
  */
 export const orderSchema = z.object({
   id: z.string(),
@@ -367,11 +373,31 @@ export const orderSchema = z.object({
       due_at: time,
     })
     .nullish(),
+  /**
+   * A usage order's period, when it is due and how much of it is paid (a
+   * funded balance and remittances pay part of it). `delinquent`: overdue
+   * past grace, so new usage in its currency is refused until it is paid.
+   */
+  usage: z
+    .object({
+      period_starts_at: time,
+      period_ends_at: time,
+      due_at: time,
+      amount_paid: amount,
+      amount_due: amount,
+      collection_method: z.string(),
+      next_collection_attempt_at: time.nullish(),
+      po_number: z.string().nullish(),
+      memo: z.string().nullish(),
+      delinquent: z.boolean(),
+    })
+    .nullish(),
   expires_at: time.nullish(),
   completed_at: time.nullish(),
   canceled_at: time.nullish(),
   expired_at: time.nullish(),
   voided_at: time.nullish(),
+  uncollectible_at: time.nullish(),
   created_at: time,
 })
 export type Order = z.infer<typeof orderSchema>
@@ -517,26 +543,6 @@ export const accountSchema = z.object({
   unread_notifications: z.number(),
 })
 export type Account = z.infer<typeof accountSchema>
-
-export const invoiceSchema = z.object({
-  id: z.string(),
-  currency: z.string(),
-  invoice_number: z.string().nullish(),
-  period_starts_at: time,
-  period_ends_at: time,
-  total_amount: amount,
-  amount_paid: amount,
-  amount_due: amount,
-  status: z.string(),
-  issued_at: time.nullish(),
-  due_at: time.nullish(),
-  /** Overdue past grace: new usage in its currency is refused until paid. */
-  delinquent: z.boolean().nullish(),
-  paid_at: time.nullish(),
-  recovery: paymentRecoverySchema.nullish(),
-  created_at: time,
-})
-export type Invoice = z.infer<typeof invoiceSchema>
 
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>

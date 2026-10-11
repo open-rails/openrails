@@ -28,13 +28,13 @@ RETURNING *;
 INSERT INTO billing.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation,
-    source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
+    source, source_id, grant_id, customer_id, invoker_id, resource, order_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
     sqlc.arg(allow_debit_negative_up_to)::bigint, sqlc.arg(operation)::text,
     sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
-    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid
+    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid
 )
 ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
 DO NOTHING
@@ -109,22 +109,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at ASC
 LIMIT 1;
 
--- SumLedgerMovementsByCustomerInPeriod: per-type net amount for a customer in a
--- window — the invoice builder's money-movement rollup. Spends/expiries are
--- emitted as positive transfer amounts; the sign is applied by the caller.
--- name: SumLedgerMovementsByCustomerInPeriod :many
-SELECT transfer_type, COALESCE(SUM(amount), 0)::bigint AS total
-FROM billing.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text
-  AND created_at >= sqlc.arg(period_starts_at)::timestamptz
-  AND created_at < sqlc.arg(period_ends_at)::timestamptz
-GROUP BY transfer_type;
-
--- ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
--- return every breached ledger so the operator cannot receive a false healthy
--- result from pagination.
 -- name: ListLedgerConservationBreaches :many
 SELECT merchant_id,
        currency,

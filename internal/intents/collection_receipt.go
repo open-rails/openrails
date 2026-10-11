@@ -69,8 +69,8 @@ func decodeCollectedTerms(in gen.BillingProviderIntent) (collectedTerms, error) 
 		return collectedTerms{Rail: in.Rail, Currency: p.Currency, AmountMinor: minor, Instrument: p.Instrument, ProviderCustomerRef: p.Instrument.RailCustomerRef,
 			OrderReference: payments.NMISaleOrderReference(in.ID, p.E2ERunID), NewVault: token && !p.PurchaseScoped, NoVault: token && p.PurchaseScoped}, err
 
-	case "invoice_collection":
-		p, err := DecodeInvoiceCollectionPayload(in)
+	case TypeOrderCollection:
+		p, err := DecodeOrderCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String(), false, false}, err
 	case subscriptions.TypeInitialMembership:
 		p, err := subscriptions.DecodeInitialMembershipPayload(in)
@@ -115,7 +115,11 @@ func collectionBinding(in gen.BillingProviderIntent) (receiptBinding, error) {
 		return receiptBinding{}, err
 	}
 	digest := sha256.Sum256(raw)
-	return receiptBinding{in.ID, in.MerchantID, *in.PspID, in.IntentType, hex.EncodeToString(digest[:])}, nil
+	kind := in.IntentType
+	if _, legacy := legacyOrderID(in.Payload); legacy && kind == TypeOrderCollection {
+		kind = legacyCollectionKind
+	}
+	return receiptBinding{in.ID, in.MerchantID, *in.PspID, kind, hex.EncodeToString(digest[:])}, nil
 }
 
 // ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order
@@ -202,7 +206,7 @@ func (r CollectedReceipt) Validate(in gen.BillingProviderIntent) error {
 			return errors.New("Stripe captured charge does not match frozen collection")
 		}
 		if facts.ChargePaymentIntentID != facts.PaymentIntentID || facts.ChargeInvoiceID != facts.InvoiceID {
-			return errors.New("captured Stripe charge is not linked to this invoice payment")
+			return errors.New("captured Stripe charge is not linked to this collection's Stripe invoice")
 		}
 		if facts.InvoiceID == "" || facts.CustomerID != p.ProviderCustomerRef || facts.PaymentMethodID != p.Instrument.RailMethodRef {
 			return errors.New("Stripe receipt does not match frozen customer and payment method")

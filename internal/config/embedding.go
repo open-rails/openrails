@@ -48,7 +48,7 @@ type Routes struct {
 // customer and webhook routes, each off until turned on.
 type RouteGroups struct {
 	// Admin is customer support (/v1/admin): customers, their
-	// subscriptions, payments, refunds, invoices, credits, access and usage.
+	// subscriptions, payments, refunds, orders, credits, access and usage.
 	// Callers need Permissions.AdminRead; changes also
 	// Permissions.AdminUpdate, without which it is read-only.
 	Admin bool

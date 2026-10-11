@@ -141,7 +141,7 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 	if err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
-	if line.OrderID != order.ID || order.CompletedAt == nil || order.PaymentID == nil || *order.PaymentID != p.PaymentID || line.BillingIntervalHours == nil || order.CustomerID != sub.CustomerID {
+	if line.OrderID != order.ID || line.PriceID == nil || line.ProductID == nil || order.CompletedAt == nil || order.PaymentID == nil || *order.PaymentID != p.PaymentID || line.BillingIntervalHours == nil || order.CustomerID != sub.CustomerID {
 		return agreement, payment, fmt.Errorf("%w: order line contradicts its subscription", ErrRebillNotRetryable)
 	}
 	if payment, err = q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.PaymentID}); err != nil {
@@ -156,8 +156,8 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 		access = &hours
 	}
 	start := *order.CompletedAt
-	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: order.CustomerID, FromPriceID: line.PriceID, FromProductID: line.ProductID,
-		PriceID: line.PriceID, ProductID: line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: order.Currency,
+	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: order.CustomerID, FromPriceID: *line.PriceID, FromProductID: *line.ProductID,
+		PriceID: *line.PriceID, ProductID: *line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: order.Currency,
 		PeriodStart: start, PeriodEnd: start.Add(time.Duration(*line.BillingIntervalHours) * time.Hour), AccessDurationHours: access}
 	return agreement, payment, nil
 }

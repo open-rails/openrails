@@ -364,7 +364,7 @@ boundary. `TestNMIFiveDayRestartRecovery` exercises real process termination and
 restart with two replicas; provider fixtures establish the local contract, not
 live processor qualification.
 
-Invoice collection and finalization also scan at startup. Monthly small-balance
+Usage order collection and billing also scan at startup. Monthly small-balance
 collection retains its last completed thirty-day period in the merchant book,
 including export/restore; pruning completed River jobs cannot reset its cadence.
 The marker advances only after the entire eligible scan succeeds. Partial errors
@@ -954,7 +954,7 @@ comment states it, and a table added without one fails the build.
 
 | Class | What it means |
 |---|---|
-| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog applications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, metered rating watermarks, destructive runs and their before-images. |
+| Permanent | Never pruned: the ledger, grants, payments, owed usage items and the usage collection cadence, receipts (catalog applications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, metered rating watermarks, destructive runs and their before-images. |
 | Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
 | Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
 | State | Configuration and entities (merchants, PSPs, catalog with its price keys and field owners, customers, subscriptions, payment methods, cursors): one row per thing that exists. |
@@ -963,7 +963,7 @@ Partitioned tables:
 
 | Table | Key | Dropped |
 |---|---|---|
-| `usage_events` | `occurred_at` | 24 months after the month's usage was invoiced. A month is invoiced by the end of the next one, so a month goes 26 months after it began. |
+| `usage_events` | `occurred_at` | 24 months after the month's usage was billed. A month is billed by the end of the next one, so a month goes 26 months after it began. |
 | `admission_operations` | `admitted_at` | Once older than 61 days: the longest spend window (31 days) plus 30. |
 
 Row retention:
@@ -991,7 +991,7 @@ What is kept on purpose:
 
 - **A provider intent that is the record of something is permanent.** Collections,
   sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
-  or refused) are what grants, payments and invoices are checked against, a
+  or refused) are what grants, payments and orders are checked against, a
   card erasure is the proof the card is gone, and a Stripe payment-method
   domain registration (one per PSP and checkout host) is the record that the
   host is registered. Only the instruction-only types
@@ -1095,11 +1095,11 @@ of leader neither delays nor repeats a period's run.
 | Notification email sweep | 10 min |
 | Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
-| Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
+| Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · usage order collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
 | Solana gas alert · Solana ledger reconcile | 6 h |
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
-| Invoice period finalize / monthly-floor sweep | daily / 30 d |
+| Usage period billing / monthly-floor sweep | daily / 30 d |
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops
@@ -1214,7 +1214,7 @@ in any mode):
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
-| Invoice collection, Solana pulls | yes | no | no |
+| Usage order collection, Solana pulls | yes | no | no |
 | `apply-catalog` local changes + existing binding verification | yes — no provider writes | yes — no provider writes | yes — no provider writes |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |

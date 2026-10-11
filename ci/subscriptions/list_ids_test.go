@@ -128,8 +128,8 @@ func TestListsReadNamedRecords(t *testing.T) {
 	gift := w.giftProduct("content:gift")
 	c.grant(gift, &hours, nil)
 	c.grant(gift, &hours, nil)
-	// An invoice for usage on credit, paid from the next funding: invoice
-	// payments, credit grants and their ledger.
+	// A usage order for usage on credit, paid from the next funding: its
+	// repayment, credit grants and their ledger.
 	d := w.newCustomer()
 	_, err = w.client[remote].UpdateCustomer(ctx, d.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(job.Job.ID)
-	invoices, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: d.cid()})
+	invoices, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: d.cid()})
 	require.NoError(t, err)
 	require.NotEmpty(t, invoices.Items)
 	_, err = client.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{
@@ -175,7 +175,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/product-access":                               {"/v1/admin/product-access", "customer_id=" + c.id, "product_access", "", ""},
 		"GET /v1/admin/credit-grants":                                {"/v1/admin/credit-grants", "customer_id=" + d.id, "grants", "", ""},
 		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
-		"GET /v1/admin/invoices":                                     {"/v1/admin/invoices", "", "invoices", "", ""},
 		"GET /v1/admin/orders":                                       {"/v1/admin/orders", "", "orders", "", ""},
 		"GET /v1/admin/payments":                                     {"/v1/admin/payments", "", "payments", "", ""},
 		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},

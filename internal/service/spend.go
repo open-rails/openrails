@@ -12,13 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-var (
-	ErrInvoiceNotRetryable             = money.ErrInvoiceNotRetryable
-	ErrInvoiceRetryInProgress          = money.ErrInvoiceRetryInProgress
-	ErrInvoiceRetryOutcomeUnknown      = money.ErrInvoiceRetryOutcomeUnknown
-	ErrInvoiceRetryIdempotencyConflict = money.ErrInvoiceRetryIdempotencyConflict
-)
-
 // GetBalance returns a customer's money in one currency.
 func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, currency string) (*billing.Balance, error) {
 	currency, err := requireCurrency(currency)

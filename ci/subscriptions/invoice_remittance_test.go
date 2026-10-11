@@ -33,25 +33,25 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 				InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice, NetTermsDays: 30}),
 			})
 			require.NoError(t, err)
-			invoice := func() *billing.Invoice {
+			invoice := func() *billing.Order {
 				_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
 				job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				w.waitJob(job.Job.ID)
-				invoices, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: payer.cid()})
+				invoices, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: payer.cid()})
 				require.NoError(t, err)
-				var selected *billing.Invoice
+				var selected *billing.Order
 				for i := range invoices.Items {
-					if invoices.Items[i].AmountDue > 0 {
+					if invoices.Items[i].Usage.AmountDue > 0 {
 						require.Nil(t, selected)
 						selected = &invoices.Items[i]
 					}
 				}
 				require.NotNil(t, selected)
-				require.Equal(t, owed, selected.AmountDue)
-				read, err := client.GetInvoice(ctx, selected.ID)
+				require.Equal(t, owed, selected.Usage.AmountDue)
+				read, err := client.GetOrder(ctx, selected.ID)
 				require.NoError(t, err)
 				return read
 			}
@@ -60,7 +60,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			if partial {
 				amount = 40_000_000
 			}
-			params := billing.CreatePaymentParams{InvoiceID: &first.ID, Amount: amount, TransactionID: "bank-remittance"}
+			params := billing.CreatePaymentParams{OrderID: first.ID, Amount: amount, TransactionID: "bank-remittance"}
 			type result struct {
 				payment *billing.Payment
 				err     error
@@ -78,12 +78,12 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			require.Equal(t, accepted.payment.ID, concurrent.payment.ID, "concurrent first submissions share one payment")
 			receipt := accepted.payment
 			require.Equal(t, billing.ChannelManual, receipt.Channel)
-			require.Equal(t, &first.ID, receipt.InvoiceID)
+			require.Equal(t, &first.ID, receipt.OrderID)
 			require.Equal(t, amount, receipt.Amount)
 			require.Equal(t, billing.PaymentSucceeded, receipt.Status)
-			paid, err := client.GetInvoice(ctx, first.ID)
+			paid, err := client.GetOrder(ctx, first.ID)
 			require.NoError(t, err)
-			require.Equal(t, owed-amount, paid.AmountDue)
+			require.Equal(t, owed-amount, paid.Usage.AmountDue)
 			for range 2 {
 				replay, err := client.CreatePayment(ctx, params)
 				require.NoError(t, err, "replay survives reduced amount_due and paid status")
@@ -94,18 +94,18 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			_, err = client.CreatePayment(ctx, changed)
 			requirePaymentRefusal(t, err, 422, billing.CodeIdempotencyKeyReused)
 			if partial {
-				_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{InvoiceID: &first.ID, Amount: owed - amount, TransactionID: "remainder"})
+				_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: first.ID, Amount: owed - amount, TransactionID: "remainder"})
 				require.NoError(t, err)
 				replay, err := client.CreatePayment(ctx, params)
 				require.NoError(t, err)
 				require.Equal(t, receipt.ID, replay.ID, "an older partial payment answers on the fully paid invoice")
-				paid, err = client.GetInvoice(ctx, first.ID)
+				paid, err = client.GetOrder(ctx, first.ID)
 				require.NoError(t, err)
 			}
-			require.Equal(t, billing.InvoicePaid, paid.Status)
-			_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{InvoiceID: &first.ID, Amount: 1, TransactionID: "new-payment-after-paid"})
-			requirePaymentRefusal(t, err, 409, billing.CodeInvoiceActionNotAllowed)
-			payments, err := client.ListPayments(ctx, billing.PaymentListParams{InvoiceID: first.ID})
+			require.Equal(t, billing.OrderComplete, paid.Status)
+			_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: first.ID, Amount: 1, TransactionID: "new-payment-after-paid"})
+			requirePaymentRefusal(t, err, 409, billing.CodeOrderActionNotAllowed)
+			payments, err := client.ListPayments(ctx, billing.PaymentListParams{OrderID: first.ID})
 			require.NoError(t, err)
 			want := 1
 			if partial {
@@ -115,13 +115,13 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			// The same remittance must not settle another invoice.
 			next := invoice()
 			other := params
-			other.InvoiceID = &next.ID
+			other.OrderID = next.ID
 			_, err = client.CreatePayment(ctx, other)
 			requirePaymentRefusal(t, err, 422, billing.CodeIdempotencyKeyReused)
-			nextAfter, err := client.GetInvoice(ctx, next.ID)
+			nextAfter, err := client.GetOrder(ctx, next.ID)
 			require.NoError(t, err)
 			require.Equal(t, next, nextAfter)
-			nextPayments, err := client.ListPayments(ctx, billing.PaymentListParams{InvoiceID: next.ID})
+			nextPayments, err := client.ListPayments(ctx, billing.PaymentListParams{OrderID: next.ID})
 			require.NoError(t, err)
 			require.Empty(t, nextPayments.Items)
 			// A recorded payment is not a replacement for live merchant authorization.

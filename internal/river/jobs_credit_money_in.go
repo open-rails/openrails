@@ -43,38 +43,40 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 	return errors.Join(errs...)
 }
 
-// --- Invoices and arrears collection ---
+// --- Usage orders and arrears collection ---
 
-const KindInvoice = "openrails.invoice"
+// KindUsageOrders is the job's kind as queued jobs carry it: earlier
+// releases named the job for invoices.
+const KindUsageOrders = "openrails.invoice"
 
-// InvoiceArgs lets one invoice-domain worker serve the recurring invoice
-// lifecycle without splitting each phase into a separate River worker type.
-type InvoiceArgs struct {
+// UsageOrderArgs selects the phases of one usage-order pass: bill periods,
+// notify overdue orders and collect them.
+type UsageOrderArgs struct {
 	MerchantID            *billing.MerchantID `json:"merchant_id,omitempty"`
 	Collect               bool                `json:"collect,omitempty"`
 	UseMonthlyFloor       bool                `json:"use_monthly_floor,omitempty"`
 	FinalizePreviousMonth bool                `json:"finalize_previous_month,omitempty"`
 }
 
-func (InvoiceArgs) Kind() string { return KindInvoice }
+func (UsageOrderArgs) Kind() string { return KindUsageOrders }
 
-type InvoiceWorker struct {
-	river.WorkerDefaults[InvoiceArgs]
+type UsageOrderWorker struct {
+	river.WorkerDefaults[UsageOrderArgs]
 	DB    *db.DB
 	Money *money.MoneyService
-	// Intents runs the invoice_collection operations; nil skips collection.
+	// Intents runs the order_collection operations; nil skips collection.
 	// Unknown outcomes are the scheduled intent verifier's, not this worker's.
 	Intents *intents.Runner
 	Config  *config.Config
 	Clock   clockwork.Clock
 }
 
-func (InvoiceWorker) Kind() string { return KindInvoice }
+func (UsageOrderWorker) Kind() string { return KindUsageOrders }
 
-func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", KindInvoice)
+func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[UsageOrderArgs]) error {
+	logger := log.WithContext(ctx).WithField("worker", KindUsageOrders)
 	if w.Money == nil {
-		logger.Debug("money service not configured; skipping invoice worker")
+		logger.Debug("money service not configured; skipping usage orders")
 		return nil
 	}
 	if job.Args.Collect && config.IsLimitedMode(w.Config) {
@@ -85,7 +87,7 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 	}
 	if job.Args.MerchantID != nil {
 		if job.Args.MerchantID.IsZero() {
-			return errors.New("invoice scan requires a nonzero merchant ID")
+			return errors.New("a usage-order pass requires a nonzero merchant ID")
 		}
 		ctx = merchant.WithID(ctx, *job.Args.MerchantID)
 		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, job, logger) })
@@ -97,18 +99,18 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 	})
 }
 
-// workMerchant runs one merchant's invoice pass on a merchant-scoped context.
-func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceArgs], logger *log.Entry) error {
+// workMerchant runs one merchant's pass on a merchant-scoped context.
+func (w UsageOrderWorker) workMerchant(ctx context.Context, job *river.Job[UsageOrderArgs], logger *log.Entry) error {
 	now := time.Now().UTC()
 	if w.Clock != nil {
 		now = w.Clock.Now().UTC()
 	}
-	settings, err := w.Money.InvoiceSettings(ctx)
+	settings, err := w.Money.UsageSettings(ctx)
 	if err != nil {
 		return err
 	}
 
-	finalized, err := w.Money.FinalizeThresholdInvoices(ctx, now, money.InvoiceThresholdOptions{
+	finalized, err := w.Money.FinalizeThresholdUsage(ctx, now, money.UsageThresholdOptions{
 		CollectionThresholdAmount: settings.CollectionThresholdAmount,
 		BillingPeriodBoundary:     settings.BillingPeriodBoundary,
 	})
@@ -116,29 +118,29 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 		return err
 	}
 	if finalized > 0 {
-		logger.WithField("invoices", finalized).Info("threshold arrears invoices finalized")
+		logger.WithField("orders", finalized).Info("threshold usage orders billed")
 	}
 
 	if job.Args.FinalizePreviousMonth {
-		n, err := w.Money.FinalizeDueInvoicesForBoundary(ctx, settings.BillingPeriodBoundary, now)
+		n, err := w.Money.FinalizeDueUsageForBoundary(ctx, settings.BillingPeriodBoundary, now)
 		if err != nil {
 			return err
 		}
 		if n > 0 {
-			logger.WithField("invoices", n).Info("monthly invoices finalized")
+			logger.WithField("orders", n).Info("monthly usage orders billed")
 		}
 	}
 
 	if job.Args.Collect {
-		// Customers hear about overdue net-N receivables before collection,
+		// Customers hear about overdue net-N orders before collection,
 		// even when no charger is armed.
-		if n, err := w.Money.NotifyOverdueInvoices(ctx, now); err != nil {
+		if n, err := w.Money.NotifyOverdueUsageOrders(ctx, now); err != nil {
 			return err
 		} else if n > 0 {
-			logger.WithField("invoices", n).Info("overdue invoice notices queued")
+			logger.WithField("orders", n).Info("overdue order notices queued")
 		}
 		if w.Intents == nil {
-			logger.Debug("invoice collection runner not configured; skipping collection")
+			logger.Debug("order collection runner not configured; skipping collection")
 			return nil
 		}
 		threshold, collect := settings.CollectionThresholdAmount, w.Money.ChargeOutstanding
@@ -150,7 +152,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 			return err
 		}
 		if n > 0 {
-			logger.WithField("charged", n).Info("invoice collection completed")
+			logger.WithField("charged", n).Info("usage order collection completed")
 		}
 	}
 	return nil

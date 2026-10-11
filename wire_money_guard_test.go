@@ -36,8 +36,6 @@ var pendingNumericMoney = map[string]string{
 	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                    notHTTPToolArgs,
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                      notHTTPToolArgs,
-	"internal/modules/money/enterprise.go:PendingCharge.Amount amount":                                                       notHTTPPendingCharges,
-	"internal/service/enterprise.go:PendingChargeDTO.Amount amount":                                                          notHTTPPendingCharges,
 	"internal/modules/money/provider_billing.go:normalizedProviderBillingRecord.Amount amount":                               notHTTPProviderEvidence,
 	"internal/modules/money/provider_billing.go:providerBillingSettlementManifest.QualifiedCostAmount qualified_cost_amount": notHTTPProviderEvidence,
 	"internal/modules/money/service_usage.go:ResourceRevenueDailyRow.Amount amount":                                          notHTTPInternalRow,
@@ -45,25 +43,16 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/money/usage.go:UsageRollupRow.TotalAmount total_amount":                                                notHTTPInternalRow,
 	"internal/service/host_events.go:func hostEvents.AmountFloor amount_floor":                                               notHTTPStoredPayload,
 	"internal/service/host_events.go:func hostEvents.OverdueAmount overdue_amount":                                           notHTTPStoredPayload,
-	"internal/intents/collection_payload.go:InvoiceCollectionPayload.Amount amount":                                          notHTTPIntentPayload,
+	"internal/intents/collection_payload.go:OrderCollectionPayload.Amount amount":                                            notHTTPIntentPayload,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                     notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":               notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.DelinquencyAmountFloor delinquency_amount_floor":                     notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.OutstandingCapAmount outstanding_cap_amount":                         notHTTPStorageRow,
 	"internal/db/models/budget_window_policy.go:BudgetWindowPolicy.Limit limit":                                              notHTTPStorageRow,
 	"internal/db/models/checkout_attempt.go:CheckoutAttempt.Amount amount":                                                   notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.AmountDue amount_due":                                                             notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.AmountPaid amount_paid":                                                           notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.ClosingBalance closing_balance":                                                   notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.OwedAccrued owed_accrued":                                                         notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.OwedPaid owed_paid":                                                               notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.SubtotalAmount subtotal_amount":                                                   notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.Tax tax":                                                                          notHTTPStorageRow,
-	"internal/db/models/invoice.go:Invoice.TotalAmount total_amount":                                                         notHTTPStorageRow,
-	"internal/db/models/invoice.go:InvoiceLineItem.Amount amount":                                                            notHTTPStorageRow,
 	"internal/db/models/merchant_configuration.go:MerchantConfiguration.ArrearsDelinquencyFloor arrears_delinquency_floor":   notHTTPStorageRow,
-	"internal/db/models/merchant_configuration.go:MerchantConfiguration.InvoiceCollectionThreshold collection_threshold":     notHTTPStorageRow,
-	"internal/db/models/merchant_configuration.go:MerchantConfiguration.InvoiceMonthlyFloor monthly_floor":                   notHTTPStorageRow,
+	"internal/db/models/merchant_configuration.go:MerchantConfiguration.CollectionThreshold collection_threshold":            notHTTPStorageRow,
+	"internal/db/models/merchant_configuration.go:MerchantConfiguration.MonthlyFloor monthly_floor":                          notHTTPStorageRow,
 	"internal/db/models/money.go:MoneyAccount.CreditLimitAmount credit_limit_amount":                                         notHTTPStorageRow,
 	"internal/db/models/money.go:MoneyBalance.Balance balance":                                                               notHTTPStorageRow,
 	"internal/db/models/money.go:MoneyBalance.HeldBalance held_balance":                                                      notHTTPStorageRow,
@@ -121,11 +110,11 @@ var pendingNumericMoney = map[string]string{
 	"internal/reconcile/stripe.go:stripeSubscriptionJSON.UnitAmount unit_amount":                                             notHTTPProviderWire,
 	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                   notHTTPInternalRow,
 
-	"billing/invoices.go:Invoice.Tax tax": notMoneyTaxFacts,
+	"billing/orders.go:OrderUsage.Tax tax": notMoneyTaxFacts,
 
 	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price": notHTTPProviderWire,
 
-	"billing/invoices.go:InvoiceProfile.Tax tax": notMoneyTaxFacts,
+	"billing/invoice_profile.go:InvoiceProfile.Tax tax": notMoneyTaxFacts,
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
@@ -143,7 +132,6 @@ const (
 	notHTTPStoredMetadata   = "not HTTP: jsonb metadata or rail state stored on the row, never served"
 	notMoneyPurgeInventory  = "not money: the purge inventory's list of uncaptured secret names"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
-	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
 	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
@@ -184,7 +172,6 @@ var pendingDynamicMoney = map[string]string{
 // cannot see must be pinned or it is a violation.
 var pinnedMarshalers = map[string]string{
 	"billing/merchant_configuration.go:UpdateMerchantConfigurationParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
-	"billing/amount_map.go:AmountMap":                                     "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
 	"internal/modules/metrics/service.go:MoneyCell":                       "TestResultWireEncoding — decimal string",
 	"catalog/application.go:Field":                                        "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
 	"internal/cardguard/card.go:Card":                                     "TestCardRedactsItself — no money: always the redaction",

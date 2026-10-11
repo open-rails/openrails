@@ -109,19 +109,25 @@ func TestHostSettlementDedupeKeyNamesItsPayment(t *testing.T) {
 	checkRows(t, cases)
 }
 
-const collectionPayload = `{"initiator":"%s","invoice_id":"10000000-0000-0000-0000-000000000001","customer_id":"10000000-0000-0000-0000-000000000002","payment_id":"10000000-0000-0000-0000-000000000003","payment_method_id":"10000000-0000-0000-0000-000000000004","rail":"nmi","currency":"USD","amount":50000,"amount_minor":5,"description":"invoice","instrument":{"psp_id":"10000000-0000-0000-0000-000000000005","custodian":"psp","rail_customer_ref":"vault-original","rail_method_ref":"billing-original"}}`
+const collectionPayload = `{"initiator":"%s","%s":"10000000-0000-0000-0000-000000000001","customer_id":"10000000-0000-0000-0000-000000000002","payment_id":"10000000-0000-0000-0000-000000000003","payment_method_id":"10000000-0000-0000-0000-000000000004","rail":"nmi","currency":"USD","amount":50000,"amount_minor":5,"description":"invoice","instrument":{"psp_id":"10000000-0000-0000-0000-000000000005","custodian":"psp","rail_customer_ref":"vault-original","rail_method_ref":"billing-original"}}`
 
-func collectionIntent(t *testing.T, initiator, origin, actor, key string) map[string]string {
+// collectionIntent is a settled order collection; a legacy one was accepted
+// before usage orders, naming its order invoice_id under the invoice kind.
+func collectionIntent(t *testing.T, legacy bool, initiator, origin, actor, key string) map[string]string {
 	t.Helper()
-	payload := fmt.Sprintf(collectionPayload, initiator)
+	idKey, kind := "order_id", intents.TypeOrderCollection
+	if legacy {
+		idKey, kind = "invoice_id", "invoice_collection"
+	}
+	payload := fmt.Sprintf(collectionPayload, initiator, idKey)
 	var decoded any
 	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 		t.Fatal(err)
 	}
 	canonical, _ := json.Marshal(decoded)
 	digest := fmt.Sprintf("%x", sha256.Sum256(canonical))
-	evidence := `{"qualified_receipt":{"version":1,"family":"collected_payment","binding":{"operation_id":"10000000-0000-0000-0000-000000000006","merchant_id":"10000000-0000-0000-0000-000000000007","psp_id":"10000000-0000-0000-0000-000000000005","kind":"invoice_collection","payload_sha256":"` + digest + `"},"nmi":{"transaction_id":"sale-original","order_reference":"10000000-0000-0000-0000-000000000006","customer_vault_id":"vault-original","amount":"5","currency":"USD","approved":true}}}`
-	m := map[string]string{"id": "10000000-0000-0000-0000-000000000006", "merchant_id": "10000000-0000-0000-0000-000000000007", "psp_id": "10000000-0000-0000-0000-000000000005", "rail": "nmi", "intent_type": "invoice_collection", "status": "succeeded", "origin": origin, "idempotency_key": key, "payload": payload, "result_evidence": evidence}
+	evidence := `{"qualified_receipt":{"version":1,"family":"collected_payment","binding":{"operation_id":"10000000-0000-0000-0000-000000000006","merchant_id":"10000000-0000-0000-0000-000000000007","psp_id":"10000000-0000-0000-0000-000000000005","kind":"` + kind + `","payload_sha256":"` + digest + `"},"nmi":{"transaction_id":"sale-original","order_reference":"10000000-0000-0000-0000-000000000006","customer_vault_id":"vault-original","amount":"5","currency":"USD","approved":true}}}`
+	m := map[string]string{"id": "10000000-0000-0000-0000-000000000006", "merchant_id": "10000000-0000-0000-0000-000000000007", "psp_id": "10000000-0000-0000-0000-000000000005", "rail": "nmi", "intent_type": intents.TypeOrderCollection, "status": "succeeded", "origin": origin, "idempotency_key": key, "payload": payload, "result_evidence": evidence}
 	if actor != "" {
 		m["actor"] = actor
 	}
@@ -133,17 +139,23 @@ func collectionIntent(t *testing.T, initiator, origin, actor, key string) map[st
 // receipt all bind them; any other hash-looking text is still scanned.
 func TestCollectionKeysAreBoundIdentities(t *testing.T) {
 	payer := uuid.MustParse("10000000-0000-0000-0000-000000000002")
-	invoice := uuid.MustParse("10000000-0000-0000-0000-000000000001")
-	customerKey := charge.CustomerPaymentKey("invoice_collection", payer, "archive-key-1461")
-	retryKey := intents.InvoiceCollectionRetryKey(invoice, "admin-archive-3817")
+	order := uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	customerKey := charge.CustomerPaymentKey(intents.TypeOrderCollection, payer, "archive-key-1461")
+	retryKey := intents.OrderCollectionRetryKey(order, "admin-archive-3817")
+	legacyCustomerKey := charge.CustomerPaymentKey("invoice_collection", payer, "archive-key-1461")
+	legacyRetryKey := strings.Replace(retryKey, intents.TypeOrderCollection, "invoice_collection", 1)
 	if safeText(customerKey) || safeText(retryKey) {
 		t.Fatal("fixtures must be keys the text scan alone would refuse")
 	}
-	customer := func() map[string]string { return collectionIntent(t, "customer", "user", payer.String(), customerKey) }
-	merchant := func() map[string]string { return collectionIntent(t, "merchant", "admin", "", retryKey) }
+	customer := func() map[string]string {
+		return collectionIntent(t, false, "customer", "user", payer.String(), customerKey)
+	}
+	merchant := func() map[string]string { return collectionIntent(t, false, "merchant", "admin", "", retryKey) }
 	cases := []rowCase{
 		{"customer key", "provider_intents", customer(), true},
 		{"merchant retry key", "provider_intents", merchant(), true},
+		{"legacy customer key", "provider_intents", collectionIntent(t, true, "customer", "user", payer.String(), legacyCustomerKey), true},
+		{"legacy merchant retry key", "provider_intents", collectionIntent(t, true, "merchant", "admin", "", legacyRetryKey), true},
 	}
 	for name, tc := range map[string]struct {
 		base   func() map[string]string
@@ -158,10 +170,13 @@ func TestCollectionKeysAreBoundIdentities(t *testing.T) {
 		"malformed digest":          {customer, "result_evidence", func(e string) string { return replaceDigest(e, "not-a-hash") }},
 		"PAN in evidence":           {customer, "result_evidence", func(e string) string { return strings.ReplaceAll(e, "sale-original", "4111111111111111") }},
 		"succeeded without receipt": {customer, "result_evidence", func(string) string { return "null" }},
-		"retry key for other invoice": {merchant, "idempotency_key", func(k string) string {
-			return strings.Replace(k, invoice.String(), "10000000-0000-0000-0000-000000000008", 1)
+		"retry key for other order": {merchant, "idempotency_key", func(k string) string {
+			return strings.Replace(k, order.String(), "10000000-0000-0000-0000-000000000008", 1)
 		}},
-		"retry key of other kind":    {merchant, "idempotency_key", func(k string) string { return strings.Replace(k, "invoice_collection:", "manual_rebill:", 1) }},
+		"retry key of other kind": {merchant, "idempotency_key", func(k string) string { return strings.Replace(k, "order_collection:", "manual_rebill:", 1) }},
+		"payload naming its order twice": {merchant, "payload", func(p string) string {
+			return strings.Replace(p, `"order_id"`, `"invoice_id":"10000000-0000-0000-0000-000000000001","order_id"`, 1)
+		}},
 		"retry key from user origin": {merchant, "origin", func(string) string { return "user" }},
 		"unsupported payload field":  {customer, "payload", func(p string) string { return strings.Replace(p, `"description":"invoice"`, `"provider_body":{}`, 1) }},
 		"instrument credential":      {customer, "payload", func(p string) string { return strings.Replace(p, `"custodian":"psp"`, `"security_key":"secret"`, 1) }},
@@ -180,10 +195,10 @@ func TestCollectionKeysAreBoundIdentities(t *testing.T) {
 	checkRows(t, cases)
 
 	resolved := `{"transaction_id":"sale-original","operator_resolution":{"actor":"operator","reason":"confirmed exact provider receipt","resolved_at":"2026-09-18T00:00:00Z","provider_reference":"sale-original"}}`
-	if err := validateJSON("provider_intents.invoice_collection.result_evidence", resolved); err != nil {
+	if err := validateJSON("provider_intents.order_collection.result_evidence", resolved); err != nil {
 		t.Fatalf("operator resolution evidence must be retained verbatim: %v", err)
 	}
-	if validateJSON("provider_intents.invoice_collection.result_evidence", `{"operator_resolution":{"actor":"operator","raw_provider_body":{}}}`) == nil {
+	if validateJSON("provider_intents.order_collection.result_evidence", `{"operator_resolution":{"actor":"operator","raw_provider_body":{}}}`) == nil {
 		t.Fatal("accepted raw operator evidence")
 	}
 }

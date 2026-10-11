@@ -10,7 +10,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, invoice_id, quantity
+    money_movement, order_id, quantity
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
@@ -25,7 +25,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(invoice_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -36,7 +36,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, invoice_id, quantity
+    money_movement, order_id, quantity
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
@@ -51,7 +51,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(invoice_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
 )
 ON CONFLICT DO NOTHING;
 
@@ -223,7 +223,6 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.deleted_at IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR p.subscription_id = sqlc.narg(subscription_id)::uuid)
-  AND (sqlc.narg(invoice_id)::uuid IS NULL OR p.invoice_id = sqlc.narg(invoice_id)::uuid)
   AND (sqlc.narg(order_id)::uuid IS NULL OR p.order_id = sqlc.narg(order_id)::uuid)
   AND (sqlc.narg(rail)::text IS NULL OR p.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(transaction_id)::text IS NULL OR p.transaction_id = sqlc.narg(transaction_id)::text)
