@@ -116,8 +116,9 @@ AuthKit groups and nothing more:
   the token's `sub`, and `billing.customers` records the issuer that made it.
   Another issuer's credential with the same `sub` is refused
   (`409 merchant_binding_mismatch`). A customer with no recorded issuer is the
-  host's own user, such as one made through the Go API; no trusted issuer
-  reaches it.
+  host's own user, such as one made through the Go API or the admin API; no
+  trusted issuer reaches it, so let a trusted issuer's customer make itself
+  with its first request.
 
 ## Trusted issuers
 
