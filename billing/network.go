@@ -23,3 +23,12 @@ type NetworkOrder struct {
 	MerchantID MerchantID     `json:"merchant_id"`
 	Order      Order          `json:"order"`
 }
+
+// NetworkNotification is a customer's billing notice at an actively linked
+// merchant. Reading it uses the same inbox state as that merchant's /me API.
+type NetworkNotification struct {
+	LinkID       CustomerLinkID `json:"link_id"`
+	MerchantID   MerchantID     `json:"merchant_id"`
+	Merchant     PublicMerchant `json:"merchant"`
+	Notification Notification   `json:"notification"`
+}

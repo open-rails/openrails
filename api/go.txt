@@ -71,6 +71,7 @@ pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader,
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
+pkg openrails, method (*Client) ListCustomerNotifications(context.Context, billing.CustomerID, billing.NotificationListParams, ...RequestOption) (*billing.ListPage[billing.Notification], error)
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
 pkg openrails, method (*Client) ListFindings(context.Context, billing.FindingListParams, ...RequestOption) (*billing.ListPage[billing.Finding], error)
@@ -1982,6 +1983,11 @@ pkg openrails/billing, type NetworkLinkChallenge struct
 pkg openrails/billing, type NetworkLinkChallenge struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type NetworkLinkChallenge struct, ID string `json:"id"`
 pkg openrails/billing, type NetworkLinkChallenge struct, Nonce string `json:"nonce"`
+pkg openrails/billing, type NetworkNotification struct
+pkg openrails/billing, type NetworkNotification struct, LinkID CustomerLinkID `json:"link_id"`
+pkg openrails/billing, type NetworkNotification struct, Merchant PublicMerchant `json:"merchant"`
+pkg openrails/billing, type NetworkNotification struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type NetworkNotification struct, Notification Notification `json:"notification"`
 pkg openrails/billing, type NetworkOrder struct
 pkg openrails/billing, type NetworkOrder struct, LinkID CustomerLinkID `json:"link_id"`
 pkg openrails/billing, type NetworkOrder struct, MerchantID MerchantID `json:"merchant_id"`
@@ -2006,6 +2012,8 @@ pkg openrails/billing, type Notification struct, CustomerID CustomerID `json:"cu
 pkg openrails/billing, type Notification struct, Data NotificationData `json:"data"`
 pkg openrails/billing, type Notification struct, EventType string `json:"event_type"`
 pkg openrails/billing, type Notification struct, ID NotificationID `json:"id"`
+pkg openrails/billing, type Notification struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type Notification struct, ReadAt *time.Time `json:"read_at"`
 pkg openrails/billing, type Notification struct, Seen bool `json:"seen"`
 pkg openrails/billing, type NotificationData struct
 pkg openrails/billing, type NotificationData struct, Amount *int64 `json:"amount,omitempty,string"`
@@ -2049,6 +2057,9 @@ pkg openrails/billing, type NotificationData struct, ToState string `json:"to_st
 pkg openrails/billing, type NotificationData struct, TransactionID string `json:"transaction_id,omitempty"`
 pkg openrails/billing, type NotificationData struct, UserEmail string `json:"user_email,omitempty"`
 pkg openrails/billing, type NotificationID [16]byte
+pkg openrails/billing, type NotificationListParams struct
+pkg openrails/billing, type NotificationListParams struct, Seen *bool
+pkg openrails/billing, type NotificationListParams struct, embedded PageRequest
 pkg openrails/billing, type OfferListParams struct
 pkg openrails/billing, type OfferListParams struct, Entitlements []string
 pkg openrails/billing, type OfferListParams struct, Keys []string

@@ -8,11 +8,20 @@ import (
 // (GET /v1/me/notifications).
 type Notification struct {
 	ID         NotificationID   `json:"id"`
+	MerchantID MerchantID       `json:"merchant_id"`
 	CustomerID CustomerID       `json:"customer_id"`
 	EventType  string           `json:"event_type"`
 	Data       NotificationData `json:"data"`
 	Seen       bool             `json:"seen"`
+	ReadAt     *time.Time       `json:"read_at"`
 	CreatedAt  time.Time        `json:"created_at"`
+}
+
+// NotificationListParams pages a customer's retained billing inbox, newest
+// first. Seen nil includes both read and unread notifications.
+type NotificationListParams struct {
+	PageRequest
+	Seen *bool
 }
 
 // CustomerNotificationLookup answers every notification a customer marked

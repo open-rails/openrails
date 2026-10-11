@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (169), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (173), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -209,6 +209,7 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
+| GET | `/v1/app/customers/{customer_id}/notifications` | application | `merchant:customers:read`<br>`root:customers:read` | — | 200 `ListPage<Notification>` |  |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
@@ -239,10 +240,13 @@ The openrails.dev account across the merchants it is linked at, where the standa
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| GET | `/v1/network/notifications` | network | — | — | 200 `ListPage<NetworkNotification>` | when `customer_network` |
 | GET | `/v1/network/links` | network | — | — | 200 `ListPage<NetworkLink>` | when `customer_network` |
 | GET | `/v1/network/subscriptions` | network | — | — | 200 `ListPage<NetworkSubscription>` | when `customer_network` |
 | GET | `/v1/network/orders` | network | — | — | 200 `ListPage<NetworkOrder>` | when `customer_network` |
 | DELETE | `/v1/network/links/{link_id}` | network | — | — | 204 — | when `customer_network`; sensitive |
+| GET | `/v1/network/links/{link_id}/notifications` | network | — | — | 200 `ListPage<Notification>` | when `customer_network` |
+| POST | `/v1/network/links/{link_id}/notifications/read` | network | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` | when `customer_network` |
 | GET | `/v1/network/links/{link_id}/subscriptions/{id}` | network | — | — | 200 `Subscription` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/subscriptions/{id}/cancel` | network | — | `CustomerCancelSubscriptionParams` | 200 `Subscription` | when `customer_network`; sensitive |
 | POST | `/v1/network/links/{link_id}/subscriptions/{id}/resume` | network | — | — | 200 `Subscription` | when `customer_network`; sensitive |

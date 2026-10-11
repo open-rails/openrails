@@ -1147,6 +1147,13 @@ export type NetworkLinkChallenge = {
   expires_at: string
 }
 
+export type NetworkNotification = {
+  link_id: string
+  merchant_id: string
+  merchant: PublicMerchant
+  notification: Notification
+}
+
 export type NetworkOrder = {
   link_id: string
   merchant_id: string
@@ -1175,10 +1182,12 @@ export type NextAction = {
 
 export type Notification = {
   id: string
+  merchant_id: string
   customer_id: string
   event_type: string
   data: NotificationData
   seen: boolean
+  read_at: string | null
   created_at: string
 }
 
