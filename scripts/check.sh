@@ -109,6 +109,19 @@ checks() {
 e2e() {
   : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
   bash scripts/e2e.sh
+  examples_e2e
+}
+
+# The examples' end-to-end tests: own-auth's, and standalone's against the
+# server built from this checkout.
+examples_e2e() {
+  : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
+  local dir
+  dir="$(mktemp -d)"
+  # shellcheck disable=SC2064 # the directory is fixed now
+  trap "rm -rf '$dir'" EXIT
+  (cd server && go build -o "$dir/openrails" ./cmd/openrails)
+  (cd examples && OPENRAILS_BIN="$dir/openrails" go test -count=1 -tags e2e,integration ./own-auth/ ./standalone/)
 }
 
 case "${1:-all}" in
@@ -118,6 +131,7 @@ case "${1:-all}" in
   console) console ;;
   chart) chart ;;
   e2e) e2e ;;
+  examples-e2e) examples_e2e ;;
   all) checks; e2e ;;
-  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|examples-e2e|all]" >&2; exit 2 ;;
 esac

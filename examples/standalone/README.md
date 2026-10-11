@@ -48,7 +48,8 @@ DATABASE_URL=postgres://… OPENRAILS_CLIENT_SECRET=… EMAIL_SMTP_HOST=… go r
 
 ## Tests
 
-`go test -tags integration .` with `OPENRAILS_E2E_DSN` naming a PostgreSQL 18
+CI runs them (`bash scripts/check.sh examples-e2e` from the repository root).
+By hand: `go test -tags integration .` with `OPENRAILS_E2E_DSN` naming a PostgreSQL 18
 server, and `OPENRAILS_E2E_REDIS` a Redis if you want one. Each test runs
 the `openrails` binary (`OPENRAILS_BIN`, else built from `../../server`)
 with `openrails/config.yaml` and `merchant.example.yaml`, only their ports

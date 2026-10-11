@@ -126,11 +126,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: HELM="$(scripts/ci-install-tool.sh helm)" bash scripts/check.sh chart
 
-  # The required check: every part above must pass. A skipped, cancelled or
-  # failed part never turns into a successful aggregate.
+  # The required check: every part above, and the examples' end-to-end job
+  # below, must pass. A skipped, cancelled or failed part never turns into a
+  # successful aggregate.
   checks:
     name: Checks
-    needs: [go-test, lint, console, chart]
+    needs: [go-test, lint, console, chart, examples-e2e]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -271,11 +272,46 @@ jobs:
           family: e2e
           save: "true"
 
-  # The required check: every worker and the SQL gates must pass. A skipped,
-  # cancelled or failed child never turns into a successful aggregate.
+  # The examples' own end-to-end tests: own-auth over its tables, and the
+  # standalone example against the server built from this revision.
+  examples-e2e:
+    name: Examples end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Start PostgreSQL
+        run: |
+          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
+          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
+            --tmpfs /var/lib/postgresql:rw,size=2g \
+            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            "$image"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: examples
+      - name: Wait for PostgreSQL
+        run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+      - run: bash scripts/check.sh examples-e2e
+      - uses: ./.github/actions/go-cache
+        if: ${{ !cancelled() }}
+        with:
+          family: examples
+          save: "true"
+
+  # The required check: every worker, the examples and the SQL gates must
+  # pass. A skipped, cancelled or failed child never turns into a successful
+  # aggregate.
   e2e:
     name: End-to-end
-    needs: [e2e-shards, sql]
+    needs: [e2e-shards, examples-e2e, sql]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
