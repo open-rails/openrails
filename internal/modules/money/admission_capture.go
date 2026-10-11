@@ -69,6 +69,9 @@ func (s *MoneyService) RateUsageEstimate(ctx context.Context, q *gen.Queries, pa
 		if err != nil {
 			return 0, nil, err
 		}
+		if amount > maxQuantity-charge {
+			return 0, nil, fmt.Errorf("usage estimate amount overflows int64")
+		}
 		amount += charge
 	}
 	pinned, err := json.Marshal(cards)

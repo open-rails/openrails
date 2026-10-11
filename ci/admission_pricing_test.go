@@ -98,6 +98,23 @@ func TestHoldIsPricedFromTheEstimatedUsage(t *testing.T) {
 	require.Equal(t, billing.CodeUsageNotPriced, verdicts[1].Error.Code)
 }
 
+func TestUsageEstimateCannotOverflowIntoAFreeAdmission(t *testing.T) {
+	p := newPricing(t, newFixture(t), "estimate-overflow")
+	// Each card's price fits int64; their sum is 2^64, which must not
+	// wrap to zero and admit the request without reserving any money.
+	for _, key := range []string{"first", "second", "third", "fourth"} {
+		p.meter(key, "expensive", catalog.AggregationCount, "", nil, perUnit(1<<62, 1), nil)
+	}
+	customer := billing.CustomerID(uuid.New())
+	p.grant(customer, 1_000_000)
+
+	verdict := p.admitUsage(customer, "overflow", billing.UsageEstimate{EventType: "expensive"})
+	require.False(t, verdict.Allowed(), "an overflowing estimate must not create a free admission")
+	require.NotNil(t, verdict.Error)
+	require.Nil(t, verdict.Admission)
+	require.Zero(t, p.balance(customer).HeldAmount)
+}
+
 // The owner's case: hold $0.02, the work costs $0.01, and $0.01 moves. The
 // hold is gone and the usage is recorded with its charges.
 func TestCaptureSettlesAtTheCatalogPrice(t *testing.T) {
