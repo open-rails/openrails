@@ -79,12 +79,6 @@ export interface Dashboard {
   updated_by?: string
 }
 
-export interface GeneratedWidget {
-  query: MetricsQuery
-  title: string
-  viz: WidgetViz
-}
-
 export const metricsQuery = (query: MetricsQuery, signal?: AbortSignal) =>
   api<MetricsResult>("/metrics/query", {
     method: "POST",
@@ -97,14 +91,6 @@ export const getDashboard = (signal?: AbortSignal) =>
 
 export const putDashboard = (widgets: Widget[]) =>
   api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })
-
-// generateWidget: prompt → validated {query,title,viz}; baseQuery makes the
-// prompt refine that query.
-export const generateWidget = (prompt: string, baseQuery?: MetricsQuery) =>
-  api<GeneratedWidget>("/metrics/dashboard/widgets/generate", {
-    method: "POST",
-    body: baseQuery ? { prompt, base_query: baseQuery } : { prompt },
-  })
 
 // AskEvidence is one executed tool query: the query plus its VERBATIM result
 // (a MetricsResult) — on-screen numbers come from here, never from prose.

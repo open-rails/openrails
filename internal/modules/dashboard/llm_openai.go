@@ -137,26 +137,6 @@ func (o *OpenAILLM) send(ctx context.Context, reqBody any) (*openaiResponse, err
 	return &out, nil
 }
 
-// Complete sends one chat turn and returns the assistant text.
-func (o *OpenAILLM) Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error) {
-	req := openaiRequest{Model: o.model, MaxCompletionTokens: openaiMaxTokens}
-	if system != "" {
-		req.Messages = append(req.Messages, openaiMessage{Role: "system", Content: system})
-	}
-	for _, m := range msgs {
-		req.Messages = append(req.Messages, openaiMessage{Role: m.Role, Content: m.Content})
-	}
-	out, err := o.send(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	text := strings.TrimSpace(out.Choices[0].Message.Content)
-	if text == "" {
-		return "", fmt.Errorf("dashboard llm: empty response (finish_reason %q)", out.Choices[0].FinishReason)
-	}
-	return text, nil
-}
-
 // CompleteTools sends one tool-use turn. Mapping notes vs the Anthropic wire:
 // tool results are individual role:"tool" messages (not blocks in a user
 // turn), tool-call arguments travel as a JSON-encoded string, and there is no

@@ -20,14 +20,10 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.MetricsSchema{}}}, Handler: h(handlers.MerchantMetricsSchema)},
 	{Method: GET, Path: "/v1/metrics/dashboard", Group: Metrics, Auth: AuthMerchant, Name: "GetDashboard",
 		Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMerchantDashboard)},
-	// The metrics assistants send aggregate results (ask) or the schema
-	// (generate) to the LLM provider: mounted only with llm.api_key, and ask
-	// with the llm.ask_enabled consent. A generated widget is a proposal;
-	// saving the layout is PUT /v1/merchant/dashboard.
+	// Metrics questions send aggregate results to the LLM provider, requiring
+	// both llm.api_key and the llm.ask_enabled consent.
 	{Method: POST, Path: "/v1/metrics/ask", Group: Metrics, Auth: AuthMerchant, Name: "AskMetrics", When: FeatureMetricsAsk,
 		Request: billing.AskMetricsParams{}, Responses: []Reply{{200, billing.MetricsAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.MerchantMetricsAsk)},
-	{Method: POST, Path: "/v1/metrics/dashboard/widgets/generate", Group: Metrics, Auth: AuthMerchant, Name: "GenerateDashboardWidget", When: FeatureDashboardGeneration,
-		Request: billing.GenerateDashboardWidgetParams{}, Responses: []Reply{{200, billing.GeneratedWidget{}}}, Errors: codes("rate_limit_exceeded", "dashboard_invalid", "invalid_param", "model_unavailable", "service_unavailable", "widget_generation_invalid"), Handler: h(handlers.GenerateDashboardWidget)},
 	{Method: PUT, Path: "/v1/merchant/dashboard", Group: MerchantConfig, Auth: AuthMerchant, Name: "SetDashboard",
 		Request: billing.SetDashboardParams{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
 	{Method: GET, Path: "/v1/merchant/findings", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListFindings",

@@ -100,6 +100,9 @@ it("runs every widget over the URL's range but a fixed one over its own", async 
   }
   await open("/?from=2024-01-01&to=2026-09-30")
   await vi.waitFor(() => expect(queried()).toHaveLength(2))
+  expect(document.body.textContent).not.toContain("Add widget")
+  expect(document.body.textContent).not.toContain("Add as widget")
+  expect(document.querySelector("textarea")).toBeNull()
   expect(queried()).toContainEqual(today.query)
   expect(queried()).toContainEqual({
     ...daily.query,

@@ -47,8 +47,8 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 }
 
 // MerchantMetricsAsk handles POST /v1/metrics/ask: an LLM answers by
-// running compiler-validated queries in the caller's merchant context. Unlike
-// widget generation it sees aggregate results, so the route mounts only with
+// running compiler-validated queries in the caller's merchant context. It
+// sees aggregate results, so the route mounts only with
 // llm.ask_enabled. The response carries every executed query's verbatim result.
 func MerchantMetricsAsk(r *httprequest.Request) {
 	svc := r.State.DashboardService

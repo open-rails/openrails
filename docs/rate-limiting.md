@@ -42,7 +42,6 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
 | `metrics-ask` | `metrics-ask` | 10 | `POST /v1/metrics/ask` |
 | `catalog-ask` | `catalog-ask` | 10 | `POST /v1/catalog/ask` (including drafting) |
-| `dashboard-generate` | `dashboard-generate` | 10 | `POST /v1/metrics/dashboard/widgets/generate` |
 
 Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front
 of OpenRails (Traefik). A bucket left out of `rate_limits` is not limited, any other key refuses

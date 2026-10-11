@@ -39,10 +39,9 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, rdb.Close()) })
 			}
 			limits := config.RateLimitsConfig{
-				"metrics-ask":        {RequestsPerMinute: 2},
-				"catalog-ask":        {RequestsPerMinute: 2},
-				"dashboard-generate": {RequestsPerMinute: 2},
-				"checkout":           {RequestsPerMinute: 2},
+				"metrics-ask": {RequestsPerMinute: 2},
+				"catalog-ask": {RequestsPerMinute: 2},
+				"checkout":    {RequestsPerMinute: 2},
 			}
 			calls := 0
 			h := RateLimitHTTP(&limits, captchaOn, stillState(rdb), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -52,7 +51,6 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			for _, path := range []string{
 				"/v1/metrics/ask",
 				"/v1/catalog/ask",
-				"/v1/metrics/dashboard/widgets/generate",
 			} {
 				before := calls
 				for i, prefix := range []string{"", "/billing"} {
