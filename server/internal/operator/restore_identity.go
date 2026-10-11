@@ -19,21 +19,20 @@ import (
 type ProvisionMerchantForRestoreRequest struct {
 	MerchantID billing.MerchantID
 	// Slug is the name the restored merchant claims at the destination.
-	Slug            string
-	ExistingGroupID string
-	OwnerUserID     string
+	Slug        string
+	OwnerUserID string
 }
 
-// ProvisionMerchantForRestore preserves a merchant UUID under an existing
-// destination merchant group whose live owner is req.OwnerUserID, claiming
-// req.Slug. It creates no groups, roles, credentials or host routes. The
-// importer separately requires an empty billing book.
+// ProvisionMerchantForRestore preserves a merchant UUID under the destination
+// merchant group whose id is the merchant's, which req.OwnerUserID owns live,
+// claiming req.Slug. It creates no groups, roles, credentials or host routes.
+// The importer separately requires an empty billing book.
 func ProvisionMerchantForRestore(ctx context.Context, cp *controlplane.ControlPlane, req ProvisionMerchantForRestoreRequest) (*billing.ProvisionMerchantResult, error) {
 	if req.MerchantID.IsZero() {
 		return nil, fmt.Errorf("control plane restore provision: merchant_id is required")
 	}
-	groupID, owner := strings.TrimSpace(req.ExistingGroupID), strings.TrimSpace(req.OwnerUserID)
-	if groupID == "" || owner == "" {
+	groupID, owner := req.MerchantID.String(), strings.TrimSpace(req.OwnerUserID)
+	if owner == "" {
 		return nil, iam.ErrInsufficientAuthority
 	}
 	core := cp.Core()

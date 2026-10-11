@@ -325,20 +325,21 @@ func (w *archiveCountingWriter) Write(p []byte) (int, error) {
 }
 
 func newBillingPrepareTargetCmd() *cobra.Command {
-	var rawMerchant, slug, groupID, ownerID string
+	var rawMerchant, slug, ownerID string
 	var unbound bool
 	cmd := &cobra.Command{
 		Use:   "prepare-target --merchant UUID",
 		Short: "Provision the exact merchant identity in the local destination database",
-		Long: "Create the destination merchant identity with --slug before import. Bind it to an existing destination " +
-			"AuthKit group and its owner, or explicitly select an unbound host-local merchant. This does not import billing data.",
+		Long: "Create the destination merchant identity with --slug before import. Bind it to the destination's AuthKit " +
+			"group whose id is the merchant's, owned by --owner-user-id, or explicitly select an unbound host-local merchant. " +
+			"This does not import billing data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mid, err := parseBillingArchiveMerchant(rawMerchant)
 			if err != nil {
 				return err
 			}
-			if err := validateBillingPrepareTarget(unbound, slug, groupID, ownerID); err != nil {
+			if err := validateBillingPrepareTarget(unbound, slug, ownerID); err != nil {
 				return err
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -371,7 +372,7 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 				}
 				defer func() { _ = srv.Close(context.WithoutCancel(ctx)) }()
 				if _, err := operator.ProvisionMerchantForRestore(ctx, cp, operator.ProvisionMerchantForRestoreRequest{
-					MerchantID: mid, Slug: strings.TrimSpace(slug), ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
+					MerchantID: mid, Slug: strings.TrimSpace(slug), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err
 				}
@@ -383,20 +384,19 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&rawMerchant, "merchant", "", "Exact source merchant UUID to preserve (required)")
 	cmd.Flags().BoolVar(&unbound, "unbound-merchants", false, "Create a host-local merchant without an OpenRails control-plane AuthKit group")
 	cmd.Flags().StringVar(&slug, "slug", "", "Destination merchant name (required)")
-	cmd.Flags().StringVar(&groupID, "authkit-group-id", "", "Existing destination AuthKit merchant group UUID")
-	cmd.Flags().StringVar(&ownerID, "owner-user-id", "", "Destination AuthKit user UUID holding live ownership of that group")
+	cmd.Flags().StringVar(&ownerID, "owner-user-id", "", "Destination AuthKit user UUID owning the merchant's group (its id is the merchant's)")
 	return cmd
 }
 
-func validateBillingPrepareTarget(unbound bool, slug, groupID, ownerID string) error {
-	slug, groupID, ownerID = strings.TrimSpace(slug), strings.TrimSpace(groupID), strings.TrimSpace(ownerID)
+func validateBillingPrepareTarget(unbound bool, slug, ownerID string) error {
+	slug, ownerID = strings.TrimSpace(slug), strings.TrimSpace(ownerID)
 	switch {
 	case slug == "":
 		return fmt.Errorf("--slug is required")
-	case unbound && (groupID != "" || ownerID != ""):
-		return fmt.Errorf("--unbound-merchants cannot use --authkit-group-id or --owner-user-id")
-	case !unbound && (groupID == "" || ownerID == ""):
-		return fmt.Errorf("provide --authkit-group-id and --owner-user-id, or use --unbound-merchants")
+	case unbound && ownerID != "":
+		return fmt.Errorf("--unbound-merchants cannot use --owner-user-id")
+	case !unbound && ownerID == "":
+		return fmt.Errorf("provide --owner-user-id, or use --unbound-merchants")
 	}
 	return nil
 }

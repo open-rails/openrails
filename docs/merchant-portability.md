@@ -118,14 +118,14 @@ For an OpenRails control plane:
 ```sh
 openrails --config destination.yaml --provider-write-mode readonly \
   billing prepare-target --merchant "$MERCHANT_UUID" --slug shop \
-  --authkit-group-id "$DESTINATION_GROUP_UUID" \
   --owner-user-id "$DESTINATION_OWNER_UUID"
 ```
 
-The destination group must already exist. Preparation checks live ownership and
-claims `--slug` as the merchant name. It creates only the merchant identity with
-the original merchant UUID and the destination group binding. It cannot adopt an
-existing merchant with different identity or authority.
+The destination's merchant group must already exist, with the merchant's UUID
+as its id: a merchant's group id is its merchant id. Preparation checks live
+ownership and claims `--slug` as the merchant name. It creates only the merchant
+identity with the original merchant UUID, bound to that group. It cannot adopt
+an existing merchant with different identity or authority.
 
 For a host that manages its own authentication and uses an unbound billing
 merchant:
@@ -138,7 +138,7 @@ openrails --config destination.yaml --provider-write-mode readonly \
 
 Go hosts run the same preparation before binding their client:
 `openrails billing prepare-target --unbound-merchants` for an engine without a
-control plane, or `--authkit-group-id` and `--owner-user-id` for one with it.
+control plane, or `--owner-user-id` for one with it.
 Preparation imports no billing data and no provider credentials. Repeating the same identity preparation is safe; conflicting
 identity or group bindings are refused.
 

@@ -7,19 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // The group-bound preparation used by the hosted CLI checks real destination
-// AuthKit authority. Neither the archive UUID nor a foreign owner can rebind it.
+// AuthKit authority: the merchant's group is the one whose id is the
+// merchant's, and only its live owner prepares it. Neither the archive nor a
+// foreign owner binds it.
 func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	t.Parallel()
 	slug := uniqueName("restore")
@@ -31,24 +31,23 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	auth := srv.AuthKit()
 	_, cp := operator.Of(srv)
 	owner, outsider := authtest.NewUser(t, auth), authtest.NewUser(t, auth)
+	req := operator.ProvisionMerchantForRestoreRequest{MerchantID: mid, Slug: slug, OwnerUserID: owner.ID}
+	_, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
+	require.ErrorIs(t, err, iam.ErrGroupNotFound, "the destination group comes first")
 	ownerSubject := iam.UserSubject(owner.ID)
-	group, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
+	_, err = auth.CreateGroup(t.Context(), iam.NewGroup{ID: mid.String(), Persona: operator.MerchantType, Owner: &ownerSubject})
 	require.NoError(t, err)
-	req := operator.ProvisionMerchantForRestoreRequest{MerchantID: mid, Slug: slug, ExistingGroupID: group.ID, OwnerUserID: outsider.ID}
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
+	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, operator.ProvisionMerchantForRestoreRequest{MerchantID: mid, Slug: slug, OwnerUserID: outsider.ID})
 	require.ErrorIs(t, err, iam.ErrInsufficientAuthority)
-	req.OwnerUserID = owner.ID
 	prepared, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.NoError(t, err)
 	require.Equal(t, mid, prepared.MerchantID)
-	require.Equal(t, group.ID, prepared.GroupID)
+	require.Equal(t, mid.String(), prepared.GroupID)
 	require.True(t, prepared.Created)
 	again, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.NoError(t, err)
 	require.False(t, again.Created)
-	otherGroup, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
+	scope, err := srv.MerchantScope(t.Context(), mid)
 	require.NoError(t, err)
-	req.ExistingGroupID = otherGroup.ID
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
-	require.ErrorIs(t, err, merchants.ErrMerchantRestoreConflict)
+	require.Equal(t, mid.String(), scope.ID, "the restored merchant's staff hold their permissions in its group")
 }
