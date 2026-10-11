@@ -79,7 +79,6 @@ var routeArguments = map[string][]any{
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
-	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
 	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID(uuid.New()), ToPriceID: billing.PriceID(uuid.New())}},
 	"PreviewPriceMigration": {billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},

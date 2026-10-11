@@ -22,7 +22,7 @@ func snapshotWireFixture(t *testing.T) CatalogSnapshot {
 		Dependencies: CatalogDependencies{PSPs: []CatalogPSPIdentity{}},
 		Tables:       map[string][]map[string]json.RawMessage{},
 	}
-	for _, table := range []string{"products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_meters", "catalog_rate_cards", "catalog_applications", "product_archive_operations"} {
+	for _, table := range []string{"products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_meters", "catalog_rate_cards", "catalog_applications"} {
 		document.Tables[table] = []map[string]json.RawMessage{}
 	}
 	return document
@@ -289,4 +289,23 @@ func TestCatalogSnapshotHistoricalRateOverrides(t *testing.T) {
 	require.Len(t, cards, 1)
 	require.Equal(t, slices.Sorted(maps.Keys(card)), slices.Sorted(maps.Keys(cards[0])))
 	require.JSONEq(t, string(card["id"]), string(cards[0]["id"]))
+}
+
+// A snapshot from before migration 66 carries product archive operations. It
+// verifies against its own digest and restores without them.
+func TestCatalogSnapshotHistoricalProductArchives(t *testing.T) {
+	document := snapshotWireFixture(t)
+	document.Tables["products"] = []map[string]json.RawMessage{snapshotWireProduct(t)}
+	document.Tables["product_archive_operations"] = []map[string]json.RawMessage{{
+		"merchant_id": json.RawMessage(`"` + snapshotTestMerchant + `"`), "id": json.RawMessage(`"10000000-0000-0000-0000-000000000006"`),
+		"idempotency_key": json.RawMessage(`"archive-1"`), "product_id": json.RawMessage(`"10000000-0000-0000-0000-000000000002"`),
+		"purchase_action": json.RawMessage(`"review"`), "created_at": json.RawMessage(`"2026-10-07 12:00:00+00"`),
+	}}
+	signed, count, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count, "the product")
+	require.Contains(t, signed.Tables, "product_archive_operations", "the signed document is unchanged")
+	upgraded, err := upgradeCatalogSnapshot(signed)
+	require.NoError(t, err)
+	require.NotContains(t, upgraded.Tables, "product_archive_operations")
 }

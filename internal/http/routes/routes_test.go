@@ -126,7 +126,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/admin/catalog/prices/{id}/history":               catalog,
 		"POST /v1/admin/catalog/apply":                            catalog,
 		"PUT /v1/admin/catalog/meters/{key}":                      catalog,
-		"POST /v1/admin/catalog/product-archives":                 catalog,
 		"GET /v1/admin/orders":                                    read,
 		"POST /v1/admin/payments":                                 write,
 	} {
@@ -187,7 +186,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	for _, key := range []string{"GET /admin/catalog/meters", "GET /admin/catalog/products", "GET /admin/price-migrations", "POST /admin/price-migrations/preview"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
-	for _, key := range []string{"POST /admin/catalog/apply", "PATCH /admin/catalog/prices/{id}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/meters/{key}"} {
+	for _, key := range []string{"POST /admin/catalog/apply", "PATCH /admin/catalog/prices/{id}", "POST /admin/catalog/prices", "PUT /admin/catalog/meters/{key}"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
 

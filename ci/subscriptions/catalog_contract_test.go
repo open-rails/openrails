@@ -244,3 +244,46 @@ func TestMetersAndTheirRateCards(t *testing.T) {
 		require.True(t, found)
 	}
 }
+
+// Archiving a product stops its sales and nothing else: its buyers keep their
+// access and their money, and their payments still name it.
+func TestArchivingAProductKeepsItsBuyers(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.client[embedded]
+	key, entitlement := "video-"+uuid.NewString()[:6], "video:"+uuid.NewString()[:6]
+	_, err := c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{key: {
+		DisplayName: catalog.Value("Video"), Entitlements: catalog.Value([]string{entitlement}),
+		Prices: map[string]catalog.ApplyPrice{"buy": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(4_000_000))}},
+	}}}, billing.ApplyCatalogParams{})
+	require.NoError(t, err)
+	price, err := priceByKey(t.Context(), c, key, "buy")
+	require.NoError(t, err)
+	buyer := w.newCustomer()
+	buyer.mustCheckout(embedded, order{price: price.ID, rail: "nmi", method: buyer.saveCard("nmi", visa)})
+
+	product, err := c.UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
+	require.NoError(t, err)
+	require.True(t, product.Archived)
+	w.settle()
+
+	require.True(t, buyer.entitled(entitlement), "the buyer keeps access")
+	paid := completed(w.payments(embedded, buyer.id))
+	require.Len(t, paid, 1)
+	require.Equal(t, billing.PaymentSucceeded, paid[0].Status)
+	require.Zero(t, paid[0].AmountRefunded, "nobody is refunded")
+	require.NotNil(t, paid[0].OrderID)
+	bought, err := c.GetOrder(t.Context(), *paid[0].OrderID)
+	require.NoError(t, err)
+	require.Len(t, bought.Lines, 1)
+	require.Equal(t, price.ProductID, *bought.Lines[0].ProductID, "the order still names the product")
+	require.Equal(t, price.ID, *bought.Lines[0].PriceID)
+	kept, err := c.GetProduct(t.Context(), price.ProductID)
+	require.NoError(t, err)
+	require.True(t, kept.Archived, "the archived product still reads")
+	for _, entry := range w.railLedger("nmi") {
+		require.Zero(t, entry.Refunded)
+	}
+	_, err = w.newCustomer().sell(embedded, order{price: price.ID})
+	require.Error(t, err, "an archived product is not for sale")
+}

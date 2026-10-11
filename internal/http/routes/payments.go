@@ -11,8 +11,7 @@ var cursorPage = params(text("cursor"), integer("limit"))
 
 // paymentsRoutes is money that moved or tried to: payments and refunds,
 // money the merchant received outside OpenRails, every authorization a PSP
-// answered, rebill cycles, and the purchases a product archive left for
-// review.
+// answered and rebill cycles.
 var paymentsRoutes = []Route{
 	{Method: POST, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "CreatePayment", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationOffChannel,
 		Request: billing.CreatePaymentParams{}, Responses: []Reply{{200, billing.Payment{}}, {201, billing.Payment{}}}, Errors: codes("idempotency_key_reused", "invalid_param", "order_action_not_allowed", "order_has_recurring_line", "order_not_payable", "order_payment_in_progress", "payment_exceeds_due", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreatePayment)},

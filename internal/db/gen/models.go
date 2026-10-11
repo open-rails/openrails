@@ -1273,19 +1273,6 @@ type BillingProductAccess struct {
 	Quantity *int32
 }
 
-// Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.
-type BillingProductArchiveOperation struct {
-	MerchantID             uuid.UUID
-	ID                     uuid.UUID
-	IdempotencyKey         string
-	RequestSha256          []byte
-	ProductID              uuid.UUID
-	PurchaseAction         string
-	PurchaseWindowStartsAt *time.Time
-	Reason                 *string
-	CreatedAt              time.Time
-}
-
 // The entitlement keys each product grants, with valid-time history: a key holds for [added_at, removed_at). Holders derive their keys from these rows at check time. Rows are never deleted; removal closes a row. Retention: permanent, never pruned.
 type BillingProductEntitlement struct {
 	ID          uuid.UUID

@@ -27,7 +27,6 @@ Every row and stored column from these nine catalog tables is included:
 | `catalog_rate_cards` | All current rate cards, with IDs |
 | `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog-ownership.md)) |
 | `catalog_applications` | Original application receipts, canonical hashes and revision coordinates |
-| `product_archive_operations` | Original product-archive request and replay receipts |
 
 The merchant's catalog revision is retained too. Price-key revisions
 (`price_keys`) are rebuilt as the prices are restored. Product revisions are counters:
@@ -75,14 +74,12 @@ catalog edits. A different artifact is refused on that occupied destination.
 old startup YAML also remains a replay after restore.
 
 Neither command contacts providers, charges customers, grants access, schedules
-jobs, or imports financial records. Archive-operation receipts retain their
-accepted request; their associated refunds, reviews and provider jobs are outside
-this catalog-only snapshot. Purchases, subscriptions, grants, balances and billing
+jobs, or imports financial records. Purchases, subscriptions, grants, balances and billing
 history require the full [merchant billing archive](../internal/merchantarchive/README.md).
 For a whole billing-book restore, use `billing export/import` directly into its
-empty destination, rather than importing a catalog first. The full billing
-archive currently excludes product-archive operation replay receipts; this
-catalog snapshot includes them. Its [documented exclusions](../internal/merchantarchive/README.md#exclusions-and-refusals)
+empty destination, rather than importing a catalog first. A snapshot taken
+before product archive operations were removed restores without them. The full
+billing archive's [documented exclusions](../internal/merchantarchive/README.md#exclusions-and-refusals)
 remain relevant when planning a complete deployment move.
 
 Artifacts are bounded at 64 MiB, with bounded YAML depth and node counts. Export

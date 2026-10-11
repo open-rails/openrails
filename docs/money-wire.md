@@ -43,7 +43,6 @@ another kind's prefix is `400 invalid_param`.
 | `uev_` | usage event | `hev_` | host event |
 | `ntf_` | notification | `fnd_` | finding |
 | `awh_` | alert webhook | | |
-| `par_` | product archive | | |
 
 Customer and merchant ids are plain UUIDs. A price or product *key* is a
 separate, opaque handle (`price_key`, `product_key`, the `keys` and `key` list filters); a

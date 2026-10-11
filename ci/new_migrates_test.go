@@ -264,11 +264,12 @@ func TestAPIHostMigrationDropsHosts(t *testing.T) {
 	require.Equal(t, product.ID, page.Items[0].ID)
 }
 
-// The migration that removes rate overrides applies over a meter whose rate
-// card one customer had an override of: the override goes with its columns,
-// and the card prices the meter.
-func TestRateOverrideMigrationDeletesOverrides(t *testing.T) {
-	f := beforeMigration(t, "_drop_rate_overrides.up.sql")
+// The migration that removes rate overrides and product archive operations
+// applies over a meter whose rate card one customer had an override of and a
+// product archived by an operation: the override goes with its columns, the
+// card prices the meter, and the operations table goes.
+func TestRateOverrideAndProductArchiveMigration(t *testing.T) {
+	f := beforeMigration(t, "_drop_rate_overrides_and_product_archives.up.sql")
 	table := func(name string) string { return pgx.Identifier{f.schema, name}.Sanitize() }
 	slug := "metered-" + uuid.NewString()[:8]
 	var merchantID, productID, customerID uuid.UUID
@@ -284,13 +285,15 @@ func TestRateOverrideMigrationDeletesOverrides(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.pool.Exec(t.Context(), `INSERT INTO `+table("catalog_rate_cards")+` (merchant_id, customer_id, ordinal, meter_key, payment_term, filter, price) VALUES ($1, $2, 1, 'requests', 'in_arrears', '{}', $3)`, merchantID, customerID, price("400"))
 	require.NoError(t, err)
+	_, err = f.pool.Exec(t.Context(), `INSERT INTO `+table("product_archive_operations")+` (merchant_id, idempotency_key, request_sha256, product_id, purchase_action) VALUES ($1, 'archive-api', sha256('archive-api'), $2, 'none')`, merchantID, productID)
+	require.NoError(t, err)
 
 	client := f.runtime(t, slug)
 	for _, column := range []string{"customer_id", "revision"} {
 		require.False(t, f.columnExists(t, "catalog_rate_cards", column), column)
 	}
-	for _, index := range []string{"catalog_rate_cards_customer_id_meter_key_key", "catalog_rate_cards_meter_key_customer_id_idx"} {
-		require.False(t, f.relationExists(t, index), index)
+	for _, relation := range []string{"catalog_rate_cards_customer_id_meter_key_key", "catalog_rate_cards_meter_key_customer_id_idx", "product_archive_operations"} {
+		require.False(t, f.relationExists(t, relation), relation)
 	}
 	var cards int
 	require.NoError(t, f.pool.QueryRow(t.Context(), `SELECT count(*) FROM `+table("catalog_rate_cards")+` WHERE merchant_id = $1`, merchantID).Scan(&cards))

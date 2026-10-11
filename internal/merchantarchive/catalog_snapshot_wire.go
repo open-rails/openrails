@@ -45,13 +45,13 @@ type CatalogPSPIdentity struct {
 	AccountID   string `json:"account_id"`
 }
 
-// The order is also the foreign-key insertion order. These are all ten
+// The order is also the foreign-key insertion order. These are all nine
 // persisted catalog tables; product/rate-card state prior to updates was never
 // retained and cannot be reconstructed by an export. Price keys are rebuilt
 // by the prices triggers.
 var catalogProfiles = func() []contract.Profile {
 	names := []string{"catalog_meters", "products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_field_owners", "catalog_applications"}
-	out := make([]contract.Profile, 0, len(names)+1)
+	out := make([]contract.Profile, 0, len(names))
 	for _, name := range names {
 		for _, p := range contract.Profiles {
 			if p.Name == name {
@@ -60,9 +60,7 @@ var catalogProfiles = func() []contract.Profile {
 			}
 		}
 	}
-	return append(out, contract.Profile{Name: "product_archive_operations", Columns: []contract.Column{
-		{Name: "merchant_id", Type: "uuid"}, {Name: "id", Type: "uuid"}, {Name: "idempotency_key", Type: "text"}, {Name: "request_sha256", Type: "bytea"}, {Name: "product_id", Type: "uuid"}, {Name: "purchase_action", Type: "text"}, {Name: "purchase_window_starts_at", Type: "timestamp with time zone"}, {Name: "reason", Type: "text"}, {Name: "created_at", Type: "timestamp with time zone"},
-	}})
+	return out
 }()
 
 func catalogRow(p contract.Profile, values []*string) (map[string]json.RawMessage, error) {
@@ -176,6 +174,11 @@ func catalogDigest(document CatalogSnapshot) (string, error) {
 // migration 15 converts them. The digest is the original document's.
 func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
 	document = withoutRateOverrides(document)
+	if _, historical := document.Tables["product_archive_operations"]; historical {
+		// Product archive operations were removed by migration 66.
+		document.Tables = maps.Clone(document.Tables)
+		delete(document.Tables, "product_archive_operations")
+	}
 	if _, current := document.Tables["catalog_field_owners"]; !current {
 		// A snapshot from before field ownership: no field had an owner.
 		tables := maps.Clone(document.Tables)

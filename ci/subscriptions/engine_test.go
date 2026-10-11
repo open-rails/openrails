@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
@@ -587,9 +588,8 @@ func TestEngineRepricing(t *testing.T) {
 
 // Scenario 8: refunding a renewal payment returns the money at the provider
 // once, with or without ending that period's access; the membership itself
-// continues (a refund is not a cancellation). Archiving the product with
-// refunds touches one-time purchases only (documented on ArchiveProduct):
-// subscription payments are neither listed nor refunded.
+// continues (a refund is not a cancellation). Archiving the product refunds
+// nobody: the member keeps access and still renews.
 func TestEngineRenewalRefunds(t *testing.T) {
 	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
@@ -641,17 +641,15 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				require.False(t, e.c.entitled(e.ent))
 			})
 		}
-		t.Run("archive_with_refund", func(t *testing.T) {
+		t.Run("archive", func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, e.price), billing.GetPriceParams{})
 			require.NoError(t, err)
-			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID, PurchaseAction: billing.PurchaseActionRefund, WindowSeconds: int64(365 * day / time.Second), Reason: "retired", IdempotencyKey: "archive-" + price.ProductID.String()})
+			_, err = w.client[tp].UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 			require.NoError(t, err)
 			w.settle()
-			require.True(t, archive.Complete)
-			require.Empty(t, archive.Purchases, "subscription payments are not archive purchases")
 			for _, entry := range e.providerLedger() {
 				require.Zero(t, entry.Refunded)
 			}

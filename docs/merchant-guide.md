@@ -276,26 +276,14 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 `revoke_on_full` (default: access ends once the charge is fully refunded),
 `revoke_on_any`, or `keep`. Set it in the merchant configuration (`UpdateMerchantConfiguration`).
 
-### Archiving a product with purchase refunds
+### Archiving a product
 
-`Client.ArchiveProduct` (`POST /v1/admin/catalog/product-archives`, catalog
-update plus payment refund permission) archives a product — never deletes it —
-and applies the host's policy to its one-time purchases at or after
-`PurchaseWindowStartsAt` (or within `WindowSeconds` of first acceptance), chosen by
-`PurchaseAction` (to archive a product alone, `PATCH` it `archived: true`):
-
-- `refund`: refund each purchase in full and end the access it granted. Purchases
-  that cannot be refunded automatically (refused, declined, off-rail) become reviews.
-- `review`: record each purchase for merchant review; no money moves.
-
-The idempotency key fixes the product, action, resolved window and reason;
-replays report the current outcome of every purchase and never refund twice.
-A response with `complete: false` stopped at its per-request provider budget;
-replay it to continue. Subscription payments are excluded (subscriptions stay
-grandfathered). A purchase under review is a finding
-(`life.product_archived_purchase`; the archive names it as `finding_id`),
-resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
-and ends access, `ignore` keeps both.
+`PATCH /v1/admin/catalog/products/{id}` with `archived: true`
+(`Client.UpdateProduct`) archives a product: it stops being for sale and is
+never deleted. Its buyers keep their access and their money, and their payments,
+orders and subscriptions keep naming it. Subscriptions on its prices stay
+grandfathered and keep renewing. Archiving refunds nobody; a refund is its own
+decision (`Client.RefundPayment`).
 
 Granting credits is money-in, an admin change (`billing.MerchantBillingManage`). Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit

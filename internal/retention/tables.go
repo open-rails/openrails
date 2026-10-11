@@ -45,7 +45,6 @@ var Tables = map[string]Table{
 	"solana_pay_receipts":                {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
 	"catalog_applications":               {Permanent, permanent},
 	"catalog_restore_receipts":           {Permanent, permanent},
-	"product_archive_operations":         {Permanent, permanent},
 	"destructive_run_before_images":      {Permanent, permanent},
 	"custody_migrations":                 {Permanent, permanent},
 	"payment_method_versions":            {Permanent, permanent},

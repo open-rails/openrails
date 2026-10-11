@@ -207,7 +207,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
 | `CheckCatalogDrift` | `client.RefreshPSPs(`, which also reads each PSP's catalog for drift |
-| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchaseWindowStartsAt` and `WindowSeconds` |
+| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | Removed: archiving a product (`client.UpdateProduct(` with `Archived`) stops its sales and refunds nobody; refund a purchase with `client.RefundPayment(` |
 
 ### Checkout
 
@@ -452,13 +452,12 @@ fields (`400 unknown_field`), and every error code is in
   `period_from`, `period_to`). Delinquency, its host event and its
   notifications: `overdue_started_at` (was `overdue_since`). The renewal
   notification: `period_starts_at`, `period_ends_at` (were `period_start`,
-  `period_end`). Product archives: `purchase_window_starts_at` (was
-  `purchased_since`). Cost observations: `query_starts_at`, `query_ends_at`;
+  `period_end`). Cost observations: `query_starts_at`, `query_ends_at`;
   lifecycle evidence: `provider_lifetime_starts_at`, `provider_lifetime_ends_at`.
 - **Notifications.** Unread is `{unread_count}`; marking read answers the
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
-  `ntf_`, `fnd_`, `hev_`, `par_`. An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
+  `ntf_`, `fnd_`, `hev_`. An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
   carries `checkout_session_id` in its metadata: let open ones expire first.
 
 ### New limits
@@ -533,7 +532,7 @@ up there.
 | `products.tier_group`, `subscriptions.tier_group` as `varchar(100)` | `text`; `products_tier_group_check` bounds a group name to 1–100 characters, and an empty name is stored as NULL (no group) |
 | `''` for an absent value, with `DEFAULT ''`: `subscriptions.rail_subscription_id`; `payment_methods.rail_customer_ref`, `rail_method_ref`, `stored_credential_recurring_ref`, `stored_credential_unscheduled_ref`, `fingerprint`, `network_token_id`, `network_token_status`, `network_token_par`, `park_reason`; `checkout_sessions.success_url`, `origin`; `grants.source_id`; `custody_migrations.from_rail_customer_ref`, `from_rail_method_ref`, `reason`; `invoker_spend_limits.provenance`; `maintenance_runs.actor`, `mode`; `merchant_webhooks.name`; `notifications.severity`, `title`, `body`, `link`; `product_archive_operations.reason`; `reconciliation_findings.rail`, `openrails_resource_type`; `reprice_batches.fallback_policy`; `subscription_reprices.blocked_reason`; `account_updater_batches.job_ref`, `failure_reason` | NULL when absent, no default; a CHECK refuses `''`. A query that matched `= ''` matches `IS NULL`, and `<> ''` becomes `IS NOT NULL`. `payment_attempts.step` and `nmi_history_months.reason` keep `''` (part of a key) |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |
-| PostgreSQL-generated and placeholder names: `admission_operations_check`, `_check1`, `_check2`, `admission_operations_merchant_id_customer_id_fkey`, `catalog_applications_check`, `product_archive_operations_check`, `product_archive_operations_merchant_id_idempotency_key_key`, `product_archive_operations_merchant_id_product_id_fkey`, `maintenance_runs_x_check`; indexes and checks named after a renamed column | Named by the same convention, e.g. `admission_operations_state_fields_check`, `product_archive_operations_idempotency_key_key`, `maintenance_runs_kind_check` |
+| PostgreSQL-generated and placeholder names: `admission_operations_check`, `_check1`, `_check2`, `admission_operations_merchant_id_customer_id_fkey`, `catalog_applications_check`, `product_archive_operations_check`, `product_archive_operations_merchant_id_idempotency_key_key`, `product_archive_operations_merchant_id_product_id_fkey`, `maintenance_runs_x_check`; indexes and checks named after a renamed column | Named by the same convention, e.g. `admission_operations_state_fields_check`, `maintenance_runs_kind_check` |
 
 ## Application cache and feature limits
 

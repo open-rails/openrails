@@ -62,7 +62,7 @@ sql:
       - "internal/migrate/postgres/0063_running_charges.up.sql"
       - "internal/migrate/postgres/0064_orders_id_index.up.sql"
       - "internal/migrate/postgres/0065_drop_merchant_api_hosts.up.sql"
-      - "internal/migrate/postgres/0066_drop_rate_overrides.up.sql"
+      - "internal/migrate/postgres/0066_drop_rate_overrides_and_product_archives.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

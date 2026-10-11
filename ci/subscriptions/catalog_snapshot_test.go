@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -41,9 +40,8 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	paid := buyer.mustCheckout(embedded, order{price: first.ID, rail: "nmi", method: method})
 	_, err = c.ApplyCatalog(t.Context(), declaration(7000000), billing.ApplyCatalogParams{})
 	require.NoError(t, err)
-	// A window that starts after the purchase leaves it alone: the archive only retires the product.
-	_, err = c.ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: first.ProductID, PurchaseAction: billing.PurchaseActionReview,
-		PurchaseWindowStartsAt: w.clock.Now().Add(time.Hour), IdempotencyKey: "snapshot-archive", Reason: "Catalog retirement"})
+	// Archiving retires the product; the purchase keeps pointing at it.
+	_, err = c.UpdateProduct(t.Context(), first.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 	require.NoError(t, err)
 	// Rate cards belong to the catalog snapshot.
 	rates, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
@@ -84,7 +82,6 @@ products:
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &document))
 	require.Len(t, document.Tables["prices"], 3)
-	require.Len(t, document.Tables["product_archive_operations"], 1)
 	require.Len(t, document.Tables["catalog_rate_cards"], 1)
 	require.Len(t, document.Dependencies.PSPs, 1)
 	require.Nil(t, document.Dependencies.Customers, "a rate card names no customer")
@@ -136,15 +133,15 @@ products:
 	_, err = w.pool.Exec(t.Context(), "UPDATE "+dst+`.psps SET account_id=(SELECT account_id FROM `+src+`.psps WHERE id=$1) WHERE id=$1`, w.psp["nmi"].UUID())
 	require.NoError(t, err)
 	// A sealed artifact with a broken later-table FK proves all earlier inserts roll back.
-	originalProduct := document.Tables["product_archive_operations"][0]["product_id"]
-	document.Tables["product_archive_operations"][0]["product_id"], err = json.Marshal(uuid.NewString())
+	originalProduct := document.Tables["catalog_rate_cards"][0]["product_id"]
+	document.Tables["catalog_rate_cards"][0]["product_id"], err = json.Marshal(uuid.NewString())
 	require.NoError(t, err)
 	var broken bytes.Buffer
 	require.NoError(t, merchantarchive.WriteCatalogSnapshot(&broken, document))
 	_, err = restore(broken.Bytes())
 	refusal(err, "integrity")
 	empty()
-	document.Tables["product_archive_operations"][0]["product_id"] = originalProduct
+	document.Tables["catalog_rate_cards"][0]["product_id"] = originalProduct
 
 	type outcome struct {
 		result merchantarchive.Result

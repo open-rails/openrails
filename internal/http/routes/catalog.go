@@ -42,9 +42,6 @@ var catalogRoutes = []Route{
 	{Method: PUT, Path: "/v1/admin/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate, Sensitive: true,
 		Request: billing.SetMeterParams{}, Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.SetMeter)},
 
-	{Method: POST, Path: "/v1/admin/catalog/product-archives", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ArchiveProduct", Level: LevelUpdate, Sensitive: true, IdempotencyKey: true,
-		Request: billing.ArchiveProductParams{}, Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes(append([]string{"idempotency_key_required", "idempotency_key_reused", "invalid_param", "provider_cancel_held", "rebill_terms_committed", "service_unavailable"}, productErrors...)...), Handler: h(handlers.CreateProductArchive)},
-
 	// The catalog assistant answers questions about the catalog and drafts
 	// price changes for a person to review; it never changes a catalog row.
 	{Method: POST, Path: "/v1/admin/catalog/ask", Group: CatalogAdmin, Auth: AuthMerchant, Name: "AskCatalog", Level: LevelRead, When: FeatureCatalogCopilot,

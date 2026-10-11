@@ -67,7 +67,6 @@ var ownedTables = []string{
 	"price_psp_bindings",
 	"prices",
 	"product_access",
-	"product_archive_operations",
 	"product_entitlements",
 	"products",
 	"provider_intents",

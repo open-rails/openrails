@@ -30,18 +30,3 @@ func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params
 	}
 	return &out, nil
 }
-
-// ArchiveProduct archives a product (never deletes it) and, per the caller's
-// policy, refunds or holds for review its recent one-time purchases. A
-// purchase held for review is a finding: ResolveFinding refunds it (approve)
-// or keeps it (ignore).
-func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProductParams, requestOptions ...RequestOption) (*billing.ProductArchive, error) {
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
-	}
-	var out billing.ProductArchive
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/catalog/product-archives", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
