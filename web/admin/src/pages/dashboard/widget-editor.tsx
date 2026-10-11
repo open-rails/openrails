@@ -51,7 +51,9 @@ export function WidgetEditor({
   onSave: (data: WidgetDraft) => void
 }) {
   const [title, setTitle] = React.useState(initial.title)
-  const [fixedRange, setFixedRange] = React.useState(initial.fixed_range ?? false)
+  const [fixedRange, setFixedRange] = React.useState(
+    initial.fixed_range ?? false
+  )
   const [viz, setViz] = React.useState<WidgetViz>(initial.viz)
   const { query } = initial
   const {
@@ -68,47 +70,119 @@ export function WidgetEditor({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className={cn("flex max-h-[90vh] flex-col overflow-hidden", DIALOG_WIDE)}>
+      <DialogContent
+        className={cn(
+          "flex max-h-[90vh] flex-col overflow-hidden",
+          DIALOG_WIDE
+        )}
+      >
         <DialogHeader>
           <DialogTitle>Edit widget</DialogTitle>
           <DialogDescription>
-            Change the title, chart type or date range behavior. The query stays the same.
+            Change the title, chart type or date range behavior. The query stays
+            the same.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <div className="grid gap-2 sm:grid-cols-[1fr_12rem]">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="widget-title">Title</Label>
-              <Input id="widget-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Widget title" />
+              <Input
+                id="widget-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Widget title"
+              />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="widget-viz">Chart type</Label>
-              <Select items={WIDGET_VIZ.map((value) => ({ value, label: VIZ_LABELS[value] }))} value={viz} onValueChange={(v) => setViz(v as WidgetViz)}>
-                <SelectTrigger id="widget-viz" className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{WIDGET_VIZ.map((v) => <SelectItem key={v} value={v}>{VIZ_LABELS[v]}</SelectItem>)}</SelectContent>
+              <Select
+                items={WIDGET_VIZ.map((value) => ({
+                  value,
+                  label: VIZ_LABELS[value],
+                }))}
+                value={viz}
+                onValueChange={(v) => setViz(v as WidgetViz)}
+              >
+                <SelectTrigger id="widget-viz" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WIDGET_VIZ.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {VIZ_LABELS[v]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           </div>
           <div className="flex items-start gap-3">
-            <Switch id="widget-fixed-range" checked={fixedRange} onCheckedChange={setFixedRange} />
+            <Switch
+              id="widget-fixed-range"
+              checked={fixedRange}
+              onCheckedChange={setFixedRange}
+            />
             <div className="grid gap-0.5">
               <Label htmlFor="widget-fixed-range">Keep its own range</Label>
-              <p className="text-xs text-muted-foreground">{fixedRange ? `Always shows ${ownRange(query.range)}, whatever range the dashboard shows.` : "Follows the range picked on the dashboard."}</p>
+              <p className="text-xs text-muted-foreground">
+                {fixedRange
+                  ? `Always shows ${ownRange(query.range)}, whatever range the dashboard shows.`
+                  : "Follows the range picked on the dashboard."}
+              </p>
             </div>
           </div>
           <div className="flex min-h-56 flex-1 flex-col rounded-lg border bg-muted/30 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground uppercase">Preview</span>
-              <Button size="sm" variant="outline" onClick={() => void refreshPreview()} disabled={previewing}>
-                {previewing ? <HugeiconsIcon icon={Loading02Icon} className="size-3.5 animate-spin" /> : null} Refresh
+              <span className="text-xs font-medium text-muted-foreground uppercase">
+                Preview
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void refreshPreview()}
+                disabled={previewing}
+              >
+                {previewing ? (
+                  <HugeiconsIcon
+                    icon={Loading02Icon}
+                    className="size-3.5 animate-spin"
+                  />
+                ) : null}{" "}
+                Refresh
               </Button>
             </div>
-            <div className="min-h-0 flex-1">{previewError ? <p className="text-xs whitespace-pre-wrap text-destructive" role="alert">{previewError}</p> : preview ? <WidgetVizView viz={viz} result={preview} query={query} /> : <p className="flex h-full items-center justify-center text-xs text-muted-foreground">{previewing ? "Running…" : "No preview yet"}</p>}</div>
+            <div className="min-h-0 flex-1">
+              {previewError ? (
+                <p
+                  className="text-xs whitespace-pre-wrap text-destructive"
+                  role="alert"
+                >
+                  {previewError}
+                </p>
+              ) : preview ? (
+                <WidgetVizView viz={viz} result={preview} query={query} />
+              ) : (
+                <p className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                  {previewing ? "Running…" : "No preview yet"}
+                </p>
+              )}
+            </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => { onSave({ title: title.trim(), viz, fixed_range: fixedRange }); onOpenChange(false) }} disabled={!title.trim()}>Save changes</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              onSave({ title: title.trim(), viz, fixed_range: fixedRange })
+              onOpenChange(false)
+            }}
+            disabled={!title.trim()}
+          >
+            Save changes
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

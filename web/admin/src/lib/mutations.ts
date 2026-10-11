@@ -60,11 +60,7 @@ import {
   type UsageMeterRequest,
   type SubscriptionFilters,
 } from "@/lib/api/endpoints"
-import {
-  askMetrics,
-  putDashboard,
-  type Widget,
-} from "@/lib/api/metrics"
+import { askMetrics, putDashboard, type Widget } from "@/lib/api/metrics"
 import type {
   ChangeSubscriptionParams,
   Customer,
