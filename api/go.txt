@@ -44,6 +44,7 @@ pkg openrails, method (*Client) CustomerAssertion(context.Context, billing.Custo
 pkg openrails, method (*Client) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (*Client) DeclarePSP(context.Context, billing.PSPDeclaration) (*billing.PSP, error)
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
+pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
@@ -510,6 +511,7 @@ pkg openrails/billing, const CodePriceChangeCurrencyMismatch untyped string = "p
 pkg openrails/billing, const CodePriceChangeTargetArchived untyped string = "price_change_target_archived"
 pkg openrails/billing, const CodePriceIncreaseNoticeTooShort untyped string = "price_increase_notice_too_short"
 pkg openrails/billing, const CodePriceMigrationNotFound untyped string = "price_migration_not_found"
+pkg openrails/billing, const CodeProductInUse untyped string = "product_in_use"
 pkg openrails/billing, const CodeProviderCancelHeld untyped string = "provider_cancel_held"
 pkg openrails/billing, const CodeQuantityNotAllowed untyped string = "quantity_not_allowed"
 pkg openrails/billing, const CodeRateLimitExceeded untyped string = "rate_limit_exceeded"

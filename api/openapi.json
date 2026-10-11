@@ -2124,6 +2124,49 @@
           "tier:merchant",
           "request"
         ]
+      },
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
+        "x-openrails-sensitive": true,
+        "x-openrails-catalog-update": true,
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "product_in_use",
+          "product_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
       }
     },
     "/v1/catalog/prices": {
@@ -21669,6 +21712,11 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "No PSP can sell this price."
+    },
+    "product_in_use": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Records refer to the product; archive it instead."
     },
     "product_not_found": {
       "status": 404,

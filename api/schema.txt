@@ -70,6 +70,7 @@ migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
+migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1620,11 +1621,13 @@ table billing.prices
   column customer_amount jsonb
   column billing_interval_hours integer
   column quantity jsonb
+  column deleted_at timestamp with time zone
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (billing_interval_hours IS NULL) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
+  constraint prices_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
   constraint prices_id_product_id_key UNIQUE (merchant_id, id, product_id)
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1647,7 +1650,7 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
-  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at')
+  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
@@ -1739,7 +1742,9 @@ table billing.products
   column revision bigint NOT NULL
   column credit_grant jsonb
   column ownership text
+  column deleted_at timestamp with time zone
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
+  constraint products_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_ownership_check CHECK ((ownership = ANY (ARRAY['unique'::text, 'consumable'::text, 'extend'::text])))

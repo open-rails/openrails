@@ -124,6 +124,7 @@ export type OpenRailsErrorCode =
   | "price_migration_not_found"
   | "price_not_found"
   | "price_not_sellable"
+  | "product_in_use"
   | "product_not_found"
   | "product_tier_group_conflict"
   | "product_tier_group_in_use"
@@ -315,6 +316,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   price_migration_not_found: { status: 404, type: "invalid_request_error", meaning: "The price migration does not exist." },
   price_not_found: { status: 404, type: "invalid_request_error", meaning: "The price does not exist." },
   price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "No PSP can sell this price." },
+  product_in_use: { status: 409, type: "invalid_request_error", meaning: "Records refer to the product; archive it instead." },
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },

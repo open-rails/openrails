@@ -129,6 +129,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
 | `price_not_sellable` | 400 | `invalid_request_error` | No PSP can sell this price. |
+| `product_in_use` | 409 | `invalid_request_error` | Records refer to the product; archive it instead. |
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
