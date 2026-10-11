@@ -10619,6 +10619,164 @@
           "tier:merchant"
         ]
       }
+    },
+    "/v1/me/network-link/challenges": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkLinkChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/me/network-link": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNetworkLinkParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerLink"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerLink"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "network_account_linked",
+          "network_link_challenge_invalid",
+          "network_link_conflict",
+          "network_terms_required",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/customers": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "network_account_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Customer"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Customers",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
     }
   },
   "components": {
@@ -13347,6 +13505,17 @@
           }
         }
       },
+      "CreateNetworkLinkParams": {
+        "type": "object",
+        "properties": {
+          "challenge_id": {
+            "type": "string"
+          },
+          "id_token": {
+            "type": "string"
+          }
+        }
+      },
       "CreateOrderParams": {
         "type": "object",
         "properties": {
@@ -13960,6 +14129,16 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "network": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerNetwork"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13969,7 +14148,8 @@
           "last_seen_at",
           "settings",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "network"
         ]
       },
       "CustomerAccount": {
@@ -14144,6 +14324,151 @@
           "customer_id",
           "entitlement",
           "quantity"
+        ]
+      },
+      "CustomerLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "checkout",
+              "connect",
+              "sign_in"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "revoked"
+            ]
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_by": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "account_deleted",
+                  "customer",
+                  "merchant_left"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchant_id",
+          "customer_id",
+          "account_id",
+          "method",
+          "status",
+          "linked_at",
+          "revoked_at",
+          "revoked_by"
+        ]
+      },
+      "CustomerNetwork": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "checkout",
+              "connect",
+              "sign_in"
+            ]
+          }
+        },
+        "required": [
+          "account_id",
+          "linked_at",
+          "method"
+        ]
+      },
+      "CustomerNetworkHostEvent": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "method": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "checkout",
+                  "connect",
+                  "sign_in"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_by": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "account_deleted",
+                  "customer",
+                  "merchant_left"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id",
+          "account_id",
+          "method",
+          "revoked_by"
         ]
       },
       "CustomerNotificationLookup": {
@@ -15131,6 +15456,8 @@
           "type": {
             "type": "string",
             "enum": [
+              "customer.network_linked",
+              "customer.network_unlinked",
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
@@ -15197,6 +15524,16 @@
                 "type": "null"
               }
             ]
+          },
+          "customer_network": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerNetworkHostEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -15208,7 +15545,8 @@
           "payment",
           "delinquency",
           "product_entitlements",
-          "order"
+          "order",
+          "customer_network"
         ]
       },
       "HostEventLookup": {
@@ -16678,6 +17016,26 @@
             "type": "string"
           }
         }
+      },
+      "NetworkLinkChallenge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "nonce",
+          "expires_at"
+        ]
       },
       "NewPriceDraft": {
         "type": "object",
@@ -22502,6 +22860,7 @@
       "merchant_not_found",
       "merchant_selector_invalid",
       "merchant_unresolved",
+      "network_account_linked",
       "permission_required",
       "rate_limit_exceeded"
     ],
@@ -23060,6 +23419,31 @@
       "status": 502,
       "type": "api_error",
       "meaning": "The language model did not answer; retry, or ask a narrower question."
+    },
+    "network_account_linked": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The openrails.dev account is linked to another customer of this merchant."
+    },
+    "network_link_challenge_invalid": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The link challenge is unknown, expired or spent, or the ID token does not answer it: another client, nonce or merchant, a sign-in older than the challenge, or no openrails:link consent; ask for a new challenge."
+    },
+    "network_link_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The customer is linked to another openrails.dev account; sign in with that one."
+    },
+    "network_link_in_use": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first."
+    },
+    "network_terms_required": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The openrails.dev account has not accepted the network terms."
     },
     "order_has_recurring_line": {
       "status": 409,

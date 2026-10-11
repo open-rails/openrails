@@ -171,6 +171,11 @@ export type CreateMyOrderParams = {
   reusable?: boolean
 }
 
+export type CreateNetworkLinkParams = {
+  challenge_id?: string
+  id_token?: string
+}
+
 export type CreatePaymentMethodParams = {
   psp_id?: string
   token?: string
@@ -218,6 +223,18 @@ export type CustomerEntitlement = {
   customer_id: string
   entitlement: string
   quantity: number | null
+}
+
+export type CustomerLink = {
+  id: string
+  merchant_id: string
+  customer_id: string
+  account_id: string
+  method: "checkout" | "connect" | "sign_in"
+  status: "active" | "revoked"
+  linked_at: string
+  revoked_at: string | null
+  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
 export type CustomerNotificationLookup = {
@@ -331,6 +348,12 @@ export type MintCheckoutSessionParams = {
   amount?: string
   auto_renew?: boolean
   success_url?: string
+}
+
+export type NetworkLinkChallenge = {
+  id: string
+  nonce: string
+  expires_at: string
 }
 
 export type NextAction = {

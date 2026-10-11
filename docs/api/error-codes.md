@@ -103,6 +103,11 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
 | `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
+| `network_account_linked` | 409 | `invalid_request_error` | The openrails.dev account is linked to another customer of this merchant. |
+| `network_link_challenge_invalid` | 400 | `invalid_request_error` | The link challenge is unknown, expired or spent, or the ID token does not answer it: another client, nonce or merchant, a sign-in older than the challenge, or no openrails:link consent; ask for a new challenge. |
+| `network_link_conflict` | 409 | `invalid_request_error` | The customer is linked to another openrails.dev account; sign in with that one. |
+| `network_link_in_use` | 409 | `invalid_request_error` | The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first. |
+| `network_terms_required` | 403 | `authorization_error` | The openrails.dev account has not accepted the network terms. |
 | `order_has_recurring_line` | 409 | `invalid_request_error` | An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
 | `order_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
 | `order_not_cancelable` | 409 | `invalid_request_error` | Only an open order, or one awaiting the customer's action, can be canceled. |

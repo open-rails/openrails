@@ -573,6 +573,11 @@ export type CreateMyOrderParams = {
   reusable?: boolean
 }
 
+export type CreateNetworkLinkParams = {
+  challenge_id?: string
+  id_token?: string
+}
+
 export type CreateOrderParams = {
   customer_id?: string
   lines?: OrderLineParams[]
@@ -728,6 +733,7 @@ export type Customer = {
   settings: CustomerSettings
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
+  network: CustomerNetwork | null
 }
 
 export type CustomerAccount = {
@@ -765,6 +771,31 @@ export type CustomerEntitlement = {
   customer_id: string
   entitlement: string
   quantity: number | null
+}
+
+export type CustomerLink = {
+  id: string
+  merchant_id: string
+  customer_id: string
+  account_id: string
+  method: "checkout" | "connect" | "sign_in"
+  status: "active" | "revoked"
+  linked_at: string
+  revoked_at: string | null
+  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
+}
+
+export type CustomerNetwork = {
+  account_id: string
+  linked_at: string
+  method: "checkout" | "connect" | "sign_in"
+}
+
+export type CustomerNetworkHostEvent = {
+  customer_id: string
+  account_id: string
+  method: "checkout" | "connect" | "sign_in" | null
+  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
 export type CustomerNotificationLookup = {
@@ -1004,13 +1035,14 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "payment.settled" | "product.entitlements_changed"
+  type: "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
   delinquency: DelinquencyHostEvent | null
   product_entitlements: ProductEntitlementsChangedEvent | null
   order: OrderHostEvent | null
+  customer_network: CustomerNetworkHostEvent | null
 }
 
 export type HostEventLookup = {
@@ -1309,6 +1341,12 @@ export type MintCheckoutSessionParams = {
   amount?: string
   auto_renew?: boolean
   success_url?: string
+}
+
+export type NetworkLinkChallenge = {
+  id: string
+  nonce: string
+  expires_at: string
 }
 
 export type NewPriceDraft = {
