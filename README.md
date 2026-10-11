@@ -1696,3 +1696,7 @@ Manual use: `./scripts/scan-injected-code.sh` (whole tree), `--staged`,
 `--range origin/master...HEAD`, or `--self-test`. Rules, exclusions and what to
 do when it fires are in [docs/injection-scan.md](docs/injection-scan.md).
 
+
+## License
+
+OpenRails is under the Functional Source License, Version 1.1, ALv2 Future License ([LICENSE](LICENSE)). The browser SDK `@openrails/billing-ui` ([`sdk/billing-ui`](sdk/billing-ui)) is MIT ([sdk/billing-ui/LICENSE](sdk/billing-ui/LICENSE)), so you can ship it in your own frontend under any license.

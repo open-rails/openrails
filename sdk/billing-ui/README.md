@@ -288,3 +288,7 @@ pnpm contract:check  # fail if a generated contract file is stale
 `BILLING_UI_SCREENSHOTS=<dir>` to capture light, dark and mobile screenshots.
 Card deletion calls NMI, which the harness has no credentials for; jsdom tests
 cover it.
+
+## License
+
+MIT; see [LICENSE](LICENSE). Only this package is MIT: the rest of the OpenRails repository is under the Functional Source License (FSL-1.1-ALv2).
