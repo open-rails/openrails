@@ -102,12 +102,15 @@ func TestMemoryIsBounded(t *testing.T) {
 }
 
 // A configured Redis that does not answer is left for memory: every
-// operation still answers, and the store reports why and how often.
+// operation still answers, and the store reports why and how often. The clock
+// stands mid-window, so the two counts share one.
 func TestUnreachableRedisFallsBackToMemory(t *testing.T) {
 	ctx := context.Background()
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: time.Second})
 	t.Cleanup(func() { _ = rdb.Close() })
 	s := New(rdb)
+	at := time.Date(2026, 10, 10, 12, 0, 30, 0, time.UTC)
+	s.SetClock(func() time.Time { return at })
 	require.ErrorIs(t, s.RedisErr(), errNotReached)
 
 	count, _ := s.Count(ctx, "rl:a", 1, time.Minute)
@@ -119,8 +122,8 @@ func TestUnreachableRedisFallsBackToMemory(t *testing.T) {
 	require.Positive(t, s.Held(ctx, "lock"))
 	require.Error(t, s.Release(ctx, "lock"), "Redis was not told")
 	require.Zero(t, s.Held(ctx, "lock"), "memory was")
-	s.Mark(ctx, time.Now(), Mark{Set: "fails", Member: "f1", TTL: time.Minute})
-	require.Equal(t, []int64{1}, s.Marked(ctx, time.Now(), "fails"))
+	s.Mark(ctx, at, Mark{Set: "fails", Member: "f1", TTL: time.Minute})
+	require.Equal(t, []int64{1}, s.Marked(ctx, at, "fails"))
 	require.EqualValues(t, 7, s.Fallbacks(), "each operation memory took")
 	require.Error(t, s.Probe(ctx))
 }
