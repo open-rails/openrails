@@ -35,7 +35,7 @@ func TestRemoteHandleRefusesEmbeddedOperations(t *testing.T) {
 	require.ErrorIs(t, err, ErrRemoteClient)
 	_, err = c.SCIMHandler()
 	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.OpenProviderOperationTx(t.Context(), nil, billing.OpenProviderOperationParams{})
+	_, err = c.StartRunningChargeTx(t.Context(), nil, billing.StartRunningChargeParams{})
 	require.ErrorIs(t, err, ErrRemoteClient)
 }
 

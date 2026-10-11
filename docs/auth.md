@@ -86,7 +86,6 @@ root role at all of them.
 | `/v1/app` | `billing.MerchantEntitlementsRead` | `billing.RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
 | `/v1/app` | `billing.MerchantCatalogRead` | `billing.RootCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |
 | `/v1/app` | `billing.MerchantUsageManage` | `billing.RootUsageManage` | admissions, usage events and running charges |
-| `/v1/app` | `billing.MerchantCostsManage` | `billing.RootCostsManage` | provider operations |
 | `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
 | `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
 | `/v1/app` | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |

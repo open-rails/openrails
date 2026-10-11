@@ -1,16 +1,12 @@
 package openrails
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"math"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -55,125 +51,6 @@ func TestUsageOrderMoneyWireIsLossless(t *testing.T) {
 		require.Equal(t, order.Total, read.Total)
 		require.Equal(t, *order.Usage, *read.Usage)
 		require.Equal(t, amount, read.Lines[0].Amount)
-	}
-}
-
-func TestProviderOperationWireContract(t *testing.T) {
-	when := time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
-	cost, rated := int64(math.MaxInt64), int64(math.MaxInt64)
-	body := []byte(`{"contract":"openrails/pass-through-provider-cost"}`)
-	digest := billing.SHA256(sha256.Sum256(body))
-	merchantID := billing.MerchantID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	settled := billing.ProviderOperation{
-		OperationID: "rental/create", MerchantID: merchantID,
-		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
-		Currency: "USD", Amount: math.MaxInt64 - 1, AuthorizedAmount: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
-		LastIncrement:           &billing.ProviderOperationIncrement{Ordinal: 1, Amount: 2, MinimumAmount: 1, GrantedAmount: 1, CreatedAt: when},
-		AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.ProviderOperationSettled,
-		TerminalReference: "sha256:" + digest.String(),
-		Qualification: &billing.ProviderBillingQualification{
-			Lifecycle: billing.ProviderBillingLifecycleEvidence{
-				Provider: "runpod", ProviderResourceID: "pod-1",
-				ProviderLifetimeStartsAt: when.Add(-2 * time.Hour), ProviderLifetimeEndsAt: when.Add(-time.Hour),
-				ProviderAbsentAt: when, ProviderAbsenceReference: "absence:1", BillingStopReference: "stop:1",
-				WindowsClosedAt: when, WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{}`),
-			},
-			LifecycleEvidenceSHA256: billing.SHA256(sha256.Sum256([]byte(`{}`))),
-			QuiescenceSeconds:       86400,
-			State:                   billing.ProviderBillingQualificationEligible,
-			Reason:                  billing.ProviderBillingEligible,
-			BaselineObservationID:   "obs-1", QualifiedObservationID: "obs-2",
-			QualifiedCostAmount: &cost,
-			QualifiedAt:         &when,
-			CreatedAt:           when, UpdatedAt: when,
-		},
-		SettlementCostAmount: &cost, SettlementAmount: &rated, SettlementBody: body, SettlementBodySHA256: &digest,
-		CreatedAt: when, SettledAt: &when,
-	}
-	raw := requireFixture(t, "provider_operation_settled.json", settled)
-	var got billing.ProviderOperation
-	require.NoError(t, json.Unmarshal(raw, &got))
-	require.True(t, reflect.DeepEqual(settled, got), "operation lost precision or null semantics: %#v", got)
-
-	settledCost := int64(1_234_567)
-	resolutions := []billing.ProviderBillingResolution{
-		{Kind: billing.ProviderBillingResolutionSettled, CostAmount: &settledCost, AttestedBy: "operator:1", Reference: "invoice:1", Note: "corrected bucket", ResolvedAt: when},
-		{Kind: billing.ProviderBillingResolutionWrittenOff, AttestedBy: "operator:1", Reference: "ticket:2", ResolvedAt: when},
-	}
-	raw = requireFixture(t, "provider_billing_resolution.json", resolutions)
-	var resolutionsGot []billing.ProviderBillingResolution
-	require.NoError(t, json.Unmarshal(raw, &resolutionsGot))
-	require.True(t, reflect.DeepEqual(resolutions, resolutionsGot), "resolution lost precision or null semantics: %#v", resolutionsGot)
-
-	releasedAt := when.Add(time.Hour)
-	closed := billing.ProviderOperation{
-		OperationID: "rental/create", MerchantID: merchantID,
-		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
-		Currency: "USD", Amount: 100, AuthorizedAmount: 100, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
-		AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.ProviderOperationReleased,
-		TerminalReference: "ticket:2",
-		Refusal:           &billing.ProviderBillingRefusal{Reason: billing.ProviderBillingLifecycleUnprovable, Detail: "observation obs-9: window 7 of an absent resource is open", RefusedAt: when},
-		Resolution:        &resolutions[1],
-		CreatedAt:         when, ReleasedAt: &releasedAt,
-	}
-	raw = requireFixture(t, "provider_operation_closed.json", closed)
-	var closedGot billing.ProviderOperation
-	require.NoError(t, json.Unmarshal(raw, &closedGot))
-	require.True(t, reflect.DeepEqual(closed, closedGot), "closed operation lost precision or null semantics: %#v", closedGot)
-
-	open := billing.ProviderOperation{State: billing.ProviderOperationOpen, CreatedAt: when}
-	raw, err := json.Marshal(open)
-	require.NoError(t, err)
-	for _, field := range []string{`"last_increment":null`, `"qualification":null`, `"settlement_amount":null`, `"settlement_body":null`, `"settlement_body_sha256":null`, `"refusal":null`, `"resolution":null`} {
-		require.Contains(t, string(raw), field, "an open operation must encode explicit nulls")
-	}
-	var openGot billing.ProviderOperation
-	require.NoError(t, json.Unmarshal(raw, &openGot))
-	require.True(t, reflect.DeepEqual(open, openGot))
-
-	var d billing.SHA256
-	valid := strings.Repeat("ab", sha256.Size)
-	require.NoError(t, d.UnmarshalText([]byte(valid)))
-	require.Equal(t, valid, d.String())
-	for _, invalid := range []string{strings.ToUpper(valid), valid[:62], valid + "00", strings.Repeat("zz", sha256.Size), ""} {
-		require.Error(t, d.UnmarshalText([]byte(invalid)), invalid)
-	}
-}
-
-// Provider obligation commands carry facts; the engine rates and settles.
-func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
-	pkg := reflect.TypeFor[Client]().PkgPath()
-	var walk func(reflect.Type, string)
-	walk = func(typ reflect.Type, path string) {
-		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
-			typ = typ.Elem()
-		}
-		if typ.Kind() != reflect.Struct || typ.PkgPath() != pkg {
-			return
-		}
-		for i := range typ.NumField() {
-			field := typ.Field(i)
-			name := strings.ToLower(field.Name + " " + field.Tag.Get("json"))
-			for _, banned := range []string{"rated", "settle", "charge"} {
-				if strings.Contains(name, banned) {
-					t.Errorf("%s.%s lets a caller supply a settlement amount", path, field.Name)
-				}
-			}
-			walk(field.Type, path+"."+field.Name)
-		}
-	}
-	for _, request := range []any{billing.OpenProviderOperationParams{}, billing.IncrementProviderOperationParams{}, billing.ReleaseProviderOperationParams{}, billing.RecordProviderBillingObservationParams{}} {
-		walk(reflect.TypeOf(request), reflect.TypeOf(request).Name())
-	}
-}
-
-func TestProviderOperationPathIsOneSegment(t *testing.T) {
-	path, err := providerOperationPath("/v1/app", "rental/1?#%/create")
-	require.NoError(t, err)
-	require.Equal(t, "/v1/app/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
-	for _, id := range []string{"", " ", ".", "..", " x"} {
-		_, err := providerOperationPath("/v1/admin", id)
-		require.ErrorIs(t, err, billing.ErrInvalid, "%q", id)
 	}
 }
 

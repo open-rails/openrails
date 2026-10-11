@@ -720,15 +720,6 @@ disappears. Two safety doctrines matter operationally:
   everything else is `requires_review` — provider failures, bad credentials,
   or a dead worker. The engine never touches intent rows (the
   executor/verifier own them); findings auto-resolve on recovery.
-- **Refused provider operations** (`life.provider_operation.refused`): an open
-  provider operation whose cost will not qualify automatically holds the
-  customer's capacity until an operator closes it
-  (`POST /v1/admin/provider-operations/{operation_id}/close`); the finding
-  clears with the close.
-- **Silent provider operations** (`life.provider_operation.silent`): an open,
-  unrefused hold with no increment or observation for 7 days. A hold never
-  expires, so its host must observe, release or refuse it; the finding clears
-  when it does.
 - **Operational problems** outside the sweep are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
@@ -977,7 +968,6 @@ Row retention:
 | `subscription_status_transitions` | 25 months (761 days) after `occurred_at` |
 | `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, account-updater batch), 25 months after they last changed |
 | `provider_mutation_logs` | 25 months after `created_at` |
-| `cost_observations` | 90 days after their operation was settled or released |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
 | `checkout_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
@@ -1025,8 +1015,8 @@ How it runs:
   writes carry on. Dropping one locks the table briefly; it gives up after two
   seconds rather than queue writers behind a long reader (a logical backup, a
   merchant archive export) and the next pass tries again.
-- `subscription_status_transitions`, reconciliation runs and `cost_observations`
-  refuse every other `DELETE`: `billing.guard_retention_delete` lets one through
+- `subscription_status_transitions` and reconciliation runs refuse every other
+  `DELETE`: `billing.guard_retention_delete` lets one through
   only when the transaction names the table in the `openrails.retention_table`
   setting and the row is older than the period the trigger declares. `usage_events` and
   `admission_operations` rows leave only with their partition.

@@ -366,8 +366,8 @@ You name no permission and no scope: you turn route groups on in
 and grant them to roles, as [auth](auth.md#permissions) lists:
 `root:billing:read`, `root:billing:manage`, `root:catalog:manage`,
 `root:config:manage`, `root:metrics:read`, `root:entitlements:read`,
-`root:catalog:read`, `root:usage:manage`, `root:costs:manage`,
-`root:events:read`, `root:orders:manage`, and each one's `merchant:` twin
+`root:catalog:read`, `root:usage:manage`, `root:events:read`,
+`root:orders:manage`, and each one's `merchant:` twin
 (`merchant:billing:read`, …) for staff of one merchant alone. The admin
 group's reads need `root:billing:read` and its updates `root:billing:manage`
 (each route's level is OpenRails'; read-only staff hold a role with the read
@@ -378,8 +378,8 @@ The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 `RouteGroups.Programmatic`) admit the application your `Auth` says a request
 is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
 a person: `root:entitlements:read` for the content gate, `root:usage:manage`
-for admissions and usage events, `root:costs:manage` for provider operations,
-`root:events:read` for host events, `root:orders:manage` for orders
+for admissions, usage events and running charges, `root:events:read` for host
+events, `root:orders:manage` for orders
 (`root:customers:read` finds a customer by openrails.dev account, only where
 the [customer network](customer-network.md) runs). Give a program a role
 holding only what its task needs.
@@ -425,7 +425,7 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
-| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:costs:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`, for the one merchant whose `Issuer` you declare; needs a staff group on. Over several merchants bound by group, `Mount` refuses it |
 | `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
@@ -471,7 +471,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `VoidOrder`, `MarkOrderUncollectible`, `RetryOrderCollection` (usage orders). Only the customer pays with a card they enter |
 | Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
-| Provider obligations | `OpenProviderOperation`, `IncrementProviderOperation`, `ReleaseProviderOperation`, `RecordProviderBillingObservation`, `ListProviderOperations`, `GetProviderOperation`, `CloseProviderOperation` |
+| Running charges | `StartRunningCharge`, `StopRunningCharge`, `GetRunningCharge`, `ListRunningCharges` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 
 ```go
@@ -502,10 +502,9 @@ allows: bound it with the context's deadline.
 Orders and their previews use the shared client too. See
 [checkout](api/commerce.md).
 
-A host that must commit its own provider obligation atomically with the OpenRails
-authorization, release or settlement uses its engine handle's `Tx` operations
-(`OpenProviderOperationTx` and siblings) with a transaction from its pool.
-See [provider obligations](architecture/provider-obligation-contract.md).
+A host that must start or stop a running charge in the same commit as its own
+rows uses its engine handle's `StartRunningChargeTx` and `StopRunningChargeTx`
+with a transaction from its pool. See [running charges](running-charges.md).
 
 One engine serves every live merchant in its directory, each through its own
 handle. `Merchant` reads nothing and refuses only the zero ID; each call reads

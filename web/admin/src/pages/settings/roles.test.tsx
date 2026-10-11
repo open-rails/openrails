@@ -36,7 +36,6 @@ const CATALOG = [
   "merchant:catalog:manage",
   "merchant:catalog:read",
   "merchant:config:manage",
-  "merchant:costs:manage",
   "merchant:credentials:manage",
   "merchant:credentials:read",
   "merchant:entitlements:read",

@@ -116,22 +116,6 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR ml.merchant_id > sqlc.narg(after)::uuid)
         AND ml.created_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
-    -- An observation of an operation still open is not due. The walk is over
-    -- the observations that still exist, each checked against its operation by
-    -- key: never over the authorizations, which are permanent. LATERAL with a
-    -- LIMIT keeps it one key lookup per observation, whatever the statistics.
-    (SELECT DISTINCT co.merchant_id AS mid
-       FROM billing.cost_observations co
-       CROSS JOIN LATERAL (
-            SELECT 1 FROM billing.operation_authorizations oa
-             WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
-               AND oa.state <> 'open'
-               AND COALESCE(oa.settled_at, oa.released_at) < sqlc.arg(cost_observation_cutoff)::timestamptz
-             LIMIT 1) closed
-      WHERE (sqlc.narg(after)::uuid IS NULL OR co.merchant_id > sqlc.narg(after)::uuid)
-        AND co.observed_at < sqlc.arg(cost_observation_cutoff)::timestamptz
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -266,24 +250,4 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- An observation goes once its operation is settled or released and the
--- period has passed since: the settlement body, which is permanent, already
--- carries the digests of the two observations it was authored from. While the
--- operation is open its observations stay, however old.
--- name: DeleteCostObservationsPastRetention :execrows
-DELETE FROM billing.cost_observations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (operation_id, observation_id) IN (
-    SELECT co.operation_id, co.observation_id
-    FROM billing.cost_observations co
-    CROSS JOIN LATERAL (
-        SELECT 1 FROM billing.operation_authorizations oa
-         WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
-           AND oa.state <> 'open'
-           AND COALESCE(oa.settled_at, oa.released_at) < now() - make_interval(days => sqlc.arg(retention_days)::int)
-         LIMIT 1) closed
-    WHERE co.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND co.observed_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
-    ORDER BY co.observed_at
-    LIMIT sqlc.arg(row_limit)::int
-);
+

@@ -146,7 +146,6 @@ type CleanupResult struct {
 	ReconciliationRuns      int64
 	ProviderIntents         int64
 	ProviderMutationLogs    int64
-	CostObservations        int64
 	CustomerLinks           int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
@@ -254,7 +253,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
-			CostObservationCutoff:  now.Add(-retention.CostObservations),
 			LinkCutoff:             now.Add(-retention.RevokedCustomerLinks),
 			After:                  after,
 			MerchantLimit:          limit,
@@ -329,7 +327,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"reconciliation_runs":       result.ReconciliationRuns,
 		"provider_intents":          result.ProviderIntents,
 		"provider_mutation_logs":    result.ProviderMutationLogs,
-		"cost_observations":         result.CostObservations,
 		"customer_links":            result.CustomerLinks,
 		"partitions_created":        result.PartitionsCreated,
 		"partitions_dropped":        result.PartitionsDropped,
@@ -503,14 +500,6 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
 		})
 	})
-
-	// 13. Cost observations of operations settled or released.
-	sweep("delete cost observations", &result.CostObservations, guarded("cost_observations",
-		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-			return q.DeleteCostObservationsPastRetention(ctx, gen.DeleteCostObservationsPastRetentionParams{
-				MerchantID: mid, RetentionDays: retention.Days(retention.CostObservations), RowLimit: limit,
-			})
-		}))
 
 	if capped {
 		result.MerchantsBudgetCapped++

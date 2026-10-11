@@ -4,9 +4,6 @@ package subscriptions_test
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,16 +35,6 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 		return w.auth.issue(t, grant{subject: "backend-" + uuid.NewString()[:8], role: role,
 			kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialAPIKey)})
 	}
-	openOperation := func() map[string]any {
-		id := "op-" + uuid.NewString()[:8]
-		body := []byte(`{"rental":"` + id + `"}`)
-		digest := sha256.Sum256(body)
-		return map[string]any{
-			"operation_id": id, "customer_id": c.id, "record_owner": "user:1", "currency": "USD", "amount": "1000000",
-			"claim_reference": "claim:" + id, "authorization_body": base64.StdEncoding.EncodeToString(body),
-			"authorization_body_sha256": hex.EncodeToString(digest[:]),
-		}
-	}
 	calls := []struct {
 		perm         billing.Permission
 		method, path string
@@ -59,7 +46,6 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 		}, http.StatusOK},
 		{appOffers, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", func() any { return nil }, http.StatusOK},
 		{appUsage, http.MethodPost, "/v1/app/admissions/release", func() any { return map[string]any{"request_ids": []string{"req-1"}} }, http.StatusOK},
-		{appCosts, http.MethodPost, "/v1/app/provider-operations", func() any { return openOperation() }, http.StatusCreated},
 		{appEvents, http.MethodGet, "/v1/app/host-events", func() any { return nil }, http.StatusOK},
 		{appOrders, http.MethodPost, "/v1/app/orders/preview", func() any {
 			return map[string]any{"customer_id": c.id, "lines": []any{map[string]any{"price_id": billing.PriceID(uuid.New()).String()}}}
@@ -91,6 +77,13 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, "a person holding %s: %v", call.perm, body)
 		require.Equal(t, billing.CodeApplicationRequired, body["error"].(map[string]any)["code"])
 	}
+
+	// Provider operations are deleted: neither their application nor their
+	// admin routes are served, whatever the caller holds.
+	status, raw := w.merchantCall(application(hostApp), http.MethodPost, "/v1/app/provider-operations")
+	require.Equal(t, http.StatusNotFound, status, raw)
+	status, raw = w.staff(http.MethodGet, "/v1/admin/provider-operations")
+	require.Equal(t, http.StatusNotFound, status, raw)
 
 	// The programmatic routes mount with their group, all of them, and none
 	// without it.

@@ -37,6 +37,24 @@ var (
 	ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 )
 
+// codedError is a stable machine code that also matches its status class, so a
+// host transaction error and a Client StatusError classify identically.
+type codedError struct {
+	code  string
+	class error
+}
+
+func (e *codedError) Error() string { return e.code }
+
+// ErrorCode is the wire error code.
+func (e *codedError) ErrorCode() string { return e.code }
+
+func (e *codedError) Is(target error) bool { return target == e.class }
+
+func newCodedError(code string, class error) *codedError {
+	return &codedError{code: code, class: class}
+}
+
 // ErrorDetails is the canonical HTTP error payload. Metadata numbers decode as
 // json.Number so identifiers and monetary values retain their exact precision.
 type ErrorDetails struct {

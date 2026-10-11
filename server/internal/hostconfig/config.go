@@ -105,9 +105,8 @@ type fileConfig struct {
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
-	CatalogReconciliationInterval     string `koanf:"catalog_reconciliation_interval"`
-	ProviderBillingQuiescenceInterval string `koanf:"provider_billing_quiescence_interval"`
-	WebhookSecretOverlap              string `koanf:"webhook_secret_overlap"`
+	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval"`
+	WebhookSecretOverlap          string `koanf:"webhook_secret_overlap"`
 
 	ReturnOrigins            []string `koanf:"return_origins"`
 	TrustedProxies           []string `koanf:"trusted_proxies"`
@@ -262,30 +261,29 @@ func (f *fileConfig) config() (*Config, error) {
 	}
 	return &Config{
 		Config: &billing.Config{
-			ProviderWriteMode:                 f.ProviderWriteMode,
-			TestMode:                          posture,
-			Database:                          f.Database,
-			PublicBillingBaseURL:              f.PublicBillingBaseURL,
-			DashboardBaseURL:                  f.DashboardBaseURL,
-			DB:                                f.DB,
-			Redis:                             redisSection(f.Redis),
-			Logger:                            f.Logger,
-			SMTP:                              smtp,
-			RateLimits:                        f.RateLimits,
-			RateLimitsDisabled:                f.RateLimitsDisabled,
-			Captcha:                           f.Captcha,
-			Vault:                             f.Vault,
-			LLM:                               f.LLM,
-			CatalogReconciliationInterval:     f.CatalogReconciliationInterval,
-			ProviderBillingQuiescenceInterval: f.ProviderBillingQuiescenceInterval,
-			WebhookSecretOverlap:              f.WebhookSecretOverlap,
-			ReturnOrigins:                     f.ReturnOrigins,
-			TrustedProxies:                    f.TrustedProxies,
-			CloudflareProxies:                 f.CloudflareProxies,
-			CCBillWebhookIPAllowlist:          f.CCBillWebhookIPAllowlist,
-			ProviderSandbox:                   f.ProviderSandbox,
-			HyperSwitch:                       f.HyperSwitch,
-			EngineAdmissionHold:               f.EngineAdmissionHold,
+			ProviderWriteMode:             f.ProviderWriteMode,
+			TestMode:                      posture,
+			Database:                      f.Database,
+			PublicBillingBaseURL:          f.PublicBillingBaseURL,
+			DashboardBaseURL:              f.DashboardBaseURL,
+			DB:                            f.DB,
+			Redis:                         redisSection(f.Redis),
+			Logger:                        f.Logger,
+			SMTP:                          smtp,
+			RateLimits:                    f.RateLimits,
+			RateLimitsDisabled:            f.RateLimitsDisabled,
+			Captcha:                       f.Captcha,
+			Vault:                         f.Vault,
+			LLM:                           f.LLM,
+			CatalogReconciliationInterval: f.CatalogReconciliationInterval,
+			WebhookSecretOverlap:          f.WebhookSecretOverlap,
+			ReturnOrigins:                 f.ReturnOrigins,
+			TrustedProxies:                f.TrustedProxies,
+			CloudflareProxies:             f.CloudflareProxies,
+			CCBillWebhookIPAllowlist:      f.CCBillWebhookIPAllowlist,
+			ProviderSandbox:               f.ProviderSandbox,
+			HyperSwitch:                   f.HyperSwitch,
+			EngineAdmissionHold:           f.EngineAdmissionHold,
 		},
 		Auth:                     auth,
 		SigningKey:               f.SigningKey,

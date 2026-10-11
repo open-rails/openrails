@@ -14,7 +14,7 @@ func TestPermissionsAreNamedInBothPersonas(t *testing.T) {
 		"merchant:catalog:manage", "root:catalog:manage", "merchant:config:manage", "root:config:manage",
 		"merchant:metrics:read", "root:metrics:read",
 		"merchant:entitlements:read", "root:entitlements:read", "merchant:catalog:read", "root:catalog:read",
-		"merchant:usage:manage", "root:usage:manage", "merchant:costs:manage", "root:costs:manage",
+		"merchant:usage:manage", "root:usage:manage",
 		"merchant:events:read", "root:events:read", "merchant:orders:manage", "root:orders:manage",
 		"merchant:customers:read", "root:customers:read",
 	}, Permissions())

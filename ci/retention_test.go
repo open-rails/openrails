@@ -487,11 +487,9 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.EqualValues(t, 995_000, balance.BalanceAmount)
 }
 
-// Provider writes and cost evidence. A finished intent that only instructed a
-// provider ages out; one that is the record of money, a membership or an
-// erasure never does. A cost observation outlives its operation by 90 days and
-// is never deleted while the operation is open.
-func TestProviderWriteAndCostObservationRetention(t *testing.T) {
+// Provider writes. A finished intent that only instructed a provider ages out;
+// one that is the record of money, a membership or an erasure never does.
+func TestProviderWriteRetention(t *testing.T) {
 	w, client := newRetentionWorld(t)
 	ctx := t.Context()
 	day := 24 * time.Hour
@@ -499,10 +497,8 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
-	var psp, account uuid.UUID
+	var psp uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT id FROM billing.ledger_accounts WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_balance' AND currency = 'USD'`),
-		w.merchant, customer.UUID()).Scan(&account))
 
 	// Intents, each last changed `ago` ago.
 	intent := func(kind, status string, ago time.Duration, payload any) uuid.UUID {
@@ -544,40 +540,6 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	}
 	oldLog, oldLogOfKept, youngLog := logEntry(oldCancel, old), logEntry(collection, old), logEntry(oldCancel, young)
 
-	// Cost observations of three operations: released 100 days ago, released
-	// 10 days ago, and still open after a year.
-	operation := func(id string, releasedAgo time.Duration) {
-		state, reference := "open", any(nil)
-		var releasedAt any
-		if releasedAgo > 0 {
-			state, reference, releasedAt = "released", "host-release", time.Now().Add(-releasedAgo)
-		}
-		w.exec(`INSERT INTO billing.operation_authorizations
-			(operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference,
-			 authorization_body_bytes, authorization_body_digest, state, terminal_reference, released_at, created_at)
-			VALUES ($1, $2, $3, 'host', $4, 'USD', 1000, 'claim-' || $1, 'body'::bytea, sha256('body'::bytea), $5, $6, $7, now() - interval '400 days')`,
-			id, w.merchant, customer.UUID(), account, state, reference, releasedAt)
-		w.exec(`INSERT INTO billing.cost_qualifications
-			(merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at,
-			 provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference,
-			 lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds)
-			VALUES ($1, $2, 'cloud', 'resource-' || $2, now() - interval '400 days', now() - interval '399 days', now() - interval '399 days',
-			        'absent', 'stopped', now() - interval '399 days', 'closed', 'evidence'::bytea, sha256('evidence'::bytea), 60)`, w.merchant, id)
-		for n := range 3 {
-			w.exec(`INSERT INTO billing.cost_observations
-				(merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at, raw_body_available, raw_body_bytes, raw_body_digest,
-				 covers_lifetime, has_negative_record, refusal_kind, qualification_reason, observed_at)
-				VALUES ($1, $2, $3, 'q', now() - interval '400 days', now() - interval '399 days', false, ''::bytea, sha256(''::bytea),
-				        false, false, 'response_too_large', 'provider_evidence_refused', now() - interval '398 days')`, w.merchant, id, fmt.Sprintf("obs-%d", n))
-		}
-	}
-	operation("closed-long-ago", retention.CostObservations+10*day)
-	operation("closed-recently", 10*day)
-	operation("still-open", 0)
-	observations := func(op string) int {
-		return w.count(`SELECT count(*) FROM billing.cost_observations WHERE merchant_id = $1 AND operation_id = $2`, w.merchant, op)
-	}
-
 	// A log entry's content is immutable, and so is which intent it names: the
 	// one change allowed is the link going NULL when that intent is deleted.
 	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.provider_mutation_logs SET reason = 'edited' WHERE merchant_id = $1 AND id = $2`), w.merchant, youngLog)
@@ -585,14 +547,9 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.provider_mutation_logs SET provider_intent_id = $3 WHERE merchant_id = $1 AND id = $2`), w.merchant, youngLog, collection)
 	requireRefused(t, err)
 
-	// No delete reaches a cost observation outside the sweep, however old.
-	_, err = w.pool.Exec(ctx, w.q(`DELETE FROM billing.cost_observations WHERE merchant_id = $1`), w.merchant)
-	requireRefused(t, err)
-
 	result := w.sweep(0)
 	require.EqualValues(t, 2, result.ProviderIntents)
 	require.EqualValues(t, 2, result.ProviderMutationLogs)
-	require.EqualValues(t, 3, result.CostObservations)
 	require.Zero(t, result.CheckoutAttempts)
 
 	exists := func(table string, id uuid.UUID) bool {
@@ -613,17 +570,9 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	// The recent entry outlives the intent it described; only its link is gone.
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1 AND id = $2 AND provider_intent_id IS NULL`, w.merchant, youngLog))
 
-	require.Zero(t, observations("closed-long-ago"))
-	require.Equal(t, 3, observations("closed-recently"))
-	require.Equal(t, 3, observations("still-open"), "an open operation keeps its evidence however old")
-	// The operations themselves and their qualifications are permanent.
-	require.Equal(t, 3, w.count(`SELECT count(*) FROM billing.operation_authorizations WHERE merchant_id = $1`, w.merchant))
-	require.Equal(t, 3, w.count(`SELECT count(*) FROM billing.cost_qualifications WHERE merchant_id = $1`, w.merchant))
-
-	// A second pass finds nothing: the open operation's old observations do
-	// not keep the merchant on the due list.
+	// A second pass finds nothing.
 	again := w.sweep(0)
-	require.Zero(t, again.ProviderIntents+again.ProviderMutationLogs+again.CostObservations)
+	require.Zero(t, again.ProviderIntents+again.ProviderMutationLogs)
 }
 
 // Writers crossing into a new month create its partitions at the same moment,

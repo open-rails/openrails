@@ -223,10 +223,6 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Admit and record usage (charges customers)",
     section: "programs",
   },
-  "merchant:costs:manage": {
-    label: "Record provider costs",
-    section: "programs",
-  },
   "merchant:events:read": {
     label: "Read and acknowledge host events",
     section: "programs",

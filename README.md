@@ -564,12 +564,11 @@ until `RouteGroups` turns it on:
 - `RouteGroups.Programmatic`: the routes at `/billing/v1/app`, for your own
   backend when it talks to OpenRails over HTTP (a standalone or hosted
   OpenRails, or a service of yours not written in Go): the content gate,
-  usage and admissions, provider operations, host events, and user
+  usage and admissions, running charges, host events, and user
   provisioning. They take an application your auth says a request is (an API
   key, a client's own token) holding the route's permission, and refuse a
   person: `root:entitlements:read` for the content gate, `root:catalog:read`
-  for offers, `root:usage:manage`, `root:costs:manage`, `root:events:read`,
-  `root:orders:manage`. Give a program a role holding only what its task
+  for offers, `root:usage:manage`, `root:events:read`, `root:orders:manage`. Give a program a role holding only what its task
   needs. Embedded,
   your Go code calls the same operations on the `Client` and you can leave this
   off.
@@ -822,9 +821,8 @@ Mounting gives your users these routes under `/billing`:
 Your backend calls these with its own credential: a client-credentials token
 from your issuer (AuthKit issues them) for this deployment, holding the route's
 permission: `root:entitlements:read` for the content gate, `root:usage:manage`
-for usage events and admissions, `root:costs:manage` for provider operations,
-`root:events:read` for host events, `root:orders:manage` for orders. A person
-is refused.
+for usage events, admissions and running charges, `root:events:read` for host
+events, `root:orders:manage` for orders. A person is refused.
 Writes take an `Idempotency-Key`, so a retry never double-counts. Embedded, call
 the same `Client` methods in process instead. The `scim/v2` routes also take a
 merchant provisioning token, for directories like Okta or Entra ID that can't
@@ -837,9 +835,8 @@ get a token from your issuer; that token opens nothing else.
 | `POST /billing/v1/app/admissions` | admit requests against a customer's budget, holding funds |
 | `POST /billing/v1/app/admissions/{request_id}/capture` | settle one at its actual cost |
 | `POST /billing/v1/app/admissions/release`, `/extend` | free holds; move their deadlines |
-| `POST /billing/v1/app/provider-operations` | reserve funds for an upstream provider's work |
-| `POST /billing/v1/app/provider-operations/{operation_id}/increment`, `/release` | raise a reservation; free it |
-| `POST /billing/v1/app/provider-operations/{operation_id}/observations` | what the provider billed |
+| `POST /billing/v1/app/running-charges` | charge a customer at a rate per hour until you stop it |
+| `POST /billing/v1/app/running-charges/{reference}/stop` | stop it and post what it charged |
 | `GET /billing/v1/app/host-events` | events for your backend to process, oldest first |
 | `POST /billing/v1/app/host-events/acknowledge` | mark them processed |
 | `POST /billing/v1/app/orders/preview` | an order's total and how it can be paid, for one of your users; changes nothing |
@@ -1689,7 +1686,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
 - [Admin console](docs/admin-console.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
-- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [provider obligations](docs/architecture/provider-obligation-contract.md).
+- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md).
 
 **Operate the deployment** — for whoever keeps it running:
 

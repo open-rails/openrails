@@ -207,11 +207,10 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 		if current.RemainingAmount > bal.Balance {
 			return ErrCreditGrantUnavailable
 		}
-		available, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "durable holds")
-		if err != nil {
-			return err
+		if bal.HeldBalance < 0 {
+			return fmt.Errorf("revoke credit grant: held balance %d is negative", bal.HeldBalance)
 		}
-		if current.RemainingAmount > available {
+		if current.RemainingAmount > satSub(bal.Balance, bal.HeldBalance) {
 			return ErrCreditGrantHeld
 		}
 		ledger := grants.New(q, mid.UUID())

@@ -54,9 +54,6 @@ const (
 	// ExpiredCheckoutAttempts keeps a checkout attempt that expired without
 	// reaching a provider 90 days past its expiry.
 	ExpiredCheckoutAttempts = 90 * Day
-	// CostObservations keeps a provider cost observation 90 days past the
-	// settlement or release of the operation it was read for.
-	CostObservations = 90 * Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past

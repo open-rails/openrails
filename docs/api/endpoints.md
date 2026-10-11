@@ -319,8 +319,6 @@ or retries a past-due subscription the PSP schedules
   `failure_rate_limited`. Usage is reported through
   `POST /v1/admin/metrics/query` (`usage_units`, `usage_revenue`,
   `forgiven_usage` by `customer`, `invoker`, `outcome`, `sku` or `rate_card`).
-- **Provider operations** authorize and settle upstream compute cost:
-  [provider obligations](../architecture/provider-obligation-contract.md).
 - **Arrears**: [delinquency](../arrears-delinquency.md) and
   [billing policies](../billing-policies.md).
 

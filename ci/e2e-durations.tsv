@@ -14,7 +14,7 @@ ci	TestOptionalProvidersNeverBlockBoot	8.1
 ci	TestPartitionedIdentitiesAndWriteBounds	6.3
 ci	TestPartitionedReadsPruneToTheirMonths	8.7
 ci	TestPartitionsAreCreatedAheadAndDroppedByTheCalendar	6.7
-ci	TestProviderWriteAndCostObservationRetention	7.5
+ci	TestProviderWriteRetention	7.5
 ci	TestPurchasedCreditAccounting	8.4
 ci	TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable	6.5
 ci	TestRescuerSurvivesItsOwnInterruptedJob	6.3

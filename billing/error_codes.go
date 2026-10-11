@@ -277,7 +277,7 @@ var errorCodes = []ErrorCode{
 	{CodeDefaultPaymentMethodRequired, 400, invalid, "The customer has no default card for the currency."},
 	{CodeDefaultPaymentMethodInvalid, 400, invalid, "The card cannot be the customer's default for the currency."},
 
-	// Credits, admission and provider obligations.
+	// Credits and admission.
 	{"credit_grant_not_found", 404, invalid, "The credit grant does not exist."},
 	{"credit_grant_held", 409, invalid, "Active holds need the grant's remaining credit."},
 	{"credit_grant_unavailable", 409, invalid, "The credit grant expired, ended or has no remaining credit."},
@@ -286,13 +286,6 @@ var errorCodes = []ErrorCode{
 	{"hold_not_found", 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
 	{"currency_unsupported", 400, invalid, "The currency is not in OpenRails' registry."},
 	{"running_charge_not_found", 404, invalid, "No running charge was started under this reference."},
-	{"provider_operation_not_found", 404, invalid, "The provider operation does not exist."},
-	{"provider_operation_conflict", 409, invalid, "The provider operation call repeats a committed one with a changed term; param names it."},
-	{"provider_operation_not_open", 409, invalid, "The provider operation's hold is no longer open."},
-	{"provider_operation_has_billing_evidence", 409, invalid, "The provider operation already carries provider billing evidence, so it cannot be released."},
-	{"provider_operation_refused", 409, invalid, "The provider operation's cost was refused automatic qualification; only an operator's close ends its hold."},
-	{"provider_operation_not_refused", 409, invalid, "Only a refused provider operation can be closed by an operator."},
-	{"provider_billing_observation_conflict", 409, invalid, "The observation conflicts with a recorded one; param names the term."},
 	{"invalid_settlement_status_request", 400, invalid, "A settlement status read needs a customer and a price."},
 
 	// Customers.

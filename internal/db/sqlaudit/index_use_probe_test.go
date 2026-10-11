@@ -275,7 +275,7 @@ func fill(ctx context.Context, conn *pgx.Conn, merchants int) error {
 	}
 
 	size := map[string]int{"merchants": merchants, "customers": 10000}
-	for _, t := range strings.Fields(`ledger_transfers grants entitlements usage_events admission_operations payments payment_attempts provider_intents provider_mutation_logs notifications subscription_status_transitions webhook_events idempotency_keys host_outbox checkout_attempts rebill_cycles cost_observations invoice_items solana_pay_receipts`) {
+	for _, t := range strings.Fields(`ledger_transfers grants entitlements usage_events admission_operations payments payment_attempts provider_intents provider_mutation_logs notifications subscription_status_transitions webhook_events idempotency_keys host_outbox checkout_attempts rebill_cycles invoice_items solana_pay_receipts`) {
 		size[t] = 40000
 	}
 	for _, t := range strings.Fields(`products prices price_psp_bindings merchant_configuration_applications catalog_applications billing_policies billing_policy_bindings catalog_meters catalog_rate_cards reconciliation_state worker_state maintenance_runs merchant_webhooks merchant_slug_aliases merchant_destructive_policy destructive_action_switch price_key_movements psp_refresh_watermarks reprice_batches`) {

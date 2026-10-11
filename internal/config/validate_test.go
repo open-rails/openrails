@@ -34,8 +34,6 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		"captcha disabled":           {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
 		"captcha half pair":          {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
 		"captcha unsupported":        {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},
-		"quiescence sub-second":      {func(c *Config) { c.ProviderBillingQuiescenceInterval = "500ms" }, "at least one second"},
-		"quiescence fractional":      {func(c *Config) { c.ProviderBillingQuiescenceInterval = "1500ms" }, "whole seconds"},
 		"reconcile typo":             {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
 		"db missing":                 {func(c *Config) { c.DB = nil }, "database configuration is required"},
 		"db url undeterminable":      {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
@@ -149,16 +147,6 @@ func TestScalarParsingBoundaries(t *testing.T) {
 	}
 	_, err := ParseCredentialPosture("true")
 	require.Error(t, err, "a bool-shaped posture must never decode")
-
-	for raw, want := range map[string]time.Duration{"": 24 * time.Hour, "36h": 36 * time.Hour} {
-		got, err := ProviderBillingQuiescence(&Config{ProviderBillingQuiescenceInterval: raw})
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	}
-	for _, raw := range []string{"0", "-1h", "tomorrow"} {
-		_, err := ProviderBillingQuiescence(&Config{ProviderBillingQuiescenceInterval: raw})
-		require.Error(t, err, raw)
-	}
 
 	for raw, want := range map[string]struct {
 		interval time.Duration

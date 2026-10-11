@@ -62,9 +62,6 @@ const (
 	// Admissions and usage events, which charge customers.
 	MerchantUsageManage Permission = "merchant:usage:manage"
 	RootUsageManage     Permission = "root:usage:manage"
-	// Provider operations: the host's own upstream costs.
-	MerchantCostsManage Permission = "merchant:costs:manage"
-	RootCostsManage     Permission = "root:costs:manage"
 	// Host events: reading and acknowledging them.
 	MerchantEventsRead Permission = "merchant:events:read"
 	RootEventsRead     Permission = "root:events:read"
@@ -84,7 +81,7 @@ func Permissions() []Permission {
 		MerchantCatalogManage, RootCatalogManage, MerchantConfigManage, RootConfigManage,
 		MerchantMetricsRead, RootMetricsRead,
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,
-		MerchantUsageManage, RootUsageManage, MerchantCostsManage, RootCostsManage,
+		MerchantUsageManage, RootUsageManage,
 		MerchantEventsRead, RootEventsRead, MerchantOrdersManage, RootOrdersManage,
 		MerchantCustomersRead, RootCustomersRead,
 	}

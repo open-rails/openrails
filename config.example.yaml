@@ -16,10 +16,6 @@ port: 3053
 # shutdown_timeout: 20s
 public_billing_base_url: http://localhost:3053
 
-# Minimum separation between two equal post-absence provider-billing reads.
-# Empty defaults to 24h; values must be positive whole-second Go durations.
-# provider_billing_quiescence_interval: 24h
-
 logger:
   level: info       # debug | info | warn | error | fatal | panic
 
@@ -187,8 +183,8 @@ captcha:
 # name on root; programmatic (/v1/app, with SCIM
 # provisioning) takes a merchant's application credential, never a person,
 # holding merchant:entitlements:read, merchant:catalog:read,
-# merchant:usage:manage, merchant:costs:manage, merchant:events:read or
-# merchant:orders:manage for each route.
+# merchant:usage:manage, merchant:events:read or merchant:orders:manage for
+# each route.
 route_groups:
   admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
   catalog: true          # products, prices, meters, price migrations

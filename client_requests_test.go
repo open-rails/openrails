@@ -205,9 +205,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
-		"meter":              func(id string) error { _, err := c.GetMeter(ctx, id); return err },
-		"set meter":          func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
-		"provider operation": func(id string) error { _, err := c.GetProviderOperation(ctx, id); return err },
+		"meter":     func(id string) error { _, err := c.GetMeter(ctx, id); return err },
+		"set meter": func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
 	}
 	// Opaque host strings (request ids, deposit keys, migration prices): only blankness is refused.
 	blankOnly := map[string]func(id string) error{

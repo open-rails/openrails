@@ -209,77 +209,6 @@ type BillingCheckoutAttempt struct {
 	OrderID *uuid.UUID
 }
 
-// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement. Retention: rows are deleted 90 days after their operation was settled or released, by the cleanup job only.
-type BillingCostObservation struct {
-	MerchantID              uuid.UUID
-	OperationID             string
-	ObservationID           string
-	NormalizedQuery         string
-	QueryStartsAt           time.Time
-	QueryEndsAt             time.Time
-	RawBodyAvailable        bool
-	RawBodyBytes            []byte
-	RawBodyDigest           []byte
-	NormalizedRecordsBytes  []byte
-	NormalizedRecordsDigest []byte
-	CostAmount              *int64
-	HasNegativeRecord       bool
-	RefusalKind             *string
-	CoversLifetime          bool
-	QualificationReason     string
-	ObservedAt              time.Time
-}
-
-// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality. Retention: permanent, never pruned.
-type BillingCostQualification struct {
-	MerchantID               uuid.UUID
-	OperationID              string
-	Provider                 string
-	ProviderResourceID       string
-	ProviderLifetimeStartsAt time.Time
-	ProviderLifetimeEndsAt   time.Time
-	ProviderAbsentAt         time.Time
-	ProviderAbsenceReference string
-	BillingStopReference     string
-	WindowsClosedAt          time.Time
-	WindowsClosedReference   string
-	LifecycleEvidenceBytes   []byte
-	LifecycleEvidenceDigest  []byte
-	QuiescenceSeconds        int64
-	State                    string
-	Reason                   string
-	BaselineObservationID    *string
-	QualifiedObservationID   *string
-	QualifiedCostAmount      *int64
-	QualifiedAt              *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-}
-
-// An operation authorization whose provider cost will not qualify automatically: refused by the qualifier (its qualification is refused) or by the host (it cannot produce evidence). The hold waits for an operator's resolution, its only exit. Immutable. Retention: permanent, never pruned.
-type BillingCostRefusal struct {
-	MerchantID         uuid.UUID
-	OperationID        string
-	Reason             string
-	QualificationState *string
-	Detail             *string
-	RefusedAt          time.Time
-}
-
-// An operator's attested close of a refused operation authorization (see cost_refusals): settled at the attested provider cost (pass-through, so the customer is charged it) or written off (released, the customer is not charged). Immutable. Retention: permanent, never pruned.
-type BillingCostResolution struct {
-	MerchantID  uuid.UUID
-	OperationID string
-	// Always refused: a resolution closes a refused hold.
-	QualificationState string
-	Kind               string
-	CostAmount         *int64
-	AttestedBy         string
-	Reference          string
-	Note               *string
-	ResolvedAt         time.Time
-}
-
 // Merchant custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds; its configuration (settings, credentials, archived) is the custodian document in a file or Vault. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -795,51 +724,6 @@ type BillingNotification struct {
 	EmailedAt *time.Time
 	// Until when one sender holds the undelivered email; another sends it only after this passes, so a sender that died is replaced.
 	EmailLeaseExpiresAt *time.Time
-}
-
-// Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire. Retention: permanent, never pruned.
-type BillingOperationAuthorization struct {
-	OperationID     string
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	RecordOwner     string
-	LedgerAccountID uuid.UUID
-	Currency        string
-	Amount          int64
-	ClaimReference  string
-	// Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.
-	AuthorizationBodyBytes []byte
-	// Caller-bound SHA-256 of authorization_body_bytes, also rechecked by the database.
-	AuthorizationBodyDigest []byte
-	State                   string
-	TerminalReference       *string
-	CreatedAt               time.Time
-	ReleasedAt              *time.Time
-	SettledAt               *time.Time
-	// Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.
-	SettlementCostAmount *int64
-	// OpenRails-owned final customer settlement. The pass-through contract maps qualified provider cost directly, so this equals settlement_cost_amount; it may exceed the authorized amount and is never clamped.
-	SettlementAmount *int64
-	// Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.
-	SettlementBodyBytes []byte
-	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
-	SettlementBodyDigest []byte
-	// Sum of granted_amount over the authorization's extensions; grows only while open.
-	ExtendedAmount int64
-	// The hold: the opening amount plus every extension grant.
-	AuthorizedAmount int64
-}
-
-// Each granted growth of an open operation authorization's hold, gapless by ordinal from 1: what the host asked for, the least it accepted, what was granted, and the authorized total after the grant. Immutable. Retention: permanent, never pruned.
-type BillingOperationAuthorizationExtension struct {
-	MerchantID       uuid.UUID
-	OperationID      string
-	Ordinal          int64
-	RequestedAmount  int64
-	MinimumAmount    int64
-	GrantedAmount    int64
-	AuthorizedAmount int64
-	CreatedAt        time.Time
 }
 
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.

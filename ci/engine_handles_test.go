@@ -107,7 +107,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	_, err = unknown.GetProviderOperationTx(ctx, tx, "rental/1")
+	_, err = unknown.StartRunningChargeTx(ctx, tx, billing.StartRunningChargeParams{Reference: "rental/1", CustomerID: customer, Currency: "USD", RatePerHour: 1_000_000})
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved, "the host's transaction is bound to a live merchant only")
 
 	// What only an engine's handle has acts on the handle's merchant.

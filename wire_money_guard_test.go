@@ -31,81 +31,79 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
-	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":    "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
-	"billing/control_plane.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                              notMoneyCount,
-	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                notMoneyCount,
-	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                    notHTTPToolArgs,
-	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                      notHTTPToolArgs,
-	"internal/modules/money/provider_billing.go:normalizedProviderBillingRecord.Amount amount":                               notHTTPProviderEvidence,
-	"internal/modules/money/provider_billing.go:providerBillingSettlementManifest.QualifiedCostAmount qualified_cost_amount": notHTTPProviderEvidence,
-	"internal/service/host_events.go:func hostEvents.AmountFloor amount_floor":                                               notHTTPStoredPayload,
-	"internal/service/host_events.go:func hostEvents.OverdueAmount overdue_amount":                                           notHTTPStoredPayload,
-	"internal/intents/collection_payload.go:OrderCollectionPayload.Amount amount":                                            notHTTPIntentPayload,
-	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                     notHTTPStorageRow,
-	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":               notHTTPStorageRow,
-	"internal/db/models/billing_policy.go:BillingPolicy.DelinquencyAmountFloor delinquency_amount_floor":                     notHTTPStorageRow,
-	"internal/db/models/billing_policy.go:BillingPolicy.OutstandingCapAmount outstanding_cap_amount":                         notHTTPStorageRow,
-	"internal/db/models/budget_window_policy.go:BudgetWindowPolicy.Limit limit":                                              notHTTPStorageRow,
-	"internal/db/models/checkout_attempt.go:CheckoutAttempt.Amount amount":                                                   notHTTPStorageRow,
-	"internal/db/models/merchant_configuration.go:MerchantConfiguration.ArrearsDelinquencyFloor arrears_delinquency_floor":   notHTTPStorageRow,
-	"internal/db/models/merchant_configuration.go:MerchantConfiguration.CollectionThreshold collection_threshold":            notHTTPStorageRow,
-	"internal/db/models/merchant_configuration.go:MerchantConfiguration.MonthlyFloor monthly_floor":                          notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyAccount.CreditLimitAmount credit_limit_amount":                                         notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyBalance.Balance balance":                                                               notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyBalance.HeldBalance held_balance":                                                      notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyTransaction.Amount amount":                                                             notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyTransaction.Authorized authorized_amount":                                              notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyTransaction.BalanceAfter balance_after":                                                notHTTPStorageRow,
-	"internal/db/models/money.go:MoneyTransaction.Captured captured_amount":                                                  notHTTPStorageRow,
-	"internal/db/models/payment.go:Payment.Amount amount":                                                                    notHTTPStorageRow,
-	"internal/db/models/payment.go:Payment.ListAmount list_amount":                                                           notHTTPStorageRow,
-	"internal/db/models/product_catalog.go:Price.Amount amount":                                                              notHTTPStorageRow,
-	"internal/db/models/product_catalog.go:Price.TrialUnitAmount trial_unit_amount":                                          notHTTPStorageRow,
-	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.AmountDueNow amount_due_now":                          notHTTPStoredMetadata,
-	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.NextChargeAmount next_charge_amount":                  notHTTPStoredMetadata,
-	"internal/db/models/usage_event.go:UsageEvent.Amount amount":                                                             notHTTPStorageRow,
-	"internal/db/models/usage_event.go:UsageEvent.ForgivenAmount forgiven_amount":                                            notHTTPStorageRow,
-	"internal/http/handlers/admin_catalog.go:PaginatedResponse.Limit limit":                                                  notMoneyPageSize,
-	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                         notHTTPProviderWire,
-	"internal/nmimock/v5.go:func v5.Amount amount":                                                                           notHTTPProviderWire,
-	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                      notHTTPProviderWire,
-	"internal/integrations/nmi/v5.go:v5PlanCreateRequest.PlanAmount plan_amount":                                             notHTTPProviderWire,
-	"internal/modules/admission/spendgate/policy.go:Window.Limit limit":                                                      notHTTPInternalRow,
-	"internal/modules/catalog/stripe_catalog.go:StripePrice.UnitAmount unit_amount":                                          notHTTPProviderWire,
-	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                            notHTTPIntentPayload,
-	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":        notHTTPIntentPayload,
-	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":             notHTTPIntentPayload,
-	"billing/metrics.go:MetricsQuery.Limit limit":                                                                            notMoneyPageSize,
-	"billing/metrics.go:MetricsLimits.MaxLimit max_limit":                                                                    notMoneyPageSize,
-	"internal/modules/money/invoice_profile.go:CustomerInvoiceProfile.Tax tax":                                               notMoneyTaxFacts,
-	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.Amount amount":                               notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountRefunded amount_refunded":              notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":              notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.Amount amount":                               notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.AmountReceived amount_received":              notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountDue amount_due":       notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountPaid amount_paid":     notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_refunds.go:RefundResult.Amount amount":                                            notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeCharge.Amount amount":                                                         notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeCharge.AmountRefunded amount_refunded":                                        notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeCheckoutSession.AmountTotal amount_total":                                     notHTTPProviderWire,
-	"internal/modules/checkout/service.go:stripeCheckoutSession.AmountTotal amount_total":                                    notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeDispute.Amount amount":                                                        notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountDue amount_due":                                                 notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountPaid amount_paid":                                               notHTTPProviderWire,
-	"internal/modules/webhooks/stripe.go:stripeRefund.Amount amount":                                                         notHTTPProviderWire,
-	"internal/modules/webhooks/webhook_handler.go:func Normalize.Amount amount":                                              notHTTPProviderWire,
-	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountPaid amount_paid":                                     notHTTPProviderWire,
-	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountTotal amount_total":                                   notHTTPProviderWire,
-	"internal/reconcile/converge/converge_passes.go:ownershipPurchaseRow.Amount amount":                                      notHTTPQueryRow,
-	"internal/reconcile/destructive_run_converge.go:ConvergeRollbackResult.AccessCaptured access_captured":                   notMoneyCount,
-	"internal/reconcile/reconcile.go:RemoteSubscription.AmountCents amount_cents":                                            notHTTPInternalRow,
-	"internal/reconcile/reconcile.go:RemoteTransaction.AmountCents amount_cents":                                             notHTTPInternalRow,
-	"internal/reconcile/stripe.go:func normalizeStripeCharge.Amount amount":                                                  notHTTPProviderWire,
-	"internal/reconcile/stripe.go:func normalizeStripeDispute.Amount amount":                                                 notHTTPProviderWire,
-	"internal/reconcile/stripe.go:func normalizeStripeRefund.Amount amount":                                                  notHTTPProviderWire,
-	"internal/reconcile/stripe.go:stripeSubscriptionJSON.UnitAmount unit_amount":                                             notHTTPProviderWire,
-	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                   notHTTPInternalRow,
+	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":  "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
+	"billing/control_plane.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                            notMoneyCount,
+	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                              notMoneyCount,
+	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                  notHTTPToolArgs,
+	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                    notHTTPToolArgs,
+	"internal/service/host_events.go:func hostEvents.AmountFloor amount_floor":                                             notHTTPStoredPayload,
+	"internal/service/host_events.go:func hostEvents.OverdueAmount overdue_amount":                                         notHTTPStoredPayload,
+	"internal/intents/collection_payload.go:OrderCollectionPayload.Amount amount":                                          notHTTPIntentPayload,
+	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                   notHTTPStorageRow,
+	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":             notHTTPStorageRow,
+	"internal/db/models/billing_policy.go:BillingPolicy.DelinquencyAmountFloor delinquency_amount_floor":                   notHTTPStorageRow,
+	"internal/db/models/billing_policy.go:BillingPolicy.OutstandingCapAmount outstanding_cap_amount":                       notHTTPStorageRow,
+	"internal/db/models/budget_window_policy.go:BudgetWindowPolicy.Limit limit":                                            notHTTPStorageRow,
+	"internal/db/models/checkout_attempt.go:CheckoutAttempt.Amount amount":                                                 notHTTPStorageRow,
+	"internal/db/models/merchant_configuration.go:MerchantConfiguration.ArrearsDelinquencyFloor arrears_delinquency_floor": notHTTPStorageRow,
+	"internal/db/models/merchant_configuration.go:MerchantConfiguration.CollectionThreshold collection_threshold":          notHTTPStorageRow,
+	"internal/db/models/merchant_configuration.go:MerchantConfiguration.MonthlyFloor monthly_floor":                        notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyAccount.CreditLimitAmount credit_limit_amount":                                       notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyBalance.Balance balance":                                                             notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyBalance.HeldBalance held_balance":                                                    notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyTransaction.Amount amount":                                                           notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyTransaction.Authorized authorized_amount":                                            notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyTransaction.BalanceAfter balance_after":                                              notHTTPStorageRow,
+	"internal/db/models/money.go:MoneyTransaction.Captured captured_amount":                                                notHTTPStorageRow,
+	"internal/db/models/payment.go:Payment.Amount amount":                                                                  notHTTPStorageRow,
+	"internal/db/models/payment.go:Payment.ListAmount list_amount":                                                         notHTTPStorageRow,
+	"internal/db/models/product_catalog.go:Price.Amount amount":                                                            notHTTPStorageRow,
+	"internal/db/models/product_catalog.go:Price.TrialUnitAmount trial_unit_amount":                                        notHTTPStorageRow,
+	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.AmountDueNow amount_due_now":                        notHTTPStoredMetadata,
+	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.NextChargeAmount next_charge_amount":                notHTTPStoredMetadata,
+	"internal/db/models/usage_event.go:UsageEvent.Amount amount":                                                           notHTTPStorageRow,
+	"internal/db/models/usage_event.go:UsageEvent.ForgivenAmount forgiven_amount":                                          notHTTPStorageRow,
+	"internal/http/handlers/admin_catalog.go:PaginatedResponse.Limit limit":                                                notMoneyPageSize,
+	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                       notHTTPProviderWire,
+	"internal/nmimock/v5.go:func v5.Amount amount":                                                                         notHTTPProviderWire,
+	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                    notHTTPProviderWire,
+	"internal/integrations/nmi/v5.go:v5PlanCreateRequest.PlanAmount plan_amount":                                           notHTTPProviderWire,
+	"internal/modules/admission/spendgate/policy.go:Window.Limit limit":                                                    notHTTPInternalRow,
+	"internal/modules/catalog/stripe_catalog.go:StripePrice.UnitAmount unit_amount":                                        notHTTPProviderWire,
+	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                          notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":      notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":           notHTTPIntentPayload,
+	"billing/metrics.go:MetricsQuery.Limit limit":                                                                          notMoneyPageSize,
+	"billing/metrics.go:MetricsLimits.MaxLimit max_limit":                                                                  notMoneyPageSize,
+	"internal/modules/money/invoice_profile.go:CustomerInvoiceProfile.Tax tax":                                             notMoneyTaxFacts,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.Amount amount":                             notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountRefunded amount_refunded":            notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":            notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.Amount amount":                             notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.AmountReceived amount_received":            notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountDue amount_due":     notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountPaid amount_paid":   notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_refunds.go:RefundResult.Amount amount":                                          notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeCharge.Amount amount":                                                       notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeCharge.AmountRefunded amount_refunded":                                      notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeCheckoutSession.AmountTotal amount_total":                                   notHTTPProviderWire,
+	"internal/modules/checkout/service.go:stripeCheckoutSession.AmountTotal amount_total":                                  notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeDispute.Amount amount":                                                      notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountDue amount_due":                                               notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountPaid amount_paid":                                             notHTTPProviderWire,
+	"internal/modules/webhooks/stripe.go:stripeRefund.Amount amount":                                                       notHTTPProviderWire,
+	"internal/modules/webhooks/webhook_handler.go:func Normalize.Amount amount":                                            notHTTPProviderWire,
+	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountPaid amount_paid":                                   notHTTPProviderWire,
+	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountTotal amount_total":                                 notHTTPProviderWire,
+	"internal/reconcile/converge/converge_passes.go:ownershipPurchaseRow.Amount amount":                                    notHTTPQueryRow,
+	"internal/reconcile/destructive_run_converge.go:ConvergeRollbackResult.AccessCaptured access_captured":                 notMoneyCount,
+	"internal/reconcile/reconcile.go:RemoteSubscription.AmountCents amount_cents":                                          notHTTPInternalRow,
+	"internal/reconcile/reconcile.go:RemoteTransaction.AmountCents amount_cents":                                           notHTTPInternalRow,
+	"internal/reconcile/stripe.go:func normalizeStripeCharge.Amount amount":                                                notHTTPProviderWire,
+	"internal/reconcile/stripe.go:func normalizeStripeDispute.Amount amount":                                               notHTTPProviderWire,
+	"internal/reconcile/stripe.go:func normalizeStripeRefund.Amount amount":                                                notHTTPProviderWire,
+	"internal/reconcile/stripe.go:stripeSubscriptionJSON.UnitAmount unit_amount":                                           notHTTPProviderWire,
+	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                 notHTTPInternalRow,
 
 	"billing/orders.go:OrderUsage.Tax tax": notMoneyTaxFacts,
 
@@ -119,19 +117,18 @@ var pendingNumericMoney = map[string]string{
 }
 
 const (
-	notMoneyCount           = "not money: a count"
-	notMoneyPageSize        = "not money: a page size"
-	notMoneyTaxFacts        = "not money: tax facts (ids and schemes; profiles never calculate tax)"
-	notHTTPStorageRow       = "not HTTP: storage row; every route projects it onto a wire DTO"
-	notHTTPProviderWire     = "not HTTP: a provider's own wire format (Stripe/NMI JSON) decoded from or sent to the provider"
-	notHTTPJobArgs          = "not HTTP: River job arguments"
-	notHTTPQueryRow         = "not HTTP: the SQL query's jsonb shape, re-encoded onto the wire type beside it"
-	notHTTPStoredMetadata   = "not HTTP: jsonb metadata or rail state stored on the row, never served"
-	notMoneyPurgeInventory  = "not money: the purge inventory's list of uncaptured secret names"
-	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
-	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
-	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
-	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
+	notMoneyCount          = "not money: a count"
+	notMoneyPageSize       = "not money: a page size"
+	notMoneyTaxFacts       = "not money: tax facts (ids and schemes; profiles never calculate tax)"
+	notHTTPStorageRow      = "not HTTP: storage row; every route projects it onto a wire DTO"
+	notHTTPProviderWire    = "not HTTP: a provider's own wire format (Stripe/NMI JSON) decoded from or sent to the provider"
+	notHTTPJobArgs         = "not HTTP: River job arguments"
+	notHTTPQueryRow        = "not HTTP: the SQL query's jsonb shape, re-encoded onto the wire type beside it"
+	notHTTPStoredMetadata  = "not HTTP: jsonb metadata or rail state stored on the row, never served"
+	notMoneyPurgeInventory = "not money: the purge inventory's list of uncaptured secret names"
+	notHTTPToolArgs        = "not HTTP: LLM tool-call arguments"
+	notHTTPInternalRow     = "not HTTP: internal rows converted by internal/service"
+	notHTTPStoredPayload   = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
 	// The invoice collection operation freezes its charge in a provider_intents
 	// payload row under internal/modules/money, which this guard scans. It is
 	// internal persisted intent data, never an HTTP body: an internal

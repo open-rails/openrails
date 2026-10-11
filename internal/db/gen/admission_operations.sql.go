@@ -199,10 +199,7 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 
 const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
 SELECT (h.claims + h.accrued)::bigint AS held, h.accrued::bigint AS accrued
-FROM (SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
-              FROM billing.operation_authorizations oa
-             WHERE oa.merchant_id = $1::uuid AND oa.customer_id = $2::uuid AND oa.currency = $3::text AND oa.state = 'open'), 0)
-     + COALESCE((SELECT SUM(ao.estimated_amount)
+FROM (SELECT (COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = $1::uuid AND ao.customer_id = $2::uuid AND ao.currency = $3::text AND ao.state = 'open'
                AND ao.admitted_at >= $4::timestamptz
@@ -243,8 +240,8 @@ type GetFinancialHeldAmountRow struct {
 	Accrued int64
 }
 
-// The one financial hold total: open operation authorizations, open, unexpired
-// admission reservations, pending refunds, and what the customer's running
+// The one financial hold total: open, unexpired admission reservations,
+// pending refunds, and what the customer's running
 // charges have accrued and not posted (accrued, also answered apart).
 // GetAdmissionCapacity computes the same sum. A live hold was admitted within
 // the hold lifetime, which is held_since. A posting through an instant holds

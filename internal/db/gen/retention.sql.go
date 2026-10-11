@@ -65,43 +65,6 @@ func (q *Queries) DeleteAbandonedCheckoutAttemptsBefore(ctx context.Context, arg
 	return result.RowsAffected(), nil
 }
 
-const deleteCostObservationsPastRetention = `-- name: DeleteCostObservationsPastRetention :execrows
-DELETE FROM billing.cost_observations
-WHERE merchant_id = $1::uuid
-  AND (operation_id, observation_id) IN (
-    SELECT co.operation_id, co.observation_id
-    FROM billing.cost_observations co
-    CROSS JOIN LATERAL (
-        SELECT 1 FROM billing.operation_authorizations oa
-         WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
-           AND oa.state <> 'open'
-           AND COALESCE(oa.settled_at, oa.released_at) < now() - make_interval(days => $2::int)
-         LIMIT 1) closed
-    WHERE co.merchant_id = $1::uuid
-      AND co.observed_at < now() - make_interval(days => $2::int)
-    ORDER BY co.observed_at
-    LIMIT $3::int
-)
-`
-
-type DeleteCostObservationsPastRetentionParams struct {
-	MerchantID    uuid.UUID
-	RetentionDays int32
-	RowLimit      int32
-}
-
-// An observation goes once its operation is settled or released and the
-// period has passed since: the settlement body, which is permanent, already
-// carries the digests of the two observations it was authored from. While the
-// operation is open its observations stay, however old.
-func (q *Queries) DeleteCostObservationsPastRetention(ctx context.Context, arg DeleteCostObservationsPastRetentionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteCostObservationsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteFinishedOutboxIntentsBefore = `-- name: DeleteFinishedOutboxIntentsBefore :execrows
 DELETE FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
@@ -441,22 +404,6 @@ FROM (
       WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
         AND ml.created_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
-    UNION
-    -- An observation of an operation still open is not due. The walk is over
-    -- the observations that still exist, each checked against its operation by
-    -- key: never over the authorizations, which are permanent. LATERAL with a
-    -- LIMIT keeps it one key lookup per observation, whatever the statistics.
-    (SELECT DISTINCT co.merchant_id AS mid
-       FROM billing.cost_observations co
-       CROSS JOIN LATERAL (
-            SELECT 1 FROM billing.operation_authorizations oa
-             WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
-               AND oa.state <> 'open'
-               AND COALESCE(oa.settled_at, oa.released_at) < $16::timestamptz
-             LIMIT 1) closed
-      WHERE ($1::uuid IS NULL OR co.merchant_id > $1::uuid)
-        AND co.observed_at < $16::timestamptz
-      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -478,7 +425,6 @@ type ListRetentionWorkMerchantsParams struct {
 	RunCutoff              time.Time
 	ProviderWriteCutoff    time.Time
 	LinkCutoff             time.Time
-	CostObservationCutoff  time.Time
 }
 
 // Retention sweep: due-work discovery and the durable resume cursor.
@@ -503,7 +449,6 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.RunCutoff,
 		arg.ProviderWriteCutoff,
 		arg.LinkCutoff,
-		arg.CostObservationCutoff,
 	)
 	if err != nil {
 		return nil, err

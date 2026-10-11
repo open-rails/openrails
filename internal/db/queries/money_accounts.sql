@@ -19,10 +19,7 @@ ORDER BY currency;
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     -- Same hold total as GetFinancialHeldAmount.
-    (COALESCE((SELECT SUM(oa.authorized_amount)
-              FROM billing.operation_authorizations oa
-             WHERE oa.merchant_id = a.merchant_id AND oa.customer_id = a.customer_id AND oa.currency = a.currency AND oa.state = 'open'), 0)
-     + COALESCE((SELECT SUM(ao.estimated_amount)
+    (COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
                AND ao.admitted_at >= sqlc.arg(held_since)::timestamptz

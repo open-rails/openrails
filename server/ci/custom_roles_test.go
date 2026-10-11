@@ -72,7 +72,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 	}
 	require.Subset(t, catalog, []string{
 		string(billing.MerchantBillingRead), string(billing.MerchantBillingManage), string(billing.MerchantCatalogManage), string(billing.MerchantConfigManage), string(billing.MerchantMetricsRead),
-		string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage), string(billing.MerchantCostsManage), string(billing.MerchantEventsRead),
+		string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage), string(billing.MerchantEventsRead),
 		string(billing.MerchantOrdersManage), server.MerchantRolesRead, server.MerchantRolesManage,
 	})
 

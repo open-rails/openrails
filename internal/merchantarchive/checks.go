@@ -40,11 +40,6 @@ var excludedTables = map[string]string{
 	"reconciliation_findings":       "operator observations",
 	"account_updater_batches":       "unsupported provider job evidence; any rows refused",
 	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
-	"operation_authorizations":      "unsupported opaque byte-exact operation evidence; any rows refused",
-	"cost_qualifications":           "unsupported opaque byte-exact provider evidence; any rows refused",
-	"cost_resolutions":              "operator attestations closing unsupported operation authorizations; any rows refused",
-	"cost_refusals":                 "refusals of unsupported operation authorizations; any rows refused",
-	"cost_observations":             "unsupported opaque byte-exact provider bodies; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
 	"nmi_bulk_checkpoints":          "transient read progress",
 	"nmi_history_months":            "decline analytics re-read from NMI, kept 25 months",
@@ -53,11 +48,10 @@ var excludedTables = map[string]string{
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 	"access_cutover_approvals":      "the source deployment's cutover evidence; the archive carries the converted product access",
 
-	"operation_authorization_extensions": "growth of unsupported operation authorizations, refused with them",
-	"customer_entitlement_cache":         "derived from product access and product keys; rebuilt on read",
-	"customer_entitlement_cache_stamps":  "derived from product access and product keys; rebuilt on read",
-	"price_keys":                         "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
-	"balance_watches":                    "derived: when a customer with a running charge is next looked at; restore watches every running charge again",
+	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
+	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
+	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"balance_watches":                   "derived: when a customer with a running charge is next looked at; restore watches every running charge again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -93,18 +87,12 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
 	"account_updater_batches":       "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
-	"operation_authorizations":      "operation_id merchant_id customer_id record_owner ledger_account_id currency amount claim_reference authorization_body_bytes authorization_body_digest state terminal_reference created_at released_at settled_at settlement_cost_amount settlement_amount settlement_body_bytes settlement_body_digest extended_amount authorized_amount",
-	"cost_qualifications":           "merchant_id operation_id provider provider_resource_id provider_lifetime_starts_at provider_lifetime_ends_at provider_absent_at provider_absence_reference billing_stop_reference windows_closed_at windows_closed_reference lifecycle_evidence_bytes lifecycle_evidence_digest quiescence_seconds state reason baseline_observation_id qualified_observation_id qualified_cost_amount qualified_at created_at updated_at",
 	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
-	"cost_observations":             "merchant_id operation_id observation_id normalized_query query_starts_at query_ends_at raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
-	"cost_resolutions":              "merchant_id operation_id qualification_state kind cost_amount attested_by reference note resolved_at",
-	"cost_refusals":                 "merchant_id operation_id reason qualification_state detail refused_at",
 
-	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
-	"customer_entitlement_cache":         "id merchant_id customer_id entitlement quantity",
-	"customer_entitlement_cache_stamps":  "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
-	"price_keys":                         "merchant_id product_id key revision created_at updated_at",
-	"balance_watches":                    "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at",
+	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
+	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
+	"price_keys":                        "merchant_id product_id key revision created_at updated_at",
+	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -242,7 +230,6 @@ type rowCheck struct{ table, predicate string }
 
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
-	{"operation_authorizations", "true"}, {"cost_qualifications", "true"}, {"cost_observations", "true"},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
 	{"checkout_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
@@ -258,8 +245,6 @@ var preflightChecks = []rowCheck{
 	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
-	{"cost_resolutions", "true"},
-	{"cost_refusals", "true"},
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {

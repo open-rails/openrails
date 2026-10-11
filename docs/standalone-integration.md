@@ -285,7 +285,7 @@ curl -X POST https://openrails.example/v1/app/admissions/release \
   -d '{"request_ids":["req-789"]}'
 ```
 
-The `/v1/app/*` surface (admissions, usage, provider operations, host events)
+The `/v1/app/*` surface (admissions, usage, running charges, host events)
 and the `/v1/admin/*` surface (credits, entitlements, settings, customers,
 payments, subscriptions) are gated per route by their permission — see [api/routes.md](api/routes.md) for every route with its permission and
 [api/endpoints.md](api/endpoints.md) for the conventions. A token acts on its issuer's merchant
@@ -367,8 +367,8 @@ merchants:
 - An application's token calls the programmatic routes, `/v1/app/*` with
   `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
-  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`,
-  `merchant:orders:manage`, `merchant:customers:read`); a
+  `merchant:usage:manage`, `merchant:events:read`, `merchant:orders:manage`,
+  `merchant:customers:read`); a
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad
   signature, audience or lifetime), `401 credential_expired`,

@@ -87,7 +87,7 @@ unbounded-many ListOpenCatalogDriftEvents       # open catalog.* findings: catal
 # never a request or a routine job.
 unpruned-partition archive.count.admission_operations        # archive counts every retained admission
 unpruned-partition archive.export.admission_operations       # archive exports every retained admission
-unpruned-partition archive.preflight.admission_operations.11 # archive refuses while any admission is open
+unpruned-partition archive.preflight.admission_operations.8 # archive refuses while any admission is open
 unpruned-partition archive.count.usage_events                # archive counts every retained usage event
 unpruned-partition archive.export.usage_events               # archive exports every retained usage event
 

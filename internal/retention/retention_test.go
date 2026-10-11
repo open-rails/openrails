@@ -140,10 +140,16 @@ func TestBaselinePeriodsAreTheConstants(t *testing.T) {
 	want := map[string]time.Duration{
 		"subscription_status_transitions": SubscriptionTransitions,
 		"maintenance_runs":                ReconciliationRuns,
-		"cost_observations":               CostObservations,
+	}
+	dropped := map[string]bool{}
+	for _, m := range dropTable.FindAllStringSubmatch(sql, -1) {
+		dropped[m[1]] = true
 	}
 	got := map[string]time.Duration{}
 	for _, m := range guardTrigger.FindAllStringSubmatch(sql, -1) {
+		if dropped[m[1]] {
+			continue
+		}
 		days, err := strconv.Atoi(m[3])
 		if err != nil {
 			t.Fatal(err)

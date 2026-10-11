@@ -79,7 +79,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/price-migrations/{id}/cancel",
 	"POST /v1/admin/product-access",
 	"POST /v1/admin/product-access/{id}/revoke",
-	"POST /v1/admin/provider-operations/{operation_id}/close",
 	"POST /v1/admin/provisioning-tokens",
 	"POST /v1/admin/psps",
 	"POST /v1/admin/psps/refresh",
@@ -586,7 +585,7 @@ func TestStaffGate(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, got.status, who.Credential.Kind)
 		require.Equal(t, "application_required", got.code)
 	}
-	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootUsageManage: true, billing.RootCostsManage: true, billing.RootEntitlementsRead: true}}, "GET /v1/app/host-events", nil)
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootUsageManage: true, billing.RootEntitlementsRead: true}}, "GET /v1/app/host-events", nil)
 	require.Equal(t, http.StatusForbidden, got.status, "every permission but events")
 	require.Equal(t, "permission_required", got.code)
 	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootEventsRead: true}}, "GET /v1/app/host-events", nil)

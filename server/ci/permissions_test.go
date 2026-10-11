@@ -118,7 +118,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		{string(billing.MerchantEntitlementsRead), http.MethodPost, "/v1/app/entitlements/check", `{"customer_id":"` + customer + `","entitlements":["content:any"]}`, http.StatusOK},
 		{string(billing.MerchantCatalogRead), http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", "", http.StatusOK},
 		{string(billing.MerchantUsageManage), http.MethodPost, "/v1/app/admissions/release", `{"request_ids":["req-1"]}`, http.StatusOK},
-		{string(billing.MerchantCostsManage), http.MethodPost, "/v1/app/provider-operations/op-missing/release", `{"release_reference":"never-opened"}`, http.StatusNotFound},
+		{string(billing.MerchantUsageManage), http.MethodGet, "/v1/app/running-charges/never-started", "", http.StatusNotFound},
 		{string(billing.MerchantEventsRead), http.MethodGet, "/v1/app/host-events", "", http.StatusOK},
 		{string(billing.MerchantOrdersManage), http.MethodPost, "/v1/app/orders/preview", `{"customer_id":"` + customer + `","lines":[{"price_id":"` + billing.PriceID(uuid.New()).String() + `"}]}`, http.StatusOK},
 	}
@@ -126,7 +126,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		w := send(handler, backend([]string{route.perm}), route.method, route.path, route.body)
 		require.Equal(t, route.status, w.Code, "%s %s holding %s: %s", route.method, route.path, route.perm, w.Body.String())
 		if route.status == http.StatusNotFound {
-			require.Equal(t, "provider_operation_not_found", errorCode(t, w), "past the gate, the handler's own answer")
+			require.Equal(t, "running_charge_not_found", errorCode(t, w), "past the gate, the handler's own answer")
 		}
 
 		others := slices.DeleteFunc(slices.Clone(every), func(p string) bool { return p == route.perm })

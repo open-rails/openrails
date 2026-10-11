@@ -60,16 +60,10 @@ var remoteMethods = map[string]string{
 // merchant route can carry it; the reason names the host that calls it. The
 // control plane's cross-merchant operations are package server's.
 var embeddedMethods = map[string]string{
-	"SCIMHandler":                        "the SCIM service provider an in-process directory pushes to",
-	"DeclarePSP":                         "the hosted product: a PSP identity without credentials, for imported billing facts",
-	"OpenProviderOperationTx":            "host-four: OpenProviderOperation inside the host's transaction",
-	"GetProviderOperationTx":             "host-four: GetProviderOperation inside the host's transaction",
-	"IncrementProviderOperationTx":       "host-four: IncrementProviderOperation inside the host's transaction",
-	"ReleaseProviderOperationTx":         "host-four: ReleaseProviderOperation inside the host's transaction",
-	"RecordProviderBillingObservationTx": "host-four: RecordProviderBillingObservation inside the host's transaction",
-	"CloseProviderOperationTx":           "host-four: CloseProviderOperation inside the host's transaction",
-	"StartRunningChargeTx":               "host-four: StartRunningCharge inside the host's transaction",
-	"StopRunningChargeTx":                "host-four: StopRunningCharge inside the host's transaction",
+	"SCIMHandler":          "the SCIM service provider an in-process directory pushes to",
+	"DeclarePSP":           "the hosted product: a PSP identity without credentials, for imported billing facts",
+	"StartRunningChargeTx": "host-four: StartRunningCharge inside the host's transaction",
+	"StopRunningChargeTx":  "host-four: StopRunningCharge inside the host's transaction",
 }
 
 // routeArguments are the arguments of the methods that refuse a request with

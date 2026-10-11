@@ -107,11 +107,6 @@ type Config struct {
 	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
 	CatalogReconciliationInterval string
 
-	// ProviderBillingQuiescenceInterval is the minimum separation between two
-	// equal provider billing observations before an operation authorization
-	// may settle: a positive Go duration in whole seconds. Empty is 24h.
-	ProviderBillingQuiescenceInterval string
-
 	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string
@@ -256,30 +251,6 @@ func CatalogReconciliationSchedule(cfg *Config) (interval time.Duration, enabled
 		return 0, false, nil
 	}
 	return d, true, nil
-}
-
-// ProviderBillingQuiescence returns the policy used for new qualifications.
-// The chosen duration is persisted per operation, so later config changes do
-// not retroactively weaken an existing reservation's evidence requirement.
-func ProviderBillingQuiescence(cfg *Config) (time.Duration, error) {
-	raw := ""
-	if cfg != nil {
-		raw = strings.TrimSpace(cfg.ProviderBillingQuiescenceInterval)
-	}
-	if raw == "" {
-		return 24 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("provider_billing_quiescence_interval %q is not a Go duration (e.g. 24h): %w", raw, err)
-	}
-	if d < time.Second {
-		return 0, fmt.Errorf("provider_billing_quiescence_interval must be at least one second")
-	}
-	if d%time.Second != 0 {
-		return 0, fmt.Errorf("provider_billing_quiescence_interval must use whole seconds")
-	}
-	return d, nil
 }
 
 // MerchantConfigKVMount is the KV v2 mount that holds merchant
@@ -1072,9 +1043,6 @@ func Validate(cfg *Config) error {
 	// Malformed catalog_reconciliation_interval refuses to boot (#712): the old
 	// env knob silently fell back to 1h on a typo.
 	if _, _, err := CatalogReconciliationSchedule(cfg); err != nil {
-		return err
-	}
-	if _, err := ProviderBillingQuiescence(cfg); err != nil {
 		return err
 	}
 

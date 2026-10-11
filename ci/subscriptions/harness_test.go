@@ -75,7 +75,6 @@ const (
 	appEntitlements = billing.RootEntitlementsRead
 	appOffers       = billing.RootCatalogRead
 	appUsage        = billing.RootUsageManage
-	appCosts        = billing.RootCostsManage
 	appEvents       = billing.RootEventsRead
 	appOrders       = billing.RootOrdersManage
 )

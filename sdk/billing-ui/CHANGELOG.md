@@ -1,5 +1,13 @@
 # Changelog
 
+## Provider operations removed
+
+- Breaking: `OpenRailsErrorCode` and `OPENRAILS_ERROR_CODES` lose
+  `provider_operation_not_found`, `provider_operation_conflict`,
+  `provider_operation_not_open`, `provider_operation_has_billing_evidence`,
+  `provider_operation_refused`, `provider_operation_not_refused` and
+  `provider_billing_observation_conflict`.
+
 ## Usage report
 
 - `getUsage({ currency, groupBy, from, to, limit, cursor })` reads a page of
