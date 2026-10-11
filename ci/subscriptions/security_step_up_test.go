@@ -33,7 +33,6 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("OpenRails-Merchant", w.slug)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer res.Body.Close()

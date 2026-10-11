@@ -79,8 +79,8 @@ func (r *Runtime) ReportSignerKeyChange(err error) {
 	r.signerIdentity.record(err)
 }
 
-// ReportDeclaredCatalog records why Config.Catalog is not applied yet (nil
-// once it is). Ready fails until then.
+// ReportDeclaredCatalog records why a declared catalog is not applied yet
+// (nil once all are). Ready fails until then.
 func (r *Runtime) ReportDeclaredCatalog(err error) {
 	r.declaredCatalog.record(err)
 }

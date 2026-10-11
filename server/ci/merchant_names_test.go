@@ -132,7 +132,7 @@ func reserving(names ...string) func(*server.Config, *server.Deps) {
 }
 
 // call sends an authenticated JSON request to the standalone surface.
-func call(t *testing.T, handler http.Handler, token, method, path, selector string, body any) *httptest.ResponseRecorder {
+func call(t *testing.T, handler http.Handler, token, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var payload bytes.Buffer
 	if body != nil {
@@ -141,9 +141,6 @@ func call(t *testing.T, handler http.Handler, token, method, path, selector stri
 	r := httptest.NewRequest(method, path, &payload)
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("Content-Type", "application/json")
-	if selector != "" {
-		r.Header.Set("OpenRails-Merchant", selector)
-	}
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 	return w
@@ -213,12 +210,12 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 }
 
 // A merchant's own rename answers to the naming policy and the creation
-// policy's reserved names; the former name keeps selecting it. No route
-// renames a merchant.
+// policy's reserved names; a token bound to it acts there whatever its name.
+// No route renames a merchant.
 func TestMerchantOwnRename(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.newServer(t, reserving(reserved))
+	cp := f.newServer(t, edits(reserving(reserved), resourced))
 	ctx := t.Context()
 	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")
@@ -247,8 +244,9 @@ func TestMerchantOwnRename(t *testing.T) {
 	var tooSoon *billing.MerchantRenameTooSoonError
 	require.ErrorAs(t, err, &tooSoon, "the interval refuses a second rename")
 	require.True(t, tooSoon.NextRenameAt.After(time.Now()))
-	require.Equal(t, http.StatusOK, call(t, handler, token, http.MethodGet, "/v1/admin/findings", shop, nil).Code, "the former name still selects the merchant")
-	require.Equal(t, http.StatusNotFound, call(t, handler, token, http.MethodPut, "/v1/merchant/name", shop, map[string]string{"name": uniqueName("shop")}).Code)
+	bound := f.exchanged(t, handler, token, m.MerchantID)
+	require.Equal(t, http.StatusOK, bound.call(t, handler, http.MethodGet, "/v1/admin/findings", nil).Code, "a renamed merchant keeps its id, which binds")
+	require.Equal(t, http.StatusNotFound, bound.call(t, handler, http.MethodPut, "/v1/merchant/name", map[string]string{"name": uniqueName("shop")}).Code)
 	mid, current, err := cp.MerchantByName(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, []any{m.MerchantID, next}, []any{mid, current})

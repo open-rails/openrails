@@ -108,13 +108,11 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
-			Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Checkout Shop",
-				// The shop's own site, the API origin, frames its embedded checkouts.
-				Settings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}},
-				PSPs: map[string]openrails.PSPConfig{
+			Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Checkout Shop", // The shop's own site, the API origin, frames its embedded checkouts.
+				Settings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]openrails.PSPConfig{
 					"nmi":    openrails.NMIPSP{AccountID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 					"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
-				}},
+				}}},
 		},
 		Auth: authkit.Config{
 			Token:        authkit.TokenConfig{Issuer: api},
@@ -135,10 +133,11 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	if err := h.rt.InitRiver(ctx); err != nil {
 		return err
 	}
-	h.mid = h.rt.ConfiguredMerchant()
-	if h.mid.IsZero() {
-		return errors.New("checkoutpage: no configured merchant")
+	declared := h.rt.DeclaredMerchants()
+	if len(declared) != 1 {
+		return errors.New("checkoutpage: the server declares no merchant")
 	}
+	h.mid = declared[0]
 	if h.shop, err = srv.Engine().Merchant(h.mid); err != nil {
 		return err
 	}

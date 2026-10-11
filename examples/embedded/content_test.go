@@ -249,13 +249,13 @@ func startApp(t *testing.T) *app {
 	// Exchange rates from a fake exchange-api: no test reaches the real one.
 	fx := fxfake.New()
 	t.Cleanup(fx.Close)
+	merchant.Catalog, merchant.Issuer = products, issuer
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
 		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
-		Merchant:          merchant,
-		Catalog:           products,
+		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
 	}, openrails.Deps{Postgres: db, UserInfo: ak.UserInfo(), FXTransport: fx.Transport()})
 	require.NoError(t, err)
 	t.Cleanup(func() { bill.Close(context.Background()) })

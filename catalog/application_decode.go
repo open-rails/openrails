@@ -13,7 +13,7 @@ import (
 )
 
 // ReadFile reads a catalog file: YAML (.yaml, .yml) or JSON (.json). Pass the
-// result as Config.Catalog. A catalog held in memory (go:embed) uses
+// result as a declared merchant's Catalog. A catalog held in memory (go:embed) uses
 // ParseApplicationYAML or ParseApplicationJSON instead.
 func ReadFile(path string) (*Application, error) {
 	raw, err := os.ReadFile(path)

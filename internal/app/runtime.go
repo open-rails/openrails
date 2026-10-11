@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,7 +70,7 @@ type Runtime struct {
 	// signerIdentity records a Vault Transit key that no longer matches its
 	// stored Solana identity.
 	signerIdentity dependencyState
-	// declaredCatalog records why Config.Catalog is not applied yet.
+	// declaredCatalog records why a declared catalog is not applied yet.
 	declaredCatalog dependencyState
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
 	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
@@ -91,11 +93,8 @@ type Runtime struct {
 	redisOwned bool
 	Config     *config.Config
 
-	// configuredMerchant scopes single-merchant embedded runtimes. Constructor
-	// declarations bind before HTTP and worker startup; standalone remains zero.
-	// Atomic reads also protect privileged restore/bootstrap integration. Readers
-	// use ConfiguredMerchant rather than caching a construction-time snapshot.
-	configuredMerchant atomic.Pointer[billing.MerchantID]
+	// declared are the merchants Config declares (DeclareMerchants).
+	declared atomic.Pointer[declaredMerchants]
 
 	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
 	// (#746), built once from config.Config.TrustedProxies. A nil/empty
@@ -298,25 +297,45 @@ func (r *Runtime) MerchantConfigEditable() bool {
 	return r != nil && r.Config != nil && config.MerchantConfigKVMount(r.Config) != ""
 }
 
-// ConfiguredMerchant returns the current single-merchant binding. Zero means
-// the caller must explicitly select a merchant through its authority.
-func (r *Runtime) ConfiguredMerchant() billing.MerchantID {
-	if r == nil {
-		return billing.MerchantID{}
-	}
-	if id := r.configuredMerchant.Load(); id != nil {
-		return *id
-	}
-	return billing.MerchantID{}
+// declaredMerchants are the merchants Config declares: their ids, and the
+// one each declared issuer binds.
+type declaredMerchants struct {
+	ids     []billing.MerchantID
+	issuers map[string]billing.MerchantID
 }
 
-// SetConfiguredMerchant binds constructor and privileged restore/bootstrap
-// integrations atomically with respect to request readers.
-func (r *Runtime) SetConfiguredMerchant(id billing.MerchantID) {
+// DeclareMerchants records the merchants Config declares, before routes or
+// workers run: ids in declaration order, and for each MerchantDeclaration.
+// Issuer the merchant its credentials are bound to. Nothing else binds a
+// request to a merchant by default.
+func (r *Runtime) DeclareMerchants(ids []billing.MerchantID, issuers map[string]billing.MerchantID) {
+	r.declared.Store(&declaredMerchants{ids: slices.Clone(ids), issuers: maps.Clone(issuers)})
+}
+
+// DeclaredMerchants are the merchants Config declares; none on a standalone
+// server, whose merchants are provisioned at run time.
+func (r *Runtime) DeclaredMerchants() []billing.MerchantID {
 	if r == nil {
-		return
+		return nil
 	}
-	r.configuredMerchant.Store(&id)
+	if d := r.declared.Load(); d != nil {
+		return slices.Clone(d.ids)
+	}
+	return nil
+}
+
+// IssuerMerchant is the merchant that declares issuer as its own: every
+// credential of that issuer bound to no scope acts at it.
+func (r *Runtime) IssuerMerchant(issuer string) (billing.MerchantID, bool) {
+	if r == nil || issuer == "" {
+		return billing.MerchantID{}, false
+	}
+	d := r.declared.Load()
+	if d == nil {
+		return billing.MerchantID{}, false
+	}
+	id, ok := d.issuers[issuer]
+	return id, ok && !id.IsZero()
 }
 
 // Close gracefully shuts down runtime resources.

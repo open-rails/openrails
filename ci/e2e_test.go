@@ -8,6 +8,7 @@ package ci_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
 type fixture struct {
@@ -77,19 +79,49 @@ func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 }
 
 // boot builds an engine, closed at cleanup, and the handle of the merchant
-// cfg declares.
+// cfg declares. The test hosts' issuer (authtest.Issuer) binds that one
+// merchant, as a single-merchant host declares its own, unless cfg names
+// another.
 func (f *fixture) boot(t *testing.T, cfg openrails.Config, deps openrails.Deps) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
+	cfg = ownIssuer(cfg)
 	bill, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
 	return bill, declared(t, bill, cfg)
 }
 
+// ownIssuer is cfg with its one declared merchant bound by the test hosts'
+// issuer, when it declares one and names no issuer.
+func ownIssuer(cfg openrails.Config) openrails.Config {
+	if len(cfg.Merchants) != 1 {
+		return cfg
+	}
+	merchants := maps.Clone(cfg.Merchants)
+	for slug, m := range merchants {
+		if m.Issuer == "" {
+			m.Issuer = authtest.Issuer
+			merchants[slug] = m
+		}
+	}
+	cfg.Merchants = merchants
+	return cfg
+}
+
+// declaredSlug is the slug of the one merchant cfg declares.
+func declaredSlug(t testing.TB, cfg openrails.Config) string {
+	t.Helper()
+	require.Len(t, cfg.Merchants, 1)
+	for slug := range cfg.Merchants {
+		return slug
+	}
+	return ""
+}
+
 // declared is the handle of the merchant cfg declares on bill.
 func declared(t testing.TB, bill *openrails.Engine, cfg openrails.Config) *openrails.Client {
 	t.Helper()
-	shop, err := bill.MerchantBySlug(cfg.Merchant.Slug)
+	shop, err := bill.MerchantBySlug(declaredSlug(t, cfg))
 	require.NoError(t, err)
 	return shop
 }
@@ -99,12 +131,12 @@ func declared(t testing.TB, bill *openrails.Engine, cfg openrails.Config) *openr
 func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
+	m := openrails.MerchantDeclaration{DisplayName: slug}
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	if transport != nil {
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		deps.StripeTransport = transport
-		cfg.Merchant.PSPs = map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
+		m.PSPs = map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: "acct_e2e",
 			Secrets: map[string]string{
 				"secret_key":             "sk_test_e2e",
@@ -112,6 +144,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 			},
 		}}
 	}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: m}
 	return f.boot(t, cfg, deps)
 }
 
@@ -119,7 +152,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 func (f *fixture) runtimeDeclaring(t *testing.T, slug string, settings billing.MerchantSettings) *openrails.Client {
 	t.Helper()
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, Settings: settings}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Settings: settings}}
 	_, shop := f.boot(t, cfg, openrails.Deps{Postgres: f.pool})
 	return shop
 }

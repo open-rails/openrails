@@ -3,8 +3,6 @@ package inprocess
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -14,9 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
@@ -66,33 +62,10 @@ func TestEngineContextKeepsOnlyCancellation(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
-// fakeDirectory is a directory of rows by id; err fails every read.
-type fakeDirectory struct {
-	rows map[billing.MerchantID]*merchants.Merchant
-	err  error
-}
-
-func (d fakeDirectory) Get(_ context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
-	if d.err != nil {
-		return nil, d.err
-	}
-	if m, ok := d.rows[id]; ok {
-		return m, nil
-	}
-	return nil, merchants.ErrMerchantNotFound
-}
-
-func live(ids ...billing.MerchantID) fakeDirectory {
-	d := fakeDirectory{rows: map[billing.MerchantID]*merchants.Merchant{}}
-	for _, id := range ids {
-		d.rows[id] = &merchants.Merchant{ID: id, Slug: "shop", Status: merchants.StatusActive}
-	}
-	return d
-}
-
-// The host principal is the handle's merchant, named by the private context
-// value alone: no header, ambient pin or host principal of the caller's
-// selects one, and no host value reaches the handler.
+// The host principal is bound to the handle's merchant, named by the private
+// context value alone: no header, ambient pin or host principal of the
+// caller's selects one, and no host value reaches the handler. The route gate
+// reads that merchant live and pins it.
 func TestTransportBindsTheHandlesMerchant(t *testing.T) {
 	bound, ambient := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	type observed struct {
@@ -106,51 +79,18 @@ func TestTransportBindsTheHandlesMerchant(t *testing.T) {
 		got.host, _ = requestauth.HostPrincipalFromContext(r.Context())
 		got.merchant, _ = merchant.FromContext(r.Context())
 		_, _ = w.Write([]byte("ok"))
-	}), live(bound, ambient))
+	}))
 
 	for _, auth := range []string{"", "Bearer merchant-key"} {
 		req, err := http.NewRequestWithContext(WithMerchant(hostContext(t, ambient), bound), http.MethodGet, "http://openrails.invalid/v1/admin/payments", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", auth)
-		req.Header.Set("OpenRails-Merchant", "id:"+ambient.String())
 		res, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		require.NoError(t, res.Body.Close())
-		require.Equal(t, observed{host: &requestauth.HostPrincipal{MerchantID: bound, MerchantSlug: "shop"}, merchant: bound}, got)
+		require.Equal(t, observed{host: &requestauth.HostPrincipal{MerchantID: bound}}, got)
 	}
-}
-
-// A call that names no merchant, or one that is unknown or deleted, is
-// refused with 403 merchant_unresolved before any handler runs; a directory
-// that cannot be read is a transport failure, never a refusal.
-func TestTransportRefusesAMerchantThatIsNotLive(t *testing.T) {
-	known, deleted := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
-	directory := live(known)
-	directory.rows[deleted] = &merchants.Merchant{ID: deleted, Slug: "gone", Status: merchants.StatusDeleted}
-	called := 0
-	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called++ })
-	transport := NewTransport(handler, directory)
-	for name, ctx := range map[string]context.Context{
-		"no handle merchant": hostContext(t, known),
-		"zero":               WithMerchant(t.Context(), billing.MerchantID{}),
-		"unknown":            WithMerchant(t.Context(), billing.MerchantID(uuid.New())),
-		"deleted":            WithMerchant(t.Context(), deleted),
-	} {
-		res, body := roundTrip(t, transport, ctx, http.MethodGet, "/v1/admin/payments", "")
-		require.Equal(t, http.StatusForbidden, res.StatusCode, name)
-		var envelope api.ErrorResponse
-		require.NoError(t, json.Unmarshal([]byte(body), &envelope))
-		require.Equal(t, billing.CodeMerchantUnresolved, envelope.Error.Code, name)
-	}
-	require.Zero(t, called)
-
-	down := errors.New("directory down")
-	req, err := http.NewRequestWithContext(WithMerchant(t.Context(), known), http.MethodGet, "http://openrails.invalid/v1/admin/payments", nil)
-	require.NoError(t, err)
-	_, err = NewTransport(handler, fakeDirectory{err: down}).RoundTrip(req)
-	require.ErrorIs(t, err, down)
-	require.Zero(t, called)
 }
 
 // Archive exports stream through a pipe: the book is never buffered, and a
@@ -163,7 +103,7 @@ func TestArchiveResponsesStream(t *testing.T) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, err := w.Write(book)
 		done <- err
-	}), live(bound))
+	}))
 	req, _ := http.NewRequestWithContext(WithMerchant(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/admin/billing-archive", nil)
 	res, err := transport.RoundTrip(req)
 	require.NoError(t, err)
@@ -244,7 +184,7 @@ func TestUploadCancellationClosesRequestBody(t *testing.T) {
 		_, err := io.Copy(io.Discard, r.Body)
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
-	}), live(bound))
+	}))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/admin/billing-archive", reader)
 	require.NoError(t, err)
 	returned := make(chan struct{})

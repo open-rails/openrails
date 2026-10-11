@@ -6,16 +6,15 @@ import (
 )
 
 // routeOptions mount the engine's routes behind AuthKit, as any host does:
-// a merchant's staff hold their merchant: permissions in its AuthKit group,
-// the platform's their root: ones in the root group.
+// each request acts on the merchant whose AuthKit group its credential is
+// bound to. A merchant's staff hold their merchant: permissions in that
+// group, the platform's their root: ones in the root group.
 func (s *Server) routeOptions() httproutes.Options {
 	return httproutes.Options{
-		Auth:            s.auth,
-		ResolveMerchant: s.resolveMerchant,
-		AdminLimiter:    s.adminLimiter,
-		Capabilities:    s.capabilities(),
-		Groups:          s.groups,
-		NativeIssuer:    s.controlPlane.Issuer(),
+		Auth:         s.auth,
+		AdminLimiter: s.adminLimiter,
+		Capabilities: s.capabilities(),
+		Groups:       s.groups,
 	}
 }
 

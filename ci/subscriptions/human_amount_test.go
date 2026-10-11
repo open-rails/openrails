@@ -21,7 +21,6 @@ func applyHumanAmountYAML(t *testing.T, w *world, document string) (int, billing
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/yaml")
 	request.Header.Set("Authorization", "Bearer "+w.auth.token(t, "staff"))
-	request.Header.Set("OpenRails-Merchant", w.slug)
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer response.Body.Close()

@@ -70,7 +70,7 @@ func TestMerchantCreationPolicy(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalidMerchantSlug)
 
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		w := call(t, handler, ownerToken, method, "/v1/merchants", "", map[string]string{"name": uniqueName("late")})
+		w := call(t, handler, ownerToken, method, "/v1/merchants", map[string]string{"name": uniqueName("late")})
 		require.Equal(t, http.StatusNotFound, w.Code, "%s /v1/merchants: %s", method, w.Body.String())
 	}
 }

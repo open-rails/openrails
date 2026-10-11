@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/authtest"
@@ -318,7 +319,7 @@ func TestNetworkPortal(t *testing.T) {
 	// Revoking the mart's authority to charge without the customer.
 	mandates := func() []billing.Mandate {
 		t.Helper()
-		r := call(t, w.handler, martKey.Secret, http.MethodGet, "/v1/admin/customers/"+martSub+"/payment-methods", "", nil)
+		r := call(t, w.handler, martKey.Secret, http.MethodGet, "/v1/admin/customers/"+martSub+"/payment-methods", nil)
 		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 		var out []billing.Mandate
 		for _, pm := range decode[billing.ListPage[billing.PaymentMethod]](t, r).Items {
@@ -439,14 +440,26 @@ func TestNetworkPortal(t *testing.T) {
 		{w.shopKey, shopSub, martSub, w.mart, martLink.ID, martPlan, martOrder},
 		{martKey, martSub, shopSub, w.shop, shopLink.ID, shopPlan, shopOrder},
 	} {
-		r := call(t, w.handler, side.key.Secret, http.MethodGet, "/v1/admin/customers/"+side.own, "", nil)
+		r := call(t, w.handler, side.key.Secret, http.MethodGet, "/v1/admin/customers/"+side.own, nil)
 		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 		for _, other := range []string{side.other, side.otherMerchant.String(), side.otherLink.String()} {
 			require.NotContains(t, r.Body.String(), other, "a merchant's read of its customer")
 		}
 		for _, path := range []string{"/v1/admin/subscriptions/" + side.otherPlan.String(), "/v1/admin/orders/" + side.otherOrder.String(), "/v1/admin/customers/" + side.other} {
-			r := call(t, w.handler, side.key.Secret, http.MethodGet, path, "", nil)
+			r := call(t, w.handler, side.key.Secret, http.MethodGet, path, nil)
 			require.Equal(t, http.StatusNotFound, r.Code, "%s: %s", path, r.Body.String())
 		}
+	}
+
+	// The network portal belongs to an account bound to no merchant: a
+	// credential bound to one, a merchant's key or its customer's token, is
+	// refused there.
+	boundToken := martLogin.mint(t, func(c jwt.MapClaims) {
+		c["sub"], c["scope"] = uuid.NewString(), billing.ScopeSelf
+		delete(c, "permissions")
+	})
+	for name, token := range map[string]string{"a merchant's key": martKey.Secret, "a merchant's customer token": boundToken} {
+		r := serve(w.handler, rsRequest{path: "/v1/network/links", authorization: "Bearer " + token})
+		require.Equal(t, http.StatusForbidden, r.Code, "%s: %s", name, r.Body.String())
 	}
 }

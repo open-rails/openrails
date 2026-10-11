@@ -34,6 +34,7 @@ import (
 // with every root: name.
 type guardedHost struct {
 	ak                        *authkit.Client
+	issuer                    string
 	perms                     map[billing.Permission]iam.Perm
 	merchant                  iam.Persona
 	roles                     map[string]iam.Role
@@ -50,12 +51,13 @@ func newGuardedHost(t *testing.T, f *fixture) *guardedHost {
 func newGuardedHostOn(t *testing.T, pool *pgxpool.Pool) *guardedHost {
 	t.Helper()
 	rbac := authkit.NewRoles(authkit.APIKeys)
-	merchant := rbac.Persona(billing.MerchantGroupPersona)
+	merchant := rbac.Persona(billing.MerchantGroupPersona, authkit.APIKeys)
 	h := &guardedHost{perms: map[billing.Permission]iam.Perm{}, merchant: merchant.Persona}
-	var everyRoot []iam.Grant
+	var everyRoot, everyMerchant []iam.Grant
 	for _, p := range billing.Permissions() {
 		if p.Persona() == billing.MerchantGroupPersona {
 			h.perms[p] = merchant.Permission(p.Resource(), p.Action())
+			everyMerchant = append(everyMerchant, h.perms[p])
 			continue
 		}
 		h.perms[p] = rbac.Root.Permission(p.Resource(), p.Action())
@@ -67,11 +69,12 @@ func newGuardedHostOn(t *testing.T, pool *pgxpool.Pool) *guardedHost {
 		"admin":   rbac.Root.Role("billing-admin", everyRoot...),
 		// A merchant's own staff, in its group.
 		"merchant-support": merchant.Role("support", h.perms[billing.MerchantBillingRead], h.perms[billing.MerchantBillingManage]),
+		"merchant-backend": merchant.Role("backend", everyMerchant...),
 	}
 	as := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = pool }),
 		authtest.WithConfig(func(c *authkit.Config) { c.Roles = rbac }))
-	h.ak = as.Client
+	h.ak, h.issuer = as.Client, as.URL
 	h.customer, h.reader, h.support, h.owner = h.token(t, ""), h.token(t, "reader"), h.token(t, "support"), h.token(t, "admin")
 	gone := authtest.NewUser(t, h.ak)
 	authtest.GrantRole(t, h.ak, iam.RootGroup(), iam.UserSubject(gone.ID), h.roles["support"])
@@ -93,6 +96,17 @@ func (h *guardedHost) merchantStaff(t *testing.T, mid billing.MerchantID) string
 	u := authtest.NewUser(t, h.ak)
 	authtest.GrantRole(t, h.ak, iam.GroupByID(group.ID), iam.UserSubject(u.ID), h.roles["merchant-support"])
 	return authtest.SignIn(t, h.ak, u).AccessToken
+}
+
+// merchantKey is an API key of mid's own group holding every merchant:
+// permission: the backend's credential bound to that merchant.
+func (h *guardedHost) merchantKey(t *testing.T, mid billing.MerchantID) string {
+	t.Helper()
+	_, err := h.ak.CreateGroup(t.Context(), iam.NewGroup{ID: mid.String(), Persona: h.merchant})
+	require.NoError(t, err)
+	key, err := h.ak.CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.NewAPIKey{Name: "merchant-backend", Role: h.roles["merchant-backend"]})
+	require.NoError(t, err)
+	return key.Secret
 }
 
 // token signs in a new user holding role in the root group ("" holds none).
@@ -156,7 +170,7 @@ type answer struct {
 
 func ask(t *testing.T, mux http.Handler, token, method, path string, body any) answer {
 	t.Helper()
-	w := call(t, mux, token, method, path, "", body)
+	w := call(t, mux, token, method, path, body)
 	return answer{w.Code, w.Body.String(), w.Header().Get("WWW-Authenticate")}
 }
 
@@ -169,7 +183,7 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	bill, client := f.runtime(t, "groups-"+uuid.NewString()[:8])
+	bill, client := f.runtimeIssued(t, "groups-"+uuid.NewString()[:8], h.issuer)
 	payment := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 	subscription := "/billing/v1/admin/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
 	// passes is a request the gate admitted: the handler answers, here that
@@ -223,7 +237,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	// A merchant's own staff hold the merchant: names in its group: they act
 	// at that merchant and nowhere else, and a root holder at both.
 	t.Run("a merchant's own staff", func(t *testing.T) {
-		other, _ := f.runtime(t, "other-"+uuid.NewString()[:8])
+		other, _ := f.runtimeIssued(t, "other-"+uuid.NewString()[:8], h.issuer)
 		staff := h.merchantStaff(t, client.MerchantID())
 		here, err := h.mount(t, bill, adminGroups)
 		require.NoError(t, err)
@@ -236,7 +250,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 		passes(t, there, h.reader, http.MethodGet, "/billing/v1/admin/payments")
 
 		access := func(mux http.Handler, token string) billing.AdminAccess {
-			return decode[billing.AdminAccess](t, call(t, mux, token, http.MethodGet, "/billing/v1/admin/access", "", nil))
+			return decode[billing.AdminAccess](t, call(t, mux, token, http.MethodGet, "/billing/v1/admin/access", nil))
 		}
 		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: client.MerchantID().String()}, access(here, staff))
 		require.Equal(t, access(here, staff), access(here, h.support), "the access read answers the same levels for either name")
@@ -244,7 +258,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	})
 
 	t.Run("merchant configuration", func(t *testing.T) {
-		config, _ := f.runtime(t, "config-"+uuid.NewString()[:8])
+		config, _ := f.runtimeIssued(t, "config-"+uuid.NewString()[:8], h.issuer)
 		mux, err := h.mount(t, config, openrails.RouteGroups{Admin: true, MerchantConfig: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodGet, "/billing/v1/admin/psps")
@@ -254,7 +268,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	})
 
 	t.Run("the catalog alone", func(t *testing.T) {
-		catalog, _ := f.runtime(t, "catalog-"+uuid.NewString()[:8])
+		catalog, _ := f.runtimeIssued(t, "catalog-"+uuid.NewString()[:8], h.issuer)
 		mux, err := h.mount(t, catalog, openrails.RouteGroups{Catalog: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodPost, "/billing/v1/admin/catalog/products")
@@ -287,7 +301,7 @@ func TestAuthKitRefusals(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	h := newGuardedHostOn(t, pool)
-	bill, _ := f.runtime(t, "refusals-"+uuid.NewString()[:8])
+	bill, shop := f.runtimeIssued(t, "refusals-"+uuid.NewString()[:8], h.issuer)
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true})))
 	refund := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
@@ -323,8 +337,11 @@ func TestAuthKitRefusals(t *testing.T) {
 		if strings.HasSuffix(path, "host-events") {
 			method = http.MethodGet
 		}
-		got := ask(t, mux, h.app, method, path, map[string]any{})
-		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, got.status, "the backend's API key reaches %s: %s", path, got.body)
+		got := ask(t, mux, h.merchantKey(t, shop.MerchantID()), method, path, map[string]any{})
+		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, got.status, "the backend's merchant API key reaches %s: %s", path, got.body)
+		got = ask(t, mux, h.app, method, path, map[string]any{})
+		require.Equal(t, http.StatusForbidden, got.status, "a key bound to the root group reaches no merchant: %s", got.body)
+		require.Contains(t, got.body, `"code":"merchant_unresolved"`)
 	}
 
 	down.Store(true)
@@ -342,7 +359,7 @@ func TestAuthKitRefusals(t *testing.T) {
 func TestMountFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	bill, _ := f.runtime(t, "groups-"+uuid.NewString()[:8])
+	bill, _ := f.runtimeIssued(t, "groups-"+uuid.NewString()[:8], h.issuer)
 	require.ErrorContains(t, openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{RouteGroups: adminGroups}), "Routes.Auth is required")
 
 	// A host whose roles declare root's billing permissions alone.

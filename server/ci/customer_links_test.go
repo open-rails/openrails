@@ -277,7 +277,7 @@ func (w *world) refused(r *httptest.ResponseRecorder, status int, code, why stri
 // adminCustomer is the merchant's read of its customer, raw and decoded.
 func (w *world) adminCustomer(key iam.APIKeyCreated, id string) (billing.Customer, map[string]json.RawMessage) {
 	w.t.Helper()
-	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/admin/customers/"+id, "", nil)
+	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/admin/customers/"+id, nil)
 	require.Equal(w.t, http.StatusOK, r.Code, r.Body.String())
 	var c billing.Customer
 	require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &c))
@@ -289,7 +289,7 @@ func (w *world) adminCustomer(key iam.APIKeyCreated, id string) (billing.Custome
 // events are the merchant's unacknowledged host events of kind.
 func (w *world) events(key iam.APIKeyCreated, kind billing.HostEventType) []billing.HostEvent {
 	w.t.Helper()
-	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/app/host-events?type="+string(kind), "", nil)
+	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/app/host-events?type="+string(kind), nil)
 	require.Equal(w.t, http.StatusOK, r.Code, r.Body.String())
 	var page billing.ListPage[billing.HostEvent]
 	require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &page))
@@ -351,7 +351,7 @@ func TestCustomerLinkFromTheMerchantsSite(t *testing.T) {
 	}
 
 	lookup := func(key iam.APIKeyCreated, account string) []billing.Customer {
-		r := call(t, w.handler, key.Secret, http.MethodGet, "/v1/app/customers?network_account_id="+url.QueryEscape(account), "", nil)
+		r := call(t, w.handler, key.Secret, http.MethodGet, "/v1/app/customers?network_account_id="+url.QueryEscape(account), nil)
 		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 		var page billing.ListPage[billing.Customer]
 		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &page))
@@ -361,7 +361,7 @@ func TestCustomerLinkFromTheMerchantsSite(t *testing.T) {
 	require.Len(t, found, 1)
 	require.Equal(t, sub, found[0].ID.String())
 	require.Empty(t, lookup(w.rivalKey, ada.ID), "another merchant learns nothing of the account")
-	r = call(t, w.handler, w.shopKey.Secret, http.MethodGet, "/v1/app/customers", "", nil)
+	r = call(t, w.handler, w.shopKey.Secret, http.MethodGet, "/v1/app/customers", nil)
 	w.refused(r, http.StatusBadRequest, billing.CodeInvalidQuery, "the lookup names an account")
 
 	got, err := handle(w.t, w.srv, w.shop).ListNetworkCustomers(t.Context(), billing.NetworkCustomerListParams{NetworkAccountID: link.AccountID})
@@ -407,7 +407,7 @@ func TestCustomerLinkBySigningIn(t *testing.T) {
 	w.connect(w.customer(w.shopLogin, uuid.NewString(), nil), w.shopClient, ada)
 	native := w.signIn(ada, w.shopClient, "n-"+uuid.NewString(), resourceID, "openid", billing.ScopeSelf)
 	w.refused(w.me(http.MethodGet, "", "Bearer "+native.AccessToken, nil), http.StatusConflict, billing.CodeNetworkAccountLinked, "a second customer for one account")
-	r = call(t, w.handler, w.shopKey.Secret, http.MethodGet, "/v1/admin/customers/"+ada.ID, "", nil)
+	r = call(t, w.handler, w.shopKey.Secret, http.MethodGet, "/v1/admin/customers/"+ada.ID, nil)
 	require.Equal(t, http.StatusNotFound, r.Code, "none was made: %s", r.Body.String())
 }
 
@@ -941,7 +941,7 @@ func TestNativeCustomersLinkWhenTheyAcceptNewTerms(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 	owner := merchantKey(t, after, shop, "owner")
 	linked := func() *billing.CustomerNetwork {
-		r := call(t, handler, owner.Secret, http.MethodGet, "/v1/admin/customers/"+sam.ID, "", nil)
+		r := call(t, handler, owner.Secret, http.MethodGet, "/v1/admin/customers/"+sam.ID, nil)
 		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 		var c billing.Customer
 		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &c))

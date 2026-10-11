@@ -29,15 +29,10 @@ import (
 // Options is what an assembly supplies to mount catalog routes.
 type Options struct {
 	// Auth is the mount's Authenticator: who a request on a staff or
-	// programmatic route is and, on checkout sessions, who presents one.
-	// With a group on it is a helpers/auth Root: its RootScope is where
-	// root: permissions are held.
+	// programmatic route is. With a group on it is a helpers/auth Root: its
+	// RootScope is where root: permissions are held, and its authority the
+	// one a bound credential's scope is a merchant's in.
 	Auth billingauth.Authenticator
-	// ResolveMerchant finds the merchant an authenticated request acts on
-	// when its credential names none (the standalone server's sessions);
-	// CredentialOnly finds none. Nil serves the configured merchant, pinned
-	// before the request is authenticated.
-	ResolveMerchant MerchantResolver
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
@@ -57,18 +52,16 @@ type Options struct {
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
 
-	// NativeIssuer is the issuer of the deployment's own accounts: its
-	// credential bound to a merchant (a merchant's client signed the account
-	// in) is the host's own user there, issuer NULL, and acts as a customer
-	// only when granted ScopeSelf.
-	NativeIssuer string
-
 	// SCIMMerchant serves the SCIM routes for this merchant without a
 	// credential: a directory in the same process holding the engine.
 	SCIMMerchant billing.MerchantID
 
 	// External are the handlers the assembly owns.
 	External External
+
+	// live replaces the directory read that says a merchant is live (test
+	// seam).
+	live func(context.Context, billing.MerchantID) (bool, error)
 }
 
 // External are the handlers an assembly owns, built from its configuration. A
@@ -83,18 +76,15 @@ type External struct {
 type Env struct {
 	Options
 	Runtime *app.Runtime
-	// Customers gates customer routes at CustomerMerchant, else at the
-	// merchant each request selects (SelectedMerchant), else at the
-	// configured one (unless ResolveMerchant).
-	Customers        billingauth.Authenticator
-	CustomerMerchant billingauth.Target
-	SelectedMerchant bool
-	// Viewers says who presents a checkout session.
-	Viewers billingauth.Authenticator
+	// Customers gates customer and network routes.
+	Customers billingauth.Authenticator
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
-	// admit pins a customer to the issuer of its subject (db.AdmitCustomer).
-	admit func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error
+	// admit pins a customer to the issuer of its subject (db.AdmitCustomer);
+	// account: the subject is the deployment's own account.
+	admit func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string, account bool) error
+	// live reports an active merchant of the directory.
+	live func(context.Context, billing.MerchantID) (bool, error)
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
 	// checkout scopes customer routes to the order a checkout URL's secret
@@ -121,7 +111,10 @@ func (e *Env) scimServer() *scim.Server {
 }
 
 func newEnv(rt *app.Runtime, opts Options) *Env {
-	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes(), admit: admitCustomer(rt)}
+	env := &Env{Options: opts, Runtime: rt, providers: routesurface.AllProviderRoutes(), admit: admitCustomer(rt), live: opts.live}
+	if env.live == nil {
+		env.live = liveMerchant(rt)
+	}
 	if opts.ProviderRoutes != nil {
 		env.providers = *opts.ProviderRoutes
 	}
@@ -205,7 +198,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	switch route.Auth {
 	case AuthPublic:
 		// The request names its merchant before a connection is pinned to it.
-		mw = append(e.publicMerchant(route), conn...)
+		mw = append(append(e.publicMerchant(route), e.cardAttack(route)...), conn...)
 	case AuthProvider:
 		mw = conn
 	case AuthProvisioning:
@@ -222,7 +215,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 		if e.checkout {
 			mw = append(mw, checkoutScope(route), e.checkoutLimit(route))
 		}
-		mw = append(mw, conn...)
+		mw = append(append(mw, e.cardAttack(route)...), conn...)
 	case AuthSignedIn:
 		mw = append(e.signedInGates(route), conn...)
 	case AuthNetwork:
@@ -245,6 +238,23 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, idsMW)
 	}
 	return mw
+}
+
+// cardAttack is the captcha of a merchant under a card-testing attack, on
+// its card routes, behind the gate that binds the merchant: nothing
+// merchant-scoped runs ahead of it.
+func (e *Env) cardAttack(route Route) []router.Middleware {
+	if route.Merchant == "" && route.Auth == AuthPublic {
+		return nil
+	}
+	bucket := middleware.ClassifyBucket(strings.ToLower(route.Path), route.Method)
+	if !slices.Contains(config.CaptchaChallengeBuckets(), bucket) {
+		return nil
+	}
+	if mw := middleware.CardAttackCaptcha(e.Runtime); mw != nil {
+		return []router.Middleware{mw}
+	}
+	return nil
 }
 
 // idsMW bounds a list's ids filter and refuses any other parameter beside it,
@@ -423,13 +433,12 @@ const SelfRoutePrefix = "/me"
 
 // RegisterCheckoutRoutes mounts, on a router rooted at the hosted checkout
 // host's root, the routes a checkout URL's secret opens. The host's own
-// middleware (hostedcheckout.ResolveHTTP) admits the secret and pins its
-// merchant; customer routes act as the order's customer
+// middleware (hostedcheckout.ResolveHTTP) admits the secret; customer routes
+// act as the order's customer at the order's merchant
 // (hostedcheckout.Authenticator), for that order alone.
 func RegisterCheckoutRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	opts.Auth, opts.ResolveMerchant = hostedcheckout.Authenticator{}, nil
+	opts.Auth = hostedcheckout.Authenticator{}
 	env := newEnv(rt, opts)
-	// The host middleware pinned the secret's merchant as the request's.
 	env.Customers, env.checkout = opts.Auth, true
 	env.mount(rr, "", func(r Route) bool { return r.Checkout != "" })
 }
@@ -466,23 +475,18 @@ func checkoutScope(route Route) router.Middleware {
 }
 
 // CustomerMount is one customer surface: the Authenticator that says who
-// its customers are and the merchant they buy from. Without a Merchant, a
-// server's surface (SelectedMerchant) serves the merchant each request
-// selects; with ResolveMerchant, the merchant the credential names, which a
-// customer's credential must be bound to (Auth is then a helpers/auth
-// Root); otherwise the configured one.
+// its customers are. Each buys from the merchant its credential is bound to.
 type CustomerMount struct {
-	Auth             billingauth.Authenticator
-	ResolveMerchant  MerchantResolver
-	Merchant         billingauth.Target
-	SelectedMerchant bool
-	Providers        routesurface.ProviderRoutes
-	NativeIssuer     string
+	Auth      billingauth.Authenticator
+	Providers routesurface.ProviderRoutes
+
+	// live is Options.live.
+	live func(context.Context, billing.MerchantID) (bool, error)
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, NativeIssuer: m.NativeIssuer})
-	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, live: m.live})
+	env.Customers = m.Auth
 	return env
 }
 
@@ -494,32 +498,31 @@ func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) 
 }
 
 // NetworkMount is the network portal's surface (/v1/network): the
-// Authenticator that says who the account is, and the issuer of the
-// deployment's own accounts.
+// Authenticator that says who the account is, a helpers/auth Root whose
+// authority the deployment's own accounts are of.
 type NetworkMount struct {
-	Auth         billingauth.Authenticator
-	NativeIssuer string
+	Auth billingauth.Authenticator
 }
 
 // RegisterNetworkRoutes mounts the openrails.dev account's routes, where the
 // deployment runs the customer network, on a router rooted at /v1/network.
 func RegisterNetworkRoutes(rr router.Router, rt *app.Runtime, m NetworkMount) {
-	env := newEnv(rt, Options{NativeIssuer: m.NativeIssuer})
+	env := newEnv(rt, Options{})
 	env.Customers = m.Auth
 	env.mount(rr, "/v1/network", in(Network))
 }
 
 // admitCustomer is the runtime's customers, each its subject's issuer's. The
 // customer network admits the deployment's own accounts.
-func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
-	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error {
+func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error {
+	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string, account bool) error {
 		if rt == nil || rt.DB == nil {
 			return errors.Join(auth.ErrUnavailable, errors.New("no database admits customers"))
 		}
 		admit := func(ctx context.Context) error {
 			return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
 		}
-		if issuer == "" && rt.Network != nil {
+		if account && issuer == "" && rt.Network != nil {
 			return rt.Network.AdmitNative(ctx, mid, id, admit)
 		}
 		return admit(ctx)

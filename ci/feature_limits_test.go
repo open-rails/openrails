@@ -38,7 +38,7 @@ func (l *featureLimitLLM) CompleteTools(context.Context, string, []dashboard.Too
 func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: "feature-limits-" + uuid.NewString()[:8]}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"feature-limits-" + uuid.NewString()[:8]: {}}
 	cfg.RateLimits = &openrails.RateLimitsConfig{
 		"metrics-ask":        {RequestsPerMinute: 2},
 		"catalog-ask":        {RequestsPerMinute: 2},

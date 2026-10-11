@@ -450,11 +450,6 @@ var requestShapeErrors = []string{
 	billing.CodeUnknownField, billing.CodeUnsupportedMediaType,
 }
 
-// selectorErrors are the codes of the OpenRails-Merchant selector.
-var selectorErrors = []string{
-	billing.CodeMerchantBindingMismatch, billing.CodeMerchantDirectoryUnavailable, billing.CodeMerchantNotFound, billing.CodeMerchantSelectorInvalid,
-}
-
 // TierErrors lists the codes a tier answers before any handler runs.
 func TierErrors(tier Tier) []string {
 	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
@@ -471,7 +466,7 @@ func TierErrors(tier Tier) []string {
 	case AuthCustomer:
 		// network_account_linked: an account linked to another customer of
 		// the merchant, where the customer network runs.
-		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeNetworkAccountLinked}, authenticated...)
+		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeNetworkAccountLinked}, authenticated...)
 	case AuthMerchant:
 		own = append(append([]string{billing.CodeStepUpRequired, billing.CodeStepUpUnavailable}, staff...), authenticated...)
 	case AuthSignedIn:
@@ -481,11 +476,11 @@ func TierErrors(tier Tier) []string {
 	case AuthNetwork:
 		own = append([]string{billing.CodeNetworkTermsRequired, billing.CodeStepUpRequired, billing.CodeStepUpUnavailable, billing.CodeResourceNotFound}, authenticated...)
 	default:
-		// No credential and no selector: a public route names its own
-		// merchant, a provider's callback its PSP.
+		// No credential: a public route names its own merchant, a provider's
+		// callback its PSP.
 		return sortedCodes(common)
 	}
-	return sortedCodes(append(append(common, own...), selectorErrors...))
+	return sortedCodes(append(common, own...))
 }
 
 func sortedCodes(codes []string) []string {

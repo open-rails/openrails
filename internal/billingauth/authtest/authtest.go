@@ -18,9 +18,13 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 )
 
+// Issuer is the fakes' issuer and the authority of their scopes. A host
+// whose merchant declares it as its Issuer acts there with their tokens.
+const Issuer = "https://issuer.test"
+
 // Root is the fakes' root scope: where a Grant holds its permissions unless
 // it names a Scope.
-var Root = billingauth.Scope{Authority: "test", ID: "root"}
+var Root = billingauth.Scope{Authority: Issuer, ID: "root"}
 
 // MerchantScope is where mid's own staff hold their permissions.
 func MerchantScope(mid billing.MerchantID) billingauth.Scope {
@@ -33,6 +37,10 @@ type Grant struct {
 	Permissions []billing.Permission
 	// Scope is where Permissions are held; zero is Root.
 	Scope billingauth.Scope
+	// Bound is the scope the credential is bound to (helpers/auth Bound),
+	// such as a merchant's group; zero binds none. Bound, it holds nothing
+	// elsewhere but a person's root permissions in Root.
+	Bound billingauth.Scope
 	// Stale fails CheckRecentSignIn: the sign-in is too old to move money.
 	Stale bool
 }
@@ -71,14 +79,14 @@ func (f *Fake) Revoke(token string) {
 	delete(f.grants, token)
 }
 
-// User is a user acting itself in a session, issued by "test".
+// User is a user acting itself in a session, issued by Issuer.
 func User(id string) billingauth.Identity {
-	return billingauth.Identity{Issuer: "test", Subject: id, SubjectKind: billingauth.SubjectUser, Invoker: billingauth.Invoker{Issuer: "test", ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialSession, ID: "s_" + id}}
+	return billingauth.Identity{Issuer: Issuer, Subject: id, SubjectKind: billingauth.SubjectUser, Invoker: billingauth.Invoker{Issuer: Issuer, ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialSession, ID: "s_" + id}}
 }
 
 // Application is an application acting itself with an API key.
 func Application(id string) billingauth.Identity {
-	return billingauth.Identity{Issuer: "test", Subject: id, SubjectKind: billingauth.SubjectApplication, Invoker: billingauth.Invoker{Issuer: "test", ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "k_" + id}}
+	return billingauth.Identity{Issuer: Issuer, Subject: id, SubjectKind: billingauth.SubjectApplication, Invoker: billingauth.Invoker{Issuer: Issuer, ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "k_" + id}}
 }
 
 // Person issues a token for a user with perms in Root.
@@ -112,7 +120,13 @@ type Verified struct{ Grant Grant }
 
 func (v Verified) Identity() billingauth.Identity { return v.Grant.Identity }
 
+// BoundScope is Grant.Bound (helpers/auth Bound).
+func (v Verified) BoundScope() billingauth.Scope { return v.Grant.Bound }
+
 func (v Verified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
+	if b := v.Grant.Bound; b != (billingauth.Scope{}) && scope != b && (scope != Root || v.Grant.Identity.SubjectKind != billingauth.SubjectUser) {
+		return false, nil
+	}
 	held := v.Grant.Scope
 	if held == (billingauth.Scope{}) {
 		held = Root

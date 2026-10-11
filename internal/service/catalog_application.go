@@ -33,7 +33,7 @@ func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Applica
 // committed; the same application can be retried.
 var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference unconfirmed")
 
-// ApplyDeclaredCatalog applies the host's Config.Catalog on start. It never
+// ApplyDeclaredCatalog applies a declared merchant's catalog on start. It never
 // forces: conflicting objects are skipped, reported and retried on the next
 // start. Provider reference reads end at deadline (zero: none); one that
 // fails without a provider refusal is ErrCatalogProviderUnconfirmed.

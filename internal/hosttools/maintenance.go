@@ -92,17 +92,14 @@ func ResolveMerchant(ctx context.Context, a *app.App, name string) (billing.Merc
 }
 
 // RegisterMerchantForRestore registers a preserved merchant UUID for an
-// embedding host, then binds the engine to it. Call during startup,
-// before serving or starting workers. It registers no PSPs or credentials.
+// embedding host. Call during startup, before serving or starting workers.
+// It registers no PSPs or credentials.
 func RegisterMerchantForRestore(ctx context.Context, a *app.App, id billing.MerchantID, slug string) (billing.MerchantID, error) {
 	if err := initialized(a); err != nil {
 		return billing.MerchantID{}, err
 	}
 	if a.Standalone {
 		return billing.MerchantID{}, fmt.Errorf("openrails: a standalone server restores through ProvisionMerchantForRestore with destination group authority")
-	}
-	if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
-		return billing.MerchantID{}, merchants.ErrMerchantRestoreConflict
 	}
 	directory, err := merchants.NewDirectoryService(a.Runtime.DB.DataPool())
 	if err != nil {
@@ -112,7 +109,6 @@ func RegisterMerchantForRestore(ctx context.Context, a *app.App, id billing.Merc
 	if err != nil {
 		return billing.MerchantID{}, err
 	}
-	a.Runtime.SetConfiguredMerchant(m.ID)
 	return m.ID, nil
 }
 

@@ -13,9 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // The body cap is enforced on the whole body before any handler runs, webhook
@@ -216,32 +214,10 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 	require.Zero(t, buf.Len(), "skipped paths are not logged")
 }
 
-// There is no default merchant: an unresolved merchant pins nothing, so
-// downstream merchant.Require fails. The request's Host names none.
-func TestResolveMerchant(t *testing.T) {
-	id := billing.MerchantID(uuid.New())
-	for i, tc := range []struct {
-		mw     HTTPMiddleware
-		pinned bool
-	}{
-		{ResolveMerchantHTTP(StaticMerchant(id)), true},
-		{ResolveMerchantHTTP(nil), false},
-		{ResolveMerchantHTTP(StaticMerchant(billing.MerchantID{})), false},
-	} {
-		tc.mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-			got, ok := merchant.FromContext(r.Context())
-			require.Equal(t, tc.pinned, ok, "case %d", i)
-			if ok {
-				require.Equal(t, id, got)
-			}
-		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://shop.example/v1/products", nil))
-	}
-}
-
 // Without an Authenticator advertising headers, the lists are OpenRails' own.
 func TestPermissiveCORSHTTPWithoutHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
 	PermissiveCORSHTTP(AllRequests, nil)(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/products", nil))
-	require.Equal(t, "Origin,Content-Length,Content-Type,Authorization,OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language", w.Header().Get("Access-Control-Allow-Headers"))
+	require.Equal(t, "Origin,Content-Length,Content-Type,Authorization,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language", w.Header().Get("Access-Control-Allow-Headers"))
 	require.Equal(t, "WWW-Authenticate,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required", w.Header().Get("Access-Control-Expose-Headers"))
 }

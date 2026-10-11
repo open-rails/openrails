@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
@@ -25,8 +26,7 @@ const InprocessBaseURL = "http://openrails.invalid"
 var NewClient func(transport http.RoundTripper, merchant billing.MerchantID) any
 
 // Transport is the in-process transport the engine's handles call through:
-// each call acts as the host at the handle's merchant, read live from the
-// directory.
+// each call acts as the host bound to the handle's merchant.
 func (e *Engine) Transport() http.RoundTripper {
 	rt := e.App.Runtime
 	// Mounted at the first call, so what a host adds to the runtime after
@@ -35,23 +35,26 @@ func (e *Engine) Transport() http.RoundTripper {
 		e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
 		e.handler.ServeHTTP(w, r)
 	})
-	return inprocess.NewTransport(served, directory{rt})
+	return inprocess.NewTransport(served)
 }
 
 // LiveMerchant is id's directory row while it is a live merchant:
-// billing.ErrMerchantUnresolved otherwise.
+// billing.ErrMerchantUnresolved for an unknown, deleted or archived one.
 func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
-	return inprocess.Live(ctx, directory{e.App.Runtime}, id)
-}
-
-// directory reads the runtime's merchant directory as it is at each call.
-type directory struct{ rt *app.Runtime }
-
-func (d directory) Get(ctx context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
-	if d.rt == nil || d.rt.Merchants == nil {
-		return nil, merchants.ErrMerchantNotFound
+	directory := e.App.Runtime.Merchants
+	if id.IsZero() || directory == nil {
+		return nil, billing.ErrMerchantUnresolved
 	}
-	return d.rt.Merchants.Get(ctx, id)
+	m, err := directory.Get(ctx, id)
+	switch {
+	case errors.Is(err, merchants.ErrMerchantNotFound):
+		return nil, billing.ErrMerchantUnresolved
+	case err != nil:
+		return nil, err
+	case m == nil || m.Status != merchants.StatusActive:
+		return nil, billing.ErrMerchantUnresolved
+	}
+	return m, nil
 }
 
 // newServiceHandler mounts the routes the Go client calls (the staff and

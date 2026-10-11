@@ -20,9 +20,7 @@ import (
 // browser tier (#765): every pattern registered here is also recorded into
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
-	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
-		Auth: s.auth, ResolveMerchant: s.resolveMerchant, NativeIssuer: s.controlPlane.Issuer(),
-	})
+	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{Auth: s.auth})
 }
 
 func (s *Server) registerUserRoutes(mux router.Registrar) {
@@ -30,8 +28,8 @@ func (s *Server) registerUserRoutes(mux router.Registrar) {
 }
 
 // registerWebhookRoutes mounts the canonical account-specific callback surface.
-// Embedded and standalone runtimes share account/environment resolution,
-// configured merchant restrictions and provider verification.
+// Embedded and standalone runtimes share account/environment resolution and
+// provider verification.
 func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }

@@ -102,7 +102,7 @@ func TestPSPRotationTouchesOneDocument(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
 	ctx := t.Context()
-	root := "openrails/merchants/" + engine.Graph(w.rt).Runtime.ConfiguredMerchant().UUID().String() + "/"
+	root := "openrails/merchants/" + engine.Graph(w.rt).Runtime.DeclaredMerchants()[0].UUID().String() + "/"
 	versions := func() map[string]int {
 		out := map[string]int{}
 		for _, path := range []string{"merchant", "psps/stripe", "psps/nmi", "psps/ccbill"} {
@@ -160,7 +160,7 @@ func TestPaymentsRideOutAVaultOutage(t *testing.T) {
 
 	down.Store(true)
 	rt := engine.Graph(w.rt).Runtime
-	_, err = rt.MerchantConfig.Reload(t.Context(), rt.ConfiguredMerchant())
+	_, err = rt.MerchantConfig.Reload(t.Context(), rt.DeclaredMerchants()[0])
 	require.Error(t, err, "the runtime cannot reach Vault")
 	e := enroll(t, w, "nmi", embedded)
 	require.True(t, e.c.entitled(e.ent), "a new purchase charges through the cached PSP")

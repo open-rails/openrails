@@ -54,6 +54,7 @@ func TestServersShareOneDatabase(t *testing.T) {
 		cfg.Engine.Redis = &openrails.RedisConfig{Addr: redis}
 		cfg.Auth.Keys = authkit.KeysConfig{Path: keys}
 		deps.Auth.KeySource = source
+		resourced(cfg, deps)
 	}
 
 	servers := make([]*server.Server, 2)
@@ -84,9 +85,12 @@ func TestServersShareOneDatabase(t *testing.T) {
 	member, token := newOwner(t, a)
 	shop, err := a.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("shared"), DisplayName: "Shared Shop", OwnerUserID: member})
 	require.NoError(t, err)
+	first, err := standaloneHandler(a)
+	require.NoError(t, err)
 	other, err := standaloneHandler(b)
 	require.NoError(t, err)
-	w := call(t, other, token, http.MethodGet, "/v1/admin/findings", "id:"+shop.MerchantID.String(), nil)
+	bound := f.exchanged(t, first, token, shop.MerchantID)
+	w := bound.call(t, other, http.MethodGet, "/v1/admin/findings", nil)
 	require.Equal(t, http.StatusOK, w.Code, "the other server verifies the token and reads the merchant the first one created: %s", w.Body.String())
 
 	for i, srv := range servers {

@@ -4,7 +4,6 @@ package ci_test
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,24 +42,26 @@ func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 	ownerKey, viewerKey := merchantKey(t, srv, mid, "owner"), merchantKey(t, srv, mid, "viewer")
 	require.True(t, strings.HasPrefix(ownerKey.Secret, "openrails_st_"))
 
-	findings := func(token, selector string) int {
-		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", selector, nil).Code
+	findings := func(token, _ string) int {
+		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", nil).Code
 	}
 	require.Equal(t, http.StatusOK, findings(viewerKey.Secret, ""), "a key names its merchant")
-	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code, "a viewer reads no merchant configuration")
-	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code)
-	require.Equal(t, http.StatusConflict, findings(ownerKey.Secret, "id:"+other.String()), "a key acts at its own merchant only")
+	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code, "a viewer reads no merchant configuration")
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code)
+	w := callWith(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+other.String())
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"), "a key acts at its own merchant, whatever a header names")
 	require.Equal(t, http.StatusOK, findings(merchantKey(t, srv, other, "viewer").Secret, ""))
 	check := map[string]any{"customer_id": billing.CustomerID(uuid.New()).String(), "entitlements": []string{"content:any"}}
-	w := call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check)
+	w = call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", check)
 	require.Equal(t, http.StatusForbidden, w.Code, "a viewer key holds no programmatic permission: %s", w.Body.String())
-	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check).Code, "the owner's merchant:* holds merchant:entitlements:read")
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", check).Code, "the owner's merchant:* holds merchant:entitlements:read")
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/merchant/team"},
 		{http.MethodPost, "/v1/merchant/api-keys"},
 		{http.MethodGet, "/v1/merchants"},
 	} {
-		w := call(t, handler, ownerKey.Secret, route.method, route.path, "", map[string]any{})
+		w := call(t, handler, ownerKey.Secret, route.method, route.path, map[string]any{})
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s is not mounted: %s", route.method, route.path, w.Body.String())
 	}
 	require.NoError(t, srv.AuthKit().RevokeAPIKey(ctx, iam.SystemIdentity(), iam.GroupByID(mid.String()), viewerKey.APIKey.ID))
@@ -118,7 +119,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.Equal(t, "owner", roles[iam.UserSubject(admin.ID)].Name())
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, call(t, handler, res.APIKeySecret, http.MethodGet, "/v1/admin/findings", "", nil).Code, "the deployment key acts for its merchant")
+	require.Equal(t, http.StatusOK, call(t, handler, res.APIKeySecret, http.MethodGet, "/v1/admin/findings", nil).Code, "the deployment key acts for its merchant")
 
 	customer := newAccount(t, cp)
 	for range 2 {
@@ -138,13 +139,13 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A person names the merchant they act on (the OpenRails-Merchant
-// selector, as the console does); holding roles in
-// several, or one, never picks it for them. Their permission is asked of
-// AuthKit in that merchant's group.
-func TestStaffNameTheirMerchant(t *testing.T) {
+// A merchant's staff act at it through a token exchanged for it: nothing in
+// the request names the merchant, the exchange for a merchant they hold no
+// role at is refused, and their token at another merchant's objects finds
+// nothing. Their permission is asked of AuthKit in the merchant's group.
+func TestMerchantStaffStayInTheirMerchant(t *testing.T) {
 	f := newFixture(t)
-	srv := f.newServer(t, nil)
+	srv := f.newServer(t, resourced)
 	ctx := t.Context()
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
@@ -154,16 +155,30 @@ func TestStaffNameTheirMerchant(t *testing.T) {
 	theirs, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("theirs"), OwnerUserID: newAccount(t, srv).ID})
 	require.NoError(t, err)
 
-	findings := func(selector string) *httptest.ResponseRecorder {
-		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", selector, nil)
-	}
-	w := findings("")
-	require.Equal(t, http.StatusForbidden, w.Code, "no merchant named: %s", w.Body.String())
+	w := callWith(t, handler, token, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+mine.MerchantID.String())
+	require.Equal(t, http.StatusForbidden, w.Code, "a session names no merchant, whatever a header says: %s", w.Body.String())
 	require.Contains(t, w.Body.String(), "merchant_unresolved")
-	require.Equal(t, http.StatusOK, findings("id:"+mine.MerchantID.String()).Code)
-	w = findings("id:" + theirs.MerchantID.String())
-	require.Equal(t, http.StatusForbidden, w.Code, "a merchant they hold no role in: %s", w.Body.String())
-	require.Contains(t, w.Body.String(), "permission_required")
+
+	bound := f.exchanged(t, handler, token, mine.MerchantID)
+	require.Equal(t, billing.ScopeMerchant, bound.Scope)
+	w = bound.call(t, handler, http.MethodGet, "/v1/admin/findings", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, mine.MerchantID.String(), w.Header().Get("OpenRails-Bound-Merchant"))
+	w = bound.call(t, handler, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+theirs.MerchantID.String())
+	require.Equal(t, mine.MerchantID.String(), w.Header().Get("OpenRails-Bound-Merchant"), "a header naming another merchant changes nothing")
+
+	_, status, body := f.exchangeFor(t, handler, token, theirs.MerchantID)
+	require.Equal(t, http.StatusBadRequest, status, string(body))
+	require.Contains(t, string(body), "invalid_target", "no role there, no token for it")
+
+	// Their token finds nothing of the other merchant's.
+	other, err := srv.Engine().Merchant(theirs.MerchantID)
+	require.NoError(t, err)
+	customer := billing.CustomerID(uuid.New())
+	_, err = other.UpdateCustomer(ctx, customer, billing.UpdateCustomerParams{})
+	require.NoError(t, err)
+	w = bound.call(t, handler, http.MethodGet, "/v1/admin/customers/"+customer.String(), nil)
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 
 	listed, err := srv.ListUserMerchants(ctx, member)
 	require.NoError(t, err)

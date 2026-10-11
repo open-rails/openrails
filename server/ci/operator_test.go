@@ -32,7 +32,7 @@ func TestOperatorDirectoryAndWorkers(t *testing.T) {
 	second, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: prefix + "-b"})
 	require.NoError(t, err)
 	key := merchantKey(t, cp, first.MerchantID, "owner")
-	findings := func() int { return call(t, handler, key.Secret, http.MethodGet, "/v1/admin/findings", "", nil).Code }
+	findings := func() int { return call(t, handler, key.Secret, http.MethodGet, "/v1/admin/findings", nil).Code }
 	require.Equal(t, http.StatusOK, findings())
 
 	list := func(params billing.MerchantListParams) []billing.Merchant {
@@ -94,7 +94,7 @@ func TestOperatorDirectoryAndWorkers(t *testing.T) {
 		{http.MethodGet, "/v1/admin/worker-health"},
 		{http.MethodGet, "/metrics"},
 	} {
-		require.Equal(t, http.StatusNotFound, call(t, handler, key.Secret, route.method, route.path, "", nil).Code, "%s %s", route.method, route.path)
+		require.Equal(t, http.StatusNotFound, call(t, handler, key.Secret, route.method, route.path, nil).Code, "%s %s", route.method, route.path)
 	}
 
 	kind := "e2e_" + uuid.NewString()[:8]

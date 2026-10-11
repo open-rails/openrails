@@ -29,13 +29,15 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	gateway := nmimock.New(nmimock.Options{})
 	t.Cleanup(gateway.Close)
 
+	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
+	// The host serves this one merchant with its AuthKit: its issuer binds it.
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	slug := "nmimock-" + uuid.NewString()[:8]
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: as.URL, PSPs: map[string]openrails.PSPConfig{
 		"nmi": openrails.NMIPSP{AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
-	}}
+	}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
@@ -46,7 +48,6 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 
-	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
 	customer := authtest.SignIn(t, as.Client, authtest.NewUser(t, as.Client)).AccessToken
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))

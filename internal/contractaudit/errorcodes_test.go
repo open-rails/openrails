@@ -26,7 +26,6 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/http/handlers/subscription_change.go": true,
 	"internal/http/handlers/orders.go":              true,
 	"internal/http/handlers/provider_operations.go": true,
-	"internal/http/router/merchant_selectors.go":    true,
 	// The route gate refuses with the code its step and the provider's error
 	// choose.
 	"internal/http/routes/gate.go": true,

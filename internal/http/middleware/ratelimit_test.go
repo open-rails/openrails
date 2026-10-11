@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
@@ -84,6 +85,15 @@ func engine(deps RateLimitDeps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applyRateLimitDecisionHTTP(w, r, next, EvaluateRateLimit(w, r, rateLimitSubjectsHTTP(r, nil), deps), deps.Captcha)
 	})
+}
+
+// attacked is engine with the card-attack captcha behind it, where the route
+// gate puts it: a call's merchant stands for the one its gate bound.
+func attacked(deps RateLimitDeps, next http.Handler) http.Handler {
+	mw := cardAttackCaptcha(deps)
+	return engine(deps, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mw(func(bound *request.Request) { next.ServeHTTP(w, bound.Request) })(request.NewHTTP(w, r, nil))
+	}))
 }
 
 // stillState is abuse state whose clock stands mid-window, so a test's
@@ -251,19 +261,29 @@ func TestCaptchaChallenges(t *testing.T) {
 	})
 
 	// Attack mode challenges everyone on the attacked merchant's card routes,
-	// and one solve does not lift it. Other merchants, and every merchant or
-	// API route, are never challenged.
+	// behind the gate that bound the merchant, and one solve does not lift
+	// it. Other merchants, and every merchant or API route, are never
+	// challenged; ahead of the gate the merchant is unknown, and the address
+	// limiter never looks for one.
 	t.Run("card attack mode", func(t *testing.T) {
-		attacked, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
-		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
-		deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute)
-		h := engine(deps, okHandler())
-		call{path: "/v1/me/orders", ip: ip, merchant: attacked, want: 403, body: "captcha_required"}.do(t, h)
-		call{path: "/v1/me/orders", ip: ip, merchant: attacked, token: "good", want: 200}.do(t, h)
-		call{path: "/v1/me/orders", ip: "198.51.100.3", merchant: attacked, want: 403}.do(t, h)
-		call{method: "GET", path: "/v1/admin/findings", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
+		under, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
+		verifier := &stubVerifier{valid: "good"}
+		deps := newDeps(limits, captchaOn, verifier)
+		deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(under.UUID()), time.Minute)
+		h := attacked(deps, okHandler())
+		call{path: "/v1/me/orders", ip: ip, merchant: under, want: 403, body: "captcha_required"}.do(t, h)
+		call{path: "/v1/me/orders", ip: ip, merchant: under, token: "good", want: 200}.do(t, h)
+		call{path: "/v1/me/orders", ip: "198.51.100.3", merchant: under, want: 403}.do(t, h)
+		call{method: "GET", path: "/v1/admin/findings", ip: "198.51.100.3", merchant: under, want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.4", want: 200}.do(t, h)
+		call{path: "/v1/me/orders", ip: "198.51.100.5", merchant: under, want: 200}.do(t, engine(deps, okHandler()))
+
+		// A token the address limiter verified is not asked for again.
+		deps.ChallengeStore.MarkChallenged(ctx, "ip:198.51.100.6", time.Minute)
+		verifier.calls = 0
+		call{path: "/v1/me/orders", ip: "198.51.100.6", merchant: under, token: "good", want: 200}.do(t, h)
+		require.Equal(t, 1, verifier.calls)
 	})
 
 	t.Run("a challenged subject meets the captcha on card routes only", func(t *testing.T) {
@@ -279,13 +299,13 @@ func TestCaptchaChallenges(t *testing.T) {
 	// attack flag refuses anyone here: the durable ledger blocks card attempts
 	// per subject, so attack mode never becomes a blanket 429.
 	t.Run("captcha disabled never refuses on a challenge", func(t *testing.T) {
-		attacked := billing.MerchantID(uuid.New())
+		underAttack := billing.MerchantID(uuid.New())
 		deps := newDeps(limits, nil, nil)
 		deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute)
-		deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute)
-		h := engine(deps, okHandler())
-		call{path: "/v1/me/orders", ip: ip, merchant: attacked, want: 200}.do(t, h)
-		call{path: "/v1/me/payment-methods", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
+		deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(underAttack.UUID()), time.Minute)
+		h := attacked(deps, okHandler())
+		call{path: "/v1/me/orders", ip: ip, merchant: underAttack, want: 200}.do(t, h)
+		call{path: "/v1/me/payment-methods", ip: "198.51.100.3", merchant: underAttack, want: 200}.do(t, h)
 	})
 }
 

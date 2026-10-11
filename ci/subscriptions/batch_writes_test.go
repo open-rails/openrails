@@ -165,7 +165,6 @@ func TestAppWritesReplayByIdempotencyKey(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/app/usage-events", bytes.NewReader(raw))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("OpenRails-Merchant", w.slug)
 		req.Header.Set("Content-Type", "application/json")
 		if key != "" {
 			req.Header.Set("Idempotency-Key", key)

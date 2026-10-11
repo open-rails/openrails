@@ -54,10 +54,11 @@ type Engine struct {
 // booting together take turns on an advisory lock, and a schema a newer build
 // already migrated is left as it is. It starts no workers: Start does, and
 // jobs queued before it wait in Config.Database.RiverSchema. ctx bounds the
-// wait for the database; nothing else does. With Config.Catalog, New applies
-// it before returning and fails with the reason if it is refused; only provider
-// references it cannot confirm within seconds finish in the background, and
-// Ready fails until they do. Vault login, PSP posture checks and Redis recover
+// wait for the database; nothing else does. It provisions each merchant
+// Config.Merchants declares and applies its Catalog before returning, failing
+// with the reason if one is refused; only provider references it cannot
+// confirm within seconds finish in the background, and Ready fails until they
+// do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
 	e, err := engine.New(ctx, cfg, deps)
@@ -81,8 +82,9 @@ func (e *Engine) Merchant(id billing.MerchantID) (*Client, error) {
 	return &Client{engine: e.engine, inprocess: true, baseURL: engine.InprocessBaseURL, client: e.client, merchantID: id}, nil
 }
 
-// MerchantBySlug is Merchant for the merchant Config declares under slug;
-// any other slug is billing.ErrMerchantUnresolved. It does no I/O.
+// MerchantBySlug is Merchant for the merchant Config.Merchants declares
+// under slug; any other slug is billing.ErrMerchantUnresolved. It does no
+// I/O.
 func (e *Engine) MerchantBySlug(slug string) (*Client, error) {
 	id, ok := e.engine.DeclaredMerchant(slug)
 	if !ok {
@@ -144,7 +146,7 @@ func (e *Engine) Close(ctx context.Context) error {
 }
 
 // Ready reports whether the engine can serve: Postgres, the merchant
-// directory, Config.Catalog (applied) and River (the host's fleet bound to
+// directory, the declared catalogs (applied) and River (the host's fleet bound to
 // RiverJobs, or OpenRails' own running since Start); optional providers never
 // fail it (see Probes).
 func (e *Engine) Ready(ctx context.Context) error { return e.engine.Ready(ctx) }

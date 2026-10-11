@@ -42,6 +42,7 @@ var checkoutPage = fstest.MapFS{
 // on the loopback NMI gateway, and its backend's credential.
 type checkoutShop struct {
 	t       *testing.T
+	f       *fixture
 	srv     *server.Server
 	handler http.Handler
 	clock   *clockwork.FakeClock
@@ -53,7 +54,7 @@ type checkoutShop struct {
 
 func newCheckoutShop(t *testing.T) *checkoutShop {
 	f := newFixture(t)
-	s := &checkoutShop{t: t, clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))}
+	s := &checkoutShop{t: t, f: f, clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))}
 	s.gateway = nmimock.New(nmimock.Options{Clock: s.clock.Now})
 	t.Cleanup(s.gateway.Close)
 	vault := vaulttest.New(t)

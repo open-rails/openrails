@@ -88,23 +88,21 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		PublicBillingBaseURL: baseURL + "/billing",
 		ReturnOrigins:        []string{baseURL},
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
-		Merchant: openrails.MerchantDeclaration{
-			Slug: MerchantSlug, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting},
-			PSPs: map[string]openrails.PSPConfig{
-				// An armed Solana PSP on devnet: checkout offers it.
-				SolanaPSPKey: openrails.SolanaPSP{
-					PrivateKey:  signer.String(),
-					RPCProvider: "public",
-					Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
-				}.PSPConfig(),
-				CardPSPKey: openrails.NMIPSP{
-					AccountID:            "billing-ui-e2e-cards",
-					SecurityKey:          "e2e-security-key",
-					WebhookSigningSecret: "e2e-webhook-secret",
-					TokenizationKey:      CardTokenizationKey,
-				}.PSPConfig(),
-			},
-		},
+		// AuthKit's issuer is baseURL: its users are this merchant's customers.
+		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting}, PSPs: map[string]openrails.PSPConfig{
+			// An armed Solana PSP on devnet: checkout offers it.
+			SolanaPSPKey: openrails.SolanaPSP{
+				PrivateKey:  signer.String(),
+				RPCProvider: "public",
+				Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
+			}.PSPConfig(),
+			CardPSPKey: openrails.NMIPSP{
+				AccountID:            "billing-ui-e2e-cards",
+				SecurityKey:          "e2e-security-key",
+				WebhookSigningSecret: "e2e-webhook-secret",
+				TokenizationKey:      CardTokenizationKey,
+			}.PSPConfig(),
+		}}},
 		// Every browser of the suite is one address, 127.0.0.1, which one
 		// checkout limit would soon refuse.
 		RateLimitsDisabled: true,

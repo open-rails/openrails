@@ -13,8 +13,7 @@ import (
 )
 
 // BuildCustomerRoutes mounts the customer surface, /v1/me, whose customers
-// auth says who they are, at the merchant on a server each request selects,
-// else the configured one.
+// auth says who they are, each at the merchant its credential is bound to.
 func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Table, error) {
 	if httproutes.IsNilAuth(auth) {
 		return nil, fmt.Errorf("openrails: the customer routes need Routes.Auth")
@@ -25,7 +24,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Ta
 	}
 	table := &router.Table{}
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
-		httproutes.CustomerMount{Auth: auth, Providers: providers, SelectedMerchant: a.Standalone})
+		httproutes.CustomerMount{Auth: auth, Providers: providers})
 	return wrapCustomerRoutes(a.Runtime, table, auth), nil
 }
 

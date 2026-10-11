@@ -12,7 +12,7 @@ import (
 )
 
 // hostOnly are the engine settings a host builds in code; no file key sets them.
-var hostOnly = map[string]bool{"Merchant": true, "Catalog": true, "Checkout": true}
+var hostOnly = map[string]bool{"Merchants": true, "Checkout": true}
 
 // Every file key reaches the server's configuration, and every engine setting
 // is either a file key or deliberately host-only.

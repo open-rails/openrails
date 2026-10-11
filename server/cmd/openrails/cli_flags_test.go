@@ -82,7 +82,7 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer test-credential", r.Header.Get("Authorization"))
-		require.Empty(t, r.Header.Values("OpenRails-Merchant"))
+		require.Empty(t, r.Header.Values("OpenRails"+"-Merchant"))
 		paths = append(paths, r.Method+" "+r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPatch {

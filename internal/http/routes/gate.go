@@ -11,30 +11,33 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	auth "github.com/open-rails/helpers/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/customernetwork"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/scim"
 )
 
 // The route gate builds every gate from the mount's Authenticator, which only
 // says who a request is. It asks it once (Authenticate) and binds the
-// Verified; then, by the route's tier, it checks who the subject is, pins the
-// merchant, asks the Verified's Can for the route's permission (its
-// merchant: name in that merchant's scope, else its root: name in the
-// Authenticator's root scope) and, for a person on a Sensitive route, its
-// CheckRecentSignIn. It answers every refusal itself, as auth.Refuse says,
-// and binds the verdict in its own context, where handlers re-check it.
+// Verified; then it pins the merchant the credential is bound to
+// (boundMerchant) and, by the route's tier, checks who the subject is, asks
+// the Verified's Can for the route's permission (its merchant: name in that
+// merchant's scope, else its root: name in the Authenticator's root scope)
+// and, for a person on a Sensitive route, its CheckRecentSignIn. Nothing in
+// the request names the merchant. It answers every refusal itself, as
+// auth.Refuse says, and binds the verdict in its own context, where handlers
+// re-check it.
 
 // MountError refuses a route the mount cannot gate. Mounting stops; a route
 // is never mounted open.
@@ -58,15 +61,6 @@ func isNil(v any) bool {
 }
 
 func authName(a any) string { return fmt.Sprintf("%T", a) }
-
-// MerchantResolver finds the merchant an authenticated request acts on when
-// its credential names none.
-type MerchantResolver func(r *http.Request, v billingauth.Verified) (billingauth.Target, error)
-
-// CredentialOnly finds none: the credential must name its merchant.
-func CredentialOnly(*http.Request, billingauth.Verified) (billingauth.Target, error) {
-	return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
-}
 
 // step is the call an error came from; refuse classifies it by step.
 type step int
@@ -265,66 +259,98 @@ func subject(r *httprequest.Request, route Route, a any) (billingauth.Verified, 
 	return nil, billingauth.Identity{}, false
 }
 
-// pin binds target as the merchant the request acts on.
-func pin(r *httprequest.Request, target billingauth.Target) bool {
-	if !middleware.EnforceMerchantBinding(r, target.MerchantID) {
-		return false
-	}
-	ctx := merchanttarget.WithResolved(r.Request.Context(), target)
-	ctx = billingauth.BindMerchant(merchant.WithID(ctx, target.MerchantID), target.MerchantID)
-	r.Request = r.Request.WithContext(ctx)
-	r.Set("openrails.merchant_id", target.MerchantID)
-	return true
+// pin binds target as the merchant the request acts on, and names it on the
+// response.
+func pin(r *httprequest.Request, target billingauth.Target) {
+	r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), target.MerchantID))
+	r.SetHeader(merchant.BoundHeader, target.MerchantID.String())
 }
 
-// gateTarget is the merchant pinned before the request was authenticated.
-func gateTarget(r *http.Request) billingauth.Target {
-	if target, ok := merchanttarget.FromContext(r.Context()); ok && !target.MerchantID.IsZero() {
-		return target
+// boundMerchant is the one merchant v's credential is bound to, by the
+// first of three bindings, and nothing of the request:
+//
+//   - the scope it is bound to (helpers/auth Bound), which is a merchant's in
+//     the Authenticator's root authority, its id the merchant's; a scope that
+//     is not never falls through to the next binding;
+//   - the merchant that declares its issuer (MerchantDeclaration.Issuer);
+//   - the row an OpenRails credential of its own names (a checkout URL's
+//     secret, a provisioning token, the in-process host).
+//
+// A credential bound to no live merchant is merchant_unresolved.
+func (e *Env) boundMerchant(ctx context.Context, a any, v billingauth.Verified, c billingauth.Identity) (billingauth.Target, error) {
+	unresolved := billingauth.Refusal(billing.CodeMerchantUnresolved)
+	var id billing.MerchantID
+	if scope := boundScope(v); scope != (billingauth.Scope{}) {
+		if _, ok := a.(auth.Root); !ok {
+			return billingauth.Target{}, unresolved
+		}
+		root, err := rootScope(ctx, a)
+		if err != nil {
+			return billingauth.Target{}, err
+		}
+		parsed, err := billing.ParseMerchantID(scope.ID)
+		if scope.Authority != root.Authority || err != nil || parsed.String() != scope.ID {
+			return billingauth.Target{}, unresolved
+		}
+		id = parsed
+	} else if declared, ok := e.Runtime.IssuerMerchant(c.Issuer); ok {
+		id = declared
+	} else if named, ok := billingauth.NamedMerchant(v); ok {
+		id = named.MerchantID
 	}
-	if id, ok := merchant.FromContext(r.Context()); ok && !id.IsZero() {
-		return billingauth.Target{MerchantID: id}
+	if id.IsZero() {
+		return billingauth.Target{}, unresolved
 	}
-	return billingauth.Target{}
+	switch live, err := e.live(ctx, id); {
+	case err != nil:
+		return billingauth.Target{}, errors.Join(auth.ErrUnavailable, err)
+	case !live:
+		return billingauth.Target{}, unresolved
+	}
+	return billingauth.Target{MerchantID: id}, nil
 }
 
-// requestMerchant pins the merchant an authenticated request acts on. A
-// mount without ResolveMerchant pinned its merchant before authenticating,
-// which a credential naming its own must agree with. Otherwise it is the
-// one the credential names, else the one ResolveMerchant finds; a request
-// selector may only agree.
-func (e *Env) requestMerchant(r *httprequest.Request, route Route, a any, v billingauth.Verified) (billingauth.Target, bool) {
-	named, ok := billingauth.NamedMerchant(v)
-	if e.ResolveMerchant == nil {
-		pinned := gateTarget(r.Request)
+// boundScope is the scope v's credential is bound to; zero for one bound to
+// none.
+func boundScope(v billingauth.Verified) billingauth.Scope {
+	if b, ok := v.(auth.Bound); ok {
+		return b.BoundScope()
+	}
+	return billingauth.Scope{}
+}
+
+// liveMerchant reads the directory for an active merchant, outside any
+// merchant's connection.
+func liveMerchant(rt *app.Runtime) func(context.Context, billing.MerchantID) (bool, error) {
+	return func(ctx context.Context, id billing.MerchantID) (bool, error) {
+		if rt == nil || rt.DB == nil {
+			return false, errors.New("no database lists merchants")
+		}
+		row, err := rt.DB.GenDirectory().GetMerchantDirectoryByID(ctx, id.UUID())
 		switch {
-		case pinned.MerchantID.IsZero():
-			refuseCode(r, route, a, billing.CodeMerchantUnresolved, "a gated route admitted an identity at no merchant")
-			return billingauth.Target{}, false
-		case ok && named.MerchantID != pinned.MerchantID:
-			refuseCode(r, route, a, billing.CodeMerchantBindingMismatch, "")
-			return billingauth.Target{}, false
+		case errors.Is(err, pgx.ErrNoRows):
+			return false, nil
+		case err != nil:
+			return false, err
 		}
-		return pinned, true
+		return row.Status == string(merchants.StatusActive), nil
 	}
-	target := named
+}
+
+// bound is the request's subject and the merchant its credential is bound
+// to, pinned: every gated tier's first step, before any rule of its own.
+func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Verified, billingauth.Identity, billingauth.Target, bool) {
+	v, c, ok := subject(r, route, a)
 	if !ok {
-		var err error
-		if target, err = e.ResolveMerchant(r.Request, v); err != nil {
-			refuse(r, route, a, stepAuthenticate, err)
-			return billingauth.Target{}, false
-		}
+		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
-	ctx := r.Request.Context()
-	// A selector already resolved to this merchant (a former name included)
-	// stays as the request named it; one naming another merchant is refused.
-	if resolved, ok := merchanttarget.FromContext(ctx); ok && resolved.MerchantID == target.MerchantID {
-		target = resolved
-	} else {
-		ctx = merchanttarget.WithResolved(ctx, target)
+	target, err := e.boundMerchant(r.Request.Context(), a, v, c)
+	if err != nil {
+		refuse(r, route, a, stepCan, err)
+		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
-	r.Request = r.Request.WithContext(merchant.WithID(ctx, target.MerchantID))
-	return target, pin(r, target)
+	pin(r, target)
+	return v, c, target, true
 }
 
 // rootScope is where a's root: permissions are held (helpers/auth Root). A
@@ -418,126 +444,20 @@ func (e *Env) permitted(r *httprequest.Request, route Route, a any, v billingaut
 	return true
 }
 
-// boundHere admits a credential bound to a scope (helpers/auth Bound), such
-// as a group's API key or a trusted issuer's token, only at the merchant
-// whose scope it is; staff may also be bound to the root scope. On a mount
-// whose merchant comes from each request (ResolveMerchant), an application
-// or a customer must be bound: a server's merchants each trust their own
-// credentials.
-func (e *Env) boundHere(r *httprequest.Request, route Route, a any, v billingauth.Verified, mid billing.MerchantID, required bool) bool {
-	ok, err := boundTo(r.Request.Context(), a, v, mid, required, route.Auth != AuthCustomer)
-	switch {
-	case err != nil:
-		refuse(r, route, a, stepCan, err)
-		return false
-	case !ok:
-		refuseCode(r, route, a, billing.CodeMerchantBindingMismatch, "")
-		return false
-	}
-	return true
-}
-
-// boundTo reports whether v may act at mid by its bound scope. A customer's
-// binding is checked only where it is required.
-func boundTo(ctx context.Context, a any, v billingauth.Verified, mid billing.MerchantID, required, staff bool) (bool, error) {
-	var bound billingauth.Scope
-	if b, ok := v.(auth.Bound); ok {
-		bound = b.BoundScope()
-	}
-	switch {
-	case bound == (billingauth.Scope{}):
-		return !required, nil
-	case !staff && !required:
-		return true, nil
-	}
-	root, err := rootScope(ctx, a)
-	if err != nil {
-		return false, err
-	}
-	return bound == merchantScope(root, mid) || staff && bound == root, nil
-}
-
-// servesMany reports a mount whose merchant comes from each request.
-func (e *Env) servesMany() bool { return e.ResolveMerchant != nil }
-
-// customerGates gates a customer route: the mount's merchant (the profile's,
-// the one the request selects on a server, else the configured one), then a
-// person acting for itself as the customer.
+// customerGates gates a customer route: a person acting for itself as the
+// customer, at the merchant its credential is bound to.
 func (e *Env) customerGates(route Route) []router.Middleware {
 	a := e.Customers
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a customer route needs Routes.Auth"})
 	}
-	if _, ok := a.(auth.Root); !ok && e.servesMany() {
-		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: each merchant's customers are bound to its scope"})
-	}
-	var out []router.Middleware
-	if e.ResolveMerchant == nil {
-		switch fixed := e.CustomerMerchant; {
-		case !fixed.MerchantID.IsZero():
-			out = append(out, fixedMerchant(fixed))
-		case e.checkout:
-			// The checkout host pinned its secret's merchant, which its
-			// Authenticator names: requestMerchant holds the two to agree.
-		case e.SelectedMerchant:
-			out = append(out, selectedMerchant())
-		default:
-			out = append(out, e.mountedMerchant())
-		}
-	}
-	return append(out, verify(route, a), e.customerCheck(route, a))
-}
-
-// fixedMerchant pins the mount's merchant; a request selector may only agree.
-func fixedMerchant(fixed billingauth.Target) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			target := fixed
-			if resolved, ok := merchanttarget.FromContext(r.Request.Context()); ok {
-				// A renamed slug may still name this book; a reused slug may not.
-				if resolved.MerchantID != fixed.MerchantID {
-					r.AbortCode(billing.CodeMerchantBindingMismatch, "")
-					return
-				}
-				target = resolved
-			}
-			if err := merchanttarget.Assert(r.Request, target); err != nil {
-				r.AbortGate(err)
-				return
-			}
-			if pin(r, target) {
-				next(r)
-			}
-		}
-	}
-}
-
-// selectedMerchant pins the merchant the request selected by its
-// OpenRails-Merchant selector (resolved before the gate). Without a
-// selection the request is refused.
-func selectedMerchant() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			target, selected := merchanttarget.FromContext(r.Request.Context())
-			if !selected || target.MerchantID.IsZero() {
-				r.AbortCode(billing.CodeMerchantUnresolved, "")
-				return
-			}
-			if err := merchanttarget.Assert(r.Request, target); err != nil {
-				r.AbortGate(err)
-				return
-			}
-			if pin(r, target) {
-				next(r)
-			}
-		}
-	}
+	return []router.Middleware{verify(route, a), e.customerCheck(route, a)}
 }
 
 func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			v, c, ok := subject(r, route, a)
+			v, c, target, ok := e.bound(r, route, a)
 			if !ok {
 				return
 			}
@@ -553,63 +473,78 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 				refuseCode(r, route, a, billing.CodeAuthenticationRequired, "the Verified's Identity names a customer that is not a canonical UUID")
 				return
 			}
-			target, ok := e.requestMerchant(r, route, a, v)
-			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, e.servesMany()) {
-				return
-			}
 			if e.checkout {
 				// A checkout URL acts as its order's customer, whose row the
 				// order holds, whatever its issuer: nothing to admit.
-				if bindCustomer(r, c, id, target) {
-					next(r)
-				}
+				bindCustomer(r, c, id, target)
+				next(r)
 				return
 			}
-			issuer, ok := e.subjectIssuer(v, c)
-			if !ok {
+			who, err := customerIssuer(r.Request.Context(), a, v, c)
+			switch {
+			case err != nil:
+				refuse(r, route, a, stepCan, err)
+				return
+			case !who.self:
 				refuseCode(r, route, a, billing.CodePermissionRequired, "")
 				return
 			}
-			switch err := e.admit(r.Request.Context(), target.MerchantID, id, issuer); {
+			switch err := e.admit(r.Request.Context(), target.MerchantID, id, who.issuer, who.account); {
 			case errors.Is(err, db.ErrCustomerIssuerMismatch):
-				refuseCode(r, route, a, billing.CodeMerchantBindingMismatch, "")
+				refuseCode(r, route, a, billing.CodeCustomerIssuerMismatch, "")
 			case err != nil:
 				refuse(r, route, a, stepCan, err)
 			default:
-				if bindCustomer(r, c, id, target) {
-					next(r)
-				}
+				bindCustomer(r, c, id, target)
+				next(r)
 			}
 		}
 	}
 }
 
-// customerIssuer is the issuer whose subject a customer is (OIDC Core
-// §5.7): "" for a person bound to no scope, the host's own user; a trusted
-// issuer's user, bound to its issuer's group, is its Identity's issuer's.
-func customerIssuer(v billingauth.Verified, c billingauth.Identity) string {
-	if b, ok := v.(auth.Bound); ok && b.BoundScope() != (billingauth.Scope{}) {
-		return c.Issuer
-	}
-	return ""
+// customerOf is whose subject a customer is.
+type customerOf struct {
+	// issuer is the issuer whose subject it is (OIDC Core §5.7): "" for the
+	// merchant's own customer.
+	issuer string
+	// account: the subject is an account of the Authenticator's own
+	// authority (the customer network's accounts are).
+	account bool
+	// self: the credential was issued to act as the customer.
+	self bool
 }
 
-// subjectIssuer is customerIssuer, with the deployment's own accounts
-// (NativeIssuer) its own users: false when such a credential, a merchant's
-// client signing the account in, was not granted ScopeSelf.
-func (e *Env) subjectIssuer(v billingauth.Verified, c billingauth.Identity) (string, bool) {
-	issuer := customerIssuer(v, c)
-	if issuer == "" || issuer != e.NativeIssuer {
-		return issuer, true
+// customerIssuer says whose subject a customer is. The merchant's own
+// customers (issuer ""): a person whose credential is bound to no scope (the
+// user of the issuer the merchant declares), an account of the
+// Authenticator's own authority bound to the merchant, and the customer the
+// merchant's own backend names in an assertion (RFC 7523: the token's client
+// is the application that asserted it). Any other bound credential's user is
+// its issuer's, pinned to it. A token of the Authenticator's own authority
+// that carries scopes but not ScopeSelf, such as a console's, was not issued
+// to act as a customer; one that says nothing of its scopes is the host's
+// own mint.
+func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billingauth.Identity) (customerOf, error) {
+	_, isRoot := a.(auth.Root)
+	bound := boundScope(v) != (billingauth.Scope{})
+	if !bound && !isRoot {
+		return customerOf{self: true}, nil
 	}
-	return "", grants(v, billing.ScopeSelf)
-}
-
-// grants reports whether v's credential was granted scope; a credential that
-// says nothing of its scopes grants none.
-func grants(v billingauth.Verified, scope string) bool {
-	scoped, ok := v.(interface{ Scopes() []string })
-	return ok && slices.Contains(scoped.Scopes(), scope)
+	root, err := rootScope(ctx, a)
+	if err != nil {
+		return customerOf{}, err
+	}
+	switch {
+	case c.Issuer == root.Authority:
+		scoped, has := v.(interface{ Scopes() []string })
+		return customerOf{account: true, self: !bound || !has || slices.Contains(scoped.Scopes(), billing.ScopeSelf)}, nil
+	case !bound:
+		return customerOf{self: true}, nil
+	}
+	if client, ok := v.(interface{ ClientID() string }); ok && client.ClientID() == c.Issuer {
+		return customerOf{self: true}, nil
+	}
+	return customerOf{issuer: c.Issuer, self: true}, nil
 }
 
 // networkGates gate a network route: the account itself and, under one of
@@ -618,6 +553,9 @@ func (e *Env) networkGates(route Route) []router.Middleware {
 	a := e.Customers
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a network route needs Routes.Auth"})
+	}
+	if _, ok := a.(auth.Root); !ok {
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: a network account is its root authority's own"})
 	}
 	return []router.Middleware{verify(route, a), e.networkCheck(route, a)}
 }
@@ -630,16 +568,20 @@ func (e *Env) networkCheck(route Route, a billingauth.Authenticator) router.Midd
 			if !ok {
 				return
 			}
+			ctx := r.Request.Context()
+			root, err := rootScope(ctx, a)
+			if err != nil {
+				refuse(r, route, a, stepCan, err)
+				return
+			}
 			// The deployment's own user acting for itself, signed in to its
-			// account, never through a merchant's client.
-			b, bound := v.(auth.Bound)
+			// account and bound to no merchant.
 			account, err := billing.ParseNetworkAccountID(c.Subject)
-			if !billingauth.SelfActing(c) || c.SubjectKind != billingauth.SubjectUser || c.Issuer == "" || c.Issuer != e.NativeIssuer ||
-				bound && b.BoundScope() != (billingauth.Scope{}) || err != nil || account.IsZero() || account.String() != c.Subject {
+			if !billingauth.SelfActing(c) || c.SubjectKind != billingauth.SubjectUser || c.Issuer != root.Authority ||
+				boundScope(v) != (billingauth.Scope{}) || err != nil || account.IsZero() || account.String() != c.Subject {
 				refuseCode(r, route, a, billing.CodePermissionRequired, "")
 				return
 			}
-			ctx := r.Request.Context()
 			network := e.Runtime.Network
 			if err := network.Admit(ctx, account); err != nil {
 				refuse(r, route, a, stepCan, err)
@@ -675,28 +617,24 @@ func (e *Env) networkCheck(route Route, a billingauth.Authenticator) router.Midd
 			as := c
 			as.Subject = link.CustomerID.String()
 			as.Invoker = auth.Invoker{Issuer: c.Issuer, ID: as.Subject}
-			if bindCustomer(r, as, link.CustomerID, billingauth.Target{MerchantID: link.MerchantID}) {
-				next(r)
-			}
+			bindCustomer(r, as, link.CustomerID, billingauth.Target{MerchantID: link.MerchantID})
+			next(r)
 		}
 	}
 }
 
 // bindCustomer binds the admitted customer and its scope: the only place a
 // customer scope is made.
-func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.CustomerID, target billingauth.Target) bool {
-	if !pin(r, target) {
-		return false
-	}
+func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.CustomerID, target billingauth.Target) {
+	pin(r, target)
 	ctx := billingauth.BindIdentity(r.Request.Context(), c)
 	r.Request = r.Request.WithContext(customerscope.Bind(ctx, target.MerchantID, id, billingauth.InvokerKey(c), billingauth.Interactive(c)))
-	return true
 }
 
-// staffGates gates a merchant-tier route: the request's merchant, a person
-// or an application holding the route's permission there or in the root
-// scope and, for a person on an operation that moves money or removes
-// access, a recent sign-in.
+// staffGates gates a merchant-tier route: a person or an application holding
+// the route's permission at the merchant its credential is bound to, or in
+// the root scope, and, for a person on an operation that moves money or
+// removes access, a recent sign-in.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
@@ -706,52 +644,13 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 	if pair == (Pair{}) {
 		panic(MountError{Route: route.Key(), Reason: "an admin route declares no permission"})
 	}
-	return append(e.preAuth(), verify(route, a), e.staffCheck(route, a, pair))
-}
-
-// preAuth pins the mount's configured merchant before the request is
-// authenticated, unless the merchant comes from it.
-func (e *Env) preAuth() []router.Middleware {
-	if e.ResolveMerchant != nil {
-		return nil
-	}
-	return []router.Middleware{e.mountedMerchant()}
+	return []router.Middleware{verify(route, a), e.staffCheck(route, a, pair)}
 }
 
 // Sensitive reports a merchant route whose operation moves money or removes
 // access: a person needs a recent sign-in for it.
 func Sensitive(route Route) bool {
 	return route.Auth == AuthMerchant && route.Sensitive
-}
-
-// mountedMerchant pins the configured merchant, the one the mount's staff
-// administer and customers buy from; a request selector may only agree.
-// Without one the request is refused.
-func (e *Env) mountedMerchant() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if e.Runtime == nil || e.Runtime.ConfiguredMerchant().IsZero() {
-				r.AbortCode(billing.CodeMerchantUnresolved, "")
-				return
-			}
-			bound := e.Runtime.ConfiguredMerchant()
-			target := billingauth.Target{MerchantID: bound}
-			// Without a selector, nothing is read before the request is
-			// authenticated; a selector is resolved and must agree.
-			if _, present, _ := merchant.ParseSelector(r.Request.Header); present {
-				var err error
-				if target, err = merchanttarget.Resolve(r.Request.Context(), r.Request, e.Runtime.Merchants, bound, ""); err != nil {
-					r.AbortGate(err)
-					return
-				}
-			} else if resolved, ok := merchanttarget.FromContext(r.Request.Context()); ok && resolved.MerchantID == bound {
-				target = resolved
-			}
-			if pin(r, target) {
-				next(r)
-			}
-		}
-	}
 }
 
 // bindStaff binds the admitted staff member or application at target: the
@@ -763,12 +662,8 @@ func bindStaff(r *httprequest.Request, c billingauth.Identity, route Route, targ
 func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			v, c, ok := subject(r, route, a)
-			if !ok {
-				return
-			}
-			target, ok := e.requestMerchant(r, route, a, v)
-			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, false) || !e.permitted(r, route, a, v, target.MerchantID, pair) {
+			v, c, target, ok := e.bound(r, route, a)
+			if !ok || !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
 			}
 			// An application has no sign-in to renew: its permission is the
@@ -872,8 +767,8 @@ func (e *Env) Guarded(route Route) router.Handler {
 }
 
 // appGates gates a programmatic route: an application holding the route's
-// permission at the request's merchant. A person is refused whatever it
-// holds. SCIM's routes name no permission.
+// permission at the merchant its credential is bound to. A person is refused
+// whatever it holds. SCIM's routes name no permission.
 func (e *Env) appGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
@@ -883,22 +778,18 @@ func (e *Env) appGates(route Route) []router.Middleware {
 	if route.Auth == AuthApplication && pair == (Pair{}) {
 		panic(MountError{Route: route.Key(), Reason: "a programmatic route declares no permission"})
 	}
-	return append(e.preAuth(), verify(route, a), e.appCheck(route, a, pair))
+	return []router.Middleware{verify(route, a), e.appCheck(route, a, pair)}
 }
 
 func (e *Env) appCheck(route Route, a billingauth.Authenticator, pair Pair) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			v, c, ok := subject(r, route, a)
+			v, c, target, ok := e.bound(r, route, a)
 			if !ok {
 				return
 			}
 			if c.SubjectKind != billingauth.SubjectApplication {
 				refuseCode(r, route, a, billing.CodeApplicationRequired, "")
-				return
-			}
-			target, ok := e.requestMerchant(r, route, a, v)
-			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, e.servesMany()) {
 				return
 			}
 			if pair != (Pair{}) && !e.permitted(r, route, a, v, target.MerchantID, pair) {
@@ -913,24 +804,19 @@ func (e *Env) appCheck(route Route, a billingauth.Authenticator, pair Pair) rout
 type provisionerKey struct{}
 
 // provisioningGate admits a SCIM request by the merchant's provisioning
-// token, which opens only these routes, or else as a programmatic route.
-// A refusal before the SCIM server runs is answered as a SCIM error.
+// token, which opens only these routes and is bound to its row's merchant,
+// or else as a programmatic route. A refusal before the SCIM server runs is
+// answered as a SCIM error.
 func (e *Env) provisioningGate(route Route) router.Middleware {
 	gates := e.appGates(route)
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			if mid, ok := e.provisioner(r, route); ok {
-				if pin(r, billingauth.Target{MerchantID: mid}) {
-					r.Request = r.Request.WithContext(context.WithValue(r.Request.Context(), provisionerKey{}, mid))
-					next(r)
-				}
-				return
-			}
 			var refusals *scimRefusals
-			asApp := func(r *httprequest.Request) {
+			admitted := func(r *httprequest.Request) {
 				refusals.passed = true
 				next(r)
 			}
+			asApp := router.Handler(admitted)
 			for i := len(gates) - 1; i >= 0; i-- {
 				asApp = gates[i](asApp)
 			}
@@ -940,29 +826,46 @@ func (e *Env) provisioningGate(route Route) router.Middleware {
 					h.ServeHTTP(refusals, req)
 					refusals.flush()
 				})
-			}, asApp)
+			}, func(r *httprequest.Request) {
+				v, ok := e.provisioner(r, route)
+				if !ok {
+					asApp(r)
+					return
+				}
+				target, err := e.boundMerchant(r.Request.Context(), nil, v, v.Identity())
+				if err != nil {
+					refuse(r, route, e.Auth, stepCan, err)
+					return
+				}
+				pin(r, target)
+				r.Request = r.Request.WithContext(context.WithValue(r.Request.Context(), provisionerKey{}, target.MerchantID))
+				admitted(r)
+			})
 		}
 	}
 }
 
-// provisioner is the merchant whose provisioning token r presents, when
-// this mount serves it; another merchant's token is no credential here.
-func (e *Env) provisioner(r *httprequest.Request, route Route) (billing.MerchantID, bool) {
+// provisioningToken is a merchant's provisioning token as a Verified: bound
+// to the merchant of its row.
+type provisioningToken struct{ billingauth.MerchantBinding }
+
+// Identity names no subject: the token opens the SCIM routes alone.
+func (provisioningToken) Identity() billingauth.Identity { return billingauth.Identity{} }
+
+// provisioner is the provisioning token r presents, when it is one.
+func (e *Env) provisioner(r *httprequest.Request, route Route) (provisioningToken, bool) {
 	token := scim.BearerToken(r.Request)
 	if token == "" || e.Runtime == nil || e.Runtime.DB == nil {
-		return billing.MerchantID{}, false
+		return provisioningToken{}, false
 	}
 	mid, err := scim.Tokens{DB: e.Runtime.DB}.Resolve(r.Request.Context(), token)
 	if err != nil {
 		if !errors.Is(err, scim.ErrUnauthorized) {
 			log.WithError(err).WithField("route", route.Key()).Error("openrails: provisioning token lookup failed")
 		}
-		return billing.MerchantID{}, false
+		return provisioningToken{}, false
 	}
-	if e.ResolveMerchant == nil && e.Runtime.ConfiguredMerchant() != mid {
-		return billing.MerchantID{}, false
-	}
-	return mid, true
+	return provisioningToken{billingauth.BindsMerchant(billingauth.Target{MerchantID: mid})}, true
 }
 
 // scimRefusals answers a refusal written before the SCIM server ran as a
@@ -1025,26 +928,22 @@ func (e *Env) scimMerchant(r *http.Request) (billing.MerchantID, error) {
 	return billing.MerchantID{}, scim.ErrUnauthorized
 }
 
-// signedInGates gates the access read: any person or application at the
-// request's merchant.
+// signedInGates gates the access read: any person or application, at the
+// merchant its credential is bound to.
 func (e *Env) signedInGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a staff route needs Routes.Auth"})
 	}
 	needs(route, a)
-	return append(e.preAuth(), verify(route, a), func(next router.Handler) router.Handler {
+	return []router.Middleware{verify(route, a), func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			v, c, ok := subject(r, route, a)
-			if !ok {
-				return
-			}
-			if target, ok := e.requestMerchant(r, route, a, v); ok && e.boundHere(r, route, a, v, target.MerchantID, false) {
+			if _, c, target, ok := e.bound(r, route, a); ok {
 				bindStaff(r, c, route, target)
 				next(r)
 			}
 		}
-	})
+	}}
 }
 
 // adminAccess answers what the caller may use of each mounted staff group,

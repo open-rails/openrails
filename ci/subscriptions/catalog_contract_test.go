@@ -30,7 +30,6 @@ func (w *world) staffCall(method, path string, body, out any) int {
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, reader)
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
-	req.Header.Set("OpenRails-Merchant", w.slug)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

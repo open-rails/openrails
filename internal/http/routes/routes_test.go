@@ -59,7 +59,7 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 func TestMerchantRouteAuthorization(t *testing.T) {
 	gate := &recordingAuth{who: authtest.User(userA), allowed: map[billing.Permission]bool{}}
 	rt := gatedRuntime(t)
-	table := merchantSurface(rt, Options{Auth: gate, Groups: everyGroup})
+	table := merchantSurface(rt, Options{Auth: gate, Groups: everyGroup, live: live})
 	h := table.Handler()
 	asked := map[string]Pair{}
 	for _, key := range routeKeys(table) {
@@ -209,7 +209,7 @@ func TestAdminOperationLimits(t *testing.T) {
 	state := abusestate.New(nil)
 	at := time.Date(2026, 1, 1, 12, 0, 30, 0, time.UTC) // mid-window: no window ends during the test
 	state.SetClock(func() time.Time { return at })
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(state), Groups: config.RouteGroups{Admin: true}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(state), Groups: config.RouteGroups{Admin: true}, live: live})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

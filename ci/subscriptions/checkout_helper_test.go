@@ -329,7 +329,7 @@ func (w *world) latestAttemptStatus(customerID string) string {
 
 func (w *world) inMerchant(run func(ctx context.Context, svc *checkout.CheckoutAttemptService) error) error {
 	rt := engine.Graph(w.rt).Runtime
-	ctx := merchant.WithID(w.t.Context(), rt.ConfiguredMerchant())
+	ctx := merchant.WithID(w.t.Context(), rt.DeclaredMerchants()[0])
 	return rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error { return run(scoped, rt.CheckoutAttemptService) })
 }
 
@@ -340,7 +340,7 @@ func (w *world) engineCheckout(c *customer, in checkout.CheckoutAttemptCreateReq
 		in.IdempotencyKey = "engine-" + uuid.NewString()
 	}
 	// The payer accepts the price's terms in this request, as an order's pay does.
-	in.Acceptance = &billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: engine.Graph(w.rt).Runtime.ConfiguredMerchant(), SubjectID: c.id, Issuer: "openrails:merchant-checkout"}
+	in.Acceptance = &billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: engine.Graph(w.rt).Runtime.DeclaredMerchants()[0], SubjectID: c.id, Issuer: "openrails:merchant-checkout"}
 	var out *checkout.CheckoutAttemptResponse
 	err := w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) (err error) {
 		out, err = svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: c.id})

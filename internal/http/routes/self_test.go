@@ -8,12 +8,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 const handlerReached = -1
@@ -38,9 +36,9 @@ func passedGates(code int) bool {
 
 func customerSurface(a billingauth.Authenticator) http.Handler {
 	mux := http.NewServeMux()
-	rt := &app.Runtime{}
-	rt.SetConfiguredMerchant(merchantA)
-	RegisterCustomerRoutes(router.NewMux(mux, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: routesurface.AllProviderRoutes()})
+	rt := runtimeDeclaring(merchantA)
+	rt.Config = nil
+	RegisterCustomerRoutes(router.NewMux(mux, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: routesurface.AllProviderRoutes(), live: live})
 	return mux
 }
 
@@ -70,8 +68,8 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	}
 
 	require.Equal(t, http.StatusUnauthorized, reach(payer, http.MethodGet, "/v1/me", map[string]string{"Authorization": "Bearer forged"}))
-	require.Equal(t, http.StatusConflict, reach(payer, http.MethodGet, "/v1/me", map[string]string{"Authorization": "Bearer " + token, merchant.SelectorHeader: "id:" + merchantB.String()}),
-		"a browser cannot select a merchant other than the mount's")
+	code := reach(payer, http.MethodGet, "/v1/me", map[string]string{"Authorization": "Bearer " + token, retiredSelector: "id:" + merchantB.String()})
+	require.True(t, passedGates(code), "a request names no merchant: its credential's is the one (%d)", code)
 }
 
 func TestCustomerRouteInventories(t *testing.T) {

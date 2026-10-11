@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,55 +27,74 @@ import (
 // the application finishes in the background.
 const declaredCatalogProviderWait = 10 * time.Second
 
-// declaredCatalog validates Config.Catalog before anything opens and returns
-// a private copy, so the host's later edits cannot reach a background retry.
-func declaredCatalog(cfg config.Config) (*catalog.Application, error) {
-	if cfg.Catalog == nil {
+// declaredCatalog validates a declared merchant's catalog before anything
+// opens and returns a private copy, so the host's later edits cannot reach a
+// background retry.
+func declaredCatalog(m config.MerchantDeclaration) (*catalog.Application, error) {
+	if m.Catalog == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(cfg.Merchant.Slug) == "" {
-		return nil, fmt.Errorf("openrails: Config.Catalog declares Config.Merchant's catalog; set Config.Merchant")
+	name := fmt.Sprintf("openrails: Config.Merchants[%q].Catalog", m.Slug)
+	if err := m.Catalog.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	if err := cfg.Catalog.Validate(); err != nil {
-		return nil, fmt.Errorf("openrails: Config.Catalog: %w", err)
-	}
-	raw, err := json.Marshal(cfg.Catalog)
+	raw, err := json.Marshal(m.Catalog)
 	if err != nil {
-		return nil, fmt.Errorf("openrails: Config.Catalog: %w", err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	out, err := catalog.ParseApplicationJSON(raw)
 	if err != nil {
-		return nil, fmt.Errorf("openrails: Config.Catalog: %w", err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return out, nil
 }
 
-// applyDeclaredCatalog applies Config.Catalog before New returns. A refusal
-// fails New; a transient database error is retried within ctx. An object an
-// edit changed is skipped, not refused: New succeeds, the finding names it
-// and the next start retries it. A provider reference not confirmed in time
-// leaves the application to the background, and Ready fails until it commits.
-func (e *Engine) applyDeclaredCatalog(ctx context.Context, params catalog.Application) error {
-	rt := e.App.Runtime
-	mid := rt.ConfiguredMerchant()
+// reportCatalog records why slug's declared catalog is not applied yet (nil
+// once it is): Ready fails while any is not.
+func (e *Engine) reportCatalog(slug string, err error) {
+	e.catalogMu.Lock()
+	defer e.catalogMu.Unlock()
+	if e.catalogPending == nil {
+		e.catalogPending = map[string]error{}
+	}
+	if err == nil {
+		delete(e.catalogPending, slug)
+	} else {
+		e.catalogPending[slug] = fmt.Errorf("merchant %s: declared catalog not applied yet: %w", slug, err)
+	}
+	var pending []error
+	for _, slug := range slices.Sorted(maps.Keys(e.catalogPending)) {
+		pending = append(pending, e.catalogPending[slug])
+	}
+	e.App.Runtime.ReportDeclaredCatalog(errors.Join(pending...))
+}
+
+// applyDeclaredCatalog applies the catalog merchant slug declares before New
+// returns. A refusal fails New; a transient database error is retried within
+// ctx. An object an edit changed is skipped, not refused: New succeeds, the
+// finding names it and the next start retries it. A provider reference not
+// confirmed in time leaves the application to the background, and Ready fails
+// until it commits.
+func (e *Engine) applyDeclaredCatalog(ctx context.Context, mid billing.MerchantID, slug string, params catalog.Application) error {
+	name := fmt.Sprintf("openrails: apply Config.Merchants[%q].Catalog", slug)
 	for attempt := 0; ; attempt++ {
 		receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Now().Add(declaredCatalogProviderWait))
 		switch {
 		case err == nil:
-			logCatalogConflicts(receipt)
+			logCatalogConflicts(slug, receipt)
 			return nil
 		case ctx.Err() != nil:
-			return fmt.Errorf("openrails: apply Config.Catalog: %w", ctx.Err())
+			return fmt.Errorf("%s: %w", name, ctx.Err())
 		case errors.Is(err, service.ErrCatalogProviderUnconfirmed):
-			rt.ReportDeclaredCatalog(fmt.Errorf("declared catalog not applied yet: %w", err))
-			e.finishDeclaredCatalog(mid, params)
+			e.reportCatalog(slug, err)
+			e.finishDeclaredCatalog(mid, slug, params)
 			return nil
 		case !transientDatabaseError(err):
-			return fmt.Errorf("openrails: apply Config.Catalog: %w", err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
-		log.WithError(err).Warn("openrails: applying Config.Catalog; retrying")
+		log.WithError(err).WithField("merchant", slug).Warn("openrails: applying the declared catalog; retrying")
 		if !retry.Sleep(ctx, retry.Backoff(attempt, retry.Base, retry.Max)) {
-			return fmt.Errorf("openrails: apply Config.Catalog: %w", err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
 }
@@ -81,38 +102,38 @@ func (e *Engine) applyDeclaredCatalog(ctx context.Context, params catalog.Applic
 // finishDeclaredCatalog retries the application until it commits, with no
 // provider deadline. A provider that now refuses a reference keeps Ready
 // failing with that reason until the reference is fixed.
-func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, params catalog.Application) {
+func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, slug string, params catalog.Application) {
 	rt := e.App.Runtime
 	rt.Go("declared catalog", func(ctx context.Context) {
 		last := ""
 		err := retry.Forever(ctx, func(ctx context.Context) error {
 			receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Time{})
 			if err == nil {
-				logCatalogConflicts(receipt)
+				logCatalogConflicts(slug, receipt)
 			}
 			return err
 		}, func(_ int, err error) {
-			rt.ReportDeclaredCatalog(fmt.Errorf("declared catalog not applied yet: %w", err))
+			e.reportCatalog(slug, err)
 			if err.Error() != last {
 				last = err.Error()
-				log.WithError(err).Warn("openrails: Config.Catalog awaits its providers; retrying in the background")
+				log.WithError(err).WithField("merchant", slug).Warn("openrails: the declared catalog awaits its providers; retrying in the background")
 			}
 		})
 		if err == nil {
-			rt.ReportDeclaredCatalog(nil)
-			log.Info("openrails: Config.Catalog applied")
+			e.reportCatalog(slug, nil)
+			log.WithField("merchant", slug).Info("openrails: declared catalog applied")
 		}
 	})
 }
 
-// logCatalogConflicts warns of each object Config.Catalog skipped because an
-// edit set its fields; the catalog finding names them too.
-func logCatalogConflicts(receipt *billing.CatalogApplicationReceipt) {
+// logCatalogConflicts warns of each object the declared catalog skipped
+// because an edit set its fields; the catalog finding names them too.
+func logCatalogConflicts(slug string, receipt *billing.CatalogApplicationReceipt) {
 	if receipt == nil {
 		return
 	}
 	for _, line := range service.ReadableCatalogConflicts(receipt.Conflicts) {
-		log.Warn("openrails: Config.Catalog: " + line)
+		log.WithField("merchant", slug).Warn("openrails: declared catalog: " + line)
 	}
 }
 

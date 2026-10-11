@@ -14,10 +14,7 @@ import (
 	"context"
 
 	"fmt"
-	"maps"
 	"net/http"
-	"reflect"
-	"slices"
 	"strings"
 	"sync"
 
@@ -25,6 +22,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -37,7 +35,11 @@ type Engine struct {
 	App *app.App
 	svc *service.Service
 
-	merchant config.MerchantDeclaration
+	// declared are Config.Merchants' ids, by slug.
+	declared map[string]billing.MerchantID
+	// catalogPending is why each declared catalog is not applied yet, by slug.
+	catalogMu      sync.Mutex
+	catalogPending map[string]error
 
 	mu          sync.Mutex
 	closed      bool
@@ -71,20 +73,23 @@ func Graph(client any) *app.App {
 // New builds the engine. It first creates or upgrades OpenRails' tables, this
 // month's partitions and River's tables (Migrate's work); the control plane's
 // AuthKit migrates itself as it is built. ctx bounds the wait for the
-// database; nothing else does. Only Postgres and a refused Config.Catalog fail
-// construction: Vault login, PSP posture, Redis and a declared catalog's
+// database; nothing else does. Only Postgres and a refused declared catalog
+// fail construction: Vault login, PSP posture, Redis and a declared catalog's
 // unconfirmed provider references recover in the background (see Ready and
 // Probes).
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := validate(&cfg, deps); err != nil {
-		return nil, err
-	}
-	catalogDoc, err := declaredCatalog(cfg)
+	declarations, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
+	}
+	catalogs := make([]*catalog.Application, len(declarations))
+	for i, m := range declarations {
+		if catalogs[i], err = declaredCatalog(m); err != nil {
+			return nil, err
+		}
 	}
 	consoleAssets := deps.ConsoleAssets
 	if consoleAssets == nil {
@@ -117,7 +122,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchant: cfg.Merchant}
+	e := &Engine{App: application, declared: map[string]billing.MerchantID{}}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -129,69 +134,78 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	application.ConsoleAssets = consoleAssets
-	signerPending, err := configureMerchant(ctx, application, e.merchant)
-	if err != nil {
-		return fail(err)
-	}
-	var declared []billing.MerchantID
-	if e.merchant.Slug != "" {
-		if m, err := rt.Merchants.GetBySlug(ctx, e.merchant.Slug); err == nil {
-			declared = append(declared, m.ID)
+	// Each declared merchant is provisioned before a route or a worker can
+	// see it; the issuer that binds its credentials is recorded with it.
+	ids := make([]billing.MerchantID, len(declarations))
+	issuers := map[string]billing.MerchantID{}
+	bySlug := map[billing.MerchantID]config.MerchantDeclaration{}
+	var signersPending []config.MerchantDeclaration
+	for i, m := range declarations {
+		id, pending, err := upsertMerchantConfig(ctx, application, m, true)
+		if err != nil {
+			return fail(err)
+		}
+		ids[i], e.declared[m.Slug], bySlug[id] = id, id, m
+		if m.Issuer != "" {
+			issuers[m.Issuer] = id
+		}
+		if pending {
+			signersPending = append(signersPending, m)
 		}
 	}
+	rt.DeclareMerchants(ids, issuers)
 	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
 		return fail(fmt.Errorf("build billing periodic jobs: %w", err))
 	}
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
 	}
-	if catalogDoc != nil {
-		if err := e.applyDeclaredCatalog(ctx, *catalogDoc); err != nil {
+	for i, doc := range catalogs {
+		if doc == nil {
+			continue
+		}
+		if err := e.applyDeclaredCatalog(ctx, ids[i], declarations[i].Slug, *doc); err != nil {
 			return fail(err)
 		}
 	}
-	declaration := e.merchant
 	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
-		return approveSolanaSigner(ctx, application, declaration, mid, key)
+		return approveSolanaSigner(ctx, application, bySlug[mid], mid, key)
 	}
-	if signerPending {
-		confirmSigner(application, declaration)
+	for _, m := range signersPending {
+		confirmSigner(application, m)
 	}
 	rt.CheckBookIdentity(ctx)
-	rt.PreloadMerchantConfig(declared...)
-	rt.StartProviderPosture(declared...)
+	rt.PreloadMerchantConfig(ids...)
+	rt.StartProviderPosture(ids...)
 	return e, nil
 }
 
 // validate enforces what embedded construction must declare and seeds the
-// protective defaults the standalone loader applies. Every refusal happens
-// before any resource opens.
-func validate(cfg *config.Config, deps config.Deps) error {
+// protective defaults the standalone loader applies; it returns
+// Config.Merchants in slug order. Every refusal happens before any resource
+// opens.
+func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, error) {
 	switch cfg.TestMode {
 	case config.CredentialPostureSandbox, config.CredentialPostureLive:
 	default:
-		return fmt.Errorf("openrails: Config.TestMode is required; set Sandbox or Live explicitly")
+		return nil, fmt.Errorf("openrails: Config.TestMode is required; set Sandbox or Live explicitly")
 	}
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
 	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
 	case "":
-		return fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
+		return nil, fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
 	default:
-		return fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
+		return nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
 	}
-	if !reflect.ValueOf(cfg.Merchant).IsZero() && strings.TrimSpace(cfg.Merchant.Slug) == "" {
-		return fmt.Errorf("openrails: Config.Merchant.Slug is required")
-	}
-	for _, key := range slices.Sorted(maps.Keys(cfg.Merchant.PSPs)) {
-		if err := config.ValidatePSPKeys(key, cfg.Merchant.PSPs[key]); err != nil {
-			return fmt.Errorf("openrails: Config.Merchant.%w", err)
-		}
+	declarations, err := config.DeclaredMerchants(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("openrails: %w", err)
 	}
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
-		return err
+		return nil, err
 	}
 	if cfg.TestMode == config.CredentialPostureLive {
 		for name, set := range map[string]bool{
@@ -199,15 +213,15 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			"Clock": deps.Clock != nil,
 		} {
 			if set {
-				return fmt.Errorf("openrails: Deps.%s is a test seam and is refused with TestMode live", name)
+				return nil, fmt.Errorf("openrails: Deps.%s is a test seam and is refused with TestMode live", name)
 			}
 		}
 	}
 	if deps.Email != nil && cfg.SMTP != nil {
-		return fmt.Errorf("openrails: set Deps.Email or Config.SMTP, not both")
+		return nil, fmt.Errorf("openrails: set Deps.Email or Config.SMTP, not both")
 	}
 	if cfg.SMTP != nil && strings.TrimSpace(cfg.SMTP.Host) == "" {
-		return fmt.Errorf("openrails: Config.SMTP.Host is required")
+		return nil, fmt.Errorf("openrails: Config.SMTP.Host is required")
 	}
 	if !cfg.RateLimitsDisabled {
 		if cfg.RateLimits == nil {
@@ -217,7 +231,7 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			cfg.Captcha = config.DefaultCaptcha()
 		}
 	}
-	return nil
+	return declarations, nil
 }
 
 func validIdentifier(s string) bool {
@@ -241,17 +255,10 @@ func validRiverSchema(schema string) error {
 	return nil
 }
 
-// ConfiguredMerchant is the declared merchant's ID, zero when unbound.
-func (e *Engine) ConfiguredMerchant() billing.MerchantID { return e.App.Runtime.ConfiguredMerchant() }
-
 // DeclaredMerchant is the merchant Config declares under slug.
 func (e *Engine) DeclaredMerchant(slug string) (billing.MerchantID, bool) {
-	slug = billing.NormalizeMerchantSlug(slug)
-	id := e.ConfiguredMerchant()
-	if slug == "" || id.IsZero() || slug != billing.NormalizeMerchantSlug(e.merchant.Slug) {
-		return billing.MerchantID{}, false
-	}
-	return id, true
+	id, ok := e.declared[billing.NormalizeMerchantSlug(slug)]
+	return id, ok && !id.IsZero()
 }
 
 // Start starts OpenRails' workers on goroutines Close stops: River, the loops

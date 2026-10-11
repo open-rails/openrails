@@ -16,8 +16,8 @@ import (
 // so applying it again retries the skipped objects. params.Force overwrites
 // those fields instead. A document that applied whole is remembered by its
 // canonical content hash: applying it again returns the original receipt even
-// after later catalog edits. Config.Catalog uses the same behavior, never
-// forced.
+// after later catalog edits. MerchantDeclaration.Catalog uses the same
+// behavior, never forced.
 func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
 	if document == nil {
 		return nil, invalidErr("catalog document is required")

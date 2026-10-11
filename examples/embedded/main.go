@@ -37,13 +37,16 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
+// issuer is your AuthKit's: the tokens it issues act at your merchant.
+const issuer = "http://localhost:8080"
+
 // newAuth is a development AuthKit with the README's roles: open
 // registration, ephemeral signing keys, and its own River client (ak.Start
 // runs it).
 func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authkit.Client, error) {
 	return authkit.New(ctx, authkit.Config{
 		Database:     authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
-		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
+		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"onlydemo"}},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
 		Roles:        rbac,
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true}, // the React app keeps its session in an HttpOnly cookie
@@ -68,12 +71,13 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 		return nil, nil, err
 	}
 
+	merchant.Catalog = products
+	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
-		Merchant:          merchant,
-		Catalog:           products,
+		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
 	}
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins

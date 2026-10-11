@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -193,7 +194,6 @@ func (w *world) merchantJSONAt(base, token, method, path string, body any) (int,
 	req, err := http.NewRequestWithContext(w.t.Context(), method, base+mountPrefix+path, bytes.NewReader(raw))
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("OpenRails-Merchant", w.slug)
 	req.Header.Set("Content-Type", "application/json")
 	if method != http.MethodGet && strings.HasPrefix(path, "/v1/app/") {
 		req.Header.Set("Idempotency-Key", uuid.NewString())

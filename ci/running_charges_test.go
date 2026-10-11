@@ -46,7 +46,7 @@ func newChargeWorld(t *testing.T) *chargeWorld {
 	// Mid-day, so no test crosses 00:00 UTC unless it means to.
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(24 * time.Hour).Add(36 * time.Hour))
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: "charges-" + uuid.NewString()[:8], DisplayName: "Charges"}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"charges-" + uuid.NewString()[:8]: {DisplayName: "Charges"}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock})
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)

@@ -65,8 +65,15 @@ func (f *fixture) config() openrails.Config {
 // cleanup, and that merchant's handle.
 func (f *fixture) runtime(t *testing.T, slug string) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
+	return f.runtimeIssued(t, slug, "")
+}
+
+// runtimeIssued is runtime with issuer, the host's own AuthKit's, binding
+// the merchant: the host's tokens act there.
+func (f *fixture) runtimeIssued(t *testing.T, slug, issuer string) (*openrails.Engine, *openrails.Client) {
+	t.Helper()
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: issuer}}
 	return f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 }
 
@@ -77,8 +84,12 @@ func (f *fixture) boot(t *testing.T, cfg openrails.Config, deps openrails.Deps) 
 	bill, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
-	shop, err := bill.MerchantBySlug(cfg.Merchant.Slug)
-	require.NoError(t, err)
+	require.Len(t, cfg.Merchants, 1)
+	var shop *openrails.Client
+	for slug := range cfg.Merchants {
+		shop, err = bill.MerchantBySlug(slug)
+		require.NoError(t, err)
+	}
 	return bill, shop
 }
 

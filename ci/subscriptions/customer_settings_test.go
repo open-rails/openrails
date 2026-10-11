@@ -153,7 +153,6 @@ func TestCustomerSettingsFieldRoutesRemoved(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), route.method, w.server.URL+mountPrefix+"/v1/admin/customers/"+c.id+"/"+route.path, strings.NewReader(`{}`))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("OpenRails-Merchant", w.slug)
 		req.Header.Set("Content-Type", "application/json")
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)

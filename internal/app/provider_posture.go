@@ -64,7 +64,7 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 	registry := providerposture.Process()
 	pending := 0
 	seen := map[billing.MerchantID]bool{}
-	for _, mid := range append([]billing.MerchantID{r.ConfiguredMerchant()}, declared...) {
+	for _, mid := range declared {
 		if mid.IsZero() || seen[mid] {
 			continue
 		}
@@ -286,7 +286,7 @@ func (r *Runtime) PreloadMerchantConfig(declared ...billing.MerchantID) {
 	}
 	r.Go("merchant config preload", func(ctx context.Context) {
 		seen := map[billing.MerchantID]bool{}
-		for _, mid := range append([]billing.MerchantID{r.ConfiguredMerchant()}, declared...) {
+		for _, mid := range declared {
 			if mid.IsZero() || seen[mid] {
 				continue
 			}

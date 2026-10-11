@@ -170,7 +170,7 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 	}
 	rt := engine.Graph(w.rt).Runtime
 	rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
-	ctx := merchant.WithID(t.Context(), rt.ConfiguredMerchant())
+	ctx := merchant.WithID(t.Context(), rt.DeclaredMerchants()[0])
 	buy := func(c *customer, price billing.PriceID, number string) {
 		t.Helper()
 		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {

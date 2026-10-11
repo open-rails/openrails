@@ -2,8 +2,7 @@
 // net/http handler (issue #282/#285). It is the keystone that lets pkg/embedded
 // expose NewHTTPHandler without importing gin: route groups are registered via
 // the neutral router.NewMux (request.NewHTTP backend), all wrapped with the
-// net/http base middleware stack (security headers, CORS, body limit, merchant
-// resolution).
+// net/http base middleware stack (security headers, CORS, body limit).
 //
 // The gin Server (internal/http) and standalone cmd/ keep gin; this package is
 // the gin-free analogue of the embedded assembly that used to live there.
@@ -72,8 +71,7 @@ func FromApp(a *app.App) *Assembler {
 // *http.ServeMux (issue #282). Route groups are registered via router.NewMux
 // (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
 // The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit, merchant resolution) — the gin-free analogue of the global
-// engine middleware. The returned handler imports zero gin on the request path.
+// CORS, body limit) — the gin-free analogue of the global engine middleware. The returned handler imports zero gin on the request path.
 //
 // Rate-limiting + the captcha challenge flow ARE enforced here BY DEFAULT
 // (#742): embedded.New seeds config.Config.RateLimits/Captcha with the same
@@ -129,9 +127,8 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		})
 	}
 
-	// Resolve the configured merchant on each request before merchant-owned
-	// database access. An unbound runtime requires explicit merchant authority;
-	// it never silently selects a default merchant.
+	// Nothing here knows a request's merchant: each route's gate binds it
+	// from the credential, and limits ahead of the gate key on the address.
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies
@@ -160,7 +157,6 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }, s.Auth),
 			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-			middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
 			// OpenRails-native rate-limiting + captcha for embedded hosts.
 			limiter,
 		)

@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/merchants"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -58,16 +63,45 @@ type Options struct {
 	// MerchantCreation is the hosted policy for merchant names users claim
 	// (or#914); nil for operator-provisioned deployments.
 	MerchantCreation *MerchantCreationConfig
+	// Console: the server's own accounts act on a merchant through a token
+	// exchanged for it (ConsoleClientID), as its admin console does; off
+	// when the console signs staff in at a trusted issuer.
+	Console bool
 }
+
+// ConsoleClientID is the admin console's first-party OAuth client, which the
+// server declares: a public client trading the person's session token for one
+// bound to the merchant they act on (RFC 8693 token exchange naming the
+// merchant's group).
+const ConsoleClientID = "openrails-console"
+
+// AccessTokenTTL is how long the access tokens of the server's resource last
+// unless auth.authorization_server.access_token_ttl says otherwise: customer
+// tokens redeemed from a merchant backend's assertion and console tokens.
+const AccessTokenTTL = 15 * time.Minute
+
+// merchantCeiling is what a token granted openrails:merchant may hold: every
+// merchant permission in its merchant's group and, for a person, OpenRails'
+// root: permissions in the root group.
+var merchantCeiling = func() []string {
+	out := []string{"merchant:*"}
+	for _, p := range billing.Permissions() {
+		if p.Persona() == "root" {
+			out = append(out, string(p))
+		}
+	}
+	return out
+}()
 
 // ResourceScopes are the scopes of the server's resource (RFC 6749 §3.3)
 // and the permissions each grants: openrails:merchant the merchant
-// permissions, openrails:self none (a customer's own billing), openrails:link
-// none (consent to link the merchant's own customer to the account).
+// permissions and OpenRails' root: ones, openrails:self none (a customer's
+// own billing), openrails:link none (consent to link the merchant's own
+// customer to the account).
 var ResourceScopes = map[string][]string{
-	"openrails:merchant": {"merchant:*"},
-	"openrails:self":     {},
-	"openrails:link":     {},
+	billing.ScopeMerchant: merchantCeiling,
+	billing.ScopeSelf:     {},
+	"openrails:link":      {},
 }
 
 // AuthKit is the server's AuthKit configuration: the host's auth, passed
@@ -86,8 +120,19 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 		auth.Token.IssuedAudiences = []string{billingauth.TokenAudience}
 	}
 	auth.Database.RiverSchema = config.RiverSchemaName(cfg)
+	if auth.Resource.ID == "" {
+		auth.Resource.ID = defaultResource(cfg.PublicBillingBaseURL)
+	}
 	if auth.Resource.ID != "" {
 		auth.Resource.Scopes = ResourceScopes
+		if auth.AuthorizationServer.AccessTokenTTL == 0 {
+			auth.AuthorizationServer.AccessTokenTTL = AccessTokenTTL
+		}
+		if opts.Console {
+			if err := declareConsoleClient(&auth); err != nil {
+				return authkit.Config{}, err
+			}
+		}
 	}
 	// A self-hosted server registers nobody unless it says so.
 	reg := &auth.Registration
@@ -113,6 +158,54 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	http.RefreshCookie = true
 	auth.HTTP = &http
 	return auth, nil
+}
+
+// defaultResource is the server's resource identifier (RFC 8707) when
+// auth.resource.id names none: its public API base, where browsers and PSPs
+// reach it, when that is https (http on a loopback host); else none.
+func defaultResource(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+	host := u.Hostname()
+	if u.Scheme == "https" || u.Scheme == "http" && (host == "localhost" || net.ParseIP(host).IsLoopback()) {
+		return base
+	}
+	return ""
+}
+
+// declareConsoleClient registers ConsoleClientID for the server's resource,
+// whose openrails:merchant tokens it exchanges for.
+func declareConsoleClient(auth *authkit.Config) error {
+	as := &auth.AuthorizationServer
+	if slices.ContainsFunc(as.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == ConsoleClientID }) {
+		return fmt.Errorf("controlplane: auth.authorization_server.clients declares %s, the admin console's client, which the server declares itself", ConsoleClientID)
+	}
+	resource := auth.Resource.ID
+	as.Clients = append(as.Clients, authkit.OAuthClientConfig{ID: ConsoleClientID, Name: "Admin console",
+		GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange}, Resources: []string{resource}})
+	i := slices.IndexFunc(as.Resources, func(r authkit.ResourceServerConfig) bool { return r.ID == resource })
+	if i < 0 {
+		as.Resources = append(as.Resources, authkit.ResourceServerConfig{ID: resource})
+		i = len(as.Resources) - 1
+	}
+	r := &as.Resources[i]
+	if !slices.Contains(r.Scopes, billing.ScopeMerchant) {
+		r.Scopes = append(r.Scopes, billing.ScopeMerchant)
+	}
+	for _, p := range merchantCeiling {
+		if !slices.Contains(r.Permissions, p) {
+			r.Permissions = append(r.Permissions, p)
+		}
+	}
+	return nil
+}
+
+// TokenEndpoint is the token endpoint of the server's AuthKit (RFC 8414).
+func (c *ControlPlane) TokenEndpoint() string {
+	return strings.TrimRight(c.Issuer(), "/") + iam.OAuthTokenPath
 }
 
 // validate refuses registration the server cannot serve.

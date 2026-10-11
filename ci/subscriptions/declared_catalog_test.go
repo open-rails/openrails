@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // declaredFile is a host's catalog.yaml: a monthly membership granting key,
@@ -64,8 +63,7 @@ func (w *world) catalogRevision() int64 {
 func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Engine, *openrails.Client, error) {
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
-		Catalog:  catalog,
+		Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps, Catalog: catalog}},
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	if err != nil {
 		return nil, nil, err
@@ -81,7 +79,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "declared-" + uuid.NewString()[:8]
 	title, amount := "Gold", int64(9_990_000)
-	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
+	w.catalog = func() *catalog.Application { return declaredFile(t, key, title, amount) }
 	w.start()
 	original, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
 	require.NoError(t, err)
@@ -94,7 +92,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	require.NoError(t, err)
 	var edited map[string]any
 	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &edited)
-	require.Equal(t, http.StatusOK, status, "Config.Catalog never closes the catalog routes: %v", edited)
+	require.Equal(t, http.StatusOK, status, "a declared catalog never closes the catalog routes: %v", edited)
 	revision := w.catalogRevision()
 	w.restart()
 	require.Equal(t, revision, w.catalogRevision(), "reboot replays the batch despite later edits")

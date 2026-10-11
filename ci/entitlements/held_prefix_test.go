@@ -82,14 +82,15 @@ func newFixture(t *testing.T) *fixture {
 		_, _ = f.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 		f.pool.Close()
 	})
+	slug := "held-" + uuid.NewString()[:8]
 	cfg := openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
-		Merchant: openrails.MerchantDeclaration{Slug: "held-" + uuid.NewString()[:8], DisplayName: "Held"},
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Held"}},
 	}
 	bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: f.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
-	f.client, err = bill.MerchantBySlug(cfg.Merchant.Slug)
+	f.client, err = bill.MerchantBySlug(slug)
 	require.NoError(t, err)
 	return f
 }

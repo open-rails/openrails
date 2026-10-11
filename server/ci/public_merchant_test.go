@@ -72,9 +72,9 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	require.Equal(t, productB, id)
 	require.EqualValues(t, 7_000_000, amount)
 
-	// The route reads no credential and no selector: the query alone decides.
+	// The route reads no credential and no header: the query alone decides.
 	keyA := merchantKey(t, srv, a, "owner")
-	id, _ = one(serve(handler, rsRequest{path: named(b), authorization: "Bearer " + keyA.Secret, selector: "id:" + a.String()}))
+	id, _ = one(serve(handler, rsRequest{path: named(b), authorization: "Bearer " + keyA.Secret, header: map[string]string{retiredMerchantHeader: "id:" + a.String()}}))
 	require.Equal(t, productB, id)
 
 	// A merchant's backend learns the id its pages name from its access read.
@@ -134,7 +134,7 @@ func TestPublicConfigHasNoMerchantPart(t *testing.T) {
 	}
 	for name, q := range map[string]rsRequest{
 		"a customer's token": {path: "/v1/config", authorization: shopper},
-		"a merchant header":  {path: "/v1/config", selector: "id:" + w.shop.String()},
+		"a merchant header":  {path: "/v1/config", header: map[string]string{retiredMerchantHeader: "id:" + w.shop.String()}},
 		"a merchant query":   {path: "/v1/config?merchant=" + w.shop.String()},
 	} {
 		got := serve(w.handler, q)

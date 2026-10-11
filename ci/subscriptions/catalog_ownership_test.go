@@ -17,7 +17,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/service"
 )
 
@@ -372,14 +371,14 @@ func TestCatalogReplacementsRenameEditedProducts(t *testing.T) {
 	require.ElementsMatch(t, []string{premium, vip}, got.Entitlements)
 }
 
-// Every start applies Config.Catalog's uncontested objects; New never fails
+// Every start applies the declared catalog's uncontested objects; New never fails
 // on a conflict, the finding names it and closes once the file agrees.
 func TestDeclaredCatalogSkipsEditsOnEveryStart(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "boot-" + uuid.NewString()[:8]
 	a, b := int64(1_000_000), int64(2_000_000)
-	w.cfg = func(cfg *config.Config) {
-		cfg.Catalog = catalogDocument(map[string]catalog.ApplyProduct{key: {DisplayName: catalog.Value("Boot"), Prices: map[string]catalog.ApplyPrice{"a": usd(a), "b": usd(b)}}})
+	w.catalog = func() *catalog.Application {
+		return catalogDocument(map[string]catalog.ApplyProduct{key: {DisplayName: catalog.Value("Boot"), Prices: map[string]catalog.ApplyPrice{"a": usd(a), "b": usd(b)}}})
 	}
 	w.start()
 	product, err := productByKey(t.Context(), w.client[embedded], key)

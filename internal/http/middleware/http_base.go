@@ -16,12 +16,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// The net/http base middleware: security headers, body limits, CORS, merchant
-// resolution, recovery and request logging, around both the standalone server
-// and the embedded surface. Rate limits and captcha are in ratelimit_neutral.go.
+// The net/http base middleware: security headers, body limits, CORS, recovery
+// and request logging, around both the standalone server and the embedded
+// surface. Rate limits and captcha are in ratelimit_neutral.go.
 
 // HTTPMiddleware is a standard net/http middleware (outermost wrapper).
 type HTTPMiddleware func(http.Handler) http.Handler
@@ -156,7 +155,7 @@ func AllRequests(*http.Request) bool { return true }
 // lists add the ones credentials travels in when it advertises them
 // (helpers/auth Headers): the mount's Authenticator.
 func PermissiveCORSHTTP(match func(*http.Request) bool, credentials any) HTTPMiddleware {
-	allow := []string{"Origin", "Content-Length", "Content-Type", "Authorization", "OpenRails-Merchant", "X-Request-ID", "X-Forwarded-For", "X-Real-IP", "Idempotency-Key", "X-E2E-Run-ID", "X-Captcha-Token", "Accept-Language"}
+	allow := []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Request-ID", "X-Forwarded-For", "X-Real-IP", "Idempotency-Key", "X-E2E-Run-ID", "X-Captcha-Token", "Accept-Language"}
 	expose := []string{"WWW-Authenticate", "X-Request-ID", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-Captcha-Required"}
 	if h, ok := credentials.(auth.Headers); ok {
 		allow, expose = mergeHeaders(allow, h.AllowedHeaders()), mergeHeaders(expose, h.ExposedHeaders())
@@ -273,34 +272,4 @@ func (s *statusWriter) status() int {
 		return http.StatusOK
 	}
 	return s.code
-}
-
-// ResolveMerchantHTTP pins the engine's configured merchant on the request
-// context before any merchant-owned DB access, so MerchantDBConnMW pins the
-// right connection. resolve runs per request (pass Runtime.ConfiguredMerchant),
-// so a later binding is never stale. With no merchant nothing is pinned and
-// merchant.Require fails: there is no default merchant.
-func ResolveMerchantHTTP(resolve func() billing.MerchantID) HTTPMiddleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var configured billing.MerchantID
-			if resolve != nil {
-				configured = resolve()
-			}
-			if configured.IsZero() {
-				next.ServeHTTP(w, r)
-				return
-			}
-			ctx := merchant.WithID(r.Context(), configured)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
-// StaticMerchant adapts a fixed billing.MerchantID into the resolver ResolveMerchantHTTP
-// expects. Production code should prefer a live accessor (Runtime.ConfiguredMerchant);
-// this exists for callers with a genuinely fixed id — chiefly tests that pin one
-// merchant for the lifetime of a test server.
-func StaticMerchant(id billing.MerchantID) func() billing.MerchantID {
-	return func() billing.MerchantID { return id }
 }

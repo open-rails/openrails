@@ -70,6 +70,21 @@ func (k issuerKey) mint(t *testing.T, edit func(jwt.MapClaims)) string {
 	return signed
 }
 
+// assertion signs an RFC 7523 assertion naming customer sub for the token
+// endpoint aud, as a merchant's backend does; edit adjusts its claims.
+func (k issuerKey) assertion(t *testing.T, aud, sub string, edit ...func(jwt.MapClaims)) string {
+	now := time.Now()
+	claims := jwt.MapClaims{"iss": k.iss, "sub": sub, "aud": aud, "jti": uuid.NewString(), "iat": now.Unix(), "exp": now.Add(2 * time.Minute).Unix()}
+	for _, e := range edit {
+		e(claims)
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = k.kid
+	signed, err := token.SignedString(k.key)
+	require.NoError(t, err)
+	return signed
+}
+
 // app is k's issuer as an AuthKit remote application holding the merchant
 // role role, with roles its tokens carry mapped to merchant roles.
 func (k issuerKey) app(t *testing.T, role string, roleMap map[string]string) iam.RemoteApplication {
@@ -90,7 +105,9 @@ func trust(t *testing.T, srv *server.Server, mid billing.MerchantID, apps ...iam
 }
 
 type rsRequest struct {
-	method, path, authorization, selector, origin, body, idempotencyKey string
+	method, path, authorization, origin, body, idempotencyKey string
+	// header adds request headers.
+	header map[string]string
 }
 
 func serve(handler http.Handler, q rsRequest) *httptest.ResponseRecorder {
@@ -102,10 +119,13 @@ func serve(handler http.Handler, q rsRequest) *httptest.ResponseRecorder {
 	if q.body != "" {
 		r.Header.Set("Content-Type", "application/json")
 	}
-	for name, value := range map[string]string{"Authorization": q.authorization, "OpenRails-Merchant": q.selector, "Origin": q.origin, "Idempotency-Key": q.idempotencyKey} {
+	for name, value := range map[string]string{"Authorization": q.authorization, "Origin": q.origin, "Idempotency-Key": q.idempotencyKey} {
 		if value != "" {
 			r.Header.Set(name, value)
 		}
+	}
+	for name, value := range q.header {
+		r.Header.Set(name, value)
 	}
 	if method == http.MethodOptions {
 		r.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -176,26 +196,25 @@ func TestTrustedIssuerTokens(t *testing.T) {
 		none := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") })
 		require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: findings, authorization: bearer(none)}).Code, "no permissions, no access")
 
-		named := serve(handler, rsRequest{path: findings, authorization: bearer(host.mint(t, nil)), selector: shop})
-		require.Equal(t, http.StatusOK, named.Code, "its own merchant, named")
+		named := serve(handler, rsRequest{path: findings, authorization: bearer(host.mint(t, nil)), header: map[string]string{retiredMerchantHeader: "id:" + rivalID.String()}})
+		require.Equal(t, http.StatusOK, named.Code, "a header naming another merchant changes nothing")
+		require.Equal(t, shopID.String(), named.Header().Get("OpenRails-Bound-Merchant"))
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: psps, authorization: bearer(other.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} }))}).Code, "an owner application")
 	})
 
 	t.Run("refused", func(t *testing.T) {
 		for name, tc := range map[string]struct {
-			token, selector string
-			status          int
-			code            string
+			token  string
+			status int
+			code   string
 		}{
-			"unknown issuer":   {stranger.mint(t, nil), "", http.StatusUnauthorized, billing.CodeAuthenticationRequired},
-			"wrong audience":   {host.mint(t, func(c jwt.MapClaims) { c["aud"] = "https://elsewhere.e2e.test" }), "", http.StatusUnauthorized, billing.CodeAuthenticationRequired},
-			"expired":          {host.mint(t, func(c jwt.MapClaims) { c["exp"] = time.Now().Add(-10 * time.Minute).Unix() }), "", http.StatusUnauthorized, billing.CodeCredentialExpired},
-			"forged signature": {issuerKey{iss: host.iss, kid: host.kid, key: other.key}.mint(t, nil), "", http.StatusUnauthorized, billing.CodeAuthenticationRequired},
-			"another merchant": {host.mint(t, nil), rival, http.StatusConflict, billing.CodeMerchantBindingMismatch},
-			"another issuer's": {other.mint(t, nil), shop, http.StatusConflict, billing.CodeMerchantBindingMismatch},
-			"customer scope":   {host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }), "", http.StatusForbidden, billing.CodePermissionRequired},
+			"unknown issuer":   {stranger.mint(t, nil), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"wrong audience":   {host.mint(t, func(c jwt.MapClaims) { c["aud"] = "https://elsewhere.e2e.test" }), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"expired":          {host.mint(t, func(c jwt.MapClaims) { c["exp"] = time.Now().Add(-10 * time.Minute).Unix() }), http.StatusUnauthorized, billing.CodeCredentialExpired},
+			"forged signature": {issuerKey{iss: host.iss, kid: host.kid, key: other.key}.mint(t, nil), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"customer scope":   {host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }), http.StatusForbidden, billing.CodePermissionRequired},
 		} {
-			w := serve(handler, rsRequest{path: findings, authorization: bearer(tc.token), selector: tc.selector})
+			w := serve(handler, rsRequest{path: findings, authorization: bearer(tc.token)})
 			require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
 			require.Equal(t, tc.code, errorCode(t, w), name)
 			if tc.status == http.StatusUnauthorized {
@@ -221,18 +240,17 @@ func TestTrustedIssuerTokens(t *testing.T) {
 
 		session := authtest.SignIn(t, srv.AuthKit(), newAccount(t, srv)).AccessToken
 		for name, tc := range map[string]struct {
-			authorization, selector string
-			status                  int
-			code                    string
+			authorization string
+			status        int
+			code          string
 		}{
-			"the server's own user":   {bearer(session), shop, http.StatusConflict, billing.CodeMerchantBindingMismatch},
-			"a client for itself":     {bearer(customer(func(c jwt.MapClaims) { c["sub"], c["client_id"] = "billing-sync", "billing-sync" })), "", http.StatusForbidden, billing.CodeInvokerScopedPrincipal},
-			"no UUID subject":         {bearer(customer(func(c jwt.MapClaims) { c["sub"] = "user-7" })), "", http.StatusUnauthorized, billing.CodeAuthenticationRequired},
-			"another merchant":        {bearer(customer(nil)), rival, http.StatusConflict, billing.CodeMerchantBindingMismatch},
-			"an untrusted issuer":     {bearer(stranger.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf })), shop, http.StatusUnauthorized, billing.CodeAuthenticationRequired},
-			"no credential, selected": {"", shop, http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"the server's own user": {bearer(session), http.StatusForbidden, billing.CodeMerchantUnresolved},
+			"a client for itself":   {bearer(customer(func(c jwt.MapClaims) { c["sub"], c["client_id"] = "billing-sync", "billing-sync" })), http.StatusForbidden, billing.CodeInvokerScopedPrincipal},
+			"no UUID subject":       {bearer(customer(func(c jwt.MapClaims) { c["sub"] = "user-7" })), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"an untrusted issuer":   {bearer(stranger.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf })), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
+			"no credential":         {"", http.StatusUnauthorized, billing.CodeAuthenticationRequired},
 		} {
-			w := serve(handler, rsRequest{path: me, authorization: tc.authorization, selector: tc.selector})
+			w := serve(handler, rsRequest{path: me, authorization: tc.authorization})
 			require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
 			require.Equal(t, tc.code, errorCode(t, w), name)
 		}
@@ -286,8 +304,8 @@ func TestCustomersArePinnedToTheirIssuer(t *testing.T) {
 	})})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	w = serve(handler, rsRequest{path: me, authorization: customer(b, sub, nil)})
-	require.Equal(t, http.StatusConflict, w.Code, "issuer B presents issuer A's customer's sub: %s", w.Body.String())
-	require.Equal(t, billing.CodeMerchantBindingMismatch, errorCode(t, w))
+	require.Equal(t, http.StatusForbidden, w.Code, "issuer B presents issuer A's customer's sub: %s", w.Body.String())
+	require.Equal(t, billing.CodeCustomerIssuerMismatch, errorCode(t, w))
 	require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: me, authorization: customer(a, sub, nil)}).Code, "issuer A still is")
 
 	native := newAccount(t, srv)
@@ -297,7 +315,8 @@ func TestCustomersArePinnedToTheirIssuer(t *testing.T) {
 	_, err = merchantClient.UpdateCustomer(ctx, billing.CustomerID(uuid.MustParse(native.ID)), billing.UpdateCustomerParams{})
 	require.NoError(t, err, "the host's Go API makes its own user a customer")
 	w = serve(handler, rsRequest{path: me, authorization: customer(a, native.ID, nil)})
-	require.Equal(t, http.StatusConflict, w.Code, "a trusted issuer never reaches the host's own customer: %s", w.Body.String())
+	require.Equal(t, http.StatusForbidden, w.Code, "a trusted issuer never reaches the host's own customer: %s", w.Body.String())
+	require.Equal(t, billing.CodeCustomerIssuerMismatch, errorCode(t, w))
 
 	contact := func(id string) *billing.CustomerContact {
 		c, err := merchantClient.GetCustomer(ctx, billing.CustomerID(uuid.MustParse(id)))

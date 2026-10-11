@@ -99,7 +99,8 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.En
 		cfg.ProviderSandbox.SolanaRPCURL = b.chain.URL()
 		psps["solana"] = openrails.SolanaPSP{TransitKey: transitKey, RPCProvider: "public", Tokens: map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}}}.PSPConfig()
 	}
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {DisplayName: b.slug, PSPs: psps}}
+	cfg = ownIssuer(cfg)
 	start := time.Now()
 	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
 	require.NoError(t, err)

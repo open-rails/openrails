@@ -11,11 +11,10 @@ import (
 // HostPrincipal is the identity the in-process transport attaches when an
 // embedding host calls its own engine through the Go client. A context value,
 // never a header, so it cannot arrive over the network and needs no shared
-// secret. The host is trusted for its own merchant.
+// secret. It is bound to the merchant of the handle that made the call.
 type HostPrincipal struct {
-	MerchantID   billing.MerchantID
-	MerchantSlug string
-	Subject      string
+	MerchantID billing.MerchantID
+	Subject    string
 }
 
 type hostPrincipalCtxKey struct{}

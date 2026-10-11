@@ -237,12 +237,26 @@ func (v identityOnly) Can(ctx context.Context, scope billingauth.Scope, perm str
 	return v.r.Can(ctx, scope, perm)
 }
 
-// gatedRuntime is a database-free runtime bound to merchantA.
+// gatedRuntime is a database-free runtime that declares merchantA, with the
+// fakes' issuer as its own: their credentials, bound to no scope, act there.
 func gatedRuntime(t *testing.T) *app.Runtime {
 	t.Helper()
+	return runtimeDeclaring(merchantA)
+}
+
+// runtimeDeclaring is a database-free runtime whose one declared merchant
+// the fakes' issuer binds; the zero id declares none.
+func runtimeDeclaring(mid billing.MerchantID) *app.Runtime {
 	rt := &app.Runtime{Config: &config.Config{Vault: &config.VaultConfig{KVMount: "kv"}}}
-	rt.SetConfiguredMerchant(merchantA)
+	if !mid.IsZero() {
+		rt.DeclareMerchants([]billing.MerchantID{mid}, map[string]billing.MerchantID{authtest.Root.Authority: mid})
+	}
 	return rt
+}
+
+// live is the tests' directory: merchantA and merchantB are live.
+func live(_ context.Context, id billing.MerchantID) (bool, error) {
+	return id == merchantA || id == merchantB, nil
 }
 
 // everyGatedSurface mounts every group an embedded host can publish, its
@@ -251,10 +265,10 @@ func everyGatedSurface(t *testing.T, a billingauth.Authenticator) (*router.Table
 	rt := gatedRuntime(t)
 	providers := routesurface.AllProviderRoutes()
 	table := &router.Table{}
-	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
-	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Groups: everyGroup})
-	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Groups: everyGroup})
-	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
+	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers, live: live})
+	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Groups: everyGroup, live: live})
+	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Groups: everyGroup, live: live})
+	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers, live: live})
 	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
 	return table, rt
 }
@@ -390,15 +404,15 @@ func TestHandlersRecheckTheirVerdict(t *testing.T) {
 }
 
 // The customer gate admits a user, whatever credential they signed in with,
-// as the customer the request acts for, at the mount's merchant; a service
-// or a non-UUID subject is no customer.
+// as the customer the request acts for, at the merchant its credential is
+// bound to; a service or a non-UUID subject is no customer.
 func TestCustomerGate(t *testing.T) {
 	rt := gatedRuntime(t)
 	run := func(who billingauth.Identity, header map[string]string) (int, customerscope.Scope) {
 		table := &router.Table{}
 		var seen customerscope.Scope
 		mux := router.NewMux(table, "/v1/me", rt)
-		env := newEnv(rt, Options{})
+		env := newEnv(rt, Options{live: live})
 		env.Customers = &recordingAuth{who: who}
 		env.admit = admitAll
 		route, _ := Lookup(GET, "/v1/me")
@@ -437,12 +451,19 @@ func TestCustomerGate(t *testing.T) {
 		"no invoker":                     {withInvoker(user, billingauth.Invoker{}), nil, http.StatusUnauthorized},
 		"an opaque subject":              {authtest.User("user-1"), nil, http.StatusUnauthorized},
 		"a non-canonical UUID":           {authtest.User(strings.ToUpper(merchantB.String())), nil, http.StatusUnauthorized},
-		"another merchant's selector":    {user, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, http.StatusConflict},
 	} {
 		code, _ := run(tc.who, tc.header)
 		require.Equal(t, tc.status, code, name)
 	}
+	// Nothing in the request names the merchant: the retired selector header
+	// naming another one changes nothing.
+	code, scope = run(user, map[string]string{retiredSelector: "id:" + merchantB.String()})
+	require.Equal(t, http.StatusNoContent, code)
+	require.Equal(t, merchantA, scope.Merchant())
 }
+
+// retiredSelector is the request header that once named a merchant.
+const retiredSelector = "OpenRails" + "-Merchant"
 
 // refusal is what a gate answered.
 type refusal struct {
@@ -451,6 +472,8 @@ type refusal struct {
 	challenge string
 	metadata  map[string]any
 	staff     billingauth.Staff
+	// bound is the merchant the response says the request acted on.
+	bound string
 }
 
 // runRoute serves key behind its gates, with a.
@@ -459,7 +482,7 @@ func runRoute(t *testing.T, rt *app.Runtime, a billingauth.Authenticator, key st
 	method, path, _ := strings.Cut(key, " ")
 	route, ok := Lookup(method, path)
 	require.True(t, ok, key)
-	env := newEnv(rt, Options{Auth: a, Groups: everyGroup})
+	env := newEnv(rt, Options{Auth: a, Groups: everyGroup, live: live})
 	table := &router.Table{}
 	var out refusal
 	router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
@@ -473,7 +496,7 @@ func runRoute(t *testing.T, rt *app.Runtime, a billingauth.Authenticator, key st
 	}
 	rec := httptest.NewRecorder()
 	table.Handler().ServeHTTP(rec, req)
-	out.status, out.challenge = rec.Code, rec.Header().Get("WWW-Authenticate")
+	out.status, out.challenge, out.bound = rec.Code, rec.Header().Get("WWW-Authenticate"), rec.Header().Get(merchant.BoundHeader)
 	var body struct {
 		Error struct {
 			Code     string         `json:"code"`
@@ -488,9 +511,9 @@ func runRoute(t *testing.T, rt *app.Runtime, a billingauth.Authenticator, key st
 const refund = "POST /v1/admin/payments/{id}/refunds"
 
 // The staff gate admits a person or an application holding the route's
-// permission, at the mount's merchant; a person on an operation that moves
-// money also proves a recent sign-in, whatever credential it presents. An
-// application passes on its permission alone.
+// permission, at the merchant its credential is bound to; a person on an
+// operation that moves money also proves a recent sign-in, whatever
+// credential it presents. An application passes on its permission alone.
 func TestStaffGate(t *testing.T) {
 	rt := gatedRuntime(t)
 	person := authtest.User(userA)
@@ -501,6 +524,7 @@ func TestStaffGate(t *testing.T) {
 	got := runRoute(t, rt, &recordingAuth{who: person}, refund, nil)
 	require.Equal(t, http.StatusNoContent, got.status, got.code)
 	require.Equal(t, billingauth.Staff{Identity: person, Route: refund, Merchant: merchantA}, got.staff)
+	require.Equal(t, merchantA.String(), got.bound, "the response names the merchant it acted on")
 
 	stepUp := &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute, Metadata: map[string]any{"step_up_methods": []any{"password"}}}
 	revoked := errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
@@ -530,7 +554,7 @@ func TestStaffGate(t *testing.T) {
 		"neither a Verified nor an error":     {nothing{}, nil, 503, "authentication_unavailable", ""},
 		"an unknown subject kind":             {&recordingAuth{who: withKind(person, "")}, nil, 403, "permission_required", ""},
 		"no invoker":                          {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
-		"another merchant's selector":         {&recordingAuth{who: person}, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, 409, "merchant_binding_mismatch", ""},
+		"a merchant that is not live":         {boundAuth{who: person, scope: authtest.MerchantScope(billing.MerchantID(uuid.New()))}, nil, 403, "merchant_unresolved", ""},
 		"a permission not held":               {&recordingAuth{who: person, allowed: map[billing.Permission]bool{}}, nil, 403, "permission_required", ""},
 		"a root scope that could not be read": {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{}, auth.ErrUnavailable }}, nil, 503, "authorization_unavailable", ""},
 		"a root scope that names none":        {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{Authority: "test"}, nil }}, nil, 503, "authorization_unavailable", ""},
@@ -575,10 +599,17 @@ func TestStaffGate(t *testing.T) {
 	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
 	require.Equal(t, http.StatusBadRequest, got.status, "a programmatic write without an Idempotency-Key")
 
-	unbound := gatedRuntime(t)
-	unbound.SetConfiguredMerchant(billing.MerchantID{})
-	got = runRoute(t, unbound, &recordingAuth{who: person}, "GET /v1/admin/payments", nil)
-	require.Equal(t, http.StatusForbidden, got.status, "no configured merchant, no admin API")
+	// The retired selector header names nothing.
+	got = runRoute(t, rt, &recordingAuth{who: person}, "GET /v1/admin/payments", map[string]string{retiredSelector: "id:" + merchantB.String()})
+	require.Equal(t, http.StatusNoContent, got.status)
+	require.Equal(t, merchantA, got.staff.Merchant)
+
+	// No deployment default fills in: where no merchant declares the
+	// credential's issuer, a credential bound to no scope reaches no merchant.
+	got = runRoute(t, runtimeDeclaring(billing.MerchantID{}), &recordingAuth{who: person}, "GET /v1/admin/payments", nil)
+	require.Equal(t, http.StatusForbidden, got.status)
+	require.Equal(t, "merchant_unresolved", got.code)
+	require.Empty(t, got.bound)
 }
 
 // rootAnswering is an Authenticator whose RootScope answers as scope does.
@@ -650,8 +681,11 @@ func TestMountFailsClosed(t *testing.T) {
 		"customers without Auth": func() {
 			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
 		},
-		"a server's customers without a root scope": func() {
-			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{Auth: rootless{who}, ResolveMerchant: CredentialOnly})
+		"network accounts without a root scope": func() {
+			env := newEnv(rt, Options{})
+			env.Customers = rootless{who}
+			route, _ := Lookup(GET, "/v1/network/links")
+			env.networkGates(route)
 		},
 		"programmatic without Auth":                        programs(nil),
 		"programmatic without a root scope":                programs(rootless{who}),
@@ -663,7 +697,7 @@ func TestMountFailsClosed(t *testing.T) {
 		`knows none of its permissions ["merchant:metrics:read" "root:metrics:read"]`)
 
 	// Without a group on, no staff or programmatic route is mounted at all;
-	// customers need no root scope where one merchant is served.
+	// customers need no root scope where their issuer binds the merchant.
 	none := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(none, "/v1", rt), rt, Options{Auth: rootless{who}})
 	RegisterAppRoutes(router.NewMux(none, "/v1", rt), rt, Options{Auth: rootless{who}, Groups: config.RouteGroups{Admin: true}})
@@ -729,9 +763,8 @@ func TestGateAsksThePair(t *testing.T) {
 	}
 
 	// The merchant: name admits only at its own merchant: recordingAuth
-	// holds it at merchantA, and the mount serves merchantB.
-	elsewhere := gatedRuntime(t)
-	elsewhere.SetConfiguredMerchant(merchantB)
+	// holds it at merchantA, and its issuer binds merchantB.
+	elsewhere := runtimeDeclaring(merchantB)
 	require.Equal(t, http.StatusForbidden, runRoute(t, elsewhere, holding(nil, held(billing.MerchantBillingRead)), payments, nil).status)
 	require.Equal(t, http.StatusNoContent, runRoute(t, elsewhere, holding(held(billing.RootBillingRead), nil), payments, nil).status, "the root: name reaches every merchant")
 
@@ -743,9 +776,8 @@ func TestGateAsksThePair(t *testing.T) {
 	// A route about no one merchant names its root: permission alone.
 	rootOnly := func(a *recordingAuth) int {
 		route, _ := Lookup(GET, "/v1/admin/payments")
-		env, table := newEnv(rt, Options{Auth: a, Groups: everyGroup}), &router.Table{}
-		gates := append(env.preAuth(), verify(route, a), env.staffCheck(route, a, Pair{Root: billing.RootBillingRead}))
-		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, gates...)
+		env, table := newEnv(rt, Options{Auth: a, Groups: everyGroup, live: live}), &router.Table{}
+		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, verify(route, a), env.staffCheck(route, a, Pair{Root: billing.RootBillingRead}))
 		return serveSafely(table.Handler(), httptest.NewRequest(route.Method, route.Path, nil))
 	}
 	require.Equal(t, http.StatusNoContent, rootOnly(holding(held(billing.RootBillingRead), nil)))
@@ -766,10 +798,12 @@ func mountErrorFor(t *testing.T, mount func()) (msg string) {
 	return ""
 }
 
-// Only the route gate makes a customer scope or binds a verdict.
+// Only the route gate makes a customer scope or binds a verdict, and every
+// gated tier binds its merchant through boundMerchant alone.
 func TestBindersHaveOneSite(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	calls := map[string][]string{}
+	binders := map[string][]string{}
 	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -791,6 +825,28 @@ func TestBindersHaveOneSite(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		rel, _ := filepath.Rel(root, path)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if fn.Name.Name == "boundMerchant" && onEnv(fn) {
+				binders["defined"] = append(binders["defined"], filepath.ToSlash(rel))
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "boundMerchant" || sel.Sel.Name == "bound") {
+					if env, ok := sel.X.(*ast.Ident); ok && env.Name == "e" && onEnv(fn) {
+						binders[sel.Sel.Name] = append(binders[sel.Sel.Name], fn.Name.Name)
+					}
+				}
+				return true
+			})
+		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -806,8 +862,7 @@ func TestBindersHaveOneSite(t *testing.T) {
 			}
 			name := pkg.Name + "." + sel.Sel.Name
 			switch name {
-			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff", "billingauth.BindMerchant", "billingauth.BindVerified":
-				rel, _ := filepath.Rel(root, path)
+			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff", "billingauth.BindVerified":
 				calls[name] = append(calls[name], filepath.ToSlash(rel))
 			}
 			return true
@@ -819,9 +874,29 @@ func TestBindersHaveOneSite(t *testing.T) {
 		"customerscope.Bind":       {gate},
 		"billingauth.BindIdentity": {gate},
 		"billingauth.BindStaff":    {gate},
-		"billingauth.BindMerchant": {gate},
 		"billingauth.BindVerified": {gate},
 	}, calls)
+	for _, callers := range binders {
+		slices.Sort(callers)
+	}
+	require.Equal(t, map[string][]string{
+		"defined":       {gate},
+		"boundMerchant": {"bound", "provisioningGate"},
+		"bound":         {"appCheck", "customerCheck", "signedInGates", "staffCheck"},
+	}, binders)
+}
+
+// onEnv is a method of the route gate's *Env.
+func onEnv(fn *ast.FuncDecl) bool {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return false
+	}
+	star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	name, ok := star.X.(*ast.Ident)
+	return ok && name.Name == "Env"
 }
 
 func withKind(id billingauth.Identity, kind billingauth.SubjectKind) billingauth.Identity {
@@ -843,7 +918,7 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 	read := func(groups config.RouteGroups, gate *recordingAuth) billing.AdminAccess {
 		gate.who = authtest.User(userA)
 		table := &router.Table{}
-		RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: gate, Groups: groups})
+		RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: gate, Groups: groups, live: live})
 		rec := do(table.Handler(), http.MethodGet, "/v1/admin/access", nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		var access billing.AdminAccess
@@ -898,69 +973,169 @@ var (
 )
 
 // admitAll admits every customer, as a database would a new one.
-func admitAll(context.Context, billing.MerchantID, billing.CustomerID, string) error { return nil }
-
-// boundAuth admits who, bound to scope (helpers/auth Bound).
-type boundAuth struct {
-	who   billingauth.Identity
-	scope billingauth.Scope
+func admitAll(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error {
+	return nil
 }
 
-func (a boundAuth) Authenticate(*http.Request) (billingauth.Verified, error) { return a, nil }
-func (a boundAuth) RootScope(context.Context) (billingauth.Scope, error)     { return authtest.Root, nil }
-func (a boundAuth) Identity() billingauth.Identity                           { return a.who }
-func (a boundAuth) BoundScope() billingauth.Scope                            { return a.scope }
+// boundAuth admits who, bound to scope (helpers/auth Bound), holding every
+// permission there. scopes, when not nil, are the scopes its token was
+// granted, and client the OAuth client it was issued to.
+type boundAuth struct {
+	who    billingauth.Identity
+	scope  billingauth.Scope
+	scopes []string
+	client string
+}
+
+func (a boundAuth) Authenticate(*http.Request) (billingauth.Verified, error) {
+	switch {
+	case a.scopes != nil:
+		return scopedAuth{a}, nil
+	case a.client != "":
+		return clientAuth{a}, nil
+	}
+	return a, nil
+}
+func (a boundAuth) RootScope(context.Context) (billingauth.Scope, error) { return authtest.Root, nil }
+func (a boundAuth) Identity() billingauth.Identity                       { return a.who }
+func (a boundAuth) BoundScope() billingauth.Scope                        { return a.scope }
 func (a boundAuth) Can(_ context.Context, scope billingauth.Scope, _ string) (bool, error) {
 	return scope == a.scope, nil
 }
 
-// A bound credential acts only at the merchant whose scope it is bound to;
-// staff may be bound to the root scope instead. On a mount serving many
-// merchants a customer must be bound, and is its issuer's subject: one
-// issuer's credential never reaches another's customer (OIDC Core §5.7).
-func TestBoundCredentials(t *testing.T) {
+// scopedAuth is a boundAuth whose token says what scopes it was granted.
+type scopedAuth struct{ boundAuth }
+
+func (a scopedAuth) Scopes() []string { return a.scopes }
+
+// clientAuth is a boundAuth whose token names the client it was issued to.
+type clientAuth struct{ boundAuth }
+
+func (a clientAuth) ClientID() string { return a.client }
+
+// A credential acts on the one merchant it is bound to. A bound scope is a
+// live merchant's in the root authority or the credential reaches no
+// merchant: it never falls through to the issuer binding. Bound to none, the
+// merchant that declares its issuer is the one; otherwise none is.
+func TestBoundMerchant(t *testing.T) {
 	rt := gatedRuntime(t)
-	here, elsewhere := authtest.MerchantScope(merchantA), authtest.MerchantScope(merchantB)
-	fromIssuer := authtest.User(userA)
-	fromIssuer.Issuer, fromIssuer.Invoker.Issuer = "https://issuer.example", "https://issuer.example"
-
-	staff := func(a billingauth.Authenticator) int {
-		return runRoute(t, rt, a, "GET /v1/admin/findings", nil).status
-	}
-	require.Equal(t, http.StatusNoContent, staff(boundAuth{who: authtest.Application("app"), scope: authtest.Root}), "bound to the root scope")
-	require.Equal(t, http.StatusNoContent, staff(boundAuth{who: authtest.Application("app"), scope: here}), "bound to the merchant's scope")
-	require.Equal(t, http.StatusConflict, staff(boundAuth{who: authtest.Application("app"), scope: elsewhere}), "bound to another merchant's scope")
-	require.Equal(t, http.StatusConflict, staff(boundAuth{who: authtest.Application("app"), scope: billingauth.Scope{Authority: "https://other.example", ID: merchantA.String()}}), "another authority's scope")
-
-	customer := func(a billingauth.Authenticator, many bool, admit func(context.Context, billing.MerchantID, billing.CustomerID, string) error) int {
-		table := &router.Table{}
-		mux := router.NewMux(table, "/v1/me", rt)
-		opts := Options{}
-		if many {
-			opts.ResolveMerchant = func(*http.Request, billingauth.Verified) (billingauth.Target, error) {
-				return billingauth.Target{MerchantID: merchantA}, nil
-			}
+	app, person := authtest.Application("app"), authtest.User(userA)
+	gone := billing.MerchantID(uuid.New())
+	const findings = "GET /v1/admin/findings"
+	for name, tc := range map[string]struct {
+		auth     billingauth.Authenticator
+		merchant billing.MerchantID
+	}{
+		"its issuer's merchant, bound to no scope": {&recordingAuth{who: person}, merchantA},
+		"the scope of the merchant":                {boundAuth{who: app, scope: authtest.MerchantScope(merchantA)}, merchantA},
+		"the scope of another merchant":            {boundAuth{who: app, scope: authtest.MerchantScope(merchantB)}, merchantB},
+		"the root scope":                           {boundAuth{who: app, scope: authtest.Root}, billing.MerchantID{}},
+		"a scope of no merchant":                   {boundAuth{who: app, scope: billingauth.Scope{Authority: authtest.Root.Authority, ID: "staff"}}, billing.MerchantID{}},
+		"the scope of a merchant that is not live": {boundAuth{who: app, scope: authtest.MerchantScope(gone)}, billing.MerchantID{}},
+		"another authority's scope":                {boundAuth{who: app, scope: billingauth.Scope{Authority: "https://other.example", ID: merchantA.String()}}, billing.MerchantID{}},
+		"a merchant id that is not canonical":      {boundAuth{who: app, scope: billingauth.Scope{Authority: authtest.Root.Authority, ID: strings.ToUpper(merchantA.String())}}, billing.MerchantID{}},
+	} {
+		got := runRoute(t, rt, tc.auth, "GET /v1/admin/access", nil)
+		if tc.merchant.IsZero() {
+			require.Equal(t, http.StatusForbidden, got.status, name)
+			require.Equal(t, "merchant_unresolved", got.code, name)
+			require.Empty(t, got.bound, name)
+			continue
 		}
-		env := newEnv(rt, opts)
-		env.Customers, env.admit = a, admit
-		route, _ := Lookup(GET, "/v1/me")
-		mux.Handle(GET, "", func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
-		return serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/me", nil))
+		require.Equal(t, http.StatusNoContent, got.status, "%s: %s", name, got.code)
+		require.Equal(t, tc.merchant, got.staff.Merchant, name)
+		require.Equal(t, tc.merchant.String(), got.bound, name)
 	}
+	// The permission is asked at the bound merchant: a key of merchantB holds
+	// nothing at merchantA, and no request reaches it there.
+	require.Equal(t, merchantB, runRoute(t, rt, boundAuth{who: app, scope: authtest.MerchantScope(merchantB)}, findings, nil).staff.Merchant)
+
+	// A lookup that fails is an outage, never a merchant.
+	down := newEnv(rt, Options{Auth: boundAuth{who: app, scope: authtest.MerchantScope(merchantA)}, live: func(context.Context, billing.MerchantID) (bool, error) {
+		return false, errors.New("directory down")
+	}})
+	_, err := down.boundMerchant(context.Background(), down.Auth, boundAuth{who: app, scope: authtest.MerchantScope(merchantA)}, app)
+	require.ErrorIs(t, err, auth.ErrUnavailable)
+
+	// An OpenRails credential of its own is bound to its row's merchant.
+	env := newEnv(runtimeDeclaring(billing.MerchantID{}), Options{live: live})
+	token := provisioningToken{billingauth.BindsMerchant(billingauth.Target{MerchantID: merchantB})}
+	target, err := env.boundMerchant(context.Background(), nil, token, token.Identity())
+	require.NoError(t, err)
+	require.Equal(t, merchantB, target.MerchantID)
+	token = provisioningToken{billingauth.BindsMerchant(billingauth.Target{MerchantID: gone})}
+	_, err = env.boundMerchant(context.Background(), nil, token, token.Identity())
+	require.ErrorContains(t, err, "bound to no merchant")
+}
+
+// A customer is its issuer's subject (OIDC Core §5.7). The merchant's own
+// (issuer ""): the user of the issuer the merchant declares, an account of
+// the root authority bound to it, and the customer its backend names in an
+// assertion. Another issuer's user is pinned to that issuer, and never
+// reaches a customer that is not its own.
+func TestCustomerIssuer(t *testing.T) {
+	rt := gatedRuntime(t)
+	here := authtest.MerchantScope(merchantA)
+	foreign := authtest.User(userA)
+	foreign.Issuer, foreign.Invoker.Issuer = "https://issuer.example", "https://issuer.example"
+	native := authtest.User(userA)
+
 	var issuer string
-	recordIssuer := func(_ context.Context, _ billing.MerchantID, _ billing.CustomerID, iss string) error {
-		issuer = iss
+	var account bool
+	recordIssuer := func(_ context.Context, _ billing.MerchantID, _ billing.CustomerID, iss string, acct bool) error {
+		issuer, account = iss, acct
 		return nil
 	}
-	require.Equal(t, http.StatusNoContent, customer(&recordingAuth{who: authtest.User(userA)}, false, recordIssuer))
-	require.Empty(t, issuer, "a person bound to no scope is the host's own user")
-	require.Equal(t, http.StatusConflict, customer(&recordingAuth{who: authtest.User(userA)}, true, recordIssuer), "a server's customer is bound")
-	require.Equal(t, http.StatusNoContent, customer(boundAuth{who: fromIssuer, scope: here}, true, recordIssuer))
-	require.Equal(t, "https://issuer.example", issuer, "a trusted issuer's user is its issuer's subject")
-	require.Equal(t, http.StatusConflict, customer(boundAuth{who: fromIssuer, scope: elsewhere}, true, recordIssuer), "bound to another merchant")
-	require.Equal(t, http.StatusConflict, customer(boundAuth{who: fromIssuer, scope: authtest.Root}, true, recordIssuer), "a customer is never bound to the root scope")
-	mismatch := func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
-		return db.ErrCustomerIssuerMismatch
+	customer := func(a billingauth.Authenticator, admit func(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error) refusal {
+		table := &router.Table{}
+		env := newEnv(rt, Options{live: live})
+		env.Customers, env.admit = a, admit
+		route, _ := Lookup(GET, "/v1/me")
+		router.NewMux(table, "/v1/me", rt).Handle(GET, "", func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
+		rec := httptest.NewRecorder()
+		table.Handler().ServeHTTP(rec, httptest.NewRequest(GET, "/v1/me", nil))
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		return refusal{status: rec.Code, code: body.Error.Code, bound: rec.Header().Get(merchant.BoundHeader)}
 	}
-	require.Equal(t, http.StatusConflict, customer(boundAuth{who: fromIssuer, scope: here}, true, mismatch), "another issuer's customer")
+	for name, tc := range map[string]struct {
+		auth    billingauth.Authenticator
+		issuer  string
+		account bool
+	}{
+		"its issuer's user, bound to no scope":      {&recordingAuth{who: native}, "", true},
+		"the root authority's account, bound":       {boundAuth{who: native, scope: here}, "", true},
+		"that account, granted the customer scope":  {boundAuth{who: native, scope: here, scopes: []string{"openid", billing.ScopeSelf}}, "", true},
+		"the customer the merchant's backend names": {boundAuth{who: foreign, scope: here, client: foreign.Issuer}, "", false},
+		"another issuer's user":                     {boundAuth{who: foreign, scope: here}, foreign.Issuer, false},
+		"another issuer's user through a client":    {boundAuth{who: foreign, scope: here, client: "admin-ui"}, foreign.Issuer, false},
+	} {
+		issuer, account = "unset", false
+		got := customer(tc.auth, recordIssuer)
+		require.Equal(t, http.StatusNoContent, got.status, "%s: %s", name, got.code)
+		require.Equal(t, tc.issuer, issuer, name)
+		require.Equal(t, tc.account, account, "%s: the deployment's own account", name)
+		require.Equal(t, merchantA.String(), got.bound, name)
+	}
+	for name, tc := range map[string]struct {
+		auth  billingauth.Authenticator
+		admit func(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error
+		code  string
+	}{
+		"a console's token, not granted the customer scope": {boundAuth{who: native, scope: here, scopes: []string{billing.ScopeMerchant}}, recordIssuer, "permission_required"},
+		"a token granted no scope":                          {boundAuth{who: native, scope: here, scopes: []string{}}, recordIssuer, "permission_required"},
+		"another issuer's customer": {boundAuth{who: foreign, scope: here}, func(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error {
+			return db.ErrCustomerIssuerMismatch
+		}, "customer_issuer_mismatch"},
+		"bound to the root scope":         {boundAuth{who: foreign, scope: authtest.Root}, recordIssuer, "merchant_unresolved"},
+		"bound, without a root authority": {rootless{boundAuth{who: foreign, scope: here}}, recordIssuer, "merchant_unresolved"},
+	} {
+		got := customer(tc.auth, tc.admit)
+		require.Equal(t, http.StatusForbidden, got.status, name)
+		require.Equal(t, tc.code, got.code, name)
+	}
 }

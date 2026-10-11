@@ -13,6 +13,13 @@ type Routes struct {
 	// and, for a person on a route that moves money or removes access,
 	// CheckRecentSignIn. Required.
 	//
+	// A request acts on the one merchant its credential is bound to, and
+	// nothing in the request names it: the merchant whose scope the
+	// Verified's BoundScope is (helpers/auth Bound: {Authority: RootScope's,
+	// ID: the merchant's id}), else the merchant that declares the
+	// Identity's Issuer (MerchantDeclaration.Issuer). A credential bound to
+	// neither is refused 403 merchant_unresolved.
+	//
 	// With a route group on, Auth is a helpers/auth Root, as AuthKit's
 	// ak.Authenticator() is. A route acting on merchant M admits its
 	// merchant: permission held in M's scope ({Authority: RootScope's, ID:
@@ -51,7 +58,7 @@ type RouteGroups struct {
 	// Catalog is the catalog: products, prices, meters and their rates,
 	// archiving a product, applying a catalog document, moving subscribers
 	// between prices. It needs billing.MerchantCatalogManage or
-	// RootCatalogManage. With Config.Catalog, the file skips what an edit
+	// RootCatalogManage. A declared merchant's Catalog skips what an edit
 	// changed.
 	Catalog bool
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,

@@ -124,3 +124,10 @@ func (s *Server) RetireUnusedMerchant(ctx context.Context, id billing.MerchantID
 func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error) {
 	return operator.CompletePendingMerchantRetirements(ctx, s.cp, limit)
 }
+
+// ConsoleClientID is the admin console's OAuth client at the server's
+// AuthKit, which the server declares: a public client exchanging a person's
+// session token for one bound to the merchant they act on (RFC 8693, the
+// merchant's id as group_id), with a DPoP proof. Absent with
+// Config.ConsoleIssuer.
+const ConsoleClientID = controlplane.ConsoleClientID

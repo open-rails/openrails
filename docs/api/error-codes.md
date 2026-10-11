@@ -49,6 +49,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `custodian_capture_unavailable` | 503 | `api_error` | The card custodian cannot capture cards right now. |
 | `customer_action_required` | 403 | `authorization_error` | Only the customer may take this action, through their own step. |
 | `customer_email_required` | 400 | `invalid_request_error` | The rail needs the customer's verified email and username. |
+| `customer_issuer_mismatch` | 403 | `authorization_error` | The customer belongs to another issuer's user with the same subject. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
@@ -81,12 +82,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_request_body` | 400 | `invalid_request_error` | The request body could not be read or is not one JSON value. |
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
-| `merchant_binding_mismatch` | 409 | `invalid_request_error` | The selected merchant is not the one the credential, deployment or request is bound to. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
-| `merchant_directory_unavailable` | 503 | `api_error` | The merchant directory could not be read; retry. |
-| `merchant_not_found` | 404 | `invalid_request_error` | No active merchant answers to the selector. |
-| `merchant_selector_invalid` | 400 | `invalid_request_error` | The OpenRails-Merchant header is malformed, repeated or names no merchant. |
-| `merchant_unresolved` | 403 | `authorization_error` | The credential names no merchant, or more than one; select one. |
+| `merchant_unresolved` | 403 | `authorization_error` | The credential is bound to no merchant here. |
 | `meter_in_use` | 409 | `invalid_request_error` | The meter is referenced and cannot change this way. |
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |

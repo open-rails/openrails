@@ -115,7 +115,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 	// header that name nothing of the order's.
 	wallet := func(method string, order string, other billing.MerchantID, body string) *httptest.ResponseRecorder {
 		return serve(handler, rsRequest{method: method, path: "https://wallet-" + uuid.NewString()[:8] + ".e2e.test/v1/orders/" + order + "/solana-pay",
-			selector: "id:" + other.String(), body: body})
+			header: map[string]string{retiredMerchantHeader: "id:" + other.String()}, body: body})
 	}
 	orders := []billing.OrderID{awaiting(shops[0]), awaiting(shops[1])}
 

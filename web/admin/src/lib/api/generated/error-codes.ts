@@ -44,6 +44,7 @@ export type OpenRailsErrorCode =
   | "custodian_capture_unavailable"
   | "customer_action_required"
   | "customer_email_required"
+  | "customer_issuer_mismatch"
   | "customer_not_found"
   | "customer_payment_unsupported"
   | "customer_session_required"
@@ -76,11 +77,7 @@ export type OpenRailsErrorCode =
   | "invalid_request_body"
   | "invalid_settlement_status_request"
   | "invoker_scoped_principal"
-  | "merchant_binding_mismatch"
   | "merchant_config_read_only"
-  | "merchant_directory_unavailable"
-  | "merchant_not_found"
-  | "merchant_selector_invalid"
   | "merchant_unresolved"
   | "meter_in_use"
   | "meter_rate_card_conflict"
@@ -249,6 +246,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   custodian_capture_unavailable: { status: 503, type: "api_error", meaning: "The card custodian cannot capture cards right now." },
   customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the customer may take this action, through their own step." },
   customer_email_required: { status: 400, type: "invalid_request_error", meaning: "The rail needs the customer's verified email and username." },
+  customer_issuer_mismatch: { status: 403, type: "authorization_error", meaning: "The customer belongs to another issuer's user with the same subject." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
@@ -281,12 +279,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
-  merchant_binding_mismatch: { status: 409, type: "invalid_request_error", meaning: "The selected merchant is not the one the credential, deployment or request is bound to." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
-  merchant_directory_unavailable: { status: 503, type: "api_error", meaning: "The merchant directory could not be read; retry." },
-  merchant_not_found: { status: 404, type: "invalid_request_error", meaning: "No active merchant answers to the selector." },
-  merchant_selector_invalid: { status: 400, type: "invalid_request_error", meaning: "The OpenRails-Merchant header is malformed, repeated or names no merchant." },
-  merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential names no merchant, or more than one; select one." },
+  merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential is bound to no merchant here." },
   meter_in_use: { status: 409, type: "invalid_request_error", meaning: "The meter is referenced and cannot change this way." },
   meter_rate_card_conflict: { status: 409, type: "invalid_request_error", meaning: "The meter and its rate card disagree." },
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },

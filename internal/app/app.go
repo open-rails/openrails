@@ -14,7 +14,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 )
@@ -30,7 +29,7 @@ type App struct {
 	ConsoleAssets fs.FS
 	// Standalone marks the engine of a standalone server (package server),
 	// which owns merchant identity and the HTTP surface: the embedded mount
-	// and RegisterMerchantForRestore refuse.
+	// refuses.
 	Standalone bool
 }
 
@@ -57,8 +56,6 @@ type BootstrapOptions struct {
 	// Vault is the host's authenticated client (Deps.Vault); nil logs in from
 	// Config.Vault.
 	Vault *vaultapi.Client
-
-	ConfiguredMerchant billing.MerchantID
 }
 
 // Bootstrap initialises core services and the auth verifier.
@@ -168,10 +165,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)
 	}
-	if opts != nil {
-		runtime.SetConfiguredMerchant(opts.ConfiguredMerchant)
-	}
-
 	runtime.startRedisMonitor()
 
 	app := &App{

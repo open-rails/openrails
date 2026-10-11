@@ -96,15 +96,15 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(user.ID), admin)
 	flow := authtest.CodeFlow{ClientID: console, ClientSecret: secret, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
 	tokens := as.Authorize(t, user, flow)
-	findings := func(token, selector string) int {
-		return serve(handler, rsRequest{path: "/v1/admin/findings", authorization: "Bearer " + token, selector: selector}).Code
+	findings := func(token string) int {
+		return serve(handler, rsRequest{path: "/v1/admin/findings", authorization: "Bearer " + token}).Code
 	}
-	require.Equal(t, http.StatusOK, findings(tokens.AccessToken, shop), "the console names the merchant its issuer is trusted by")
+	require.Equal(t, http.StatusOK, findings(tokens.AccessToken), "the issuer's token is bound to the merchant whose group trusts it")
 	require.Equal(t, http.StatusNotFound, serve(handler, rsRequest{path: "/v1/merchants", authorization: "Bearer " + tokens.AccessToken}).Code, "the console's merchants come from the host")
 	renewed := as.Refresh(t, console, secret, tokens)
-	require.Equal(t, http.StatusOK, findings(renewed.AccessToken, ""), "the console's refreshed token")
+	require.Equal(t, http.StatusOK, findings(renewed.AccessToken), "the console's refreshed token")
 	stranger := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
-	require.Equal(t, http.StatusForbidden, findings(stranger.AccessToken, ""), "a user the issuer grants nothing")
+	require.Equal(t, http.StatusForbidden, findings(stranger.AccessToken), "a user the issuer grants nothing")
 
 	_, err = f.buildServer(t, federated(resourceID, nil))
 	require.ErrorContains(t, err, "no sign-in method")

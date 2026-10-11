@@ -9,13 +9,12 @@ import (
 )
 
 // registerSelfServiceRoutes mounts the customer surface under /v1/me/*: a
-// customer is a trusted issuer's user, whose credential is bound to its
-// issuer's merchant, calling OpenRails directly from the browser.
+// customer's credential is bound to its merchant's group, calling OpenRails
+// directly from the browser.
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.CustomerMount{Auth: s.auth, ResolveMerchant: s.resolveMerchant, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
-			NativeIssuer: s.controlPlane.Issuer()})
+		s.runtime, httproutes.CustomerMount{Auth: s.auth, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("self-service API routes registered on public handler")
@@ -29,5 +28,5 @@ func (s *Server) registerNetworkRoutes(mux router.Registrar) {
 		return
 	}
 	httproutes.RegisterNetworkRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/network", s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.NetworkMount{Auth: s.auth, NativeIssuer: s.controlPlane.Issuer()})
+		s.runtime, httproutes.NetworkMount{Auth: s.auth})
 }

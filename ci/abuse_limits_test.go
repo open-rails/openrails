@@ -34,8 +34,8 @@ func (m staffMember) Authenticate(*http.Request) (auth.Verified, error) { return
 func (staffMember) RootScope(context.Context) (auth.Scope, error)       { return staffRoot, nil }
 
 func (m staffMember) Identity() openrails.Identity {
-	return openrails.Identity{Issuer: "test", Subject: string(m), SubjectKind: openrails.SubjectUser,
-		Invoker: openrails.Invoker{Issuer: "test", ID: string(m)}, Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: "s_staff"}}
+	return openrails.Identity{Issuer: authtest.Issuer, Subject: string(m), SubjectKind: openrails.SubjectUser,
+		Invoker: openrails.Invoker{Issuer: authtest.Issuer, ID: string(m)}, Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: "s_staff"}}
 }
 
 func (staffMember) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
@@ -58,7 +58,7 @@ func newAbuseInstances(t *testing.T, n int, redis *openrails.RedisConfig) *abuse
 	t.Helper()
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: "limits-" + uuid.NewString()[:8], DisplayName: "Limits"}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"limits-" + uuid.NewString()[:8]: {DisplayName: "Limits"}}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "e2e-site", SecretKey: "e2e-secret"}
 	cfg.Redis = redis
 	in := &abuseInstances{f: f, admin: staffMember(uuid.NewString())}

@@ -21,8 +21,9 @@ import (
 )
 
 // A merchant's backend mints its customers' tokens with its registered key:
-// the token acts as that customer of that merchant alone, and each assertion
-// redeems once.
+// the token acts as that customer of that merchant alone, the merchant's own
+// customer whichever of the token and the API key named it first, and each
+// assertion redeems once.
 func TestCustomerTokenHelper(t *testing.T) {
 	f := newFixture(t)
 	srv := f.resourceServer(t)
@@ -58,19 +59,24 @@ func TestCustomerTokenHelper(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Bearer", token.TokenType)
 	require.True(t, token.ExpiresAt.After(before) && token.ExpiresAt.Before(before.Add(time.Hour)), "expires at %s", token.ExpiresAt)
-	entitlements := func(selector string) []billing.CustomerEntitlement {
+	entitlementsOf := func(token billing.CustomerToken, header ...string) []billing.CustomerEntitlement {
 		t.Helper()
-		w := serve(handler, rsRequest{path: "/v1/me/entitlements", authorization: "Bearer " + token.AccessToken, selector: selector})
+		q := rsRequest{path: "/v1/me/entitlements", authorization: "Bearer " + token.AccessToken, header: map[string]string{}}
+		for i := 0; i+1 < len(header); i += 2 {
+			q.header[header[i]] = header[i+1]
+		}
+		w := serve(handler, q)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, a.String(), w.Header().Get("OpenRails-Bound-Merchant"))
 		var held struct {
 			Data []billing.CustomerEntitlement `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &held))
 		return held.Data
 	}
-	// Mint first: a customer a staff call made before its first token is
-	// native, and the issuer pin still refuses the backend's token for it.
-	require.Empty(t, entitlements(""))
+	entitlements := func(header ...string) []billing.CustomerEntitlement { return entitlementsOf(*token, header...) }
+	// Mint first: the backend's token makes the merchant's own customer.
+	require.Empty(t, entitlements())
 
 	// The same person then holds one entitlement at each merchant.
 	for key, h := range map[string]*openrails.Client{"at-a": handle(t, srv, a), "at-b": handle(t, srv, b)} {
@@ -79,12 +85,25 @@ func TestCustomerTokenHelper(t *testing.T) {
 		_, err = h.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID}}})
 		require.NoError(t, err)
 	}
-	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: customer, Entitlement: "at-a"}}, entitlements(""), "that customer of merchant A")
+	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: customer, Entitlement: "at-a"}}, entitlements(), "that customer of merchant A")
 	// The token is bound to A: naming merchant B gives it nothing of B's.
-	w := serve(handler, rsRequest{path: "/v1/me/entitlements", authorization: "Bearer " + token.AccessToken, selector: "id:" + b.String()})
-	require.NotContains(t, w.Body.String(), "at-b")
-	w = serve(handler, rsRequest{path: "/v1/admin/products", authorization: "Bearer " + token.AccessToken})
+	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: customer, Entitlement: "at-a"}}, entitlements(retiredMerchantHeader, "id:"+b.String()))
+	w := serve(handler, rsRequest{path: "/v1/admin/products", authorization: "Bearer " + token.AccessToken})
 	require.NotEqual(t, http.StatusOK, w.Code, "a customer token is no staff credential")
+
+	// Create first: the backend makes the customer and gives it access with
+	// its API key, then mints its token; it is the same customer, the
+	// merchant's own.
+	early := billing.CustomerID(uuid.New())
+	_, err = shop.UpdateCustomer(t.Context(), early, billing.UpdateCustomerParams{})
+	require.NoError(t, err)
+	early1, err := shop.CreateProduct(t.Context(), billing.CreateProductParams{Key: "early", DisplayName: "Early", Entitlements: []string{"early"}})
+	require.NoError(t, err)
+	_, err = shop.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: early, ProductID: early1.ID}}})
+	require.NoError(t, err)
+	earlyToken, err := shop.CustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: early, Email: "early@backend.e2e.test", EmailVerified: true})
+	require.NoError(t, err)
+	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: early, Entitlement: "early"}}, entitlementsOf(*earlyToken), "the customer the API key made")
 
 	// An assertion the backend hands its frontend redeems once.
 	assertion, err := shop.CustomerAssertion(t.Context(), billing.CustomerTokenParams{CustomerID: customer})

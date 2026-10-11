@@ -184,6 +184,6 @@ func TestRemoteHandlesActAsTheirCredential(t *testing.T) {
 	requests := api.seen()
 	require.NotEmpty(t, requests)
 	for _, header := range requests {
-		require.Empty(t, header.Values("OpenRails-Merchant"), "no Go client names a merchant")
+		require.Empty(t, header.Values(retiredMerchantHeader), "no Go client names a merchant")
 	}
 }

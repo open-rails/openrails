@@ -283,8 +283,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		rt, err := openrails.New(t.Context(), openrails.Config{
 			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-			DB:       &openrails.DBConfig{URL: w.dsn},
-			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}},
+			DB:        &openrails.DBConfig{URL: w.dsn},
+			Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}}},
 		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: recorder, Clock: w.clock})
 		if err != nil {
 			t.Logf("refused at construction: %v", err)

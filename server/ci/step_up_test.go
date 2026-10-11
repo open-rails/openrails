@@ -22,7 +22,7 @@ import (
 // sign-in, and the owner's API key, pass. Reads need no step-up.
 func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, reserving())
+	cp := f.newServer(t, edits(reserving(), resourced))
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
@@ -32,6 +32,9 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	fresh := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 	stale := authtest.StaleSession(t, cp.AuthKit(), authtest.SignIn(t, cp.AuthKit(), owner).AccessToken)
 	customer := uuid.NewString()
+	// A person acts at the merchant through a token exchanged for it, which
+	// carries the session's sign-in.
+	freshAt, staleAt := f.exchanged(t, handler, fresh, m.MerchantID), f.exchanged(t, handler, stale, m.MerchantID)
 
 	for _, op := range []struct {
 		method, path string
@@ -43,17 +46,18 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
 	} {
-		w := call(t, handler, stale, op.method, op.path, shop, op.body)
+		w := staleAt.call(t, handler, op.method, op.path, op.body)
 		require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
 		require.Contains(t, w.Body.String(), `"code":"step_up_required"`, "%s %s", op.method, op.path)
-		require.Equal(t, `Bearer error="insufficient_user_authentication", max_age="900"`, w.Header().Get("WWW-Authenticate"))
-		require.Contains(t, w.Body.String(), `"step_up_methods":[`, "AuthKit's challenge reaches the client: %s", w.Body.String())
+		require.Contains(t, w.Header().Get("WWW-Authenticate"), `error="insufficient_user_authentication"`)
+		require.Contains(t, w.Header().Get("WWW-Authenticate"), `max_age=900`)
+		require.Contains(t, w.Body.String(), `"max_age":900`, "AuthKit's challenge reaches the client: %s", w.Body.String())
 
-		w = call(t, handler, fresh, op.method, op.path, shop, op.body)
+		w = freshAt.call(t, handler, op.method, op.path, op.body)
 		require.NotContains(t, w.Body.String(), "step_up_required", "%s %s, fresh", op.method, op.path)
 	}
 
-	w := call(t, handler, stale, http.MethodGet, "/v1/admin/findings", shop, nil)
+	w := staleAt.call(t, handler, http.MethodGet, "/v1/admin/findings", nil)
 	require.Equal(t, http.StatusOK, w.Code, "a read needs no step-up: %s", w.Body.String())
 
 	signedIn := func(token string) error {
@@ -67,6 +71,6 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	require.NoError(t, signedIn(fresh))
 
 	minted := merchantKey(t, cp, m.MerchantID, "owner")
-	w = call(t, handler, minted.Secret, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), "", map[string]any{})
+	w = call(t, handler, minted.Secret, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), map[string]any{})
 	require.Equal(t, http.StatusOK, w.Code, "an API key carries no sign-in to step up: %s", w.Body.String())
 }

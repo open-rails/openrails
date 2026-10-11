@@ -25,7 +25,7 @@ import (
 // live. An edit applies on the next request; deleting it revokes the key.
 func TestMerchantCustomRoles(t *testing.T) {
 	f := newFixture(t)
-	srv := f.newServer(t, nil)
+	srv := f.newServer(t, resourced)
 	ctx := t.Context()
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
@@ -33,7 +33,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 	p, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("roles"), OwnerUserID: ownerID})
 	require.NoError(t, err)
 	mid := p.MerchantID
-	selector := "id:" + mid.String()
+	bound := f.exchanged(t, handler, owner, mid)
 	groups := "/" + f.schema + "/v1/groups/" + mid.String()
 	decode := func(w *httptest.ResponseRecorder, status int, out any) {
 		t.Helper()
@@ -45,11 +45,11 @@ func TestMerchantCustomRoles(t *testing.T) {
 
 	// The console finds the merchant's group in the access read.
 	var access billing.AdminAccess
-	decode(call(t, handler, owner, http.MethodGet, "/v1/admin/access", selector, nil), http.StatusOK, &access)
+	decode(bound.call(t, handler, http.MethodGet, "/v1/admin/access", nil), http.StatusOK, &access)
 	require.Equal(t, mid.String(), access.ScopeID)
 
 	var created iam.GroupRole
-	decode(call(t, handler, owner, http.MethodPost, groups+"/roles", "", map[string]any{
+	decode(call(t, handler, owner, http.MethodPost, groups+"/roles", map[string]any{
 		"name": "storefront", "permissions": []string{string(billing.MerchantCatalogRead), string(billing.MerchantEntitlementsRead)},
 	}), http.StatusCreated, &created)
 	storefront := created.Name.String()
@@ -60,7 +60,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 	// Declared roles, then the merchant's; the owner's lists every
 	// permission a role may hold, which the console offers.
 	var roles struct{ Data []iam.GroupRole }
-	decode(call(t, handler, owner, http.MethodGet, groups+"/roles", "", nil), http.StatusOK, &roles)
+	decode(call(t, handler, owner, http.MethodGet, groups+"/roles", nil), http.StatusOK, &roles)
 	byName := map[string]iam.GroupRole{}
 	for _, r := range roles.Data {
 		byName[r.Name.String()] = r
@@ -77,14 +77,14 @@ func TestMerchantCustomRoles(t *testing.T) {
 	})
 
 	var minted iam.APIKeyCreated
-	decode(call(t, handler, owner, http.MethodPost, groups+"/api-keys", "", map[string]any{"name": "storefront", "role": storefront}), http.StatusCreated, &minted)
+	decode(call(t, handler, owner, http.MethodPost, groups+"/api-keys", map[string]any{"name": "storefront", "role": storefront}), http.StatusCreated, &minted)
 	key := minted.Secret
 	customer := billing.CustomerID(uuid.New()).String()
 	products := func(token string) *httptest.ResponseRecorder {
-		return call(t, handler, token, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", "", nil)
+		return call(t, handler, token, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", nil)
 	}
 	entitlements := func(token string) *httptest.ResponseRecorder {
-		return call(t, handler, token, http.MethodPost, "/v1/app/entitlements/check", "", map[string]any{"customer_id": customer, "entitlements": []string{"content:any"}})
+		return call(t, handler, token, http.MethodPost, "/v1/app/entitlements/check", map[string]any{"customer_id": customer, "entitlements": []string{"content:any"}})
 	}
 	usage := func(token string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/v1/app/usage-events", strings.NewReader(`{"items":[]}`))
@@ -114,7 +114,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 
 	// A teammate holds it too; their merchant list says what it grants.
 	teammate := newAccount(t, srv)
-	decode(call(t, handler, owner, http.MethodPut, groups+"/members/users/"+teammate.ID, "", map[string]any{"role": storefront}), http.StatusOK, nil)
+	decode(call(t, handler, owner, http.MethodPut, groups+"/members/users/"+teammate.ID, map[string]any{"role": storefront}), http.StatusOK, nil)
 	listed, err := srv.ListUserMerchants(ctx, teammate.ID)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
@@ -123,13 +123,13 @@ func TestMerchantCustomRoles(t *testing.T) {
 
 	// Only the owner manages roles: a viewer neither reads nor changes them.
 	viewer := newAccount(t, srv)
-	decode(call(t, handler, owner, http.MethodPut, groups+"/members/users/"+viewer.ID, "", map[string]any{"role": "merchant:viewer"}), http.StatusOK, nil)
+	decode(call(t, handler, owner, http.MethodPut, groups+"/members/users/"+viewer.ID, map[string]any{"role": "merchant:viewer"}), http.StatusOK, nil)
 	viewerToken := authtest.SignIn(t, srv.AuthKit(), viewer).AccessToken
-	decode(call(t, handler, viewerToken, http.MethodGet, groups+"/roles", "", nil), http.StatusForbidden, nil)
-	decode(call(t, handler, viewerToken, http.MethodPatch, rolePath, "", map[string]any{"permissions": []string{string(billing.MerchantUsageManage)}}), http.StatusForbidden, nil)
+	decode(call(t, handler, viewerToken, http.MethodGet, groups+"/roles", nil), http.StatusForbidden, nil)
+	decode(call(t, handler, viewerToken, http.MethodPatch, rolePath, map[string]any{"permissions": []string{string(billing.MerchantUsageManage)}}), http.StatusForbidden, nil)
 
 	// An edit applies on the next request, to every holder.
-	decode(call(t, handler, owner, http.MethodPatch, rolePath, "", map[string]any{
+	decode(call(t, handler, owner, http.MethodPatch, rolePath, map[string]any{
 		"permissions": []string{string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage)},
 	}), http.StatusOK, nil)
 	decode(products(key), http.StatusOK, nil)
@@ -142,12 +142,12 @@ func TestMerchantCustomRoles(t *testing.T) {
 	require.Equal(t, []string{string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage)}, listed[0].Permissions)
 
 	// Deleting it revokes the keys carrying it and takes it from the team.
-	decode(call(t, handler, owner, http.MethodDelete, rolePath, "", nil), http.StatusNoContent, nil)
+	decode(call(t, handler, owner, http.MethodDelete, rolePath, nil), http.StatusNoContent, nil)
 	for _, secret := range []string{key, goKey.Secret} {
 		require.Equal(t, http.StatusUnauthorized, products(secret).Code, "a deleted role's key authenticates nothing")
 	}
 	listed, err = srv.ListUserMerchants(ctx, teammate.ID)
 	require.NoError(t, err)
 	require.Empty(t, listed)
-	decode(call(t, handler, owner, http.MethodGet, rolePath, "", nil), http.StatusNotFound, nil)
+	decode(call(t, handler, owner, http.MethodGet, rolePath, nil), http.StatusNotFound, nil)
 }

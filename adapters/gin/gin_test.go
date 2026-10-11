@@ -45,7 +45,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, Vault: &config.VaultConfig{KVMount: "kv"}}
 	rt := &app.Runtime{Config: cfg}
-	rt.SetConfiguredMerchant(testMerchant)
+	rt.DeclareMerchants([]billing.MerchantID{testMerchant}, nil)
 	graph := &app.App{Config: cfg, Runtime: rt}
 	selection := config.Routes{Auth: authtest.Deny{}, RouteGroups: authtest.Groups()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)

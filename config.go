@@ -27,8 +27,9 @@ type (
 	Routes = config.Routes
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
 	RouteGroups = config.RouteGroups
-	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
-	// engine serves.
+	// MerchantDeclaration is one entry of Config.Merchants: a merchant the
+	// engine provisions on start, its catalog, and the issuer whose
+	// credentials are bound to it.
 	MerchantDeclaration = config.MerchantDeclaration
 	// MerchantSecrets is MerchantDeclaration.Secrets: the merchant's own
 	// credentials (secrets.scim_token).
@@ -144,13 +145,14 @@ const (
 // helpers/auth sentinel.
 var ErrUnauthenticated = billingauth.ErrUnauthenticated
 
-// ParseMerchantDeclaration reads Config.Merchant from one YAML document that
-// names its merchant with a required slug, refusing unknown fields.
+// ParseMerchantDeclaration reads an entry of Config.Merchants from one YAML
+// document that names its merchant with a required slug, the entry's key,
+// refusing unknown fields. Issuer and Catalog are set in code.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
 }
 
-// ReadMerchantFile reads Config.Merchant from a YAML file in
+// ReadMerchantFile reads an entry of Config.Merchants from a YAML file in
 // ParseMerchantDeclaration's shape. The file carries PSP credentials, so keep
 // it out of version control.
 func ReadMerchantFile(path string) (MerchantDeclaration, error) {

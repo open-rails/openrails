@@ -154,12 +154,14 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 	require.Equal(t, http.StatusOK, send(handler, backend(every), http.MethodGet, "/v1/admin/findings", "").Code, "control: the admin group is on")
 }
 
-// A root role's root: permissions reach every merchant, the merchant named
-// by the request; a merchant's own staff hold the merchant: names in its
-// group and act at that merchant alone.
-func TestRootHoldersActAtAnyMerchant(t *testing.T) {
+// A person acts at a merchant only through a token bound to it. A root
+// role's root: permissions reach every merchant through such a token, and a
+// person's own sign-in reaches none. The openrails:merchant scope's ceiling
+// names the root: permissions, so an exchanged token keeps them; a person
+// holding none gains nothing from it.
+func TestRootActsOnlyThroughABoundToken(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, nil)
+	cp := f.newServer(t, resourced)
 	ak := cp.AuthKit()
 	a, b := provision(t, cp, uniqueName("shop-a")), provision(t, cp, uniqueName("shop-b"))
 	handler, err := standaloneHandler(cp)
@@ -171,34 +173,34 @@ func TestRootHoldersActAtAnyMerchant(t *testing.T) {
 	authtest.GrantRole(t, ak, iam.GroupByID(a.String()), iam.UserSubject(support.ID), role)
 	authtest.EnrollTOTP(t, ak, operator) // a root role needs a second factor
 	authtest.GrantRole(t, ak, iam.RootGroup(), iam.UserSubject(operator.ID), controlplane.Roles.Root.Owner)
-	supportToken, operatorToken := authtest.SignIn(t, ak, support).AccessToken, authtest.SignIn(t, ak, operator).AccessToken
+	supportSession, operatorSession := authtest.SignIn(t, ak, support).AccessToken, authtest.SignIn(t, ak, operator).AccessToken
 
-	at := func(token string, mid billing.MerchantID, method, path string) *httptest.ResponseRecorder {
-		return call(t, handler, token, method, path, "id:"+mid.String(), nil)
+	for _, session := range []string{operatorSession, supportSession} {
+		w := call(t, handler, session, http.MethodGet, "/v1/admin/customers", nil)
+		require.Equal(t, http.StatusForbidden, w.Code, "a person's own sign-in: %s", w.Body.String())
+		require.Equal(t, billing.CodeMerchantUnresolved, errorCode(t, w))
 	}
-	require.Equal(t, http.StatusOK, at(supportToken, a, http.MethodGet, "/v1/admin/customers").Code, "its own merchant")
-	for _, path := range []string{"/v1/admin/customers", "/v1/admin/psps"} {
-		w := at(supportToken, b, http.MethodGet, path)
-		require.Equal(t, http.StatusForbidden, w.Code, "%s at another merchant: %s", path, w.Body.String())
-		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
-	}
-	w := at(supportToken, a, http.MethodGet, "/v1/admin/psps")
-	require.Equal(t, http.StatusForbidden, w.Code, "support holds no merchant:config:manage: %s", w.Body.String())
 
 	for _, mid := range []billing.MerchantID{a, b} {
+		bound := f.exchanged(t, handler, operatorSession, mid)
 		for _, path := range []string{"/v1/admin/customers", "/v1/admin/psps", "/v1/admin/metrics/schema"} {
-			w := at(operatorToken, mid, http.MethodGet, path)
-			require.Equal(t, http.StatusOK, w.Code, "the root holder reads %s at %s: %s", path, mid, w.Body.String())
+			w := bound.call(t, handler, http.MethodGet, path, nil)
+			require.Equal(t, http.StatusOK, w.Code, "the root holder reads %s at %s through its root: names: %s", path, mid, w.Body.String())
+			require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"))
 		}
+		w := bound.call(t, handler, http.MethodGet, "/v1/admin/access", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: true, MerchantConfig: true, Metrics: true, ScopeID: mid.String()}, decode[billing.AdminAccess](t, w))
 	}
 
-	// The access read answers what each holds at the merchant named.
-	access := func(token string, mid billing.MerchantID) billing.AdminAccess {
-		w := at(token, mid, http.MethodGet, "/v1/admin/access")
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		return decode[billing.AdminAccess](t, w)
-	}
-	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: a.String()}, access(supportToken, a))
-	require.Equal(t, billing.AdminAccess{Admin: billing.AccessNone, ScopeID: b.String()}, access(supportToken, b))
-	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: true, MerchantConfig: true, Metrics: true, ScopeID: b.String()}, access(operatorToken, b))
+	atA := f.exchanged(t, handler, supportSession, a)
+	require.Equal(t, http.StatusOK, atA.call(t, handler, http.MethodGet, "/v1/admin/customers", nil).Code, "its own merchant")
+	w := atA.call(t, handler, http.MethodGet, "/v1/admin/psps", nil)
+	require.Equal(t, http.StatusForbidden, w.Code, "the wider ceiling grants support nothing it does not hold: %s", w.Body.String())
+	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
+	w = atA.call(t, handler, http.MethodGet, "/v1/admin/access", nil)
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: a.String()}, decode[billing.AdminAccess](t, w))
+	_, status, body := f.exchangeFor(t, handler, supportSession, b)
+	require.Equal(t, http.StatusBadRequest, status, string(body))
+	require.Contains(t, string(body), "invalid_target", "no role at b, no token bound to b")
 }

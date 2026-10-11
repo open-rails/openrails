@@ -191,7 +191,6 @@ pkg openrails, type Config = config.Config
 pkg openrails, type Config struct
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string
 pkg openrails, type Config struct, Captcha *config.CaptchaConfig
-pkg openrails, type Config struct, Catalog *catalog.Application
 pkg openrails, type Config struct, CatalogReconciliationInterval string
 pkg openrails, type Config struct, CloudflareProxies []string
 pkg openrails, type Config struct, DB *config.DBConfig
@@ -201,7 +200,7 @@ pkg openrails, type Config struct, EngineAdmissionHold bool
 pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
 pkg openrails, type Config struct, LLM *config.LLMConfig
 pkg openrails, type Config struct, Logger *config.LoggerConfig
-pkg openrails, type Config struct, Merchant config.MerchantDeclaration
+pkg openrails, type Config struct, Merchants map[string]config.MerchantDeclaration
 pkg openrails, type Config struct, ProviderBillingQuiescenceInterval string
 pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig
 pkg openrails, type Config struct, ProviderWriteMode string
@@ -290,8 +289,10 @@ pkg openrails, type LoggerConfig struct, Level string
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, AlertWebhooks []config.AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
+pkg openrails, type MerchantDeclaration struct, Catalog *catalog.Application `yaml:"-"`
 pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty"`
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
+pkg openrails, type MerchantDeclaration struct, Issuer string `yaml:"-"`
 pkg openrails, type MerchantDeclaration struct, PSPs map[string]config.PSPConfig `yaml:"psps,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Secrets config.MerchantSecrets `yaml:"secrets,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Settings billing.MerchantSettings `yaml:"settings,omitempty"`
@@ -495,6 +496,7 @@ pkg openrails/billing, const CodeCatalogBenefitOverlap untyped string = "catalog
 pkg openrails/billing, const CodeCredentialExpired untyped string = "credential_expired"
 pkg openrails/billing, const CodeCredentialRevoked untyped string = "credential_revoked"
 pkg openrails/billing, const CodeCustomerActionRequired untyped string = "customer_action_required"
+pkg openrails/billing, const CodeCustomerIssuerMismatch untyped string = "customer_issuer_mismatch"
 pkg openrails/billing, const CodeDefaultPaymentMethodInvalid untyped string = "default_payment_method_invalid"
 pkg openrails/billing, const CodeDefaultPaymentMethodRequired untyped string = "default_payment_method_required"
 pkg openrails/billing, const CodeHostPrincipalInvalid untyped string = "host_principal_invalid"
@@ -508,10 +510,6 @@ pkg openrails/billing, const CodeInvalidParam untyped string = "invalid_param"
 pkg openrails/billing, const CodeInvalidQuery untyped string = "invalid_query"
 pkg openrails/billing, const CodeInvalidRequestBody untyped string = "invalid_request_body"
 pkg openrails/billing, const CodeInvokerScopedPrincipal untyped string = "invoker_scoped_principal"
-pkg openrails/billing, const CodeMerchantBindingMismatch untyped string = "merchant_binding_mismatch"
-pkg openrails/billing, const CodeMerchantDirectoryUnavailable untyped string = "merchant_directory_unavailable"
-pkg openrails/billing, const CodeMerchantNotFound untyped string = "merchant_not_found"
-pkg openrails/billing, const CodeMerchantSelectorInvalid untyped string = "merchant_selector_invalid"
 pkg openrails/billing, const CodeMerchantUnresolved untyped string = "merchant_unresolved"
 pkg openrails/billing, const CodeMethodNotAllowed untyped string = "method_not_allowed"
 pkg openrails/billing, const CodeModelUnavailable untyped string = "model_unavailable"
@@ -3470,6 +3468,7 @@ pkg openrails/openrailstest/stripemock, type LedgerEntry struct, Refunded int64
 pkg openrails/openrailstest/stripemock, type Mock struct
 pkg openrails/openrailstest/stripemock, type Options struct
 pkg openrails/openrailstest/stripemock, type Options struct, Clock func() time.Time
+pkg openrails/server, const ConsoleClientID untyped string = "openrails-console"
 pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"

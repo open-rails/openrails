@@ -4,6 +4,7 @@ package ci_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -138,13 +139,28 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ReturnOrigins = []string{"https://example.test"}
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug,
-		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
+	// Two merchants on one engine, each with its own Stripe account: a
+	// webhook reaches the merchant whose PSP its path names and whose secret
+	// signed it.
+	const otherSecret, otherAccount = "whsec_e2e_webhook_other", "acct_e2e_webhook_other"
+	otherSlug := "webhook-other-" + uuid.NewString()[:8]
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{
+		slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: account,
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
-		}},
+		}}},
+		otherSlug: {DisplayName: otherSlug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
+			AccountID: otherAccount,
+			Secrets:   map[string]string{"secret_key": "sk_test_e2e_other", "webhook_signing_secret": otherSecret},
+		}}},
 	}
-	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
+	bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
+	client, err := bill.MerchantBySlug(slug)
+	require.NoError(t, err)
+	other, err := bill.MerchantBySlug(otherSlug)
+	require.NoError(t, err)
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:          "webhook-product-" + uuid.NewString()[:8],
@@ -203,4 +219,10 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.Equal(t, "USD", payments.Items[0].Currency)
 	require.Equal(t, "pi_e2e_webhook", payments.Items[0].TransactionID)
 	require.EqualValues(t, 1, fake.checkoutCalls.Load(), "webhook handling must not submit another checkout")
+
+	theirs, err := other.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
+	require.NoError(t, err)
+	require.Empty(t, theirs.Items, "the other merchant's books are untouched")
+	status, body = postSignedStripeWebhook(t, mux, otherAccount, secret, completed, now.Add(3*time.Second))
+	require.Equal(t, http.StatusUnauthorized, status, "the other PSP's path takes only its own secret: %s", body)
 }

@@ -54,6 +54,20 @@ type Config struct {
 	// Merchant is the merchant the mount serves; null where staff choose one
 	// (a host's console extension lists theirs, or they open one by name).
 	Merchant *Merchant `json:"merchant"`
+	// Exchange is where the console trades the session's token for one bound
+	// to the merchant staff choose (RFC 8693, the merchant's id as group_id);
+	// null where the session's token is bound already (an issuer's, or the
+	// one merchant a declared issuer binds).
+	Exchange *Exchange `json:"exchange"`
+}
+
+// Exchange is the console's token exchange: its public client at the token
+// endpoint, for the deployment's resource and the merchant scope.
+type Exchange struct {
+	TokenEndpoint string `json:"token_endpoint"`
+	ClientID      string `json:"client_id"`
+	Resource      string `json:"resource"`
+	Scope         string `json:"scope"`
 }
 
 // Assistants turns on the console's assistants the deployment has an LLM

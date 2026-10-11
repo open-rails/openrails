@@ -9,15 +9,14 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // HostAuth is the in-process transport's Authenticator: the embedding host's
 // own principal, a context value the transport attaches and no network
-// request can carry. It is an application holding every permission at its
-// own merchant, which its credential names, and in its root scope. It
-// admits no customer.
+// request can carry. It is an application bound to the merchant of its
+// handle, holding every permission there and in its root scope. It admits no
+// customer.
 type HostAuth struct{}
 
 var (
@@ -43,15 +42,11 @@ func (HostAuth) Authenticate(r *http.Request) (billingauth.Verified, error) {
 	case hp.MerchantID.IsZero():
 		return nil, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
 	}
-	target, err := hostTarget(r, hp)
-	if err != nil {
-		return nil, err
-	}
 	id := hp.Subject
 	if id == "" {
 		id = "host"
 	}
-	return hostVerified{MerchantBinding: billingauth.BindsMerchant(target), id: billingauth.Identity{
+	return hostVerified{MerchantBinding: billingauth.BindsMerchant(billingauth.Target{MerchantID: hp.MerchantID}), id: billingauth.Identity{
 		Issuer: billingauth.HostIssuer, Subject: id, SubjectKind: billingauth.SubjectApplication,
 		Invoker: billingauth.Invoker{Issuer: billingauth.HostIssuer, ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "in-process"},
 	}}, nil
@@ -64,12 +59,6 @@ type hostVerified struct {
 
 func (v hostVerified) Identity() billingauth.Identity { return v.id }
 
-// BoundScope is the host's own merchant (helpers/auth Bound).
-func (v hostVerified) BoundScope() billingauth.Scope {
-	target, _ := billingauth.NamedMerchant(v)
-	return billingauth.HostScope(target.MerchantID)
-}
-
 // Can grants the host every permission at its own merchant and in its root
 // scope.
 func (v hostVerified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
@@ -80,28 +69,11 @@ func (v hostVerified) Can(_ context.Context, scope billingauth.Scope, permission
 // CheckRecentSignIn: an application has no sign-in of its own.
 func (hostVerified) CheckRecentSignIn(context.Context) error { return auth.ErrForbidden }
 
-// hostTarget is the merchant an in-process request acts on: the host
-// principal's, which a resolved selector must agree with.
-func hostTarget(r *http.Request, hp *requestauth.HostPrincipal) (billingauth.Target, error) {
-	target := billingauth.Target{MerchantID: hp.MerchantID, MerchantSlug: hp.MerchantSlug}
-	if captured, ok := merchanttarget.FromContext(r.Context()); ok {
-		if captured.MerchantID != hp.MerchantID {
-			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantBindingMismatch, "host merchant binding mismatch")
-		}
-		target = captured
-	}
-	if err := merchanttarget.Assert(r, target); err != nil {
-		return billingauth.Target{}, err
-	}
-	return target, nil
-}
-
 // HostOptions mounts every staff and programmatic route for the in-process
 // transport, whose host holds every permission at its own merchant.
 func HostOptions() Options {
 	return Options{
-		Auth:            HostAuth{},
-		ResolveMerchant: CredentialOnly,
-		Groups:          config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
+		Auth:   HostAuth{},
+		Groups: config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
 	}
 }

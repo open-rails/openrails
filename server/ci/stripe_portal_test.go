@@ -80,7 +80,7 @@ merchants:
 	tokens := map[string]string{shop: customerToken(host), plain: customerToken(plainHost)}
 	me := func(merchant, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
-		return serve(handler, rsRequest{method: http.MethodPost, path: "/v1/me" + path, authorization: "Bearer " + tokens[merchant], selector: merchant, body: body, idempotencyKey: uuid.NewString()})
+		return serve(handler, rsRequest{method: http.MethodPost, path: "/v1/me" + path, authorization: "Bearer " + tokens[merchant], body: body, idempotencyKey: uuid.NewString()})
 	}
 	const portal = "/stripe/billing-portal-sessions"
 

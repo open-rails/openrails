@@ -380,8 +380,9 @@ func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 		trusted         []string
 		want            int
 	}{
-		// 503 = past the IP gate, stopped only by the absent merchants service.
-		{"behind trusted proxy", "10.0.0.5:443", "64.38.212.5", []string{"10.0.0.0/8"}, http.StatusServiceUnavailable},
+		// 401 = past the IP gate, refused only for want of a merchants
+		// service to find its account in.
+		{"behind trusted proxy", "10.0.0.5:443", "64.38.212.5", []string{"10.0.0.0/8"}, http.StatusUnauthorized},
 		{"spoofed XFF, no trusted proxies", "203.0.113.9:443", "64.38.212.5", nil, http.StatusForbidden},
 		{"spoofed XFF from untrusted peer", "203.0.113.9:443", "64.38.212.5", []string{"10.0.0.0/8"}, http.StatusForbidden},
 	} {
@@ -392,7 +393,6 @@ func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 		req.SetPathValue("rail", "ccbill")
 		req.SetPathValue("account_id", "900000-0000")
 		rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: tc.trusted}, TrustedProxies: iputil.ParseTrustedProxies(tc.trusted)}
-		rt.SetConfiguredMerchant(billing.MerchantID(uuid.New()))
 		rec := httptest.NewRecorder()
 		Webhook(httprequest.NewHTTP(rec, req, rt))
 		require.Equal(t, tc.want, rec.Code, "%s: %s", tc.name, rec.Body.String())

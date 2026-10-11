@@ -142,10 +142,10 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: psps, Issuer: issuer}},
 	}
 	if w.vault != nil {
-		cfg.Merchant = openrails.MerchantDeclaration{Slug: slug}
+		cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Issuer: issuer}}
 		cfg.Vault = w.vault.Config()
 	}
 	rt, err := openrails.New(t.Context(), cfg, deps)
@@ -232,13 +232,14 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NotContains(t, err.Error(), "River", "refused by ownership, not by the headless harness")
 	require.Len(t, e.providerLedger(), 1, "nothing charged the member's card")
 
-	// Staff authorized for merchant A cannot select merchant B on either
-	// merchant's mount; the same request for A is allowed.
+	// Nothing in the request names the merchant: a header naming merchant B
+	// leaves staff of A acting at A on A's mount, and at B's mount A's
+	// credentials are no credential.
 	merchantGet := func(server, token, slug string) int {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/admin/findings", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("OpenRails-Merchant", slug)
+		req.Header.Set(retiredMerchantHeader, slug)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		res.Body.Close()
@@ -258,9 +259,8 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, status, body)
 	require.Contains(t, body, `"credential_revoked"`)
 	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug), "another session is unaffected")
-	for _, server := range []string{w.server.URL, r.server.URL} {
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict}, merchantGet(server, staff, r.slug))
-	}
+	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, r.slug), "A's staff act at A whatever a header names")
+	require.Equal(t, http.StatusUnauthorized, merchantGet(r.server.URL, staff, r.slug), "B's host does not know A's credential")
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, merchantGet(w.server.URL, e.c.token, w.slug), "a customer credential is not merchant authority")
 	// A's staff credential is no credential at B's mount.
 	crossed, err := openrails.NewRemoteMerchant(r.server.URL+mountPrefix, openrails.RemoteCredential{

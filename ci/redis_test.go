@@ -30,7 +30,7 @@ import (
 func redisEngine(t *testing.T, f *fixture, rc openrails.RedisConfig) (*openrails.Engine, http.Handler) {
 	t.Helper()
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: "redis-" + uuid.NewString()[:8], DisplayName: "Redis"}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"redis-" + uuid.NewString()[:8]: {DisplayName: "Redis"}}
 	cfg.Redis = &rc
 	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, bill.Start(t.Context()))
@@ -134,7 +134,7 @@ func TestDeclaredRedisOutageDegrades(t *testing.T) {
 	require.Eventually(t, func() bool { return degraded(t, down) }, 15*time.Second, 50*time.Millisecond, "ready, with Redis degraded")
 
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: "noredis-" + uuid.NewString()[:8], DisplayName: "No Redis"}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"noredis-" + uuid.NewString()[:8]: {DisplayName: "No Redis"}}
 	none, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, none.Close(context.Background())) })

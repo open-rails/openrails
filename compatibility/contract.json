@@ -237,7 +237,7 @@
       "const (\n\tChargeSucceeded ChargeOutcome = \"succeeded\"\n\tChargeFailed    ChargeOutcome = \"failed\"\n)",
       "const (\n\tCheckoutHosted CheckoutUIMode = \"hosted\"\n\n\tCheckoutEmbedded CheckoutUIMode = \"embedded\"\n)",
       "const (\n\tCodeCardDeclined = \"card_declined\"\n\n\tCodePaymentMethodStale = \"payment_method_stale\"\n\n\tCodePaymentProviderRejected = \"payment_provider_rejected\"\n\n\tCodePaymentMethodRequired = \"payment_method_required\"\n)",
-      "const (\n\tCodeCredentialExpired                    = \"credential_expired\"\n\tCodeCredentialRevoked                    = \"credential_revoked\"\n\tCodeServiceCredentialCustomerScopeDenied = \"service_credential_customer_scope_denied\"\n\tCodeHostPrincipalInvalid                 = \"host_principal_invalid\"\n\tCodePermissionRequired                   = \"permission_required\"\n\tCodeMerchantUnresolved                   = \"merchant_unresolved\"\n\tCodeInvokerScopedPrincipal               = \"invoker_scoped_principal\"\n\tCodeApplicationRequired                  = \"application_required\"\n\tCodeStepUpRequired                       = \"step_up_required\"\n\tCodeStepUpUnavailable                    = \"step_up_unavailable\"\n\tCodeAuthenticationUnavailable            = \"authentication_unavailable\"\n\tCodeAuthorizationUnavailable             = \"authorization_unavailable\"\n)",
+      "const (\n\tCodeCredentialExpired                    = \"credential_expired\"\n\tCodeCredentialRevoked                    = \"credential_revoked\"\n\tCodeServiceCredentialCustomerScopeDenied = \"service_credential_customer_scope_denied\"\n\tCodeHostPrincipalInvalid                 = \"host_principal_invalid\"\n\tCodePermissionRequired                   = \"permission_required\"\n\tCodeMerchantUnresolved                   = \"merchant_unresolved\"\n\tCodeCustomerIssuerMismatch               = \"customer_issuer_mismatch\"\n\tCodeInvokerScopedPrincipal               = \"invoker_scoped_principal\"\n\tCodeApplicationRequired                  = \"application_required\"\n\tCodeStepUpRequired                       = \"step_up_required\"\n\tCodeStepUpUnavailable                    = \"step_up_unavailable\"\n\tCodeAuthenticationUnavailable            = \"authentication_unavailable\"\n\tCodeAuthorizationUnavailable             = \"authorization_unavailable\"\n)",
       "const (\n\tCodeDefaultPaymentMethodRequired = \"default_payment_method_required\"\n\n\tCodeDefaultPaymentMethodInvalid = \"default_payment_method_invalid\"\n)",
       "const (\n\tCodeInvalidParam           = \"invalid_param\"\n\tCodeAuthenticationRequired = \"authentication_required\"\n\tCodeResourceAccessDenied   = \"resource_access_denied\"\n\tCodeResourceNotFound       = \"resource_not_found\"\n\tCodeResourceConflict       = \"resource_conflict\"\n\tCodePaymentFailed          = \"payment_failed\"\n\tCodeRateLimitExceeded      = \"rate_limit_exceeded\"\n\tCodeInternalError          = \"internal_error\"\n\tCodeServiceUnavailable     = \"service_unavailable\"\n\tCodeIdempotencyKeyReused   = \"idempotency_key_reused\"\n\tCodeIdempotencyKeyInUse    = \"idempotency_key_in_use\"\n\tCodeInsufficientCredits    = \"insufficient_credits\"\n\tCodeInsufficientFunds      = \"insufficient_funds\"\n\n\tCodeAlreadyOwned             = \"already_owned\"\n\tCodeOrderLineUnavailable     = \"order_line_unavailable\"\n\tCodeQuantityNotAllowed       = \"quantity_not_allowed\"\n\tCodeOrderTotalChanged        = \"order_total_changed\"\n\tCodeOrderPaymentInProgress   = \"order_payment_in_progress\"\n\tCodeOrderNotPayable          = \"order_not_payable\"\n\tCodeOrderNotCancelable       = \"order_not_cancelable\"\n\tCodeOrderActionNotAllowed    = \"order_action_not_allowed\"\n\tCodePaymentOptionUnavailable = \"payment_option_unavailable\"\n\n\tCodePaymentExceedsDue     = \"payment_exceeds_due\"\n\tCodeOrderHasRecurringLine = \"order_has_recurring_line\"\n\n\tCodeModelUnavailable = \"model_unavailable\"\n)",
       "const (\n\tCodeNetworkLinkChallengeInvalid = \"network_link_challenge_invalid\"\n\tCodeNetworkLinkConflict         = \"network_link_conflict\"\n\tCodeNetworkAccountLinked        = \"network_account_linked\"\n\tCodeNetworkTermsRequired        = \"network_terms_required\"\n\tCodeNetworkLinkInUse            = \"network_link_in_use\"\n)",
@@ -246,7 +246,7 @@
       "const (\n\tCodeScheduledChangeExists       = \"scheduled_change_exists\"\n\tCodePriceMigrationNotFound      = \"price_migration_not_found\"\n\tCodePriceChangeCurrencyMismatch = \"price_change_currency_mismatch\"\n\tCodePriceChangeTargetArchived   = \"price_change_target_archived\"\n\tCodePriceIncreaseNoticeTooShort = \"price_increase_notice_too_short\"\n)",
       "const (\n\tCodeSubscriptionChangeInFlight = \"subscription_change_in_flight\"\n\n\tCodeSubscriptionChangeRefused = \"subscription_change_refused\"\n\n\tCodeSubscriptionChangeIdempotencyConflict = \"subscription_change_idempotency_conflict\"\n\n\tCodeSubscriptionChangeIdempotencyKeyRequired = \"subscription_change_idempotency_key_required\"\n\n\tCodeSubscriptionChangeCycleUnknown = \"subscription_change_cycle_unknown\"\n\n\tCodeSubscriptionChangePeriodUnknown = \"subscription_change_period_unknown\"\n\n\tCodeSubscriptionChangeCreditExceedsPrice = \"subscription_change_credit_exceeds_price\"\n\n\tCodeSubscriptionChangeRenewalDue = \"subscription_change_renewal_due\"\n\n\tCodeSubscriptionChangeAlreadyScheduled = \"subscription_change_already_scheduled\"\n\n\tCodeSubscriptionChangeCadenceUnsupported = \"subscription_change_cadence_unsupported\"\n\n\tCodeSubscriptionChangeRequiresLinkedPlan = \"subscription_change_requires_linked_plan\"\n\n\tCodeSubscriptionChangeTargetInactive = \"subscription_change_target_inactive\"\n\n\tCodeSubscriptionChangeUnsupportedOnRail = \"subscription_change_unsupported_on_rail\"\n\n\tCodeSubscriptionChangeProviderConflict = \"subscription_change_provider_conflict\"\n\n\tCodeStoredCredentialRequired = \"stored_credential_required\"\n)",
       "const (\n\tCodeSubscriptionResumable = \"subscription_resumable\"\n\n\tCodeSubscriptionPaidThrough = \"subscription_paid_through\"\n)",
-      "const (\n\tCodeUnknownField = \"unknown_field\"\n\n\tCodeInvalidQuery = \"invalid_query\"\n\n\tCodeInvalidCursor                = \"invalid_cursor\"\n\tCodeUnsupportedMediaType         = \"unsupported_media_type\"\n\tCodeRouteNotFound                = \"route_not_found\"\n\tCodeMethodNotAllowed             = \"method_not_allowed\"\n\tCodeMerchantSelectorInvalid      = \"merchant_selector_invalid\"\n\tCodeMerchantNotFound             = \"merchant_not_found\"\n\tCodeMerchantBindingMismatch      = \"merchant_binding_mismatch\"\n\tCodeMerchantDirectoryUnavailable = \"merchant_directory_unavailable\"\n)",
+      "const (\n\tCodeUnknownField = \"unknown_field\"\n\n\tCodeInvalidQuery = \"invalid_query\"\n\n\tCodeInvalidCursor        = \"invalid_cursor\"\n\tCodeUnsupportedMediaType = \"unsupported_media_type\"\n\tCodeRouteNotFound        = \"route_not_found\"\n\tCodeMethodNotAllowed     = \"method_not_allowed\"\n)",
       "const (\n\tCollectChargeAutomatically InvoiceCollectionMethod = \"charge_automatically\"\n\tCollectSendInvoice         InvoiceCollectionMethod = \"send_invoice\"\n)",
       "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\n\tCreditGrantTerminated CreditGrantState = \"terminated\"\n)",
       "const (\n\tCreditGrantIDPrefix        = \"cgr_\"\n\tBalanceTransactionIDPrefix = \"txn_\"\n)",
@@ -1056,7 +1056,7 @@
     "internal/config": [
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
-      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchants map[string]MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
       "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
@@ -1071,7 +1071,7 @@
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
       "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
-      "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
+      "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tIssuer string `yaml:\"-\"`\n\n\tCatalog     *catalog.Application `yaml:\"-\"`\n\tDisplayName string               `yaml:\"display_name\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
@@ -1146,6 +1146,7 @@
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
       "const (\n\tMerchantRolesRead   = \"merchant:roles:read\"\n\tMerchantRolesManage = \"merchant:roles:manage\"\n)",
+      "const ConsoleClientID = controlplane.ConsoleClientID",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) Close(ctx context.Context) error",
       "func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error)",
@@ -1281,7 +1282,8 @@
       "func (q *Quantity) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMin int `json:\"min\"`\n\t\tMax int `json:\"max\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*q = Quantity(value)\n\treturn nil\n}"
     ],
     "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
     ],
@@ -2142,13 +2144,13 @@
       "slog": "log/slog"
     },
     "internal/config/config.go": {
-      "catalog": "github.com/open-rails/openrails/catalog",
       "cmp": "cmp",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
       "fmt": "fmt",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
+      "maps": "maps",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "net": "net",
       "path": "path",
@@ -2181,16 +2183,19 @@
     },
     "internal/config/merchant_declaration.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "catalog": "github.com/open-rails/openrails/catalog",
       "errors": "errors",
       "fmt": "fmt",
       "go-yaml": "github.com/goccy/go-yaml",
       "maps": "maps",
       "models": "github.com/open-rails/openrails/internal/db/models",
+      "net": "net",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "reflect": "reflect",
       "slices": "slices",
       "strconv": "strconv",
-      "strings": "strings"
+      "strings": "strings",
+      "url": "net/url"
     },
     "internal/config/naming.go": {
       "fmt": "fmt",

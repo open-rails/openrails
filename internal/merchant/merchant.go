@@ -7,81 +7,28 @@ package merchant
 import (
 	"context"
 	"errors"
-	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// SelectorHeader names the merchant a request targets: a public slug
-// (`OpenRails-Merchant: shop`) or an immutable id (`OpenRails-Merchant:
-// id:<uuid>`). It grants no authority: the server resolves it, the route
-// authorizes the credential for that merchant, and only then is it pinned.
-const SelectorHeader = "OpenRails-Merchant"
-
 // BoundHeader is the response header naming the merchant a merchant-bound
-// request acted on (`OpenRails-Bound-Merchant: <uuid>`). The Go client checks
-// it against its handle's merchant.
+// request acted on (`OpenRails-Bound-Merchant: <uuid>`): the one its
+// credential is bound to. The Go client checks it against its handle's
+// merchant. No request header names a merchant.
 const BoundHeader = "OpenRails-Bound-Merchant"
-
-// selectorIDPrefix marks the id form of a selector; a slug never contains ":".
-const selectorIDPrefix = "id:"
-
-// Selector is a parsed SelectorHeader: exactly one of Slug and ID is set.
-type Selector struct {
-	Slug string
-	ID   billing.MerchantID
-}
-
-// ErrSelector is a SelectorHeader that is repeated, blank or malformed.
-var ErrSelector = errors.New("merchant: invalid OpenRails-Merchant selector")
-
-// ParseSelector reads the request's selector. present is false when the
-// header is absent; a present header that is repeated, blank or malformed is
-// ErrSelector.
-func ParseSelector(h http.Header) (selector Selector, present bool, err error) {
-	values, present := h[http.CanonicalHeaderKey(SelectorHeader)]
-	if !present {
-		return Selector{}, false, nil
-	}
-	if len(values) != 1 {
-		return Selector{}, true, ErrSelector
-	}
-	raw := strings.TrimSpace(values[0])
-	if id, ok := strings.CutPrefix(raw, selectorIDPrefix); ok {
-		parsed, err := billing.ParseMerchantID(strings.TrimSpace(id))
-		if err != nil || parsed.IsZero() {
-			return Selector{}, true, ErrSelector
-		}
-		return Selector{ID: parsed}, true, nil
-	}
-	if raw == "" || billing.ValidateMerchantSlug(raw) != nil {
-		return Selector{}, true, ErrSelector
-	}
-	return Selector{Slug: billing.NormalizeMerchantSlug(raw)}, true, nil
-}
-
-// String is the selector's header value.
-func (s Selector) String() string {
-	if !s.ID.IsZero() {
-		return selectorIDPrefix + s.ID.String()
-	}
-	return s.Slug
-}
 
 // ErrNoMerchant is returned by Require when no merchant has been resolved onto
 // the context. It signals a programming/wiring error — every merchant-owned code
-// path must resolve a merchant first (HTTP middleware, host authenticator,
-// background-job enqueue, or the host's configured merchant).
+// path must resolve a merchant first (the route gate, a handle, or a
+// background job's own).
 var ErrNoMerchant = errors.New("merchant: no merchant resolved on context")
 
 // merchantCtxKey is the unexported context key for the resolved merchant id.
 type merchantCtxKey struct{}
 
 // WithID returns a child context carrying the resolved merchant id. Resolution
-// plumbing (HTTP middleware, host authenticator, admin routes, background job
-// enqueue) calls this once the merchant is known, before any merchant-owned DB
-// access.
+// plumbing (the route gate, a handle's call, background job enqueue) calls
+// this once the merchant is known, before any merchant-owned DB access.
 func WithID(ctx context.Context, id billing.MerchantID) context.Context {
 	return context.WithValue(ctx, merchantCtxKey{}, id)
 }

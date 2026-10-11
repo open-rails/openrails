@@ -15,6 +15,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
+	"github.com/open-rails/openrails/internal/engine"
 )
 
 // publicConfig reads the deployment's GET /v1/config, as any browser does.
@@ -41,7 +42,10 @@ func customerConfig(t *testing.T, bill *openrails.Engine) billing.CustomerConfig
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth}))
 	req := httptest.NewRequest(http.MethodGet, "/v1/me/config", nil)
-	req.Header.Set("Authorization", "Bearer "+auth.Person(configReader))
+	// A host's token for the customer, bound to the merchant's group as a
+	// group-bound mint is.
+	mid := engine.Graph(bill).Runtime.DeclaredMerchants()[0]
+	req.Header.Set("Authorization", "Bearer "+auth.Issue(authtest.Grant{Identity: authtest.User(configReader), Bound: authtest.MerchantScope(mid)}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

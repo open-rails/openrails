@@ -22518,10 +22518,6 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded"
@@ -22534,13 +22530,10 @@
       "captcha_required",
       "credential_expired",
       "credential_revoked",
+      "customer_issuer_mismatch",
       "database_busy",
       "internal_error",
       "invoker_scoped_principal",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "merchant_unresolved",
       "network_account_linked",
       "permission_required",
@@ -22557,10 +22550,6 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded",
@@ -22577,10 +22566,6 @@
       "credential_revoked",
       "database_busy",
       "internal_error",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "merchant_unresolved",
       "network_terms_required",
       "permission_required",
@@ -22614,10 +22599,6 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded"
@@ -22839,6 +22820,11 @@
       "type": "invalid_request_error",
       "meaning": "The rail needs the customer's verified email and username."
     },
+    "customer_issuer_mismatch": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The customer belongs to another issuer's user with the same subject."
+    },
     "customer_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -22999,35 +22985,15 @@
       "type": "authorization_error",
       "meaning": "An invoker-scoped credential spends a customer's balance but may not manage the account."
     },
-    "merchant_binding_mismatch": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The selected merchant is not the one the credential, deployment or request is bound to."
-    },
     "merchant_config_read_only": {
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The merchant's configuration is read from a file; change the file."
     },
-    "merchant_directory_unavailable": {
-      "status": 503,
-      "type": "api_error",
-      "meaning": "The merchant directory could not be read; retry."
-    },
-    "merchant_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "No active merchant answers to the selector."
-    },
-    "merchant_selector_invalid": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The OpenRails-Merchant header is malformed, repeated or names no merchant."
-    },
     "merchant_unresolved": {
       "status": 403,
       "type": "authorization_error",
-      "meaning": "The credential names no merchant, or more than one; select one."
+      "meaning": "The credential is bound to no merchant here."
     },
     "meter_in_use": {
       "status": 409,

@@ -68,18 +68,22 @@ const (
 // Config is a standalone deployment: plain data.
 type Config struct {
 	// Engine is the engine's configuration, as any host passes to
-	// openrails.New. The server's merchants manage their catalogs through the
-	// API, so Engine.Catalog is refused.
+	// openrails.New. The server's merchants are provisioned at run time, each
+	// with its AuthKit group, and manage their catalogs through the API: a
+	// declared merchant's Issuer and Catalog are refused.
 	Engine openrails.Config
 
 	// Auth is the server's AuthKit, as AuthKit documents its configuration:
 	// accounts, sign-in and the tokens it issues (Auth.SignIn.DPoP), the
-	// resource server (Auth.Resource) and its trusted issuers. It decides who
+	// resource server (Auth.Resource; its ID defaults to
+	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
 	// every request is; the server only maps merchants to AuthKit groups.
 	// Auth.Token.Issuer is required. The server sets what is the product's:
 	// the merchant roles, the API key prefix, the issued audience, the
-	// resource's scopes, AuthKit's River schema (the engine's) and its HTTP
-	// mount. An empty client-IP posture takes the engine's TrustedProxies
+	// resource's scopes, the admin console's OAuth client (openrails-console),
+	// a 15-minute access-token lifetime unless
+	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
+	// (the engine's) and its HTTP mount. An empty client-IP posture takes the engine's TrustedProxies
 	// and CloudflareProxies. Declaring the network-terms agreement runs the
 	// customer network (docs/customer-network.md): it needs Auth.Resource,
 	// and the server adds the network's scopes and consent policy.
@@ -181,8 +185,13 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if cfg.Engine.Catalog != nil {
-		return nil, errors.New("server: Engine.Catalog declares one embedded merchant's catalog; a standalone server's merchants manage theirs through the API")
+	for slug, m := range cfg.Engine.Merchants {
+		if m.Catalog != nil {
+			return nil, fmt.Errorf("server: Engine.Merchants[%q].Catalog declares an embedded merchant's catalog; a standalone server's merchants manage theirs through the API", slug)
+		}
+		if m.Issuer != "" {
+			return nil, fmt.Errorf("server: Engine.Merchants[%q].Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", slug)
+		}
 	}
 	origin, err := checkoutOrigin(cfg)
 	if err != nil {
@@ -203,7 +212,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming}
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.ConsoleIssuer == nil}
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {

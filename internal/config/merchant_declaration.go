@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -12,17 +14,36 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// MerchantDeclaration declares one merchant: the embedded engine's merchant
-// (Config.Merchant) or one entry of a standalone merchant manifest.
+// MerchantDeclaration declares one merchant: an entry of Config.Merchants or
+// of a standalone merchant manifest.
 type MerchantDeclaration struct {
 	// Slug is the merchant's name: slug: in a single-merchant file, the
-	// entry's key in a manifest, which refuses the field.
-	Slug        string `yaml:"-"`
-	DisplayName string `yaml:"display_name"`
+	// entry's key in Config.Merchants and in a manifest, which refuses the
+	// field.
+	Slug string `yaml:"-"`
+	// Issuer binds the credentials of one issuer to this merchant: every
+	// request whose Identity names it as issuer, and whose credential is
+	// bound to no scope, acts on this merchant, as its customer or its
+	// staff. It is the host's own auth's issuer (AuthKit's Token.Issuer)
+	// where the host serves this one merchant with it: an absolute https URL
+	// (http on a loopback host), declared by one merchant of an engine at
+	// most. Its users are the merchant's own customers. Set it in the host's
+	// own code or configuration, per engine; a merchant file never carries
+	// it, since several hosts with their own issuers may share one. Empty
+	// binds by scope only: a credential must be bound to the merchant's
+	// group (helpers/auth Bound), whose id is the merchant's.
+	Issuer string `yaml:"-"`
+	// Catalog optionally applies the merchant's catalog document at startup,
+	// using the same permanent content-hash replay as Client.ApplyCatalog. A
+	// field an edit changed last is not overwritten by it. Nil skips it. A
+	// merchant file never carries it.
+	Catalog     *catalog.Application `yaml:"-"`
+	DisplayName string               `yaml:"display_name"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty"`
@@ -202,6 +223,9 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 		if retired, ok := RetiredDeclarationKey(probe); ok {
 			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %s", retired)
 		}
+		if _, ok := probe["issuer"]; ok {
+			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: issuer is not a merchant file's: each host sets MerchantDeclaration.Issuer in its own configuration")
+		}
 	}
 	var f merchantFile
 	if err := yaml.UnmarshalWithOptions(raw, &f, yaml.DisallowUnknownField()); err != nil {
@@ -260,6 +284,58 @@ func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaratio
 	}
 	if fields := ConfigurationFields(m); len(fields) > 0 {
 		return fmt.Errorf("merchant %q declares %s: %w", slug, strings.Join(fields, ", "), ErrDeclarationBesideVault)
+	}
+	return nil
+}
+
+// DeclaredMerchants is cfg.Merchants in slug order, each named by its key,
+// after the checks that need no database: every key is a slug, an Issuer is
+// an absolute https URL (http on a loopback host) one merchant alone
+// declares, and every PSP names a rail and only its keys.
+func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
+	out := make([]MerchantDeclaration, 0, len(cfg.Merchants))
+	issuers := map[string]string{}
+	for _, key := range slices.Sorted(maps.Keys(cfg.Merchants)) {
+		m := cfg.Merchants[key]
+		slug := billing.NormalizeMerchantSlug(key)
+		if err := billing.ValidateMerchantSlug(key); err != nil {
+			return nil, fmt.Errorf("Config.Merchants[%q]: %w", key, err)
+		}
+		if m.Slug != "" && billing.NormalizeMerchantSlug(m.Slug) != slug {
+			return nil, fmt.Errorf("Config.Merchants[%q]: Slug %q is not its key", key, m.Slug)
+		}
+		m.Slug = slug
+		if m.Issuer = strings.TrimSpace(m.Issuer); m.Issuer != "" {
+			if err := validateIssuer(m.Issuer); err != nil {
+				return nil, fmt.Errorf("Config.Merchants[%q].Issuer: %w", key, err)
+			}
+			if other, taken := issuers[m.Issuer]; taken {
+				return nil, fmt.Errorf("Config.Merchants[%q].Issuer %q is also %q's: an issuer binds its credentials to one merchant", key, m.Issuer, other)
+			}
+			issuers[m.Issuer] = key
+		}
+		for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
+			if err := ValidatePSPKeys(psp, m.PSPs[psp]); err != nil {
+				return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
+			}
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// validateIssuer accepts an issuer identifier as tokens carry it (RFC 8414
+// §2): an absolute https URL without query or fragment, or http on a
+// loopback host.
+func validateIssuer(issuer string) error {
+	u, err := url.Parse(issuer)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(issuer, "#") {
+		return fmt.Errorf("%q is not an absolute URL without query or fragment", issuer)
+	}
+	host := u.Hostname()
+	loopback := host == "localhost" || net.ParseIP(host).IsLoopback()
+	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+		return fmt.Errorf("%q must be https (http only on a loopback host)", issuer)
 	}
 	return nil
 }

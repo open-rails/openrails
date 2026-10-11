@@ -86,15 +86,14 @@ products:
         unit_amount: 1000000
 `, key))
 	require.NoError(t, err)
+	slug := "instances-" + uuid.NewString()[:8]
 	cfg := openrails.Config{
 		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ReturnOrigins:     []string{"https://e2e.test"},
 		Redis:             &openrails.RedisConfig{Addr: e2eRedis(t)},
-		Merchant: openrails.MerchantDeclaration{Slug: "instances-" + uuid.NewString()[:8], DisplayName: "Instances",
-			PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: account,
-				Secrets: map[string]string{"secret_key": "sk_test_instances", "webhook_signing_secret": secret}}}},
-		Catalog: declared,
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Instances", Catalog: declared, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: account,
+			Secrets: map[string]string{"secret_key": "sk_test_instances", "webhook_signing_secret": secret}}}}},
 	}
 
 	// Boot: every replica runs New at once on the empty database. One migrates
@@ -112,7 +111,7 @@ products:
 				errs[i] = err
 				return
 			}
-			client, err := bill.MerchantBySlug(cfg.Merchant.Slug)
+			client, err := bill.MerchantBySlug(slug)
 			if err != nil {
 				errs[i] = err
 				return

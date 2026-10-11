@@ -32,13 +32,15 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	stripe := stripemock.New(stripemock.Options{})
 	t.Cleanup(stripe.Close)
 
+	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
+	// The host serves this one merchant with its AuthKit: its issuer binds it.
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()}
 	slug := "stripemock-" + uuid.NewString()[:8]
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: as.URL, PSPs: map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
-	}}
+	}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "credit-" + uuid.NewString()[:8], DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
@@ -46,7 +48,6 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "deposit", Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}})
 	require.NoError(t, err)
 
-	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
 	user := authtest.NewUser(t, as.Client)
 	customer := authtest.SignIn(t, as.Client, user).AccessToken
 	mux := http.NewServeMux()

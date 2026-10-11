@@ -123,10 +123,20 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	}
 	console := adminconsole.Config{AuthBaseURL: authBase, APIBaseURL: sel.Prefix + "/v1"}
 	console.Assistants(a.Config.LLM, sel.RouteGroups.Catalog, sel.RouteGroups.Metrics)
-	// The console acts for the merchant the engine serves.
-	if mid := a.Runtime.ConfiguredMerchant(); !mid.IsZero() && a.Config.Merchant.Slug != "" {
-		console.Merchant = &adminconsole.Merchant{ID: mid.String(), Slug: a.Config.Merchant.Slug, DisplayName: a.Config.Merchant.DisplayName}
+	// The console acts for the merchant its sign-in binds: the one whose
+	// Issuer the engine declares. Staff of several merchants would need a
+	// token exchanged per merchant, which an embedded console cannot get.
+	var issued []string
+	for slug := range e.declared {
+		if a.Config.Merchants[slug].Issuer != "" {
+			issued = append(issued, slug)
+		}
 	}
+	if len(issued) != 1 {
+		return nil, fmt.Errorf("openrails: Routes.AdminConsole acts for the one merchant whose Issuer Config.Merchants declares, the issuer staff sign in at; this engine declares %d (a console over several merchants is not supported yet)", len(issued))
+	}
+	slug := issued[0]
+	console.Merchant = &adminconsole.Merchant{ID: e.declared[slug].String(), Slug: slug, DisplayName: a.Config.Merchants[slug].DisplayName}
 	handler, err := adminconsole.Handler(path, console, a.ConsoleAssets)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)

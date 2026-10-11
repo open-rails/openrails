@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -282,6 +283,9 @@ type world struct {
 	periodics []string
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]openrails.PSPConfig)
+	// catalog is the merchant's declared catalog, read and applied on every
+	// start.
+	catalog func() *catalog.Application
 	// custodians are the merchant's declared card custodians.
 	custodians map[string]openrails.CustodianConfig
 	// alertWebhooks are the merchant's declared alert webhooks.
@@ -344,7 +348,7 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, declared openrails.MerchantDeclaration) {
 	t.Helper()
 	rt := engine.Graph(bill).Runtime
-	id := rt.ConfiguredMerchant()
+	id := rt.DeclaredMerchants()[0]
 	root := "openrails/merchants/" + id.UUID().String() + "/"
 	merchant := map[string]any{"display_name": declared.DisplayName, "settings": declared.Settings}
 	var hooks []map[string]any
@@ -385,12 +389,12 @@ func (w *world) editDoc(path string, edit func(doc map[string]any)) {
 	t := w.t
 	t.Helper()
 	rt := engine.Graph(w.rt).Runtime
-	full := "openrails/merchants/" + rt.ConfiguredMerchant().UUID().String() + "/" + path
+	full := "openrails/merchants/" + rt.DeclaredMerchants()[0].UUID().String() + "/" + path
 	doc := map[string]any{}
 	w.vault.Get(t, full, &doc)
 	edit(doc)
 	w.vault.Put(t, full, doc)
-	_, err := rt.MerchantConfig.Reload(t.Context(), rt.ConfiguredMerchant())
+	_, err := rt.MerchantConfig.Reload(t.Context(), rt.DeclaredMerchants()[0])
 	require.NoError(t, err)
 }
 
@@ -480,12 +484,15 @@ func (w *world) start() {
 	if name == "" {
 		name = w.slug
 	}
-	declared := openrails.MerchantDeclaration{Slug: w.slug, DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, Settings: w.settings}
-	cfg.Merchant = declared
+	// The harness host's own issuer binds its merchant, as a single-merchant
+	// host declares it.
+	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, Settings: w.settings,
+		Issuer: issuer, Catalog: w.declaredCatalog()}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: declared}
 	if w.vault != nil {
 		// Vault holds the configuration: the engine is told only the slug, and
 		// the documents are written as an operator writes them.
-		cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug}
+		cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: {Issuer: issuer, Catalog: w.declaredCatalog()}}
 		cfg.Vault = w.vault.Config()
 		if w.vaultAddr != "" {
 			cfg.Vault.Address = w.vaultAddr
@@ -541,6 +548,18 @@ func (w *world) start() {
 		}
 	}
 }
+
+// declaredCatalog is the catalog the merchant declares at this start.
+func (w *world) declaredCatalog() *catalog.Application {
+	if w.catalog == nil {
+		return nil
+	}
+	return w.catalog()
+}
+
+// retiredMerchantHeader is the request header that once named a merchant:
+// tests send it to show it names nothing.
+const retiredMerchantHeader = "OpenRails" + "-Merchant"
 
 // stop ends this process. River work in flight is canceled, as in a crash.
 func (w *world) stop() {
@@ -865,7 +884,6 @@ func (w *world) merchantCall(token, method, path string) (int, string) {
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, nil)
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("OpenRails-Merchant", w.slug)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()

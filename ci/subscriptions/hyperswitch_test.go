@@ -146,7 +146,7 @@ func newHyperSwitchMember(t *testing.T) (*world, *hyperSwitchMember) {
 			Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id")}).TransactionID
 	}
 
-	mid := engine.Graph(w.rt).Runtime.ConfiguredMerchant()
+	mid := engine.Graph(w.rt).Runtime.DeclaredMerchants()[0]
 	m.c = w.newCustomer()
 	hs.methods["pm_hs_e2e"] = "cus_hs_e2e"
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO billing.payment_methods
@@ -178,7 +178,7 @@ func TestHyperSwitchRenewalReadsTheOrderBeforeCharging(t *testing.T) {
 	t.Parallel()
 	w, m := newHyperSwitchMember(t)
 	hs, keyed, c, subID, end := m.hs, m.keyed, m.c, m.sub, m.end
-	mid := engine.Graph(w.rt).Runtime.ConfiguredMerchant()
+	mid := engine.Graph(w.rt).Runtime.DeclaredMerchants()[0]
 
 	// The period falls due with provider coverage fresh. Then another copy of
 	// the book charges it through the same proxy, after the last refresh.

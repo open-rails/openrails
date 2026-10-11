@@ -133,7 +133,7 @@ func TestRemoteHandlesSendTheirOwnCredential(t *testing.T) {
 	type observed struct{ auth, selector string }
 	seen := make(chan observed, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen <- observed{r.Header.Get("Authorization"), strings.Join(r.Header.Values(merchant.SelectorHeader), ",")}
+		seen <- observed{r.Header.Get("Authorization"), strings.Join(r.Header.Values("OpenRails"+"-Merchant"), ",")}
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()

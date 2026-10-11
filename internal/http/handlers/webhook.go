@@ -74,13 +74,8 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Webhook processing is not configured")
 		return
 	}
-	if bound := r.State.ConfiguredMerchant(); !bound.IsZero() {
-		r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), bound))
-		processResolvedMerchantWebhook(r, provider, bound, strings.TrimSpace(r.Param("account_id")))
-		return
-	}
-	// Account identity selects scope. Never trust an ambient merchant context
-	// supplied by a host middleware instead of resolving the configured account.
+	// The account's identity selects the merchant: (rail, environment,
+	// account_id) names one PSP, whose secret checks the signature.
 	if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 		if accepted {
 			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
@@ -96,13 +91,6 @@ func Webhook(r *httprequest.Request) {
 // handler, so MerchantDBConnMW cannot have pinned it. Nested calls are a
 // no-op, so re-entering processResolvedMerchantWebhook is safe.
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
-	if r != nil && r.State != nil {
-		if bound := r.State.ConfiguredMerchant(); !bound.IsZero() && bound != merchantID {
-			rejectWebhook(r)
-			return func() {}, false
-		}
-	}
-
 	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
 		return func() {}, true
 	}
@@ -272,6 +260,10 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 		r.ErrorCode(billing.CodeInvalidParam, "Webhook account_id is required")
 		return true, false
 	}
+	if rail == subscriptions.RailCCBill && !ccbillWebhookIPAllowed(r, clientIP) {
+		r.ErrorCode(billing.CodeResourceAccessDenied, "Unauthorized webhook source")
+		return true, false
+	}
 	if r.State == nil || r.State.Merchants == nil {
 		return false, false
 	}
@@ -298,10 +290,6 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 		defer release()
 		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
 	case rail == subscriptions.RailCCBill:
-		if !ccbillWebhookIPAllowed(r, clientIP) {
-			r.ErrorCode(billing.CodeResourceAccessDenied, "Unauthorized webhook source")
-			return true, false
-		}
 		body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
 		if !ok {
 			return true, false

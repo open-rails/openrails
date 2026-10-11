@@ -220,7 +220,7 @@ products:
 	require.NoError(t, err)
 	bill, err := openrails.New(t.Context(), openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: provisionedSchema, RiverSchema: provisionedSchema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-		Merchant: openrails.MerchantDeclaration{Slug: "catalog-provisioned", DisplayName: "Catalog destination", PSPs: w.psps},
+		Merchants: map[string]openrails.MerchantDeclaration{"catalog-provisioned": {DisplayName: "Catalog destination", PSPs: w.psps}},
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bill.Close(context.Background()) })

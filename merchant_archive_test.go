@@ -41,7 +41,6 @@ func TestMerchantArchiveStreamsBothDirections(t *testing.T) {
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, merchantBillingArchivePath, r.URL.Path)
 		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
-		require.Empty(t, r.Header.Values(merchant.SelectorHeader))
 		w.Header().Set(merchant.BoundHeader, mid.String())
 		if r.Method == http.MethodGet {
 			require.Equal(t, "application/x-ndjson", r.Header.Get("Accept"))

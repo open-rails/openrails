@@ -19,8 +19,8 @@ import (
 )
 
 // wrapCustomerRoutes applies the browser-tier base chain to the customer
-// routes: permissive CORS, body limits, credential admission, merchant
-// resolution and the rate limiter. Each route's own gate runs inside it.
+// routes: permissive CORS, body limits, credential admission and the rate
+// limiter. Each route's own gate runs inside it.
 func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billingauth.Authenticator) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
@@ -53,9 +53,6 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billinga
 			middleware.PermissiveCORSHTTP(middleware.AllRequests, credentials),
 			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-			// Resolve current authority on each request, including privileged
-			// restore/bootstrap integrations that bind after graph construction.
-			middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
 			limiter,
 		)
 	})
@@ -63,18 +60,25 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billinga
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
-// bound merchant's armed PSPs. Explicit selections override rail discovery.
+// armed PSPs of the merchants Config declares, taken together; a runtime that
+// declares none (a standalone server's) serves every provider route. Explicit
+// selections override rail discovery.
 func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
-	r := routesurface.AllProviderRoutes()
 	if override != nil {
 		return *override
 	}
-	if rt != nil {
-		if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
-			r = armedProviderRoutes(context.Background(), rt, mid)
-			r.SolanaSigning = r.Solana
-		}
+	declared := rt.DeclaredMerchants()
+	if len(declared) == 0 || rt.Merchants == nil {
+		return routesurface.AllProviderRoutes()
 	}
+	var r routesurface.ProviderRoutes
+	for _, mid := range declared {
+		armed := armedProviderRoutes(context.Background(), rt, mid)
+		r.StripePortal = r.StripePortal || armed.StripePortal
+		r.Solana = r.Solana || armed.Solana
+		r.Webhooks = r.Webhooks || armed.Webhooks
+	}
+	r.SolanaSigning = r.Solana
 	return r
 }
 

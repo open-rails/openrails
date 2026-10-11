@@ -204,7 +204,7 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 
 	buy := func(c *customer, price billing.PriceID, number string) {
 		t.Helper()
-		ctx := merchant.WithID(t.Context(), rt.ConfiguredMerchant())
+		ctx := merchant.WithID(t.Context(), rt.DeclaredMerchants()[0])
 		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 			res, err := rt.CheckoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: price.String(), Rail: "nmi-bt", BTTokenIntentID: bt.collect(number), IdempotencyKey: uuid.NewString()}, &checkout.UserIdentity{ID: c.id})
 			if err != nil {

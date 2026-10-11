@@ -3,16 +3,13 @@ package embedhttp
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
 // ValidateRoutes refuses a selection without the Auth its routes need,
@@ -59,8 +56,5 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 		entry.Path = "/billing" + entry.Path
 		table.Entries = append(table.Entries, entry)
 	}
-	router.ResolveMerchantSelectors(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-	}, embeddedMount+CustomerPrefix)
 	return table, nil
 }

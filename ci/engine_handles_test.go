@@ -27,7 +27,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug}}
 	bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
@@ -35,7 +35,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	// A second merchant in the same directory, provisioned by an engine that
 	// is gone before any handle is used.
 	other := f.config()
-	other.Merchant = openrails.MerchantDeclaration{Slug: slug + "-b", DisplayName: "B"}
+	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B"}}
 	provisioner, err := openrails.New(ctx, other, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	theirs, err := provisioner.MerchantBySlug(slug + "-b")

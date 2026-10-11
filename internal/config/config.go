@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"path"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
@@ -63,17 +63,14 @@ type Config struct {
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig
-	// Merchant declares the one merchant an embedded engine serves; zero
-	// leaves the engine unbound (callers select a merchant per operation).
-	// Without a Vault KV mount it is the merchant's configuration, read-only;
-	// with one it seeds Vault once, when Vault holds nothing for the merchant.
-	Merchant MerchantDeclaration
-	// Catalog optionally applies one merchant-scoped batch at startup, using
-	// the same permanent content-hash replay as Client.ApplyCatalog. Later
-	// programmatic edits remain available, and the catalog-write HTTP routes
-	// (RouteGroups.Catalog) refuse while it is set: the document is the
-	// truth. Requires Merchant. Nil skips the batch.
-	Catalog *catalog.Application
+	// Merchants declares the merchants an embedded engine provisions on
+	// start, by slug; none leaves that to run time (a standalone server's
+	// are provisioned through its API). Without a Vault KV mount a
+	// declaration is the merchant's configuration, read-only; with one it
+	// seeds Vault once, when Vault holds nothing for the merchant. A request
+	// acts on the merchant its credential is bound to: see
+	// MerchantDeclaration.Issuer.
+	Merchants map[string]MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
@@ -1145,8 +1142,10 @@ func Validate(cfg *Config) error {
 	if err := validateVault(cfg.Vault); err != nil {
 		return err
 	}
-	if err := RefuseDeclarationBesideVault(cfg, cfg.Merchant.Slug, cfg.Merchant); err != nil {
-		return err
+	for _, slug := range slices.Sorted(maps.Keys(cfg.Merchants)) {
+		if err := RefuseDeclarationBesideVault(cfg, slug, cfg.Merchants[slug]); err != nil {
+			return err
+		}
 	}
 	if err := validateSecurityPolicy(cfg); err != nil {
 		return err

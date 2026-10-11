@@ -94,8 +94,8 @@ func CredentialName(who Identity) string {
 // host's own Go client.
 const HostIssuer = "openrails:host"
 
-// HostScope is where the in-process host holds every permission: its own
-// merchant.
+// HostScope is where the in-process host holds every permission: the
+// merchant of its handle.
 func HostScope(mid billing.MerchantID) Scope {
 	return Scope{Authority: HostIssuer, ID: mid.String()}
 }
@@ -118,7 +118,6 @@ type Staff struct {
 
 type identityKey struct{}
 type staffKey struct{}
-type merchantKey struct{}
 type verifiedKey struct{}
 
 // BindVerified records the request's Verified: the route gate's later steps
@@ -138,10 +137,11 @@ func VerifiedFrom(ctx context.Context) (Verified, bool) {
 	return v, ok && v != nil
 }
 
-// MerchantBinding is embedded by OpenRails' own Verified types whose
-// credential names the merchant it acts on: a merchant API key, a trusted
-// issuer's access token, the in-process host. Its method is unexported, so no
-// host's Verified can claim a merchant.
+// MerchantBinding is embedded by OpenRails' own Verified types, whose
+// credential is bound to the merchant of one row: a checkout URL's secret,
+// a provisioning token, the in-process host. Its method is unexported, so no
+// host's Verified can claim a merchant, and such a type reports no bound
+// scope (helpers/auth Bound).
 type MerchantBinding struct{ target Target }
 
 // BindsMerchant is a MerchantBinding naming target.
@@ -151,8 +151,8 @@ func (b MerchantBinding) boundMerchant() Target { return b.target }
 
 type merchantBound interface{ boundMerchant() Target }
 
-// NamedMerchant is the merchant v's credential names, when it is one of
-// OpenRails' own that names one.
+// NamedMerchant is the merchant v's credential is bound to, when it is one of
+// OpenRails' own.
 func NamedMerchant(v Verified) (Target, bool) {
 	b, ok := v.(merchantBound)
 	if !ok {
@@ -160,21 +160,6 @@ func NamedMerchant(v Verified) (Target, bool) {
 	}
 	t := b.boundMerchant()
 	return t, !t.MerchantID.IsZero()
-}
-
-// BindMerchant records the merchant the route gate pinned a request to.
-// Only the route gate calls it.
-func BindMerchant(ctx context.Context, id billing.MerchantID) context.Context {
-	return context.WithValue(ctx, merchantKey{}, id)
-}
-
-// BoundMerchant is the merchant the route gate pinned the request to.
-func BoundMerchant(ctx context.Context) (billing.MerchantID, bool) {
-	if ctx == nil {
-		return billing.MerchantID{}, false
-	}
-	id, ok := ctx.Value(merchantKey{}).(billing.MerchantID)
-	return id, ok && !id.IsZero()
 }
 
 // BindIdentity records a customer route's admitted identity in OpenRails' own

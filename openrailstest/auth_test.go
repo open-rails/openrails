@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/stretchr/testify/require"
 
@@ -26,6 +27,7 @@ const (
 	customerID = "11111111-1111-4111-8111-111111111111"
 	staffID    = "22222222-2222-4222-8222-222222222222"
 	staleID    = "33333333-3333-4333-8333-333333333333"
+	merchantID = "66666666-6666-4666-8666-666666666666"
 )
 
 func routesWith(a openrails.Authenticator) openrails.Routes {
@@ -64,8 +66,10 @@ func cases(fake *authtest.Fake) helpersauthtest.Cases {
 		},
 		Stale:       request(fake.Issue(authtest.Grant{Identity: authtest.User(staleID), Permissions: []billing.Permission{read, write}, Stale: true})),
 		Application: request(fake.Machine("key_1", read, write)),
-		Refused:     map[string]func() *http.Request{"forged": request("test_forged"), "malformed": request("not-a-token")},
-		Revoke:      func() { fake.Revoke(staff) },
+		// Staff's token exchanged for one merchant keeps their root: permissions.
+		BoundStaff: request(fake.Issue(authtest.Grant{Identity: authtest.User(staffID), Permissions: []billing.Permission{read, write}, Bound: authtest.MerchantScope(billing.MerchantID(uuid.MustParse(merchantID)))})),
+		Refused:    map[string]func() *http.Request{"forged": request("test_forged"), "malformed": request("not-a-token")},
+		Revoke:     func() { fake.Revoke(staff) },
 	}
 }
 

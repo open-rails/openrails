@@ -3,42 +3,14 @@ package inprocess
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
-
-// Directory reads a merchant's directory row.
-type Directory interface {
-	Get(context.Context, billing.MerchantID) (*merchants.Merchant, error)
-}
-
-// Live is id's row while it is a live merchant: billing.ErrMerchantUnresolved
-// for an unknown, deleted or archived one.
-func Live(ctx context.Context, directory Directory, id billing.MerchantID) (*merchants.Merchant, error) {
-	if id.IsZero() || directory == nil {
-		return nil, billing.ErrMerchantUnresolved
-	}
-	m, err := directory.Get(ctx, id)
-	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound):
-		return nil, billing.ErrMerchantUnresolved
-	case err != nil:
-		return nil, err
-	case m == nil || m.Status != merchants.StatusActive:
-		return nil, billing.ErrMerchantUnresolved
-	}
-	return m, nil
-}
 
 type merchantKey struct{}
 
@@ -50,18 +22,18 @@ func WithMerchant(ctx context.Context, id billing.MerchantID) context.Context {
 }
 
 // NewTransport dispatches a handle's calls into handler as the host itself,
-// bound to the merchant WithMerchant names, read live from directory on every
-// call.
-func NewTransport(handler http.Handler, directory Directory) http.RoundTripper {
-	return &inprocessTransport{handler: handler, directory: directory}
+// bound to the merchant WithMerchant names. The route gate reads that
+// merchant live on every call: one that is not live is 403
+// merchant_unresolved.
+func NewTransport(handler http.Handler) http.RoundTripper {
+	return &inprocessTransport{handler: handler}
 }
 
 // inprocessTransport dispatches Client requests straight into the in-process
 // handler: no socket, one JSON round trip. The host principal is a context
 // value; network mounts never use it.
 type inprocessTransport struct {
-	handler   http.Handler
-	directory Directory
+	handler http.Handler
 }
 
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -75,48 +47,13 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	mid, _ := req.Context().Value(merchantKey{}).(billing.MerchantID)
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
-	ctx := engineContext(req.Context())
-	m, err := Live(ctx, t.directory, mid)
-	if err != nil {
-		if stream && req.Body != nil {
-			_ = req.Body.Close()
-		}
-		// A refusal is a response: a RoundTrip error would surface as
-		// ErrUnreachable, wrong for a well-formed request the engine refuses.
-		if errors.Is(err, billing.ErrMerchantUnresolved) {
-			return unresolvedResponse(req, mid), nil
-		}
-		return nil, fmt.Errorf("openrails: read merchant %s: %w", mid, err)
-	}
-	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: m.ID, MerchantSlug: m.Slug})
-	// Pin the merchant before any merchant-owned DB access.
-	ctx = merchant.WithID(ctx, m.ID)
+	ctx := requestauth.WithHostPrincipal(engineContext(req.Context()), &requestauth.HostPrincipal{MerchantID: mid})
 	if stream {
 		return streamInprocessResponse(t.handler, req.Clone(ctx))
 	}
 	w := &bufferedResponse{header: make(http.Header)}
 	t.handler.ServeHTTP(w, req.Clone(ctx))
 	return w.response(req), nil
-}
-
-// unresolvedResponse is the 403 a handle whose merchant is not live gets, in
-// the OpenRails error envelope.
-func unresolvedResponse(req *http.Request, mid billing.MerchantID) *http.Response {
-	refusal := api.Coded(billing.CodeMerchantUnresolved, "merchant "+mid.String()+" is not a live merchant of this engine")
-	body, _ := json.Marshal(refusal.ToResponse())
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
-	return &http.Response{
-		Status:        fmt.Sprintf("%d %s", refusal.HTTPStatus, http.StatusText(refusal.HTTPStatus)),
-		StatusCode:    refusal.HTTPStatus,
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(body)),
-		ContentLength: int64(len(body)),
-		Request:       req,
-	}
 }
 
 // bufferedResponse is a minimal in-memory http.ResponseWriter for the

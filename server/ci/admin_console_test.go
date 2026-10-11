@@ -63,13 +63,70 @@ func requireConsoleAt(t *testing.T, handler http.Handler, mount, marker string) 
 }
 
 // standaloneConsole serves c from a standalone build on a server whose issuer
-// is issuer.
+// is issuer, a resource server whose persons act at a merchant through a
+// token exchanged for it.
 func standaloneConsole(issuer string, c *server.AdminConsole) func(*server.Config, *server.Deps) {
 	return func(cfg *server.Config, deps *server.Deps) {
+		resourced(cfg, deps)
 		cfg.Auth.Token.Issuer = issuer
 		cfg.AdminConsole = c
 		deps.Engine.ConsoleAssets = consoleBuild("standalone")
 	}
+}
+
+// The standalone console switches merchants by token exchange: config.json
+// names the exchange (the server's token endpoint, the console's client, the
+// resource and the merchant scope), and the token it describes, from the real
+// token endpoint, reads the access read of the merchant it names and no other.
+// The server's resource defaults to its public API base; without either the
+// console does not mount.
+func TestConsoleSwitchesMerchantByExchange(t *testing.T) {
+	f := newFixture(t)
+	srv := f.newServer(t, standaloneConsole("http://127.0.0.1/"+f.schema, &server.AdminConsole{}))
+	handler, err := standaloneHandler(srv)
+	require.NoError(t, err)
+	var boot struct {
+		Exchange *struct {
+			TokenEndpoint string `json:"token_endpoint"`
+			ClientID      string `json:"client_id"`
+			Resource      string `json:"resource"`
+			Scope         string `json:"scope"`
+		} `json:"exchange"`
+		Merchant any `json:"merchant"`
+	}
+	require.NoError(t, json.Unmarshal(get(handler, "/admin/config.json").Body.Bytes(), &boot))
+	require.NotNil(t, boot.Exchange)
+	require.Equal(t, f.tokenURL(), boot.Exchange.TokenEndpoint)
+	require.Equal(t, server.ConsoleClientID, boot.Exchange.ClientID)
+	require.Equal(t, resourceID, boot.Exchange.Resource)
+	require.Equal(t, billing.ScopeMerchant, boot.Exchange.Scope)
+	require.Nil(t, boot.Merchant, "staff choose the merchant")
+
+	ownerID, session := newOwner(t, srv)
+	a := provisionOwned(t, srv, uniqueName("console-a"), ownerID)
+	b := provisionOwned(t, srv, uniqueName("console-b"), ownerID)
+	for _, mid := range []billing.MerchantID{a, b} {
+		bound := f.exchanged(t, handler, session, mid)
+		require.Equal(t, int64(900), bound.ExpiresIn, "15 minutes, the server's default")
+		w := bound.call(t, handler, http.MethodGet, "/v1/admin/access", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, mid.String(), decode[billing.AdminAccess](t, w).ScopeID)
+		require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"))
+	}
+
+	defaulted := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1/"+f.schema, &server.AdminConsole{})(cfg, deps)
+		cfg.Auth.Resource = authkit.ResourceConfig{}
+		cfg.Engine.PublicBillingBaseURL = "https://api.console.e2e.test"
+	})
+	h, err := standaloneHandler(defaulted)
+	require.NoError(t, err)
+	require.Contains(t, get(h, "/admin/config.json").Body.String(), `"resource":"https://api.console.e2e.test"`, "the public API base is the resource")
+	_, err = f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1/"+f.schema, &server.AdminConsole{})(cfg, deps)
+		cfg.Auth.Resource = authkit.ResourceConfig{}
+	})
+	require.ErrorContains(t, err, "needs the server's resource")
 }
 
 // The console's bootstrap document names the path AuthKit's JSON API is
@@ -145,7 +202,7 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{uniqueName("console"): {Issuer: "https://host.e2e.test"}}
 	staff := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	deny := authtest.Deny{}
 	boot := func(assets fstest.MapFS) *openrails.Engine {
@@ -184,6 +241,26 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
 }
 
+// An embedded console acts for the one merchant its sign-in binds. Over
+// merchants bound by group, which an embedded console cannot exchange a
+// token for, it refuses to mount rather than answer every call 403.
+func TestEmbeddedConsoleOverSeveralMerchantsRefusesToMount(t *testing.T) {
+	f := newFixture(t)
+	for name, declared := range map[string]map[string]openrails.MerchantDeclaration{
+		"one bound by group": {uniqueName("one"): {}},
+		"two bound by group": {uniqueName("a"): {}, uniqueName("b"): {}},
+	} {
+		cfg := f.config()
+		cfg.Merchants = declared
+		bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = bill.Close(context.Background()) })
+		err = openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true})
+		require.ErrorContains(t, err, "a console over several merchants is not supported yet", name)
+		require.NoError(t, openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: adminGroups}), "%s: the API mounts without the console", name)
+	}
+}
+
 // An embedded console signs staff in at the host's AuthKit wherever the host
 // mounts it: config.json names Routes.AdminConsoleAuthBase, AuthKit's
 // APIBase(), and AuthKit answers there; left empty, AuthKit's default
@@ -191,7 +268,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{uniqueName("console"): {Issuer: "http://127.0.0.1"}}
 	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
 	routes := openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true}
 
@@ -245,8 +322,6 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 // their holders. With the merchant's group, its holders too.
 func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	f := newFixture(t)
-	bill, client := f.runtime(t, uniqueName("roles"))
-	mid := client.MerchantID().String()
 
 	rbac := authkit.NewRoles(authkit.CustomRoles)
 	merchant := rbac.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)
@@ -264,6 +339,9 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	ak, _ := authkittest.New(t,
 		authkittest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
 		authkittest.WithConfig(func(c *authkit.Config) { c.Roles = rbac }))
+	// The host serves this one merchant with its AuthKit: its issuer binds it.
+	bill, client := f.runtimeIssued(t, uniqueName("roles"), authkittest.Issuer)
+	mid := client.MerchantID().String()
 
 	host := http.NewServeMux()
 	require.NoError(t, ak.Mount(host))
@@ -280,24 +358,24 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	}
 	// The console's calls: the access read, then AuthKit's.
 	scopeOf := func(token string) string {
-		w := call(t, host, token, http.MethodGet, "/billing/v1/admin/access", "", nil)
+		w := call(t, host, token, http.MethodGet, "/billing/v1/admin/access", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		return decode[billing.AdminAccess](t, w).ScopeID
 	}
 	me := func(token, group string) permissionSet {
-		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/me/permissions?group_id="+group, "", nil)
+		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/me/permissions?group_id="+group, nil)
 		require.Equal(t, http.StatusOK, w.Code, "%s: %s", group, w.Body.String())
 		return decode[permissionSet](t, w)
 	}
 	// holders are a group's members by role, as its roles list them.
 	holders := func(token, group string) map[string][]string {
-		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/roles", "", nil)
+		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/roles", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		out := map[string][]string{}
 		for _, role := range decode[struct{ Data []iam.GroupRole }](t, w).Data {
 			out[role.Name.String()] = []string{}
 		}
-		w = call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/members?kind=user&expand=user", "", nil)
+		w = call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/members?kind=user&expand=user", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		for _, member := range decode[struct{ Data []iam.GroupMember }](t, w).Data {
 			out[member.Role.String()] = append(out[member.Role.String()], member.Subject.ID)
@@ -320,7 +398,7 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	// Staff holding only OpenRails' root: names act, and AuthKit shows them no one.
 	require.Equal(t, mid, scopeOf(supportToken))
 	require.ElementsMatch(t, []string{string(billing.RootBillingRead), string(billing.RootBillingManage)}, me(supportToken, "root").Permissions)
-	require.Equal(t, http.StatusForbidden, call(t, host, supportToken, http.MethodGet, ak.APIBase()+"/groups/root/members", "", nil).Code)
+	require.Equal(t, http.StatusForbidden, call(t, host, supportToken, http.MethodGet, ak.APIBase()+"/groups/root/members", nil).Code)
 
 	// The merchant's own group: its holders, and nobody on root.
 	_, err := ak.CreateGroup(t.Context(), iam.NewGroup{ID: mid, Persona: merchant.Persona})
@@ -330,7 +408,7 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	require.Equal(t, permissionSet{Permissions: []string{}}, me(managerToken, "root"))
 	require.Equal(t, manager.String(), *me(managerToken, mid).Role)
 	require.Equal(t, []string{managerID}, holders(managerToken, mid)[manager.String()])
-	require.Equal(t, http.StatusForbidden, call(t, host, managerToken, http.MethodGet, ak.APIBase()+"/groups/root/members", "", nil).Code)
+	require.Equal(t, http.StatusForbidden, call(t, host, managerToken, http.MethodGet, ak.APIBase()+"/groups/root/members", nil).Code)
 
 	// Both: someone holding a role in each reads each.
 	authkittest.GrantRole(t, ak, iam.GroupByID(mid), iam.UserSubject(adminID), manager)

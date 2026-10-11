@@ -217,20 +217,14 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 		return nil, nil, err
 	}
 	close := func() { _ = database.Close() }
-	directory, err := merchants.NewDirectoryService(database.DataPool())
-	if err != nil {
-		close()
-		return nil, nil, err
-	}
 	// A minimal runtime shares the real handlers and merchant gate without
 	// initializing credentials, providers, workers, FX refresh or control plane.
 	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock()}
-	rt.SetConfiguredMerchant(mid)
 	mux := http.NewServeMux()
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(mux, "/v1", rt), rt,
 		httproutes.HostOptions(), "/v1/admin/billing-archive")
 	handler := middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux)
-	return inprocessClient(inprocess.NewTransport(handler, directory), mid), close, nil
+	return inprocessClient(inprocess.NewTransport(handler), mid), close, nil
 }
 
 // inprocessClient is merchant's handle over an in-process transport.

@@ -22,13 +22,12 @@ import (
 	"github.com/open-rails/openrails/internal/http/routebundle"
 )
 
-// httpRuntime is a database-free runtime bound to one merchant: route
+// httpRuntime is a database-free engine declaring one merchant: route
 // materialization and every refusal exercised here happen before a handler
 // touches storage.
 func httpRuntime() *Engine {
 	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	rt := &app.Runtime{Config: c}
-	rt.SetConfiguredMerchant(billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111")))
 	return &Engine{App: &app.App{Config: c, Runtime: rt}}
 }
 
@@ -158,7 +157,7 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
 	// Mounts choose independently; a host's catalog document never closes them.
-	rt.App.Config.Catalog = &pkgcatalog.Application{}
+	rt.App.Config.Merchants = map[string]config.MerchantDeclaration{"acme": {Catalog: &pkgcatalog.Application{}}}
 	reads, n = writes(rt, config.Routes{Auth: fake, RouteGroups: config.RouteGroups{Catalog: true}})
 	require.Positive(t, reads)
 	require.Positive(t, n)
@@ -293,8 +292,16 @@ func TestAmbientCookiesNeverAuthenticate(t *testing.T) {
 // The admin console mounts with the admin API it drives, at the prefix's
 // /admin, pointed at the API and the host's AuthKit on the same origin;
 // otherwise Mount fails.
-func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
+// consoleRuntime is httpRuntime declaring acme, whose issuer staff sign in at.
+func consoleRuntime() *Engine {
 	rt := httpRuntime()
+	rt.App.Config.Merchants = map[string]config.MerchantDeclaration{"acme": {DisplayName: "Acme", Issuer: "https://shop.example"}}
+	rt.declared = map[string]billing.MerchantID{"acme": billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111"))}
+	return rt
+}
+
+func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
+	rt := consoleRuntime()
 	fake := &authtest.Fake{}
 	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: true, Auth: fake})
 	require.ErrorContains(t, err, "turn on at least one of RouteGroups.Admin")
@@ -310,7 +317,8 @@ func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `<base href="/billing/admin/">host build`)
 	rec = serve(mux, http.MethodGet, "/billing/admin/config.json", "")
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"merchant":null}`, rec.Body.String())
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"exchange":null,
+		"merchant":{"id":"11111111-1111-4111-8111-111111111111","slug":"acme","display_name":"Acme"}}`, rec.Body.String(), "the console acts for the merchant its sign-in binds, and exchanges nothing")
 
 	// An assistant shows where the deployment has an LLM and its group is mounted.
 	for _, tc := range []struct {
@@ -320,18 +328,30 @@ func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 		{sel, `"nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false`},
 		{config.Routes{Prefix: "/billing", RouteGroups: authtest.Groups(), AdminConsole: true, Auth: fake}, `"nl_widgets_enabled":true,"ask_enabled":true,"catalog_copilot_enabled":true`},
 	} {
-		assisted := httpRuntime()
+		assisted := consoleRuntime()
 		assisted.App.ConsoleAssets = rt.App.ConsoleAssets
 		assisted.App.Config.LLM = &config.LLMConfig{APIKey: "k", AskEnabled: true, CatalogCopilotEnabled: true}
 		require.Contains(t, serve(mountAt(t, assisted, tc.sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String(), tc.want)
 	}
 
-	// The console acts for the merchant the engine serves.
-	declared := httpRuntime()
-	declared.App.ConsoleAssets = rt.App.ConsoleAssets
-	declared.App.Config.Merchant = config.MerchantDeclaration{Slug: "acme", DisplayName: "Acme"}
-	body := serve(mountAt(t, declared, sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String()
-	require.Contains(t, body, `"merchant":{"id":"11111111-1111-4111-8111-111111111111","slug":"acme","display_name":"Acme"}`)
+	// A console over merchants bound by group would answer every call 403:
+	// it refuses to mount instead.
+	for name, declare := range map[string]map[string]config.MerchantDeclaration{
+		"no merchant":                 nil,
+		"one merchant bound by group": {"acme": {}},
+		"several bound by group":      {"acme": {}, "beta": {}},
+		"two issuers":                 {"acme": {Issuer: "https://shop.example"}, "beta": {Issuer: "https://other.example"}},
+	} {
+		several := httpRuntime()
+		several.App.ConsoleAssets = rt.App.ConsoleAssets
+		several.App.Config.Merchants = declare
+		several.declared = map[string]billing.MerchantID{}
+		for slug := range declare {
+			several.declared[slug] = billing.MerchantID(uuid.New())
+		}
+		_, err := several.Routes(sel)
+		require.ErrorContains(t, err, "a console over several merchants is not supported yet", name)
+	}
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/config", "").Code)
 
 	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: fake, RouteGroups: authtest.AdminGroups()}, "")

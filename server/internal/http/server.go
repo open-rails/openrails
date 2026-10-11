@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -263,12 +262,6 @@ func New(deps Dependencies) (*Server, error) {
 		return nil, err
 	}
 
-	// A request that names its merchant has it resolved before its route
-	// authorizes, on the served handler and on the exported table alike.
-	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, r, s.runtime.Merchants, s.runtime.ConfiguredMerchant(), "")
-	})
-
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	if err := s.buildCheckout(deps.CheckoutOrigin, deps.CheckoutAssets); err != nil {
 		return nil, err
@@ -332,12 +325,8 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		middleware.PermissiveCORSHTTP(browser, s.auth),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		s.billingCredentialsHTTP,
-		// Resolve the merchant / billing namespace before authorization and before any
-		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime
-		// (#744), never a value snapshotted here at construction time; zero when none
-		// is configured, in which case merchant-owned operations hard-fail (there is
-		// no default merchant).
-		middleware.ResolveMerchantHTTP(s.runtime.ConfiguredMerchant),
+		// Nothing names a request's merchant here: each route's gate binds
+		// it from the credential.
 		limiter,
 	)
 }

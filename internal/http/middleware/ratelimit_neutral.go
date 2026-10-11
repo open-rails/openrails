@@ -90,6 +90,9 @@ type RateLimitDecision struct {
 	Headers        map[string]string
 	SubjectKeys    []string
 	CaptchaMessage string
+	// CaptchaSolved: the request's captcha token was verified; a token
+	// verifies once, so nothing later in the request asks for it again.
+	CaptchaSolved bool
 }
 
 // RateLimitDeps is the engine's collaborator set. State and ChallengeStore
@@ -150,11 +153,11 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	// subscriptions). Merchant, console and server-to-server API traffic is
 	// never challenged: an API key cannot solve a captcha.
 	captchaEnforced := captcha.ShouldApply(deps.Captcha, bucket)
+	solved := false
 	if captchaEnforced && deps.ChallengeStore != nil {
-		// Card-testing attack mode: while the request's merchant is under
-		// attack, every request to its captcha buckets must solve a captcha. The
-		// flag lives on its own subject so an individual solve never clears it.
-		challenged := cardAttackMode(r, deps.ChallengeStore)
+		// A merchant's card-attack mode is checked behind the route's gate
+		// (CardAttackCaptcha): here nothing is known of the merchant.
+		challenged := false
 		for _, subject := range subjects {
 			if deps.ChallengeStore.IsChallenged(r.Context(), subject.Key) {
 				challenged = true
@@ -167,6 +170,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 				return verdict
 			}
 			// Solved: fall through to normal counting (with the buckets just reset).
+			solved = true
 		}
 	}
 
@@ -184,7 +188,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	if combined.result.reset > 0 {
 		headers["X-RateLimit-Reset"] = strconv.FormatInt(time.Now().Add(combined.result.reset).Unix(), 10)
 	}
-	decision := RateLimitDecision{Bucket: bucket, Headers: headers, SubjectKeys: keys}
+	decision := RateLimitDecision{Bucket: bucket, Headers: headers, SubjectKeys: keys, CaptchaSolved: solved}
 
 	if !combined.result.allowed {
 		if captchaEnforced && deps.ChallengeStore != nil {
@@ -321,9 +325,14 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		if len(decision.SubjectKeys) > 0 {
 			r = r.WithContext(WithSubjectKeys(r.Context(), decision.SubjectKeys))
 		}
+		if decision.CaptchaSolved {
+			r = r.WithContext(context.WithValue(r.Context(), captchaSolvedKey{}, true))
+		}
 		next.ServeHTTP(w, r)
 	}
 }
+
+type captchaSolvedKey struct{}
 
 func writeJSONResponse(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -507,15 +516,47 @@ func isCheckoutPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/orders/") && strings.HasSuffix(path, "/solana-pay")
 }
 
-// cardAttackMode reports whether the request's merchant is under a card-testing
-// attack. A merchant not yet known here (a delegated token names it later)
-// leaves the request to its subjects' challenges and the failure ledger.
-func cardAttackMode(r *http.Request, store *captcha.ChallengeStore) bool {
-	id, ok := merchant.FromContext(r.Context())
-	if !ok || id.IsZero() {
-		return false
+// CardAttackCaptcha is the captcha a merchant under a card-testing attack
+// puts in front of its card routes: every request to them solves one, and one
+// solve never lifts the attack. It runs behind the route's gate, which bound
+// the merchant; ahead of the gate nothing is known of it, and limits key on
+// the address. A captcha the address limiter verified on this request is not
+// asked for again. Nil where the runtime enforces no captcha.
+func CardAttackCaptcha(rt *app.Runtime) router.Middleware {
+	if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || rt.CaptchaStore == nil || rt.AbuseState == nil || !config.CaptchaEnabled(rt.Config.Captcha) {
+		return nil
 	}
-	return store.IsChallenged(r.Context(), captcha.CardAttackModeSubject(id.UUID()))
+	return cardAttackCaptcha(RateLimitDeps{
+		Limits: rt.Config.RateLimits, Captcha: rt.Config.Captcha, State: rt.AbuseState, ChallengeStore: rt.CaptchaStore,
+		Verifier: captcha.NewVerifier(rt.Config.Captcha, nil),
+	})
+}
+
+func cardAttackCaptcha(deps RateLimitDeps) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *request.Request) {
+			ctx := r.Request.Context()
+			limit, bucket := resolveRateLimitPolicy(deps.Limits, r.Request)
+			mid, bound := merchant.FromContext(ctx)
+			solved, _ := ctx.Value(captchaSolvedKey{}).(bool)
+			if !bound || limit == nil || solved || !captcha.ShouldApply(deps.Captcha, bucket) ||
+				!deps.ChallengeStore.IsChallenged(ctx, captcha.CardAttackModeSubject(mid.UUID())) {
+				next(r)
+				return
+			}
+			verdict := evaluateCaptchaVerify(r.Request, deps, bucket, r.ClientIP(), SubjectKeysFromContext(ctx))
+			if verdict.Outcome == RateLimitAllow {
+				next(r)
+				return
+			}
+			verdict.Bucket = bucket
+			r.Through(func(http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					applyRateLimitDecisionHTTP(w, req, nil, verdict, deps.Captcha)
+				})
+			}, func(*request.Request) {})
+		}
+	}
 }
 
 func effectiveLimit(limit *config.RateLimit) int {

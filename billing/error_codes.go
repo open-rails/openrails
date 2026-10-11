@@ -93,14 +93,10 @@ const (
 	// param is the parameter.
 	CodeInvalidQuery = "invalid_query"
 	// CodeInvalidCursor: the list cursor is not one this list issued.
-	CodeInvalidCursor                = "invalid_cursor"
-	CodeUnsupportedMediaType         = "unsupported_media_type"
-	CodeRouteNotFound                = "route_not_found"
-	CodeMethodNotAllowed             = "method_not_allowed"
-	CodeMerchantSelectorInvalid      = "merchant_selector_invalid"
-	CodeMerchantNotFound             = "merchant_not_found"
-	CodeMerchantBindingMismatch      = "merchant_binding_mismatch"
-	CodeMerchantDirectoryUnavailable = "merchant_directory_unavailable"
+	CodeInvalidCursor        = "invalid_cursor"
+	CodeUnsupportedMediaType = "unsupported_media_type"
+	CodeRouteNotFound        = "route_not_found"
+	CodeMethodNotAllowed     = "method_not_allowed"
 )
 
 // Customer link codes (openrails.dev).
@@ -120,6 +116,7 @@ const (
 	CodeHostPrincipalInvalid                 = "host_principal_invalid"
 	CodePermissionRequired                   = "permission_required"
 	CodeMerchantUnresolved                   = "merchant_unresolved"
+	CodeCustomerIssuerMismatch               = "customer_issuer_mismatch"
 	CodeInvokerScopedPrincipal               = "invoker_scoped_principal"
 	CodeApplicationRequired                  = "application_required"
 	CodeStepUpRequired                       = "step_up_required"
@@ -173,12 +170,6 @@ var errorCodes = []ErrorCode{
 	{"captcha_invalid", 403, invalid, "The captcha token was rejected."},
 	{"card_requires_https", 400, invalid, "Card data is accepted only over HTTPS."},
 
-	// Merchant selection.
-	{CodeMerchantSelectorInvalid, 400, invalid, "The OpenRails-Merchant header is malformed, repeated or names no merchant."},
-	{CodeMerchantNotFound, 404, invalid, "No active merchant answers to the selector."},
-	{CodeMerchantBindingMismatch, 409, invalid, "The selected merchant is not the one the credential, deployment or request is bound to."},
-	{CodeMerchantDirectoryUnavailable, 503, fault, "The merchant directory could not be read; retry."},
-
 	// Authentication.
 	{CodeCredentialExpired, 401, authn, "The credential has expired."},
 	{CodeCredentialRevoked, 401, authn, "The credential or its session was revoked."},
@@ -188,7 +179,8 @@ var errorCodes = []ErrorCode{
 
 	// Authorization.
 	{CodePermissionRequired, 403, authz, "The credential lacks the permission the route requires."},
-	{CodeMerchantUnresolved, 403, authz, "The credential names no merchant, or more than one; select one."},
+	{CodeMerchantUnresolved, 403, authz, "The credential is bound to no merchant here."},
+	{CodeCustomerIssuerMismatch, 403, authz, "The customer belongs to another issuer's user with the same subject."},
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},
