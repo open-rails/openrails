@@ -123,17 +123,17 @@ bounds, or metered rate-card fields.
 |---|---|---|
 | `flat` | fixed amount | base fees ("$5/mo includes…") |
 | `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); `round: up\|down\|half_up` (default `half_up`) picks the mode, declared inside `per_unit` — the one place it is read; optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
-| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; prefer graduated — volume has price cliffs and doesn't invert |
+| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; a metered card takes `graduated` only |
 | `package` | `ceil((qty − free_units)/package_size) × amount` | block pricing, round-up-to-next-unit |
 
 **Metered usage** — declare `meters:` (event_type, value_property, aggregation,
 group_by) and attach `rate_cards:` to a product: each card binds one meter to a charge
-model, with optional `allowance` (included usage netted off first, poolable and
-accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
-products declare no billing cadence — the billing period is the window: the daily
-pass rates reported usage through the cards and bills each customer's owed usage as a
-usage order, including a customer whose only activity is metered usage.
-See the metering API documentation for complete rate-card contracts.
+model, with an optional `allowance` (`included` usage netted off first, per period).
+Usage products declare no billing cadence — the billing period is the window. Each
+usage event is priced through the cards when it is recorded and draws the prepaid
+balance or is owed at once; the daily pass bills each customer's owed usage as a
+usage order. A metered card states no `payment_term`. See
+[usage pricing](usage-pricing.md).
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
 Supplied links are validated against the provider (object exists + money terms match)

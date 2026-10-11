@@ -4,7 +4,10 @@ Usage billed in arrears is an order with `origin: usage`. The period sweep
 bills each customer's previous period, per currency, and the threshold pass
 bills the period so far once a customer's unpaid usage reaches their trigger.
 Each order bills the window's pending owed charges once: one line per accrual
-source (`source`, e.g. `metered:<meter>`), with no price or product. It is due
+source (`source`, e.g. `metered:<meter>`), with no price or product. Usage is
+priced and owed when it is recorded ([usage pricing](usage-pricing.md)), so
+an order bills what was recorded in its window, including usage dated in an
+earlier period. It is due
 when billed plus the customer's net terms, and has no expiry. A window with
 nothing owed bills no order.
 
