@@ -152,7 +152,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/stripemock/mock.go:func createRefund \"refunded\"":                                         notHTTPProviderWire,
 	"internal/stripemock/seed.go:func changePrice \"price\"":                                             notHTTPProviderWire,
 	"internal/stripemock/seed.go:func invoiceLocked \"amount_paid\"":                                     notHTTPProviderWire,
-	"internal/modules/solana/recurring/enroll_service.go:func ConfirmEnrollment \"solana_token_amount\"": notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleChargeback \"chargeback_amount_cents\"":              notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleRefund \"refund_amount_cents\"":                      notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleRenewalSuccessInternal \"amount_cents\"":             notHTTPStoredMetadata,

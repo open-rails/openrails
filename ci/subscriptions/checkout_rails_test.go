@@ -108,7 +108,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	require.NoError(t, err)
 
 	monthly := w.options(pid(priceID(t, w, key, key+"-monthly")))
-	require.NotContains(t, monthly, "solana", "Solana sells one-time lines only: %+v", monthly)
+	require.Equal(t, []string{"solana_pay"}, monthly["solana"].Accepts, "a price with a Solana plan subscribes from a wallet: %+v", monthly)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["nmi"].Accepts)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["stripe"].Accepts, "a recurring line is no Stripe hosted sale")
 	require.NotContains(t, monthly, "ccbill", "CCBill never enrolls a new subscription")

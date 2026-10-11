@@ -195,7 +195,11 @@ func ConfirmMyOrder(r *httprequest.Request) {
 	if !ok || svc == nil {
 		return
 	}
-	answer, err := svc.ConfirmOrder(r.Request.Context(), *actor, id)
+	var body billing.ConfirmOrderParams
+	if !r.BindOptionalJSON(&body) {
+		return
+	}
+	answer, err := svc.ConfirmOrder(r.Request.Context(), *actor, id, body)
 	if err != nil {
 		writeOrderError(r, err)
 		return

@@ -40,7 +40,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
@@ -1059,9 +1058,6 @@ func (s *CheckoutAttemptService) ConfirmSession(ctx context.Context, sessionID u
 
 	switch rail {
 	case "solana":
-		if session.Mode == models.CheckoutAttemptModeSubscription {
-			return s.confirmSolanaSubscriptionSession(ctx, session, req, user)
-		}
 		return s.confirmSolanaSession(ctx, session, req, user)
 	default:
 		return nil, fmt.Errorf("%w: confirmation not implemented for rail %s", ErrCheckoutAttemptConflict, rail)
@@ -1235,11 +1231,8 @@ func (s *CheckoutAttemptService) initializeSession(ctx context.Context, session 
 }
 
 func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, session *models.CheckoutAttempt, payment *CheckoutAttemptPaymentRequest) error {
-	// Recurring Solana subscription (#261): distinct from the one-off Solana Pay
-	// flow — the subscriber signs init_subscription_authority + subscribe in their
-	// wallet, so we return UNSIGNED transactions to sign rather than a Pay URL.
 	if session.Mode == models.CheckoutAttemptModeSubscription {
-		return s.initializeSolanaSubscriptionSession(ctx, session, payment)
+		return fmt.Errorf("%w: a Solana subscription is bought on an order", ErrCheckoutAttemptValidation)
 	}
 
 	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
@@ -1359,123 +1352,6 @@ func parseSolanaPlanTerms(cfg map[string]string) (solanaPlanTerms, error) {
 	return t, nil
 }
 
-func toAnySlice(ss []string) []any {
-	out := make([]any, len(ss))
-	for i, s := range ss {
-		out[i] = s
-	}
-	return out
-}
-
-// getStringSliceField reads a []string persisted in RailState (JSONB decodes
-// it back as []any of strings).
-func getStringSliceField(fields map[string]any, key string) []string {
-	if fields == nil {
-		return nil
-	}
-	raw, ok := fields[key]
-	if !ok || raw == nil {
-		return nil
-	}
-	switch v := raw.(type) {
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, e := range v {
-			if str, ok := e.(string); ok {
-				out = append(out, str)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-// initializeSolanaSubscriptionSession prepares the UNSIGNED init/subscribe
-// transaction(s) the subscriber's wallet must sign to start a recurring Solana
-// subscription (#261). It stores the canonical plan terms + the current step on
-// the session; the response renders next_action: solana_sign_transactions.
-func (s *CheckoutAttemptService) initializeSolanaSubscriptionSession(ctx context.Context, session *models.CheckoutAttempt, payment *CheckoutAttemptPaymentRequest) error {
-	if err := s.solanaSignerAvailable(ctx); err != nil {
-		return err
-	}
-	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutAttemptValidation)
-	}
-	wallet := strings.TrimSpace(payment.Wallet)
-	// A subscribe session created WITHOUT a connected wallet is a Solana Pay
-	// (transaction-request) subscribe: the wallet is unknown until it scans the QR
-	// and POSTs its account to /solana-pay, where BuildSolanaPayTransaction calls
-	// PrepareSubscribeService and returns the init/subscribe tx. This is the
-	// recurring counterpart of the one-off transaction_request flow — driven purely
-	// by the price being recurring; the client never sends mode:one_off.
-	if wallet == "" {
-		return s.initializeSolanaSubscriptionPayRequest(ctx, session)
-	}
-	price, err := s.priceService.GetByID(ctx, *session.PriceID)
-	if err != nil || price == nil {
-		return fmt.Errorf("%w: price not found", ErrCheckoutAttemptValidation)
-	}
-
-	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))
-	if err != nil {
-		return err
-	}
-
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-
-	// The reference binds the prepared first payment to this checkout: the
-	// merchant co-signs the bundle carrying it, and confirm requires it.
-	reference, err := solana.GenerateReference()
-	if err != nil {
-		return fmt.Errorf("failed to generate reference: %w", err)
-	}
-	res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
-		MerchantID:       tid,
-		SubscriberWallet: wallet,
-		PlanID:           terms.planID,
-		MintSymbol:       terms.mintSymbol,
-		AmountBaseUnits:  terms.amount,
-		PeriodHours:      terms.period,
-		PlanCreatedAt:    terms.createdAt,
-		Reference:        reference,
-	})
-	if err != nil {
-		return err
-	}
-
-	session.Reference = &reference
-	expiresAt := s.now().Add(defaultCheckoutAttemptTTL)
-	session.Status = models.CheckoutAttemptStatusRequiresAction
-	session.ExpiresAt = &expiresAt
-	if session.RailState == nil {
-		session.RailState = map[string]any{}
-	}
-	session.RailState["flow"] = "subscription"
-	session.RailState["subscriber_wallet"] = wallet
-	session.RailState["plan_id"] = strconv.FormatUint(terms.planID, 10)
-	session.RailState["mint_symbol"] = terms.mintSymbol
-	session.RailState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
-	session.RailState["period_hours"] = strconv.FormatUint(terms.period, 10)
-	session.RailState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
-	session.RailState["subscription_pda"] = res.SubscriptionPDA
-	session.RailState["sign_transactions"] = toAnySlice(res.Transactions)
-	return nil
-}
-
-// initializeSolanaSubscriptionPayRequest sets up a RECURRING subscribe over the
-// Solana Pay transaction-request flow (no wallet at create time). It persists the
-// canonical plan terms and marks the session flow=transaction_request so
-// sessionToResponse surfaces a solana_pay_url; the actual init/subscribe tx is
-// built later by BuildSolanaPayTransaction when the scanning wallet POSTs its
-// account. The decision to land here is purely price-driven (the price carries a
-// published Solana recurring plan → mode resolved to subscription) — no client
-// mode override. Admission already reserved the customer's membership slot.
 // solanaSignerAvailable refuses (503) while the Solana rail's signer is
 // unavailable or its identity change awaits approval (#1101).
 func (s *CheckoutAttemptService) solanaSignerAvailable(ctx context.Context) error {
@@ -1483,141 +1359,6 @@ func (s *CheckoutAttemptService) solanaSignerAvailable(ctx context.Context) erro
 		return err
 	}
 	return nil
-}
-
-func (s *CheckoutAttemptService) initializeSolanaSubscriptionPayRequest(ctx context.Context, session *models.CheckoutAttempt) error {
-	if err := s.solanaSignerAvailable(ctx); err != nil {
-		return err
-	}
-	price, err := s.priceService.GetByID(ctx, *session.PriceID)
-	if err != nil || price == nil {
-		return fmt.Errorf("%w: price not found", ErrCheckoutAttemptValidation)
-	}
-
-	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))
-	if err != nil {
-		return err
-	}
-
-	expiresAt := s.now().Add(defaultCheckoutAttemptTTL)
-	session.Status = models.CheckoutAttemptStatusRequiresAction
-	session.ExpiresAt = &expiresAt
-	if session.RailState == nil {
-		session.RailState = map[string]any{}
-	}
-	// flow=transaction_request is what makes sessionToResponse build the
-	// solana_pay_url; the subscribe terms travel on RailState exactly like the
-	// wallet path so BuildSolanaPayTransaction can re-derive the PrepareSubscribe
-	// input without trusting client input.
-	session.RailState["flow"] = "transaction_request"
-	session.RailState["plan_id"] = strconv.FormatUint(terms.planID, 10)
-	session.RailState["mint_symbol"] = terms.mintSymbol
-	session.RailState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
-	session.RailState["period_hours"] = strconv.FormatUint(terms.period, 10)
-	session.RailState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
-	return nil
-}
-
-// confirmSolanaSubscriptionSession completes a subscribe checkout from the
-// signature of its landed first payment. The payment is read from the chain and
-// must be the bundle this checkout prepared: signed by the bound wallet,
-// carrying the checkout's reference and pulling the full first period to the
-// merchant. Nothing the client sends besides the signature is trusted.
-func (s *CheckoutAttemptService) confirmSolanaSubscriptionSession(ctx context.Context, session *models.CheckoutAttempt, req *CheckoutAttemptConfirmRequest, user *UserIdentity) (*CheckoutAttemptResponse, error) {
-	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutAttemptValidation)
-	}
-	wallet := strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet"))
-	if reqWallet := strings.TrimSpace(req.Payment.Wallet); reqWallet != "" && wallet != "" && reqWallet != wallet {
-		return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutAttemptValidation)
-	}
-	sig := strings.TrimSpace(req.Payment.Signature)
-	if wallet == "" || sig == "" {
-		return nil, fmt.Errorf("%w: the signed first payment is required", ErrCheckoutAttemptValidation)
-	}
-	sub, err := s.enrollSolanaSubscription(ctx, session, sig)
-	switch {
-	case errors.Is(err, recurring.ErrPaymentNotLanded):
-		// Confirmation lag: the wallet just sent it. Retryable; the poller also
-		// settles a Solana Pay subscribe asynchronously.
-		return nil, fmt.Errorf("%w: subscription payment not yet confirmed on-chain; retry", ErrCheckoutAttemptConflict)
-	case errors.Is(err, recurring.ErrPaymentLate):
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutAttemptExpired, err)
-	case errors.Is(err, recurring.ErrPaymentUnverified):
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	case errors.Is(err, settlement.ErrClaimed):
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutAttemptConflict, err)
-	case err != nil:
-		return nil, err
-	}
-
-	// Verified on-chain within the late window: settled even if the session's
-	// window has since elapsed.
-	if err := s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, sig, sub.ID, true); err != nil {
-		return nil, err
-	}
-	updated, err := s.repo.GetByID(ctx, session.ID)
-	if err != nil {
-		return nil, err
-	}
-	return s.sessionToResponse(updated), nil
-}
-
-// enrollSolanaSubscription activates a subscribe checkout from its landed first
-// payment, with the terms, wallet, reference and validity the checkout stored.
-func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, session *models.CheckoutAttempt, signature string) (*models.Subscription, error) {
-	tenantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	terms := solanaPlanTerms{
-		planID:     getUint64Field(session.RailState, "plan_id"),
-		mintSymbol: getStringField(session.RailState, "mint_symbol"),
-		amount:     getUint64Field(session.RailState, "amount_base_units"),
-		period:     getUint64Field(session.RailState, "period_hours"),
-	}
-	if v := strings.TrimSpace(getStringField(session.RailState, "plan_created_at")); v != "" {
-		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
-	}
-	in := recurring.EnrollInput{
-		MerchantID:        tenantID,
-		CheckoutAttemptID: session.ID,
-		UserID:            session.CustomerID.String(),
-		PriceID:           *session.PriceID,
-		SubscriberWallet:  strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet")),
-		PlanID:            terms.planID,
-		MintSymbol:        terms.mintSymbol,
-		AmountBaseUnits:   terms.amount,
-		PeriodHours:       terms.period,
-		PlanCreatedAt:     terms.createdAt,
-		FiatAmount:        *session.Amount,
-		Currency:          *session.Currency,
-		Signature:         signature,
-	}
-	if session.Reference != nil {
-		in.Reference = *session.Reference
-	}
-	if session.ExpiresAt != nil {
-		in.ValidUntil = *session.ExpiresAt
-	}
-	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, in)
-	if subscriptions.IsMembershipSlotTaken(err) && s.db != nil {
-		if aerr := solanamodule.RecordOrphanedFirstPull(ctx, s.db, s.now().UTC(), signature, solanamodule.LateSettlement{
-			UserID: in.UserID, PriceID: in.PriceID.String(), SessionID: session.ID.String(), Token: in.MintSymbol, TokenAmount: in.AmountBaseUnits,
-		}); aerr != nil {
-			return nil, errors.Join(err, aerr)
-		}
-	}
-	var late *recurring.LatePaymentError
-	if errors.As(err, &late) && s.db != nil {
-		if aerr := solanamodule.RecordLateSettlement(ctx, s.db, late.LandedAt, in.Reference, signature, solanamodule.LateSettlement{
-			UserID: in.UserID, PriceID: in.PriceID.String(), SessionID: session.ID.String(), Amount: in.FiatAmount, Currency: in.Currency,
-			Token: in.MintSymbol, TokenAmount: in.AmountBaseUnits, ExpiresAt: in.ValidUntil,
-		}); aerr != nil {
-			return nil, aerr
-		}
-	}
-	return sub, err
 }
 
 func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, session *models.CheckoutAttempt, payment *CheckoutAttemptPaymentRequest, successURL, cancelURL string, user *UserIdentity) error {
@@ -1849,17 +1590,6 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 
 	if action := s.buildNextAction(resp); action != nil {
 		resp.NextAction = action
-	}
-
-	// Recurring Solana subscribe (#261): surface the unsigned transaction(s) to
-	// sign. Takes precedence over other next_actions for a subscription session.
-	if resp.Status == string(models.CheckoutAttemptStatusRequiresAction) {
-		if txns := getStringSliceField(session.RailState, "sign_transactions"); len(txns) > 0 {
-			resp.NextAction = &CheckoutAttemptNextAction{
-				Type:         "solana_sign_transactions",
-				Transactions: txns,
-			}
-		}
 	}
 
 	return resp
@@ -2367,7 +2097,7 @@ func (s *CheckoutAttemptService) GetSessionForSolanaPay(ctx context.Context, ses
 	if session.ExpiresAt != nil && s.now().After(*session.ExpiresAt) {
 		return nil, ErrCheckoutAttemptExpired
 	}
-	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Mode != models.CheckoutAttemptModeSubscription && s.now().After(quote) {
+	if quote, ok := solanaQuoteExpiresAt(session); ok && s.now().After(quote) {
 		return nil, ErrCheckoutAttemptExpired
 	}
 
@@ -2428,7 +2158,7 @@ func (s *CheckoutAttemptService) BuildSolanaPayTransaction(ctx context.Context, 
 	if session.ExpiresAt != nil && s.now().After(*session.ExpiresAt) {
 		return nil, ErrCheckoutAttemptExpired
 	}
-	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Mode != models.CheckoutAttemptModeSubscription && s.now().After(quote) {
+	if quote, ok := solanaQuoteExpiresAt(session); ok && s.now().After(quote) {
 		return nil, ErrCheckoutAttemptExpired
 	}
 
@@ -2438,10 +2168,10 @@ func (s *CheckoutAttemptService) BuildSolanaPayTransaction(ctx context.Context, 
 		return nil, ErrCheckoutAttemptAlreadyCompleted
 	}
 
-	// A RECURRING subscribe over Solana Pay (price-driven) builds the init or
-	// the atomic [subscribe+transfer] tx for the POSTed account, with the
-	// reference injected and put under the poller's watch.
-	if session.Mode == models.CheckoutAttemptModeSubscription {
+	// A subscribe builds the atomic [init?, subscribe, first pull] transaction
+	// for the POSTed account, with the reference injected and put under the
+	// poller's watch.
+	if solanaSubscribes(session) {
 		resp, err := s.buildSolanaSubscribeTransaction(ctx, session, account)
 		if err != nil {
 			return nil, err
@@ -2693,44 +2423,28 @@ func (s *CheckoutAttemptService) pollerConfirmContext(ctx context.Context, sessi
 	return db.WithPSPID(ctx, session.PspID)
 }
 
-// ConfirmSolanaSubscribeSession completes a RECURRING subscribe Solana Pay
-// session when the reference poller finds a confirmed transaction carrying its
+// ConfirmSolanaSubscribeSession enrolls an order's Solana subscription from a
+// confirmed transaction the reference poller found carrying the attempt's
 // reference. Anyone can put a public reference in a transaction, so the
-// signature only names a candidate: enrollment verifies it is this checkout's
-// first payment (see confirmSolanaSubscriptionSession). A transaction not yet
-// readable stays pending; one that is not the payment is refused and the
-// poller moves on to the reference's other signatures.
-//
-// Idempotent: a re-confirm of an already-succeeded session is a no-op, and
-// ConfirmEnrollment upserts on the rail subscription id.
-func (s *CheckoutAttemptService) ConfirmSolanaSubscribeSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
-	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutAttemptValidation)
-	}
-	session, err := s.repo.GetByID(ctx, sessionID)
+// signature only names a candidate: enrollment verifies it is the attempt's
+// first payment. A transaction not yet readable stays pending; one that is not
+// the payment is refused and the poller moves on to the reference's other
+// signatures. A settled attempt confirms again as a no-op.
+func (s *CheckoutAttemptService) ConfirmSolanaSubscribeSession(ctx context.Context, attemptID uuid.UUID, signature string) error {
+	attempt, err := s.repo.GetByID(ctx, attemptID)
 	if err != nil {
 		return ErrCheckoutAttemptNotFound
 	}
-	if session.Status == models.CheckoutAttemptStatusSucceeded {
+	if attempt.Status == models.CheckoutAttemptStatusSucceeded {
 		return nil
 	}
-	ctx = s.pollerConfirmContext(ctx, session)
-	signature = strings.TrimSpace(signature)
-	if signature == "" {
+	if attempt.OrderID == nil || !solanaSubscribes(attempt) {
+		return fmt.Errorf("%w: attempt %s subscribes to nothing", ErrCheckoutAttemptValidation, attemptID)
+	}
+	if strings.TrimSpace(signature) == "" {
 		return fmt.Errorf("%w: signature is required", ErrCheckoutAttemptValidation)
 	}
-	if strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet")) == "" {
-		// No wallet has POSTed yet — there is nothing to confirm.
-		return solanamodule.ErrSolanaSubscribePending
-	}
-	sub, err := s.enrollSolanaSubscription(ctx, session, signature)
-	if errors.Is(err, recurring.ErrPaymentNotLanded) {
-		return solanamodule.ErrSolanaSubscribePending
-	}
-	if err != nil {
-		return err
-	}
-	return s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, sub.ID, true)
+	return s.enrollSolanaOrder(ctx, attempt, signature)
 }
 
 // solanaSettleDeadline: a Solana one-off attempt stays open while its

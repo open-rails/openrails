@@ -131,12 +131,20 @@ delegates a spending allowance on their token account. OpenRails then pulls one
 plan-amount per period via `transfer_subscription` — the merchant signer signs
 and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
 
-A subscription activates only from its first payment. Confirm reads the landed
-transaction by signature and requires the bundle the checkout prepared: signed
-by the checkout's wallet, carrying the checkout's reference, subscribing to the
-plan's terms, and a merchant-co-signed pull of the full first period into the
-merchant's ATA, landed within the checkout's validity. A signature settles one
-checkout only, across every merchant and PSP.
+A subscription is bought on an order of its one line, paid like a one-time
+order: `payment: {token_symbol}` (the plan's token) answers `solana_pay` with
+`payload.period_hours`, and the wallet's transaction request is answered with
+the subscribe transaction for its account: (`init_subscription_authority`
+for a first-timer,) `subscribe`, and a merchant-co-signed pull of the full
+first period, stamped with the order's reference.
+
+A subscription activates only from that first payment: signed by the wallet
+that asked for it, carrying the reference, subscribing to the plan's terms and
+pulling the full first period into the merchant's ATA, landed within the
+offer's validity. OpenRails finds it on the reference, or reads it at once
+when `POST /v1/me/orders/{id}/confirm` names its `signature`; the order
+completes with the subscription on its line. A signature settles one order
+only, across every merchant and PSP.
 
 - Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
   Declaring `psps: [solana]` creates or
@@ -206,8 +214,8 @@ To exercise the flows on devnet:
   Circle faucet at faucet.circle.com) plus a little SOL — the recurring
   allowlist resolves the configured USDC mint, so a self-minted token won't work.
 - Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; a
-  subscription's wallet action returns `next_action: solana_sign_transactions` and the wallet
-  approves one transaction (a first-timer's bundle folds
+  subscription's order answers `next_action: solana_pay` and the wallet
+  approves one transaction (a first-timer's folds
   `initialize_subscription_authority` in front of subscribe + first pull, using
   the program's `UNKNOWN_INIT_ID` same-slot check).
 

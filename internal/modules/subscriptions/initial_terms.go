@@ -87,7 +87,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
 		return err
 	}
-	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
+	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
 		return errors.New("initial membership terms are incomplete")
 	}
 	for _, instant := range []time.Time{t.AcceptedAt, t.PeriodStart, t.PeriodEnd} {

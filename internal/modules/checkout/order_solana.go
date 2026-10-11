@@ -66,6 +66,12 @@ func (s *CheckoutAttemptService) payOrderSolana(ctx context.Context, in OrderPay
 	if err != nil {
 		return OrderCharge{}, err
 	}
+	if in.Order.HasRecurring() {
+		if len(in.Prices) != 1 {
+			return OrderCharge{}, orders.ErrOptionMissing
+		}
+		return OrderCharge{}, s.startOrderSolanaSubscribe(ctx, in.Order, attemptID, option.PSPID, token, in.Prices[0], uuid.Nil)
+	}
 	return OrderCharge{}, s.startOrderSolana(ctx, in.Order, attemptID, option.PSPID, token, uuid.Nil)
 }
 
@@ -76,11 +82,17 @@ func (s *CheckoutAttemptService) startOrderSolana(ctx context.Context, order *or
 	if err := s.requireProviderWrites(ctx); err != nil {
 		return err
 	}
-	mid, err := merchant.Require(ctx)
+	state, quoteExpires, err := s.quoteSolana(ctx, order.Total, order.Currency, token)
 	if err != nil {
 		return err
 	}
-	state, quoteExpires, err := s.quoteSolana(ctx, order.Total, order.Currency, token)
+	return s.openOrderSolana(ctx, order, attemptID, psp, state, quoteExpires, replaces)
+}
+
+// openOrderSolana opens attempt on the order with its Solana terms and a
+// fresh reference, offered until validUntil: the order awaits the wallet.
+func (s *CheckoutAttemptService) openOrderSolana(ctx context.Context, order *orders.Order, attemptID, psp uuid.UUID, state map[string]any, validUntil time.Time, replaces uuid.UUID) error {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -122,7 +134,7 @@ func (s *CheckoutAttemptService) startOrderSolana(ctx context.Context, order *or
 		}
 		if err := q.CreateOrderAttempt(ctx, gen.CreateOrderAttemptParams{ID: attemptID, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: order.ID,
 			Rail: string(models.RailSolana), Status: string(models.CheckoutAttemptStatusRequiresAction), Reference: &reference, Amount: current.Total, Currency: current.Currency,
-			ExpiresAt: solanaSettleDeadline(quoteExpires), RailState: raw, PspID: psp, Now: now}); err != nil {
+			ExpiresAt: solanaSettleDeadline(validUntil), RailState: raw, PspID: psp, Now: now}); err != nil {
 			return err
 		}
 		if n, err := q.StartOrderAttempt(ctx, gen.StartOrderAttemptParams{MerchantID: mid.UUID(), ID: order.ID, AttemptID: attemptID, PspID: psp, Now: now}); err != nil || n != 1 {
@@ -206,6 +218,11 @@ func (s *CheckoutAttemptService) orderSolanaAction(order *orders.Order, attempt 
 	if attempt.Reference != nil {
 		payload["reference"] = *attempt.Reference
 	}
+	// A subscription pays its plan's amount every period_hours.
+	if period := railStateText(attempt.RailState, "period_hours"); period != "" {
+		payload["period_hours"] = period
+		delete(payload, "recipient")
+	}
 	if units, err := strconv.ParseUint(railStateText(attempt.RailState, "token_amount"), 10, 64); err == nil {
 		if decimals, err := strconv.Atoi(railStateText(attempt.RailState, "token_decimals")); err == nil {
 			payload["token_amount"] = solanamodule.FormatBaseUnits(units, decimals)
@@ -244,7 +261,14 @@ func (s *CheckoutAttemptService) BuildOrderSolanaTransaction(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	if quote, ok := solanaQuoteExpiresAt(session); ok && s.now().After(quote) {
+	if quote, ok := solanaQuoteExpiresAt(session); ok && s.now().After(quote) && solanaSubscribes(session) {
+		if err := s.reofferOrderSolanaSubscribe(ctx, order, session); err != nil {
+			return nil, err
+		}
+		if _, attempt, err = s.solanaOrderAttempt(ctx, orderID); err != nil {
+			return nil, err
+		}
+	} else if ok && s.now().After(quote) {
 		if session.Reference != nil {
 			landed, err := s.solanaTransactionService.ReferenceHasOurTransfer(ctx, *session.Reference, railStateText(attempt.RailState, "recipient"), railStateText(attempt.RailState, "token_mint"), session.ID)
 			if errors.Is(err, solanamodule.ErrReferenceUndetermined) {

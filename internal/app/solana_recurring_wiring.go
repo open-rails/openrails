@@ -45,15 +45,7 @@ func (r *Runtime) ArmSolanaRecurringServices(
 	chainReader := r.SolanaRPCResolver.ChainReader()
 	subscriptions := solanasubs.NewSolanaSubscriptionRepo(r.DB)
 	plan := recurring.NewPlanServiceWithReader(submitter, chainReader, network, tokens)
-	enroll := recurring.NewEnrollService(
-		r.SubscriptionLifecycleService,
-		subscriptions,
-		chainReader,
-		r.DB,
-		submitter,
-		network,
-		tokens,
-	)
+	enroll := recurring.NewEnrollService(chainReader, submitter, network, tokens)
 	r.SetSolanaPlanService(plan)
 	r.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
 		subscriptions,

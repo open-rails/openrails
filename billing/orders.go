@@ -148,6 +148,12 @@ type PayOrderParams struct {
 	Reusable      *bool              `json:"reusable,omitempty"`
 }
 
+// ConfirmOrderParams confirms an order awaiting its customer. Signature is
+// the transaction a Solana wallet sent for it: OpenRails reads it at once.
+type ConfirmOrderParams struct {
+	Signature *string `json:"signature,omitempty"`
+}
+
 // RetryOrderCollectionParams charges what a usage order still owes to one
 // of its customer's saved cards. IdempotencyKey is required: a retry with it
 // answers the same collection.
