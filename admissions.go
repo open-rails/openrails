@@ -3,8 +3,8 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
-	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -19,33 +19,62 @@ func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requ
 	return out.Items, nil
 }
 
-// admissionPath keeps an arbitrary request id one URL segment: PathEscape
-// leaves dot segments intact, which ServeMux would clean away.
-func admissionPath(requestID string) (string, error) {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return "", invalidErr("request_id is required")
+// AdmitTx is Admit inside tx, a transaction from the host's pool on the
+// engine's database, so an admission and its hold commit with the host's
+// request row, or not at all: no outbox and no orphan hold. OpenRails binds
+// the handle's merchant and never commits or rolls tx back; after an error
+// the host rolls back. Embedded only: a remote client returns ErrRemoteClient.
+func (c *Client) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
+	if err := batchSize(len(requests), billing.MaxAdmissionBatchItems); err != nil {
+		return nil, err
 	}
-	segment := url.PathEscape(requestID)
-	if segment == "." || segment == ".." {
-		segment = strings.ReplaceAll(segment, ".", "%2E")
-	}
-	return "/v1/app/admissions/" + segment, nil
-}
-
-// CaptureAdmission settles an admitted request. An exact retry returns the
-// original receipt; a changed amount or usage is
-// billing.ErrIdempotencyKeyReused.
-func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error) {
-	path, err := admissionPath(requestID)
+	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	var out billing.CaptureReceipt
-	if err := c.do(ctx, http.MethodPost, path+"/capture", params, &out, requestOptions...); err != nil {
+	return e.AdmitTx(ctx, c.merchantID, tx, requests)
+}
+
+// CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted
+// requests, one result per item in order: each is captured or refused on its
+// own. A capture that names its usage is priced by the admission's pinned
+// rate cards; above the hold the rest is owed. An exact retry answers the
+// first receipt; changed terms are billing.ErrIdempotencyKeyReused.
+func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams, requestOptions ...RequestOption) ([]billing.CaptureResult, error) {
+	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	var out billing.CaptureBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/app/admissions/capture", billing.CaptureAdmissionBatchParams{Items: items}, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// CaptureAdmissionsTx is CaptureAdmissions inside tx (see AdmitTx), so a
+// capture commits with the host's record of the finished work. Embedded only.
+func (c *Client) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
+	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
+		return nil, err
+	}
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.CaptureAdmissionsTx(ctx, c.merchantID, tx, items)
+}
+
+// ReleaseAdmissionsTx is ReleaseAdmissions inside tx (see AdmitTx), so a
+// release commits with the host's record of the failed work. Embedded only.
+func (c *Client) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
+	if err := batchSize(len(requestIDs), billing.MaxAdmissionBatchItems); err != nil {
+		return nil, err
+	}
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.ReleaseAdmissionsTx(ctx, c.merchantID, tx, requestIDs)
 }
 
 // ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems

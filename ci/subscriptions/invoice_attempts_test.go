@@ -36,7 +36,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: customer, Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
 	require.NoError(t, err)
 	require.True(t, admitted[0].Allowed(), "%+v", admitted)
-	_, err = client.CaptureAdmission(ctx, request, billing.CaptureAdmissionParams{Amount: owed})
+	_, err = captureAdmission(ctx, client, request, owed, nil)
 	require.NoError(t, err)
 
 	w.advance(time.Minute)

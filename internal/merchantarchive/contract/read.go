@@ -122,6 +122,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
 		}
+		// Admissions before usage estimates held host-stated estimates only.
+		if p.Name == "admission_operations" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, nil, nil)
+		}
 		// Payment methods before card saves awaited the customer had no setup.
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)

@@ -36,15 +36,16 @@ func usageNotPriced(param, format string, args ...any) error {
 	return &apperr.Error{Status: http.StatusUnprocessableEntity, Code: billing.CodeUsageNotPriced, Message: fmt.Sprintf(format, args...), Param: param}
 }
 
-// ratingCard is a meter and the rate card that prices it.
+// ratingCard is a meter and the rate card that prices it, as an admission
+// pins it.
 type ratingCard struct {
-	MeterKey    string
-	ValueKey    string
-	Aggregation catalog.Aggregation
-	GroupBy     map[string]string
-	Filter      map[string][]string
-	Allowance   *catalog.Allowance
-	Price       catalog.RatePrice
+	MeterKey    string              `json:"meter_key"`
+	ValueKey    string              `json:"value_property"`
+	Aggregation catalog.Aggregation `json:"aggregation"`
+	GroupBy     map[string]string   `json:"group_by,omitempty"`
+	Filter      map[string][]string `json:"filter,omitempty"`
+	Allowance   *catalog.Allowance  `json:"allowance,omitempty"`
+	Price       catalog.RatePrice   `json:"price"`
 }
 
 // usageQuantity is what one meter takes from one event.
@@ -301,62 +302,84 @@ func (s *MoneyService) usagePeriodStart(ctx context.Context, q *gen.Queries, mer
 	return CurrentBillingPeriodStart(occurred, anchor, boundary)
 }
 
-// rateUsageTx prices an event's quantities, advances the customer's period
-// quantities and posts each charge, balance first and the rest owed: usage is
-// never refused for money. It answers the charges and the transfer of the
-// first one posted. The caller holds the customer's spend lock and has opened
-// its balance account.
+// rateUsageTx prices an event's quantities and posts each charge
+// (priceUsageTx, then postChargesTx).
 func (s *MoneyService) rateUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invoker, currency string, eventID uuid.UUID, occurred time.Time, quantities []usageQuantity) ([]models.UsageCharge, *uuid.UUID, error) {
+	charges, err := s.priceUsageTx(ctx, q, payer, currency, occurred, quantities)
+	if err != nil {
+		return nil, nil, err
+	}
+	first, err := s.postChargesTx(ctx, q, payer, invoker, currency, eventID, charges)
+	return charges, first, err
+}
+
+// priceUsageTx advances the customer's period quantities by an event's and
+// answers what each meter charges it. The caller holds the customer's spend
+// lock and has opened its balance account.
+func (s *MoneyService) priceUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, occurred time.Time, quantities []usageQuantity) ([]models.UsageCharge, error) {
+	charges := make([]models.UsageCharge, 0, len(quantities))
 	if len(quantities) == 0 {
-		return []models.UsageCharge{}, nil, nil
+		return charges, nil
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	merchantID := mid.UUID()
 	period, err := s.usagePeriodStart(ctx, q, merchantID, payer.UUID(), currency, occurred)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	now := s.now()
-	charges := make([]models.UsageCharge, 0, len(quantities))
-	var first *uuid.UUID
 	for _, u := range quantities {
 		total, err := q.AddMeterPeriodQuantity(ctx, gen.AddMeterPeriodQuantityParams{
 			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency, MeterKey: u.card.MeterKey,
 			Cell: u.cell, PeriodStartsAt: period, Quantity: u.quantity, Now: now,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("meter %q period quantity: %w", u.card.MeterKey, err)
+			return nil, fmt.Errorf("meter %q period quantity: %w", u.card.MeterKey, err)
 		}
 		amount, err := marginalPrice(u.card, u.cell, total-u.quantity, u.quantity)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		charges = append(charges, models.UsageCharge{MeterKey: u.card.MeterKey, Cell: u.cell, Quantity: u.quantity, Amount: amount})
-		if amount == 0 {
+	}
+	if _, err := q.PruneMeterPeriodQuantities(ctx, gen.PruneMeterPeriodQuantitiesParams{MerchantID: merchantID, Before: now.Add(-retention.MeterPeriodQuantities)}); err != nil {
+		return nil, err
+	}
+	return charges, nil
+}
+
+// postChargesTx posts each charge of an event at metered:<meter>, balance
+// first and the rest owed: usage is never refused for money. It answers the
+// transfer of the first charge posted.
+func (s *MoneyService) postChargesTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invoker, currency string, eventID uuid.UUID, charges []models.UsageCharge) (*uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var first *uuid.UUID
+	for _, c := range charges {
+		if c.Amount == 0 {
 			continue
 		}
-		key := MustIdempotencyKey(OpMeteredRating, "metered:"+u.card.MeterKey, eventID.String())
-		if _, _, _, err := s.spendBalanceThenOwedTx(ctx, q, payer, invoker, currency, key, amount, true); err != nil {
-			return nil, nil, err
+		key := MustIdempotencyKey(OpMeteredRating, "metered:"+c.MeterKey, eventID.String())
+		if _, _, _, err := s.spendBalanceThenOwedTx(ctx, q, payer, invoker, currency, key, c.Amount, true); err != nil {
+			return nil, err
 		}
 		if first == nil {
 			tr, err := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
-				MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency,
+				MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency,
 				Operation: string(key.Operation()), Source: key.Source(), SourceID: key.SourceID(),
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("meter %q posting: %w", u.card.MeterKey, err)
+				return nil, fmt.Errorf("meter %q posting: %w", c.MeterKey, err)
 			}
 			first = &tr.ID
 		}
 	}
-	if _, err := q.PruneMeterPeriodQuantities(ctx, gen.PruneMeterPeriodQuantitiesParams{MerchantID: merchantID, Before: now.Add(-retention.MeterPeriodQuantities)}); err != nil {
-		return nil, nil, err
-	}
-	return charges, first, nil
+	return first, nil
 }
 
 func propertyKey(property string) string {

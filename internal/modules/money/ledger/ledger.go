@@ -81,7 +81,7 @@ type Operation string
 
 const (
 	OpSpend    Operation = "spend"    // MoneyService.SpendCredits
-	OpCapture  Operation = "capture"  // MoneyService.CaptureAuthorized
+	OpCapture  Operation = "capture"  // an admission captured at a host-stated amount
 	OpWithdraw Operation = "withdraw" // MoneyService.Withdraw
 	OpDeposit  Operation = "deposit"  // credit grant / top-up
 

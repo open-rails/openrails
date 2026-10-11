@@ -25,6 +25,7 @@ type pricing struct {
 	ctx     context.Context
 	client  *openrails.Client
 	product billing.ProductID
+	started time.Time
 }
 
 func newPricing(t *testing.T, f *fixture, slug string) *pricing {
@@ -32,7 +33,7 @@ func newPricing(t *testing.T, f *fixture, slug string) *pricing {
 	client := f.runtime(t, slug+"-"+uuid.NewString()[:8])
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "usage", DisplayName: "Usage"})
 	require.NoError(t, err)
-	return &pricing{t: t, ctx: t.Context(), client: client, product: product.ID}
+	return &pricing{t: t, ctx: t.Context(), client: client, product: product.ID, started: time.Now().UTC().Truncate(time.Second)}
 }
 
 // meter declares a meter of eventType and its rate card.
@@ -321,6 +322,17 @@ func TestLLMTokensPricePerMillionByModel(t *testing.T) {
 	again := request("small", 1_000_000, 0, 0)
 	require.Equal(t, map[string]int64{"input-tokens": 150_000}, charged(again), "a zero dimension takes nothing")
 	require.EqualValues(t, 100_000_000-3_000-50_000-150_000, p.balance(customer).BalanceAmount)
+
+	// A request's hold is its prompt and max tokens at its model's price, and
+	// its capture what it used, priced by the same cards.
+	held := p.admitUsage(customer, "chat-large", billing.UsageEstimate{EventType: "chat",
+		Dimensions: map[string]int64{"input_tokens": 2_000, "output_tokens": 4_000}, Metadata: map[string]any{"model": "large"}})
+	require.EqualValues(t, 5_000+40_000, held.Admission.EstimatedAmount)
+	receipt := p.capture(billing.CaptureAdmissionParams{RequestID: "chat-large", Usage: &billing.CaptureUsage{EventType: "chat",
+		Dimensions: map[string]int64{"input_tokens": 2_000, "cached_input_tokens": 1_000, "output_tokens": 300}, Metadata: map[string]any{"model": "large"}}})[0]
+	require.Equal(t, http.StatusOK, receipt.Status, "%+v", receipt.Error)
+	require.Equal(t, map[string]int64{"input-tokens": 5_000, "cached-input-tokens": 1_250, "output-tokens": 3_000}, receiptCharges(receipt.Receipt))
+	require.EqualValues(t, 0, p.balance(customer).HeldAmount)
 }
 
 // Whatever the order and sizes of a period's events, each meter's charges sum

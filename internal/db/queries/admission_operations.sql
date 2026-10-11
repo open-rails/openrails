@@ -23,12 +23,13 @@ FOR UPDATE;
 -- name: InsertAdmissionOperation :one
 INSERT INTO billing.admission_operations (
     merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms,
-    requested_expires_at, expires_at, admitted_at, window_keys
+    requested_expires_at, expires_at, admitted_at, window_keys, estimate_usage, rate_cards
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(request_id)::text, sqlc.arg(customer_id)::uuid,
     sqlc.arg(currency)::text, sqlc.arg(estimated_amount)::bigint, sqlc.arg(available_amount)::bigint, sqlc.arg(terms)::jsonb,
     sqlc.narg(requested_expires_at)::timestamptz, sqlc.narg(requested_expires_at)::timestamptz,
-    sqlc.arg(admitted_at)::timestamptz, sqlc.arg(window_keys)::text[]
+    sqlc.arg(admitted_at)::timestamptz, sqlc.arg(window_keys)::text[],
+    sqlc.narg(estimate_usage)::jsonb, sqlc.narg(rate_cards)::jsonb
 )
 RETURNING *;
 

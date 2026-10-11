@@ -1,0 +1,13 @@
+-- parent: 69 sha256:711573be0283105b90635754597691ba63e61f26a714b2c23d7729006a712703
+-- Repair: none-needed Both columns are new and null on every stored row, which the check accepts.
+-- An admission may hold an estimate of its usage, priced by the meters' rate
+-- cards; the cards that priced it are pinned with it, and its capture is
+-- priced by them.
+ALTER TABLE billing.admission_operations ADD COLUMN estimate_usage jsonb;
+ALTER TABLE billing.admission_operations ADD COLUMN rate_cards jsonb;
+ALTER TABLE billing.admission_operations ADD CONSTRAINT admission_operations_estimate_usage_check CHECK (
+    (estimate_usage IS NULL) = (rate_cards IS NULL)
+    AND (estimate_usage IS NULL OR (jsonb_typeof(estimate_usage) = 'object' AND octet_length(estimate_usage::text) <= 65536))
+    AND (rate_cards IS NULL OR (jsonb_typeof(rate_cards) = 'array' AND octet_length(rate_cards::text) <= 262144)));
+COMMENT ON COLUMN billing.admission_operations.estimate_usage IS 'The usage the request expects ({event_type, dimensions, metadata}); estimated_amount is its price when admitted. Null for a host-stated estimate.';
+COMMENT ON COLUMN billing.admission_operations.rate_cards IS 'The rate cards that priced estimate_usage, pinned: the capture is priced by them, whatever the catalog says later.';

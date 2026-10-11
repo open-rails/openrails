@@ -10,7 +10,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -36,6 +38,9 @@ type AdmitInput struct {
 	Roles           []uuid.UUID
 	Currency        string
 	EstimatedAmount int64
+	// Usage is the usage estimate the rate cards price into the hold, in
+	// place of EstimatedAmount.
+	Usage *billing.UsageEstimate
 	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
 	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
 	// the host knows it. Zero means the request adds no ongoing rate, which
@@ -73,6 +78,20 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
+	return s.admit(ctx, s.rt.DB, in)
+}
+
+// AdmitTx is Admit inside tx, a transaction from the host's pool: the
+// admission commits with the host's request row, or not at all.
+func (s *Service) AdmitTx(ctx context.Context, tx pgx.Tx, in AdmitInput) (admission *billing.Admission, err error) {
+	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
+		admission, err = s.admit(ctx, txDB, in)
+		return err
+	})
+	return admission, err
+}
+
+func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*billing.Admission, error) {
 	if in.CustomerID.IsZero() {
 		return nil, &spendgate.ValidationError{Param: "customer_id", Message: "customer_id required"}
 	}
@@ -84,15 +103,19 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		if in.InvokerType != billing.InvokerTypeCustomer && in.InvokerType != billing.InvokerTypeDelegated {
 			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be customer or delegated"}
 		}
+		if in.Usage != nil && in.EstimatedAmount != 0 {
+			return nil, &spendgate.ValidationError{Param: "usage", Message: "usage and estimated_amount are exclusive: the rate cards price usage"}
+		}
 	}
 	currency, err := requireCurrency(in.Currency)
 	if err != nil {
 		return nil, err
 	}
 
-	gate := s.spendGate()
-	loader := admission.NewSpendgatePolicyLoader(admission.NewBillingPolicyStore(s.rt.DB), s.rt.FXProvider)
-	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
+	gate := spendgate.New(database)
+	gate.SetClock(s.now)
+	loader := admission.NewSpendgatePolicyLoader(admission.NewBillingPolicyStore(database), s.rt.FXProvider)
+	adm := admission.NewAdmitter(money.NewMoneyService(database, s.rt.Clock), gate, loader).
 		WithFailedUsageCutoff(failedUsageCutoff{s}).
 		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
 		WithDelinquency(s.delinquencyService()).
@@ -117,6 +140,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		Roles:           in.Roles,
 		Currency:        currency,
 		EstimatedAmount: in.EstimatedAmount,
+		Usage:           in.Usage,
 
 		AccrualRateDeltaPerHour: in.AccrualRateDeltaPerHour,
 		Source:                  source,
@@ -132,7 +156,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		CustomerID:          billing.CustomerID(in.CustomerID),
 		Allowed:             dec.Allowed,
 		Currency:            currency,
-		EstimatedAmount:     in.EstimatedAmount,
+		EstimatedAmount:     dec.EstimatedAmount,
 		StartCapacityAmount: startCapacity(dec.AvailableAmount, dec.HeldAmount),
 		Replayed:            dec.Replayed,
 	}

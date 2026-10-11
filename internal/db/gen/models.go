@@ -70,6 +70,10 @@ type BillingAdmissionOperation struct {
 	CapturedAmount *int64
 	CapturedAt     *time.Time
 	ReleasedAt     *time.Time
+	// The usage the request expects ({event_type, dimensions, metadata}); estimated_amount is its price when admitted. Null for a host-stated estimate.
+	EstimateUsage []byte
+	// The rate cards that priced estimate_usage, pinned: the capture is priced by them, whatever the catalog says later.
+	RateCards []byte
 }
 
 // One row per customer and currency with a running charge: when its balance is next looked at (the low line, the run-out or the next 00:00 UTC, whichever is first) and what the last look found. Derived from the running charges and the balance; stopping the last charge deletes the row.
