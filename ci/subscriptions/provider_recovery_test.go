@@ -435,3 +435,35 @@ func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
 	require.Equal(t, 1, refunds)
 	require.Equal(t, 1, e.providerAttempts())
 }
+
+// A customer's cancel while the account's provider book is held (here by an
+// unresolved financial finding) is refused for a retry, not failed: 503
+// service_unavailable, the membership unchanged. Once the finding is resolved
+// the same cancel goes through.
+func TestCustomerCancelWaitsForProviderRecovery(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, rail, embedded)
+			_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
+				SELECT id, 'pull.charge.missing', 'held-charge', 'high', 'reconcile_required', $2, $3 FROM billing.merchants WHERE slug = $1`), w.slug, w.psp[rail].UUID(), rail)
+			require.NoError(t, err)
+			cancel := func() (int, map[string]any) {
+				return e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
+			}
+			status, body := cancel()
+			require.Equal(t, http.StatusServiceUnavailable, status, "%v", body)
+			require.Equal(t, "service_unavailable", errorCode(body))
+			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
+			require.Nil(t, w.subscription(embedded, e.sub).CanceledAt)
+
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.reconciliation_findings SET status = 'fixed', resolution = 'admin_fixed', resolved_at = now() WHERE subject_key = 'held-charge'`))
+			require.NoError(t, err)
+			status, body = cancel()
+			require.Equal(t, http.StatusOK, status, "%v", body)
+			require.NotNil(t, w.subscription(embedded, e.sub).CanceledAt)
+		})
+	}
+}
