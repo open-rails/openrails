@@ -67,13 +67,15 @@ type NotificationData struct {
 
 	// A usage order's billing and collection (order_due, order_overdue,
 	// payment_method_failed, payment_method_update_required,
-	// order_collection_stopped); OrderID names it.
-	AmountDue      *int64     `json:"amount_due,omitempty,string"`
-	DueAt          *time.Time `json:"due_at,omitempty"`
-	FailureCode    string     `json:"failure_code,omitempty"`
-	FailureReason  string     `json:"failure_reason,omitempty"`
-	DeclineOutcome string     `json:"decline_outcome,omitempty"`
-	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
+	// order_collection_stopped); OrderID names it. CollectionMethod, on
+	// order_due, is whether the card on file is charged or the customer pays.
+	AmountDue        *int64                  `json:"amount_due,omitempty,string"`
+	DueAt            *time.Time              `json:"due_at,omitempty"`
+	CollectionMethod InvoiceCollectionMethod `json:"collection_method,omitempty"`
+	FailureCode      string                  `json:"failure_code,omitempty"`
+	FailureReason    string                  `json:"failure_reason,omitempty"`
+	DeclineOutcome   string                  `json:"decline_outcome,omitempty"`
+	NextAttemptAt    *time.Time              `json:"next_attempt_at,omitempty"`
 
 	// Rail context on payment_method_failed.
 	Rail               string `json:"rail,omitempty"`

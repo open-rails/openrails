@@ -176,6 +176,9 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		}
 		return s.emailService.SendPremiumEnded(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID(), reason)
 	case models.NotificationPaymentMethodFailed:
+		if !notification.Data.OrderID.IsZero() {
+			return s.emailService.SendNotice(ctx, notification)
+		}
 		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
 	case models.NotificationUsageCharged:
 		return s.emailService.SendUsageCharged(ctx, notification)
@@ -190,9 +193,16 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		return nil
 	case models.NotificationPaymentMethodUpdateRequired:
 		// Bucket 2: charging stopped, access retained, customer must act.
+		if !notification.Data.OrderID.IsZero() {
+			return s.emailService.SendNotice(ctx, notification)
+		}
 		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
 	case models.NotificationPaymentAuthenticationRequired:
 		return s.emailService.SendPaymentAuthenticationRequired(ctx, notification)
+	case models.NotificationOrderDue, models.NotificationOrderOverdue, models.NotificationOrderCollectionStopped,
+		models.NotificationAccountDelinquent, models.NotificationAccountDelinquencyClosed,
+		models.NotificationSubscriptionRepriceScheduled, models.NotificationSubscriptionPlanChangeScheduled:
+		return s.emailService.SendNotice(ctx, notification)
 	default:
 		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")
 		return nil

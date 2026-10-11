@@ -174,6 +174,62 @@ func (s *EmailService) SendPaymentMethodUpdateRequired(ctx context.Context, user
 	return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
+// SendNotice emails a notice rendered from its own data: a usage order's,
+// arrears delinquency's, or a scheduled price change's.
+func (s *EmailService) SendNotice(ctx context.Context, n *models.NotificationQueue) error {
+	if !s.IsEnabled() {
+		return nil
+	}
+	username, email, err := s.getUserEmail(ctx, n.CustomerID.String())
+	if errors.Is(err, errUserEmailUnavailable) {
+		log.WithContext(ctx).WithField("event_type", n.EventType).Debug("email unavailable - skipping notice email")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	store, billingURL := s.storeName(ctx), s.cancelURL(ctx)
+	var content EmailContent
+	switch n.EventType {
+	case models.NotificationOrderDue:
+		content = RenderOrderDueEmail(store, billingURL, username, n.Data)
+	case models.NotificationOrderOverdue:
+		content = RenderOrderOverdueEmail(store, billingURL, username, n.Data)
+	case models.NotificationPaymentMethodFailed:
+		content = RenderOrderCardFailedEmail(store, billingURL, username, n.Data)
+	case models.NotificationPaymentMethodUpdateRequired:
+		content = RenderOrderCardUpdateEmail(store, billingURL, username, n.Data)
+	case models.NotificationOrderCollectionStopped:
+		content = RenderOrderCollectionStoppedEmail(store, billingURL, username, n.Data)
+	case models.NotificationAccountDelinquent:
+		content = RenderAccountDelinquentEmail(store, billingURL, username, n.Data)
+	case models.NotificationAccountDelinquencyClosed:
+		content = RenderAccountDelinquencyClearedEmail(store, username)
+	case models.NotificationSubscriptionRepriceScheduled, models.NotificationSubscriptionPlanChangeScheduled:
+		content = RenderPriceChangeEmail(store, billingURL, username, s.priceProductName(ctx, n.Data.FromPriceID), n.Data)
+	default:
+		return fmt.Errorf("no notice email for %s", n.EventType)
+	}
+	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
+}
+
+// priceProductName is the display name of a price's product; "" when it
+// cannot be read.
+func (s *EmailService) priceProductName(ctx context.Context, id billing.PriceID) string {
+	if s.priceService == nil || s.productService == nil || id.IsZero() {
+		return ""
+	}
+	price, err := s.priceService.GetByID(ctx, id.UUID())
+	if err != nil {
+		return ""
+	}
+	product, err := s.productService.GetByID(ctx, price.ProductID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(product.DisplayName)
+}
+
 // SendPaymentAuthenticationRequired asks the customer to confirm a renewal's
 // payment their bank wants authenticated, on the merchant's site.
 func (s *EmailService) SendPaymentAuthenticationRequired(ctx context.Context, notification *models.NotificationQueue) error {
