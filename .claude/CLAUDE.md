@@ -70,6 +70,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   never a currency in a field name.
 - A double-entry ledger is the source of truth for money; a separate grant ledger tracks
   credit lots. FX is forbidden inside the ledger (no cross-currency transfers).
+- Every provider money boundary has a test pinning the exact value sent on the wire
+  (micros, cents or major units), beside a typed conversion.
 
 ## Rails and PSPs
 - TERMINOLOGY (frozen): a **rail** is the gateway KIND (nmi/ccbill/stripe/solana — the
@@ -151,6 +153,11 @@ through `host-four`; these are placeholders, not customer or repository names.
   `cost_qualifications` and `cost_observations`. A `checkout_attempts` row (`chk_`) is a
   provider attempt; a `checkout_sessions` row (`ocs_`) is what a browser pays.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
+- User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
+  Hard deletes only for privacy erasure and derived or short-lived rows.
+- Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
+  caches (FX rates) live in Redis, or in process memory without Redis; never in Postgres.
+  Several instances need Redis.
 
 ## Layer altitude
 - A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen`
@@ -158,11 +165,21 @@ through `host-four`; these are placeholders, not customer or repository names.
   module. Handlers may call `gen` for orchestration-free reads. Never add a wrapper just
   to "complete" a layer.
 
+## Engineering rules
+- Background work scales with activity, not records: watermarks, indexed due work and
+  push. No routine sweep over every row.
+- No evidence, no action: OpenRails never cancels, revokes or deletes on uncertain data;
+  a state it cannot confirm is `unknown`, and `unknown` keeps access.
+- Libraries never read the environment; only binaries and config loaders do. Environment
+  variables are configuration and secrets, never logic gates.
+
 ## Trackers (issues)
 - The tracker is the separate `open-rails/tracker` repository. OpenRails issues are one
   file each: active `openrails/<id>.md`, parked `openrails/future/<id>.md`, completed
   `openrails/completed/<id>.md`. `openrails/README.md` owns the shared `next_id` counter.
 - CONCURRENT-EDIT SAFE: only edit the issue you own and its index entries.
+- Standing product rules are in the tracker's `openrails/specs/principles.md`; designs live
+  in tracker issues, which are the source of truth.
 
 ## Docs
 - `docs/` is public documentation for integrators and operators; design history lives in
