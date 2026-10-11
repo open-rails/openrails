@@ -24,7 +24,7 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 			product["display_name"] = "Duration contract"
 		}
 		var receipt billing.CatalogApplicationReceipt
-		status := w.staffCall(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
+		status := w.staffCall(http.MethodPost, "/v1/admin/catalog/apply", map[string]any{
 			"schema_version": 1, "products": map[string]any{key: product},
 		}, &receipt)
 		require.Equal(t, http.StatusOK, status, "%+v", receipt)
@@ -56,7 +56,7 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	}
 	// The YAML HTTP entry point shares the normalized JSON replay identity.
 	yaml := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Duration contract\n    prices:\n      mixed:\n        currency: USD\n        unit_amount: 10000000\n        access_duration: 72 hours\n        billing_interval: 30 days\n", key)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/admin/catalog/applications", strings.NewReader(yaml))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/admin/catalog/apply", strings.NewReader(yaml))
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/yaml")
 	request.Header.Set("Authorization", "Bearer "+w.auth.token(t, "staff"))
@@ -141,7 +141,7 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 		{"auto_renew": false},
 	} {
 		invalid["currency"], invalid["unit_amount"] = "USD", "1000000"
-		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
+		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/apply", map[string]any{
 			"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"invalid": invalid}}},
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)

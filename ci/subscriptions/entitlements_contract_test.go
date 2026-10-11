@@ -48,7 +48,7 @@ products:
 	initial, err := w.client[embedded].ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	var replay billing.CatalogApplicationReceipt
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/admin/catalog/apply", map[string]any{
 		"schema_version": 1, "products": map[string]any{key: map[string]any{
 			"display_name": "Opaque access", "entitlements": []string{" private key ", "premium", "post:101"},
 		}},

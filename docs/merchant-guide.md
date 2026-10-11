@@ -26,7 +26,7 @@ retires an entry, and `prune: true` opts into archiving omitted products and pri
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
-The API is `POST /v1/admin/catalog/applications`, and the in-process client
+The API is `POST /v1/admin/catalog/apply`, and the in-process client
 method is `ApplyCatalog`. The operator CLI (`openrails apply-catalog`) applies the
 same document with local authority. No application ID or expected revision is
 written by the caller.

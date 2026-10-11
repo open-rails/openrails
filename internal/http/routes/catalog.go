@@ -32,7 +32,7 @@ var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: needOffers, Name: "ListOffers",
 		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
-	{Method: POST, Path: "/v1/admin/catalog/applications", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate, Sensitive: true,
+	{Method: POST, Path: "/v1/admin/catalog/apply", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate, Sensitive: true,
 		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/admin/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,

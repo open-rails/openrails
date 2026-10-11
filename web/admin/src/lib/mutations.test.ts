@@ -194,7 +194,7 @@ const cases: Case[] = [
         document: JSON.stringify(application),
         force: false,
       }),
-    "POST /admin/catalog/applications",
+    "POST /admin/catalog/apply",
     catalogTree,
     application,
   ],

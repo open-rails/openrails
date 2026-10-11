@@ -124,7 +124,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/psps/refresh":                             admin,
 		"GET /v1/admin/catalog/products":                          catalog,
 		"GET /v1/admin/catalog/prices/{id}/history":               catalog,
-		"POST /v1/admin/catalog/applications":                     catalog,
+		"POST /v1/admin/catalog/apply":                            catalog,
 		"PUT /v1/admin/catalog/meters/{key}":                      catalog,
 		"POST /v1/admin/catalog/product-archives":                 catalog,
 		"GET /v1/admin/orders":                                    read,
@@ -187,7 +187,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	for _, key := range []string{"GET /admin/catalog/meters", "GET /admin/catalog/products", "GET /admin/price-migrations", "POST /admin/price-migrations/preview"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
-	for _, key := range []string{"POST /admin/catalog/applications", "PATCH /admin/catalog/prices/{id}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/meters/{key}"} {
+	for _, key := range []string{"POST /admin/catalog/apply", "PATCH /admin/catalog/prices/{id}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/meters/{key}"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
 
@@ -195,7 +195,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	// owner edits its catalog whatever a mount publishes.
 	inProcess := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(inProcess, "", rt), rt, HostOptions())
-	require.Contains(t, routeKeys(inProcess), "POST /admin/catalog/applications")
+	require.Contains(t, routeKeys(inProcess), "POST /admin/catalog/apply")
 }
 
 // Administrative velocity limits apply per operation class after

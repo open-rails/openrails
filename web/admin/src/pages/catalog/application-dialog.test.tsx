@@ -23,7 +23,7 @@ beforeEach(async () => {
   browserEnvironment()
   response = () => receipt()
   requests = await server({
-    "POST /admin/catalog/applications": () => response(),
+    "POST /admin/catalog/apply": () => response(),
   })
   selectMerchant("merchant-one")
   await mount(
@@ -36,7 +36,7 @@ afterEach(unmount)
 const editor = () =>
   document.querySelector<HTMLTextAreaElement>("#catalog-application")!
 const applications = () =>
-  requests.filter((r) => r.path.endsWith("/applications"))
+  requests.filter((r) => r.path.endsWith("/catalog/apply"))
 async function applyDraft() {
   await click("Apply catalog")
   await click("Review batch")

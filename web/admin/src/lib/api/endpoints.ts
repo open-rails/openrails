@@ -534,7 +534,7 @@ export type { CatalogApplicationReceipt } from "./generated/wire"
 // instead of parsing/re-encoding money in the browser. The server deduplicates
 // batches by their canonical content. force overwrites what edits set.
 export const applyCatalog = (document: string, force = false) =>
-  api<CatalogApplicationReceipt>("/admin/catalog/applications", {
+  api<CatalogApplicationReceipt>("/admin/catalog/apply", {
     method: "POST",
     rawBody: document,
     headers: { "Content-Type": "application/yaml" },

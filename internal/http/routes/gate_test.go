@@ -64,7 +64,7 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/alert-webhooks",
 	"POST /v1/admin/billing-archive",
 	"POST /v1/admin/billing-import",
-	"POST /v1/admin/catalog/applications",
+	"POST /v1/admin/catalog/apply",
 	"POST /v1/admin/catalog/prices",
 	"POST /v1/admin/catalog/product-archives",
 	"POST /v1/admin/catalog/products",

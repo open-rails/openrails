@@ -96,7 +96,7 @@ products:
         amount: 4.99 USD
 ```
 
-The JSON body of `POST /v1/merchant/catalog/applications` and the Go
+The JSON body of `POST /v1/admin/catalog/apply` (was `/v1/merchant/catalog/applications`) and the Go
 `catalog.Application` (`Products`, `Prices` and `Meters` are maps) change the
 same way. Plain lists such as `entitlements`, `psps` and `rate_cards` stay lists.
 
@@ -372,6 +372,7 @@ fields (`400 unknown_field`), and every error code is in
 | `GET` and `POST /v1/orders/{id}/solana-pay` needed a Host or header naming the merchant on a server of many | The order names its merchant; a public route no longer answers `merchant_not_found` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | Removed: the meter's rate card prices every customer; `PATCH` the product or price |
+| `/v1/merchant/catalog/applications`, `/v1/admin/catalog/applications` | `POST /v1/admin/catalog/apply` |
 | `/v1/merchant/catalog/revision`, `/v1/admin/catalog/revision` | Removed: an apply's receipt reports the catalog revision; each object carries its own |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |

@@ -25,7 +25,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 	if err := document.Validate(); err != nil {
 		return nil, invalidErr(err.Error())
 	}
-	path := "/v1/admin/catalog/applications"
+	path := "/v1/admin/catalog/apply"
 	if params.Force {
 		path = withQuery(path, url.Values{"force": {"true"}})
 	}
