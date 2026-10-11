@@ -1,4 +1,4 @@
--- parent: 67 sha256:f8429901c74af88f5794886cef10b195af6379bd0f09500213af40dae97d6992
+-- parent: 70 sha256:407e305726f35570d6e3c3a68ff05cf5b11253050c56bdd48404881649d05815
 -- Repair: none-needed The new table and column hold no stored row a check refuses: existing events record no charges, and a metered card's payment term is cleared before its check.
 -- Usage is priced when it is recorded: each meter's period-to-date quantity
 -- per customer prices the next event at the difference it makes, so the
@@ -89,10 +89,6 @@ BEGIN
                   'catalog_rate_cards',
                   'catalog_restore_receipts',
                   'checkout_attempts',
-                  'cost_observations',
-                  'cost_qualifications',
-                  'cost_refusals',
-                  'cost_resolutions',
                   'custodians',
                   'custody_migrations',
                   'customer_delinquency',
@@ -119,8 +115,6 @@ BEGIN
                   'nmi_history_months',
                   'nmi_history_reads',
                   'notifications',
-                  'operation_authorization_extensions',
-                  'operation_authorizations',
                   'order_lines',
                   'orders',
                   'owed_items',
