@@ -1,7 +1,7 @@
 # OpenRails — project guide for Claude
 
 OpenRails is a multi-merchant billing/payments platform (Go). It runs **standalone**
-(hosted SaaS, many merchants) and **embedded** (a host app embeds it for one merchant).
+(hosted SaaS, many merchants) and **embedded** (a host app embeds it and declares its merchants in `Config.Merchants`).
 One merchant ↔ one controlling org (deliberately 1:1). The repo is **source-available** —
 keep secrets and customer/account-specific identifiers OUT of editable committed
 files (code, trackers, this file). Neutral examples in this repository use `host-one`
@@ -31,8 +31,10 @@ through `host-four`; these are placeholders, not customer or repository names.
 - A removed or changed snapshot line is a break. Don't make one without the owner.
 
 ## Public surface
-- The root package is the interface: one `*openrails.Client` from `openrails.New` (in
-  process) or `openrails.NewRemote`, flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
+- The root package is the interface: `openrails.New` (in process) returns the `*Engine`
+  (workers, routes, every declared merchant), and `engine.Merchant(id)` the `*Client` bound
+  to one merchant; over HTTP, `openrails.NewRemoteMerchant` (or `NewRemote` with a credential
+  per merchant) returns the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
   `ctx` first, request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …) and
   typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
@@ -47,17 +49,19 @@ through `host-four`; these are placeholders, not customer or repository names.
   `docs/api/routes.md` / `error-codes.md`.
 - Route groups: public, customer (`/v1/me`) and webhooks are always mounted. The staff
   groups (`Routes.RouteGroups`: `Admin`, `Catalog`, `MerchantConfig`, `Metrics`) are off
-  unless the host turns them on, and each needs its permission in `Routes.Scope`
-  (`Permissions.AdminRead`, plus `AdminUpdate` for admin changes; `Catalog`;
-  `MerchantConfig`; `Metrics`); `Programmatic` (`/v1/app`) admits applications, each
-  route only with its permission (`Orders`, `Entitlements`, `Usage`, `Costs`, `Events`).
+  unless the host turns them on; `Programmatic` (`/v1/app`) admits applications.
   No route registers a merchant or manages a
   team, API keys or the merchant directory: those are `server` Go methods and
   the `openrails` CLI; a hosted product builds its own routes on them.
-- Permissions are `persona:resource:action` (`read`/`manage`), the persona being where
-  they are held: embedded hosts pass their own `root:…` in `Routes.Permissions`
-  (OpenRails names none); the standalone server's are `merchant:…` (the `server`
-  package's `Merchant…` constants). The in-process `Client` checks none.
+- A merchant route acts on the merchant its credential is bound to: its group, the
+  declared `Issuer`, or an OpenRails object. The request names none; anything else is
+  403 `merchant_unresolved`.
+- Permissions are OpenRails' own: `billing.Permission` constants, always the full
+  `persona:resource:action` (`read`/`manage`), listed by `billing.Permissions()`. Each
+  route declares a pair: the gate admits its `merchant:` name in the bound merchant's
+  group or its `root:` name in the Authenticator's root scope (helpers `auth.Root`).
+  Hosts build their roles from the constants and pass none; `Mount` fails for a route
+  neither of whose names the Authenticator knows. The in-process `Client` checks none.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
