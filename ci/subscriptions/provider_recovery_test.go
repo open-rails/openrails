@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,16 +13,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -464,6 +468,63 @@ func TestCustomerCancelWaitsForProviderRecovery(t *testing.T) {
 			status, body = cancel()
 			require.Equal(t, http.StatusOK, status, "%v", body)
 			require.NotNil(t, w.subscription(embedded, e.sub).CanceledAt)
+		})
+	}
+}
+
+// A pull that reads a renewal charge while its collection is still executing
+// leaves the charge to that operation: no missing-charge finding holds the
+// account, the collection records its payment, and the customer's cancel that
+// follows goes through. The providers stamp their charges ten minutes back,
+// past the pull's indexing lag, so the pull sees the charge while the
+// collection still holds it.
+func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			w := prepareWorld(t, 12)
+			past := func() time.Time { return w.clock.Now().Add(-10 * time.Minute) }
+			w.nmi = newNMIFake(past)
+			w.stripe.SetClock(past)
+			w.start()
+			e := enroll(t, w, rail, embedded)
+			e.toFreshPeriodEnd()
+			sub := uuid.MustParse(subUUID(e.sub))
+			held, release := make(chan struct{}), make(chan struct{})
+			var reached, freed sync.Once
+			free := func() { freed.Do(func() { close(release) }) }
+			t.Cleanup(free)
+			remove := failpoint.Set(func(_ context.Context, s failpoint.Site) error {
+				if s.Point != failpoint.AfterProvider || s.Subscription != sub || s.Kind != "subscription_collection" {
+					return nil
+				}
+				reached.Do(func() { close(held) })
+				<-release
+				return nil
+			})
+			defer remove()
+			_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			require.NoError(t, err)
+			select {
+			case <-held:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the renewal never reached the provider")
+			}
+			pull, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				job, err := w.jobs.JobGet(t.Context(), pull)
+				return err == nil && (job.FinalizedAt != nil || job.State == rivertype.JobStateRetryable)
+			}, time.Minute, 50*time.Millisecond, "the pull runs while the collection records its charge")
+			require.Empty(t, w.openFindings("pull.charge.missing"), "the charge is its operation's, not missing")
+
+			free()
+			w.settle()
+			require.Len(t, e.providerLedger(), 2, "one renewal charge")
+			require.Len(t, completed(w.payments(embedded, e.c.id)), 2, "the collection recorded it")
+			status, body := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
+			require.Equal(t, http.StatusOK, status, "%v", body)
 		})
 	}
 }
