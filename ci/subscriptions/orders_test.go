@@ -423,6 +423,36 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	require.NotNil(t, paymentOf(after)["payment_id"], "the money that moved is recorded")
 }
 
+// An order that expires while its payment awaits the customer's
+// authentication closes the challenged payment at Stripe: the PaymentIntent
+// is canceled, nothing is charged, and what the order claimed is free again.
+func TestOrderExpiresWhileAwaitingAuthentication(t *testing.T) {
+	t.Parallel()
+	w := orderWorld(t)
+	life := w.lifetime("orders:expired-challenge", 5_000_000)
+	c := w.newCustomer()
+	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
+	bought := c.order(http.MethodPost, "/orders", "expiring-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(5_000_000), "payment": map[string]any{"payment_method_id": challenged}})
+	require.Equal(t, "requires_action", paymentOf(bought)["status"], "%v", bought.body)
+	pi := paymentOf(bought)["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
+	id := bought.body["id"].(string)
+
+	w.advance(25 * time.Hour)
+	w.expireOrders()
+	require.Equal(t, "expired", c.order(http.MethodGet, "/orders/"+id, "", nil).body["status"])
+	w.until(func() bool {
+		w.promoteOperations()
+		return w.stripe.PaymentIntent(pi)["status"] == "canceled"
+	}, "the expired order's payment is canceled at Stripe")
+	require.Empty(t, w.stripe.ledger(""), "nothing was charged")
+	require.False(t, w.stripe.Authenticate(pi), "a canceled payment cannot be authenticated")
+	w.settle()
+	require.Equal(t, "expired", c.order(http.MethodGet, "/orders/"+id, "", nil).body["status"])
+	require.False(t, c.entitled("orders:expired-challenge"))
+	again := c.order(http.MethodPost, "/orders", "again-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}})
+	require.Equal(t, http.StatusCreated, again.status, "the expired order released its claim: %v", again.body)
+}
+
 // Two concurrent buys of one product: one order claims it, the other is
 // already_owned naming that order.
 func TestOrderConcurrentBuys(t *testing.T) {
