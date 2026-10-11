@@ -91,7 +91,7 @@ func newSolanaPay(t *testing.T) *solanaPay {
 }
 
 // runWorkers runs a runtime's non-River loops (the Solana Pay poller), as a
-// Client.Start runs them for a host; the test stops them on its own.
+// Engine.Start runs them for a host; the test stops them on its own.
 func (p *solanaPay) runWorkers(w *world) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(w.t.Context()))
 	done := make(chan struct{})

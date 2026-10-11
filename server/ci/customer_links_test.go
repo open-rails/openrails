@@ -364,7 +364,7 @@ func TestCustomerLinkFromTheMerchantsSite(t *testing.T) {
 	r = call(t, w.handler, w.shopKey.Secret, http.MethodGet, "/v1/app/customers", "", nil)
 	w.refused(r, http.StatusBadRequest, billing.CodeInvalidQuery, "the lookup names an account")
 
-	got, err := w.srv.Client().ListNetworkCustomers(t.Context(), billing.NetworkCustomerListParams{NetworkAccountID: link.AccountID}, openrails.ForMerchantID(w.shop))
+	got, err := handle(w.t, w.srv, w.shop).ListNetworkCustomers(t.Context(), billing.NetworkCustomerListParams{NetworkAccountID: link.AccountID})
 	require.NoError(t, err)
 	require.Len(t, got.Items, 1, "the Go client finds it too")
 
@@ -417,11 +417,11 @@ func TestCustomerLinkBySigningIn(t *testing.T) {
 // have accepted the network terms.
 func TestCustomerLinkAtCheckout(t *testing.T) {
 	w := newWorld(t)
-	at := openrails.ForMerchantID(w.shop)
+	shop := handle(w.t, w.srv, w.shop)
 	key := "linked-" + uuid.NewString()[:8]
-	product, err := w.srv.Client().CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Course " + key}, at)
+	product, err := shop.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Course " + key})
 	require.NoError(t, err)
-	price, err := w.srv.Client().CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000}, at)
+	price, err := shop.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000})
 	require.NoError(t, err)
 	host := func(host, method, path, bearer string, body any) *httptest.ResponseRecorder {
 		t.Helper()
@@ -577,14 +577,14 @@ func TestCustomerLinkRefusals(t *testing.T) {
 // merchant's NMI PSP and a checkout paid with it.
 func (w *world) subscribe(mid billing.MerchantID, authorization string) billing.SubscriptionID {
 	w.t.Helper()
-	ctx, at := w.t.Context(), openrails.ForMerchantID(mid)
+	ctx, shop := w.t.Context(), handle(w.t, w.srv, mid)
 	hours := 720
 	key := "members-" + uuid.NewString()[:8]
-	product, err := w.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Members", Entitlements: []string{"content:" + key}}, at)
+	product, err := shop.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Members", Entitlements: []string{"content:" + key}})
 	require.NoError(w.t, err)
-	price, err := w.srv.Client().CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-monthly", Currency: "USD", UnitAmount: 9_990_000, BillingIntervalHours: &hours, AccessDurationHours: &hours}, at)
+	price, err := shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-monthly", Currency: "USD", UnitAmount: 9_990_000, BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
-	psps, err := w.srv.Client().ListPSPs(ctx, billing.PSPListParams{}, at)
+	psps, err := shop.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(w.t, err)
 	ok := func(r *httptest.ResponseRecorder) map[string]any {
 		w.t.Helper()
@@ -636,7 +636,7 @@ func TestUnlinkingCustomers(t *testing.T) {
 	require.Equal(t, http.StatusConflict, r.Code, "deleting the account: %s", r.Body.String())
 	require.Contains(t, r.Body.String(), "deletion_refused")
 
-	canceled, err := w.srv.Client().CancelSubscription(ctx, subscription, billing.CancelSubscriptionParams{Reason: "moving on", RevokeAccess: true}, openrails.ForMerchantID(w.shop))
+	canceled, err := handle(w.t, w.srv, w.shop).CancelSubscription(ctx, subscription, billing.CancelSubscriptionParams{Reason: "moving on", RevokeAccess: true})
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 	unlinked, err := w.srv.UnlinkCustomer(ctx, account, link.ID)
@@ -650,7 +650,7 @@ func TestUnlinkingCustomers(t *testing.T) {
 	}
 	customer, _ := w.adminCustomer(w.shopKey, sub)
 	require.Nil(t, customer.Network)
-	subs, err := w.srv.Client().ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: billing.CustomerID(uuid.MustParse(sub))}, openrails.ForMerchantID(w.shop))
+	subs, err := handle(w.t, w.srv, w.shop).ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: billing.CustomerID(uuid.MustParse(sub))})
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1, "the customer keeps its subscriptions")
 	event := w.linkedEvent(w.shopKey, billing.HostEventCustomerNetworkUnlinked, sub)

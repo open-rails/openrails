@@ -61,14 +61,25 @@ func (f *fixture) config() openrails.Config {
 	}
 }
 
-func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
+// runtime is an embedded host's engine declaring merchant slug, closed at
+// cleanup, and that merchant's handle.
+func (f *fixture) runtime(t *testing.T, slug string) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+	return f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+}
+
+// boot builds an engine, closed at cleanup, and the handle of the merchant
+// cfg declares.
+func (f *fixture) boot(t *testing.T, cfg openrails.Config, deps openrails.Deps) (*openrails.Engine, *openrails.Client) {
+	t.Helper()
+	bill, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	return client
+	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
+	shop, err := bill.MerchantBySlug(cfg.Merchant.Slug)
+	require.NoError(t, err)
+	return bill, shop
 }
 
 // adminGroups turns on the admin group alone.
@@ -82,8 +93,8 @@ func (c rescueClock) NowOrNil() *time.Time { return &c.at }
 
 const transitKey = "e2e-solana"
 
-// probe runs the client's readiness probe called name.
-func probe(t *testing.T, rt *openrails.Client, name string) error {
+// probe runs the engine's readiness probe called name.
+func probe(t *testing.T, rt *openrails.Engine, name string) error {
 	t.Helper()
 	for _, p := range rt.Probes() {
 		if p.Name == name {

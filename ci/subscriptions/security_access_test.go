@@ -291,7 +291,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 			return
 		}
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		client := rt
+		client, err := rt.MerchantBySlug(slug)
+		require.NoError(t, err)
 		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", Entitlements: []string{"content:live"}})
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
@@ -310,7 +311,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], w.auth, psps)
-		cfg := publicConfig(t, r.client)
+		cfg := publicConfig(t, r.rt)
 		found := false
 		for _, psp := range cfg.Payment.PSPs {
 			if psp.Rail == "nmi" {

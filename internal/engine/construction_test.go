@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Every refusal below happens before bootstrap: the configs carry no database,
@@ -71,26 +70,28 @@ func TestEmbeddedDefaults(t *testing.T) {
 	require.Nil(t, cfg.Captcha)
 }
 
-// Host transactions run under the engine's merchant; a caller context pinned
-// to another merchant is a conflict, never a re-scope.
-func TestHostTransactionsBindEngineMerchant(t *testing.T) {
+// MerchantBySlug's lookup: only the slug Config declares names the configured
+// merchant, and an engine that declares none names nothing.
+func TestDeclaredMerchant(t *testing.T) {
 	appRuntime := &app.Runtime{Config: &config.Config{}}
-	e := &Engine{App: &app.App{Runtime: appRuntime}}
-	_, err := e.bind(context.Background())
-	require.ErrorContains(t, err, "no merchant is bound")
+	e := &Engine{App: &app.App{Runtime: appRuntime}, merchant: config.MerchantDeclaration{Slug: "Shop"}}
+	_, ok := e.DeclaredMerchant("shop")
+	require.False(t, ok, "not provisioned yet")
 
-	bound, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
+	bound := billing.MerchantID(uuid.New())
 	appRuntime.SetConfiguredMerchant(bound)
-	ctx, err := e.bind(context.Background())
-	require.NoError(t, err)
-	got, ok := merchant.FromContext(ctx)
-	require.True(t, ok)
-	require.Equal(t, bound, got)
-
-	_, err = e.bind(merchant.WithID(context.Background(), bound))
-	require.NoError(t, err)
-	_, err = e.bind(merchant.WithID(context.Background(), other))
-	require.ErrorIs(t, err, billing.ErrConflict)
+	for _, slug := range []string{"shop", " SHOP "} {
+		got, ok := e.DeclaredMerchant(slug)
+		require.True(t, ok, slug)
+		require.Equal(t, bound, got)
+	}
+	for _, slug := range []string{"", "other", bound.String()} {
+		_, ok := e.DeclaredMerchant(slug)
+		require.False(t, ok, slug)
+	}
+	e.merchant = config.MerchantDeclaration{}
+	_, ok = e.DeclaredMerchant("")
+	require.False(t, ok, "an engine declaring no merchant")
 }
 
 // Startup catalogs are ordinary partial batches, with a private copy retained

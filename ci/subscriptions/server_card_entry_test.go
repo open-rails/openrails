@@ -134,7 +134,7 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := tc.world(t)
-			config := publicConfig(t, w.client[embedded])
+			config := publicConfig(t, w.rt)
 			for _, psp := range config.Payment.PSPs {
 				if psp.Rail != "nmi" {
 					continue

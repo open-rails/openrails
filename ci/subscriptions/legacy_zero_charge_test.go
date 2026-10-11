@@ -301,7 +301,7 @@ func (w *world) promoteUntil(done <-chan struct{}, what string) {
 // replica is a second process of the same deployment: its own runtime,
 // River fleet and HTTP server over the same database and providers.
 type replica struct {
-	rt     *openrails.Client
+	rt     *openrails.Engine
 	jobs   *river.Client[pgx.Tx]
 	server *httptest.Server
 }

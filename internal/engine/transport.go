@@ -2,28 +2,32 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// InprocessBaseURL is the synthetic base of the embedded client. `.invalid`
+// InprocessBaseURL is the synthetic base of an in-process handle. `.invalid`
 // (RFC 2606) never resolves, so a request that bypassed the in-process
 // transport fails instead of leaking onto the network.
 const InprocessBaseURL = "http://openrails.invalid"
 
-// Transport is the in-process transport the embedded Client is built on, and
-// the bearer that carries the engine's own merchant-owner authority over it.
-func (e *Engine) Transport() (http.RoundTripper, string) {
+// NewClient builds the openrails.Client handle for merchant over an
+// in-process transport (inprocess.NewTransport). The root package sets it;
+// operator tooling inside the module asserts the result to *openrails.Client.
+var NewClient func(transport http.RoundTripper, merchant billing.MerchantID) any
+
+// Transport is the in-process transport the engine's handles call through:
+// each call acts as the host at the handle's merchant, read live from the
+// directory.
+func (e *Engine) Transport() http.RoundTripper {
 	rt := e.App.Runtime
 	// Mounted at the first call, so what a host adds to the runtime after
 	// New (a server's customer network) is served.
@@ -31,9 +35,23 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 		e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
 		e.handler.ServeHTTP(w, r)
 	})
-	return inprocess.NewTransportWithResolver(served, rt.ConfiguredMerchant, func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, request, rt.Merchants, rt.ConfiguredMerchant(), "")
-	})
+	return inprocess.NewTransport(served, directory{rt})
+}
+
+// LiveMerchant is id's directory row while it is a live merchant:
+// billing.ErrMerchantUnresolved otherwise.
+func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
+	return inprocess.Live(ctx, directory{e.App.Runtime}, id)
+}
+
+// directory reads the runtime's merchant directory as it is at each call.
+type directory struct{ rt *app.Runtime }
+
+func (d directory) Get(ctx context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
+	if d.rt == nil || d.rt.Merchants == nil {
+		return nil, merchants.ErrMerchantNotFound
+	}
+	return d.rt.Merchants.Get(ctx, id)
 }
 
 // newServiceHandler mounts the routes the Go client calls (the staff and
@@ -48,14 +66,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	opts.Capabilities = &caps
 	httproutes.RegisterStaffRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
-	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
-	})
 	// The same body cap the HTTP mounts apply: an oversized request gets the
 	// same 413 envelope in every deployment.
 	return middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler())
-}
-
-func merchantMismatchMsg(bound, pinned billing.MerchantID) string {
-	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }

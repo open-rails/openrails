@@ -218,18 +218,20 @@ products:
 	require.NoError(t, err)
 	_, _, err = directory.RegisterForRestore(t.Context(), mid, "catalog-provisioned")
 	require.NoError(t, err)
-	client, err := openrails.New(t.Context(), openrails.Config{
+	bill, err := openrails.New(t.Context(), openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: provisionedSchema, RiverSchema: provisionedSchema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: "catalog-provisioned", DisplayName: "Catalog destination", PSPs: w.psps},
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
+	client, err := bill.MerchantBySlug("catalog-provisioned")
+	require.NoError(t, err)
 	var provisionedPSP uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))
 	require.Equal(t, w.psp["nmi"].UUID(), provisionedPSP)
 	_, err = client.UpdateCustomer(t.Context(), buyer.cid(), billing.UpdateCustomerParams{})
 	require.NoError(t, err)
-	require.NoError(t, client.Close(t.Context()))
+	require.NoError(t, bill.Close(t.Context()))
 	_, err = merchantarchive.RestoreCatalog(t.Context(), provisioned, mid, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err, "publicly provisioned prerequisites must satisfy restore")
 

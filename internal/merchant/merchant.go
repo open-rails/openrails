@@ -19,6 +19,11 @@ import (
 // authorizes the credential for that merchant, and only then is it pinned.
 const SelectorHeader = "OpenRails-Merchant"
 
+// BoundHeader is the response header naming the merchant a merchant-bound
+// request acted on (`OpenRails-Bound-Merchant: <uuid>`). The Go client checks
+// it against its handle's merchant.
+const BoundHeader = "OpenRails-Bound-Merchant"
+
 // selectorIDPrefix marks the id form of a selector; a slug never contains ":".
 const selectorIDPrefix = "id:"
 

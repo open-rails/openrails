@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -75,9 +74,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	slug := "credit-purchase-" + uuid.NewString()[:8]
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
 	ctx := t.Context()
 	face := int64(2_000_000)
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "api-credit", DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", Amount: &face}})
@@ -87,7 +84,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	buy := func() {
 		t.Helper()
-		session, err := sell(t, client, sale{customer: customer, price: price.ID})
+		session, err := sell(t, bill, client, sale{customer: customer, price: price.ID})
 		require.NoError(t, err)
 		_, err = session.pay("pay-1", redirect("https://e2e.test/success"))
 		require.NoError(t, err)
@@ -97,7 +94,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	_, err = client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{CreditGrant: catalog.Value(catalog.CreditGrantSpec{Currency: "USD", Amount: &face, ExpiresAfterDays: &days})})
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}}))
 	deliver := func(raw []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, "acct_e2e", "whsec_e2e", raw, time.Now())

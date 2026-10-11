@@ -1,4 +1,4 @@
-// Package openrailsgin registers an OpenRails Client's routes natively in Gin.
+// Package openrailsgin registers an OpenRails Engine's routes natively in Gin.
 package openrailsgin
 
 import (
@@ -11,22 +11,22 @@ import (
 )
 
 // Mount registers one native route per method and path of the routes
-// selection selects (Client.Routes) on the root engine: the API under
-// selection.Prefix, e.g. Mount(r, client, openrails.Routes{Auth: auth,
+// selection selects (Engine.Routes) on the root engine: the API under
+// selection.Prefix, e.g. Mount(r, engine, openrails.Routes{Auth: auth,
 // Prefix: "/billing"}) serves /billing/v1/*. Gin keeps its own 404, 405 and
 // redirect policy.
-func Mount(router *gin.Engine, client *openrails.Client, selection openrails.Routes) error {
-	if client == nil || router == nil {
-		return fmt.Errorf("openrailsgin: Mount requires a Gin engine and a client")
+func Mount(router *gin.Engine, engine *openrails.Engine, selection openrails.Routes) error {
+	if engine == nil || router == nil {
+		return fmt.Errorf("openrailsgin: Mount requires a Gin engine and an OpenRails engine")
 	}
-	routes, err := client.Routes(selection)
+	routes, err := engine.Routes(selection)
 	if err != nil {
 		return err
 	}
 	return MountRoutes(router, routes)
 }
 
-// MountRoutes registers a host-selected subset of Client.Routes on the root
+// MountRoutes registers a host-selected subset of Engine.Routes on the root
 // engine. Hosts can own an individual route without duplicating path or HEAD
 // handling.
 func MountRoutes(router *gin.Engine, routes []openrails.Route) error {

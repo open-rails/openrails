@@ -37,7 +37,7 @@ func TestVaultLogsInAtItsAuthMount(t *testing.T) {
 	roleID, secretID := role.Data["role_id"].(string), secret.Data["secret_id"].(string)
 
 	f := newFixture(t)
-	connect := func(authMount string) (*openrails.Client, error) {
+	connect := func(authMount string) (*openrails.Engine, error) {
 		cfg := f.config()
 		cfg.Merchant = openrails.MerchantDeclaration{Slug: "vault-" + uuid.NewString()[:8], DisplayName: "Vault"}
 		cfg.Vault = &openrails.VaultConfig{Address: v.Addr, AuthMethod: "approle", RoleID: roleID, SecretID: secretID, AuthMount: authMount}

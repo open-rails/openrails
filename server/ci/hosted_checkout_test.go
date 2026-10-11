@@ -74,9 +74,9 @@ func newCheckoutShop(t *testing.T) *checkoutShop {
 	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("checkout"), DisplayName: "Checkout Shop"})
 	require.NoError(t, err)
 	s.mid = entry.MerchantID
-	psp, err := s.srv.Client().CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: "e2e-" + uuid.NewString()[:8],
+	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: "e2e-" + uuid.NewString()[:8],
 		Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
-		Credentials: map[string]string{"security_key": "e2e-key", "webhook_signing_secret": "e2e-nmi-webhook"}}, openrails.ForMerchantID(s.mid))
+		Credentials: map[string]string{"security_key": "e2e-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 	require.NoError(t, err)
 	s.psp = psp.ID
 	issuer := newIssuerKey(t, "https://backend-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
@@ -94,10 +94,10 @@ func newCheckoutShop(t *testing.T) *checkoutShop {
 func (s *checkoutShop) price() billing.PriceID {
 	s.t.Helper()
 	key := "item-" + uuid.NewString()[:8]
-	at := openrails.ForMerchantID(s.mid)
-	product, err := s.srv.Client().CreateProduct(s.t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Course " + key}, at)
+	shop := handle(s.t, s.srv, s.mid)
+	product, err := shop.CreateProduct(s.t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Course " + key})
 	require.NoError(s.t, err)
-	price, err := s.srv.Client().CreatePrice(s.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000}, at)
+	price, err := shop.CreatePrice(s.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000})
 	require.NoError(s.t, err)
 	return price.ID
 }
@@ -209,7 +209,7 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	}
 
 	// A host serving no checkout refuses one.
-	embedded := newFixture(t).runtime(t, uniqueName("embedded"))
+	_, embedded := newFixture(t).runtime(t, uniqueName("embedded"))
 	_, err := embedded.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
 		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID(uuid.New())}}, Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}})
 	var refusal *billing.StatusError
@@ -272,7 +272,7 @@ func TestHostedCheckoutSecretOpensOneOrder(t *testing.T) {
 	// Past its expiry the URL stops working; the order expires with it.
 	s.clock.Advance(hostedcheckout.DefaultLifetime + time.Second)
 	refused(t, s.call(checkoutHost, http.MethodGet, "/v1/me/orders/"+orderA.ID.String(), secretA, "", nil), http.StatusGone, "checkout_expired")
-	rt := engine.Graph(s.srv.Client()).Runtime
+	rt := engine.Graph(s.srv.Engine()).Runtime
 	n, err := rt.Orders.ExpireDue(merchant.WithID(t.Context(), s.mid), 10)
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
@@ -290,7 +290,7 @@ func TestHostedCheckoutPays(t *testing.T) {
 	paid := s.pay(secret, first, map[string]any{"token": s.gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), "psp_id": s.psp})
 	require.Equal(t, http.StatusOK, paid.Code, paid.Body.String())
 	require.Equal(t, billing.OrderComplete, decode[billing.Order](t, paid).Status)
-	events, err := s.srv.Client().ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderCompleted}, openrails.ForMerchantID(s.mid))
+	events, err := handle(s.t, s.srv, s.mid).ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, first.ID, events.Items[0].Order.OrderID)

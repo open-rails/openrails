@@ -96,7 +96,7 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	}
 	require.Positive(t, app)
 	require.Zero(t, scim)
-	_, err = w.rt.SCIMHandler()
+	_, err = w.client[embedded].SCIMHandler()
 	require.Error(t, err)
 }
 

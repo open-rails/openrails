@@ -15,9 +15,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
@@ -67,111 +66,91 @@ func TestEngineContextKeepsOnlyCancellation(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
-// Only the per-client private capability mints the host principal; any other
-// credential reaches the handler unauthenticated, and no host identity leaks.
-func TestTransportAuthority(t *testing.T) {
-	bound := billing.MerchantID(uuid.New())
+// fakeDirectory is a directory of rows by id; err fails every read.
+type fakeDirectory struct {
+	rows map[billing.MerchantID]*merchants.Merchant
+	err  error
+}
+
+func (d fakeDirectory) Get(_ context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+	if m, ok := d.rows[id]; ok {
+		return m, nil
+	}
+	return nil, merchants.ErrMerchantNotFound
+}
+
+func live(ids ...billing.MerchantID) fakeDirectory {
+	d := fakeDirectory{rows: map[billing.MerchantID]*merchants.Merchant{}}
+	for _, id := range ids {
+		d.rows[id] = &merchants.Merchant{ID: id, Slug: "shop", Status: merchants.StatusActive}
+	}
+	return d
+}
+
+// The host principal is the handle's merchant, named by the private context
+// value alone: no header, ambient pin or host principal of the caller's
+// selects one, and no host value reaches the handler.
+func TestTransportBindsTheHandlesMerchant(t *testing.T) {
+	bound, ambient := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	type observed struct {
 		host     *requestauth.HostPrincipal
 		merchant billing.MerchantID
-		auth     string
 	}
 	var got observed
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Nil(t, r.Context().Value(hostKey{}))
-		got = observed{auth: r.Header.Get("Authorization")}
+		got = observed{}
 		got.host, _ = requestauth.HostPrincipalFromContext(r.Context())
 		got.merchant, _ = merchant.FromContext(r.Context())
 		_, _ = w.Write([]byte("ok"))
-	})
-	transport, capability := NewTransport(handler, func() billing.MerchantID { return bound })
-	other, _ := NewTransport(handler, func() billing.MerchantID { return bound })
-	require.NotEmpty(t, capability)
+	}), live(bound, ambient))
 
-	for _, auth := range []string{"Bearer " + capability, "", "Bearer in-process-host", "Bearer merchant-key", capability} {
-		res, body := roundTrip(t, transport, hostContext(t, bound), http.MethodGet, "/v1/admin/payments", auth)
+	for _, auth := range []string{"", "Bearer merchant-key"} {
+		req, err := http.NewRequestWithContext(WithMerchant(hostContext(t, ambient), bound), http.MethodGet, "http://openrails.invalid/v1/admin/payments", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("OpenRails-Merchant", "id:"+ambient.String())
+		res, err := transport.RoundTrip(req)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, res.StatusCode)
-		require.Equal(t, "ok", body)
-		require.Equal(t, auth, got.auth, "explicit credentials pass through for normal verification")
-		require.Equal(t, bound, got.merchant)
-		if auth == "Bearer "+capability {
-			require.NotNil(t, got.host)
-			require.Equal(t, bound, got.host.MerchantID)
-		} else {
-			require.Nil(t, got.host)
-		}
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, observed{host: &requestauth.HostPrincipal{MerchantID: bound, MerchantSlug: "shop"}, merchant: bound}, got)
 	}
-	_, _ = roundTrip(t, other, hostContext(t, bound), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
-	require.Nil(t, got.host, "a capability is scoped to the client that minted it")
 }
 
-// An unbound client, a conflicting pin, or a runtime rebound after the client
-// was built are refused with a 409 envelope before any handler runs.
-func TestTransportRefusesMerchantMismatch(t *testing.T) {
-	original := billing.MerchantID(uuid.New())
-	bound := original
+// A call that names no merchant, or one that is unknown or deleted, is
+// refused with 403 merchant_unresolved before any handler runs; a directory
+// that cannot be read is a transport failure, never a refusal.
+func TestTransportRefusesAMerchantThatIsNotLive(t *testing.T) {
+	known, deleted := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
+	directory := live(known)
+	directory.rows[deleted] = &merchants.Merchant{ID: deleted, Slug: "gone", Status: merchants.StatusDeleted}
 	called := 0
-	transport, capability := NewTransport(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called++ }), func() billing.MerchantID { return bound })
-	for _, tc := range []struct {
-		name   string
-		pin    billing.MerchantID
-		rebind billing.MerchantID
-	}{
-		{"unbound client", billing.MerchantID{}, original},
-		{"conflicting pin", billing.MerchantID(uuid.New()), original},
-		{"runtime rebound", original, billing.MerchantID(uuid.New())},
+	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called++ })
+	transport := NewTransport(handler, directory)
+	for name, ctx := range map[string]context.Context{
+		"no handle merchant": hostContext(t, known),
+		"zero":               WithMerchant(t.Context(), billing.MerchantID{}),
+		"unknown":            WithMerchant(t.Context(), billing.MerchantID(uuid.New())),
+		"deleted":            WithMerchant(t.Context(), deleted),
 	} {
-		bound = tc.rebind
-		res, body := roundTrip(t, transport, hostContext(t, tc.pin), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
-		require.Equal(t, http.StatusConflict, res.StatusCode, tc.name)
+		res, body := roundTrip(t, transport, ctx, http.MethodGet, "/v1/admin/payments", "")
+		require.Equal(t, http.StatusForbidden, res.StatusCode, name)
 		var envelope api.ErrorResponse
 		require.NoError(t, json.Unmarshal([]byte(body), &envelope))
-		require.NotEmpty(t, envelope.Error.Code, tc.name)
+		require.Equal(t, billing.CodeMerchantUnresolved, envelope.Error.Code, name)
 	}
 	require.Zero(t, called)
-	bound = billing.MerchantID{}
-	res, _ := roundTrip(t, transport, hostContext(t, original), http.MethodGet, "/v1/admin/payments", "")
-	require.Equal(t, http.StatusOK, res.StatusCode, "a not-yet-bound runtime accepts the client's own binding")
-}
 
-func TestTransportExplicitSelector(t *testing.T) {
-	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}
-	bound := billing.MerchantID{}
-	var resolveErr error
-	var host *requestauth.HostPrincipal
-	var selected billingauth.Target
-	var sawAmbient bool
-	transport, capability := NewTransportWithResolver(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		host, _ = requestauth.HostPrincipalFromContext(r.Context())
-		selected, _ = merchanttarget.FromContext(r.Context())
-	}), func() billing.MerchantID { return bound }, func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		sawAmbient = ctx.Value(hostKey{}) != nil || r.Context().Value(hostKey{}) != nil
-		return target, resolveErr
-	})
-
-	res, _ := roundTrip(t, transport, hostContext(t, billing.MerchantID(uuid.New())), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
-	require.Equal(t, http.StatusOK, res.StatusCode, "the resolved target replaces the client's construction pin")
-	require.False(t, sawAmbient, "resolution never sees host context values")
-	require.Equal(t, target, selected)
-	require.Equal(t, target.MerchantID, host.MerchantID)
-	require.Equal(t, "store", host.MerchantSlug)
-
-	for _, tc := range []struct {
-		err    error
-		bound  billing.MerchantID
-		status int
-		code   string
-	}{
-		{billingauth.Refusal(billing.CodeMerchantNotFound), billing.MerchantID{}, http.StatusNotFound, "merchant_not_found"},
-		{errors.New("directory down"), billing.MerchantID{}, http.StatusConflict, ""},
-		{nil, billing.MerchantID(uuid.New()), http.StatusConflict, ""},
-	} {
-		resolveErr, bound, selected = tc.err, tc.bound, billingauth.Target{}
-		res, body := roundTrip(t, transport, t.Context(), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
-		require.Equal(t, tc.status, res.StatusCode)
-		require.Contains(t, body, tc.code)
-		require.Zero(t, selected, "refused selections never reach the handler")
-	}
+	down := errors.New("directory down")
+	req, err := http.NewRequestWithContext(WithMerchant(t.Context(), known), http.MethodGet, "http://openrails.invalid/v1/admin/payments", nil)
+	require.NoError(t, err)
+	_, err = NewTransport(handler, fakeDirectory{err: down}).RoundTrip(req)
+	require.ErrorIs(t, err, down)
+	require.Zero(t, called)
 }
 
 // Archive exports stream through a pipe: the book is never buffered, and a
@@ -180,12 +159,12 @@ func TestArchiveResponsesStream(t *testing.T) {
 	bound := billing.MerchantID(uuid.New())
 	book := bytes.Repeat([]byte("archive-data\n"), 200000)
 	done := make(chan error, 1)
-	transport, _ := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, err := w.Write(book)
 		done <- err
-	}), func() billing.MerchantID { return bound })
-	req, _ := http.NewRequestWithContext(merchant.WithID(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/admin/billing-archive", nil)
+	}), live(bound))
+	req, _ := http.NewRequestWithContext(WithMerchant(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/admin/billing-archive", nil)
 	res, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	select {
@@ -255,17 +234,17 @@ func TestArchiveResponsesStream(t *testing.T) {
 // A canceled upload must unblock a handler still waiting for request bytes.
 func TestUploadCancellationClosesRequestBody(t *testing.T) {
 	bound := billing.MerchantID(uuid.New())
-	ctx, cancel := context.WithCancel(merchant.WithID(t.Context(), bound))
+	ctx, cancel := context.WithCancel(WithMerchant(t.Context(), bound))
 	defer cancel()
 	reader, writer := io.Pipe()
 	defer writer.Close()
 	started, finished := make(chan struct{}), make(chan error, 1)
-	transport, _ := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		_, err := io.Copy(io.Discard, r.Body)
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
-	}), func() billing.MerchantID { return bound })
+	}), live(bound))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/admin/billing-archive", reader)
 	require.NoError(t, err)
 	returned := make(chan struct{})

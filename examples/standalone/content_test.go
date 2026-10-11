@@ -323,7 +323,7 @@ func startStack(t *testing.T) *stack {
 
 	// The app.
 	s := settings{
-		PublicURL: appURL, OpenRailsURL: serverURL, Merchant: "onlydemo", ClientSecret: clientSecret,
+		PublicURL: appURL, OpenRailsURL: serverURL, ClientSecret: clientSecret,
 		SCIMInterval: time.Second, SMTP: smtp.Server{Host: mail.Host, Port: mail.Port, From: "OnlyDemo <hello@onlydemo.example>"},
 	}
 	db, err := pgxpool.New(ctx, freshDatabase(t, dsn))
@@ -331,10 +331,7 @@ func startStack(t *testing.T) *stack {
 	t.Cleanup(db.Close)
 	ak, bill, r, err := newApp(ctx, db, s, testMediaKey)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		bill.Close(context.Background())
-		_ = ak.Close(context.Background())
-	})
+	t.Cleanup(func() { _ = ak.Close(context.Background()) })
 	app := &httptest.Server{Listener: appListener, Config: &http.Server{Handler: r}}
 	app.Start()
 	t.Cleanup(app.Close)

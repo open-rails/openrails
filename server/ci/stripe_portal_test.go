@@ -88,7 +88,7 @@ merchants:
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.Equal(t, billing.CodeResourceNotFound, errorCode(t, w), "served, but the customer has no Stripe customer yet")
 
-	psps, err := cp.Client().ListPSPs(t.Context(), billing.PSPListParams{}, openrails.ForMerchantID(m.ID))
+	psps, err := handle(t, cp, m.ID).ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 	card := stripe.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})

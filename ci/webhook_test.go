@@ -4,7 +4,6 @@ package ci_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -145,9 +144,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
 		}},
 	}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:          "webhook-product-" + uuid.NewString()[:8],
@@ -163,7 +160,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	session, err := sell(t, client, sale{customer: cid(userID), price: price.ID})
+	session, err := sell(t, bill, client, sale{customer: cid(userID), price: price.ID})
 	require.NoError(t, err)
 	_, err = session.pay("pay-1", redirect("https://example.test/success"))
 	require.NoError(t, err)
@@ -173,7 +170,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.Equal(t, strings.TrimPrefix(session.attempt(f).String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}}))
 	now := time.Now()
 	completed := stripeWebhookBody(t, "evt_e2e_completed", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataOrderID, now.Unix())
 	status, body := postSignedStripeWebhook(t, mux, account, secret, completed, now)

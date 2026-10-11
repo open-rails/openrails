@@ -61,12 +61,17 @@ func (w *world) catalogRevision() int64 {
 
 // bootDeclared constructs one more process for w's merchant, outside the
 // harness, so New's own outcome stays observable.
-func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Client, error) {
-	return openrails.New(ctx, openrails.Config{
+func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Engine, *openrails.Client, error) {
+	bill, err := openrails.New(ctx, openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
 		Catalog:  catalog,
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
+	if err != nil {
+		return nil, nil, err
+	}
+	shop, err := bill.MerchantBySlug(w.slug)
+	return bill, shop, err
 }
 
 // A startup batch shares the catalog with edits: staff edit over HTTP while the
@@ -120,12 +125,12 @@ func TestDeclaredCatalog(t *testing.T) {
 	w.stop()
 	revision = w.catalogRevision()
 	start := make(chan struct{})
-	clients, errs := make([]*openrails.Client, 2), make([]error, 2)
+	clients, errs := make([]*openrails.Engine, 2), make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range clients {
 		wg.Go(func() {
 			<-start
-			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "HTTP edit", 14_000_000))
+			clients[i], _, errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "HTTP edit", 14_000_000))
 		})
 	}
 	close(start)
@@ -164,18 +169,18 @@ products:
 	revision := w.catalogRevision()
 
 	w.stripe.PriceReadsUnavailable(true)
-	client, err := w.bootDeclared(t.Context(), params)
+	bill, client, err := w.bootDeclared(t.Context(), params)
 	require.NoError(t, err, "a provider outage never fails New")
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	_, err = riverkit.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 1}}}, client.RiverJobs())
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
+	_, err = riverkit.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 1}}}, bill.RiverJobs())
 	require.NoError(t, err)
-	require.ErrorContains(t, client.Ready(t.Context()), "declared catalog not applied yet")
+	require.ErrorContains(t, bill.Ready(t.Context()), "declared catalog not applied yet")
 	_, err = priceByKey(t.Context(), client, key, key+"-monthly")
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	require.Equal(t, revision, w.catalogRevision())
 
 	w.stripe.PriceReadsUnavailable(false)
-	require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return bill.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond)
 	price, err := priceByKey(t.Context(), client, key, key+"-monthly")
 	require.NoError(t, err)
 	require.Equal(t, "price_legacy_"+key, price.PSPs["stripe"].IDs["price_id"])
@@ -215,9 +220,9 @@ products:
 	time.AfterFunc(time.Second, func() { _ = holder.Rollback(context.Background()); close(released) })
 	t.Cleanup(func() { <-released }) // before the cleanup's own Rollback above
 
-	client, err := w.bootDeclared(t.Context(), params)
+	bill, client, err := w.bootDeclared(t.Context(), params)
 	require.NoError(t, err, "a PSP another replica holds delays New, never fails it")
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
 	_, err = priceByKey(t.Context(), client, key, key+"-monthly")
 	require.NoError(t, err)
 }

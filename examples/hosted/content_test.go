@@ -254,7 +254,7 @@ func startStack(t *testing.T) *stack {
 	smtpPort, err := strconv.Atoi(cmpOr(env("SMTP_PORT"), "1025"))
 	require.NoError(t, err)
 	s := settings{
-		PublicURL: env("APP_URL"), APIHost: env("API_HOST"), Merchant: cmpOr(env("MERCHANT"), "onlydemo"),
+		PublicURL: env("APP_URL"), APIHost: env("API_HOST"),
 		Resource: env("RESOURCE"), ServiceToken: env("SERVICE_TOKEN"), Directory: env("DIRECTORY"), SCIMInterval: time.Second, KeysPath: env("KEYS"),
 		SMTP: smtp.Server{Host: inbox.Hostname(), Port: smtpPort, From: "OnlyDemo <hello@onlydemo.example>"},
 	}
@@ -263,10 +263,7 @@ func startStack(t *testing.T) *stack {
 	t.Cleanup(db.Close)
 	ak, bill, r, err := newApp(ctx, db, s, testMediaKey)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		bill.Close(context.Background())
-		_ = ak.Close(context.Background())
-	})
+	t.Cleanup(func() { _ = ak.Close(context.Background()) })
 	listener, err := net.Listen("tcp", appURL.Host)
 	require.NoError(t, err)
 	app := &httptest.Server{Listener: listener, Config: &http.Server{Handler: r}}

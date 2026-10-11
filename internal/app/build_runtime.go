@@ -414,7 +414,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, fmt.Errorf("initialize merchant configuration: %w", err)
 	}
 
-	// Jobs queue in RiverSchema from the start; Client.Start binds the fleet
+	// Jobs queue in RiverSchema from the start; Engine.Start binds the fleet
 	// that runs them there, OpenRails' own or the host's.
 	runtime.SetRiverSchema(config.RiverSchemaName(cfg))
 	if err := runtime.BindRiverProducer(ctx); err != nil {

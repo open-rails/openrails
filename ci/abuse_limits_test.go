@@ -48,7 +48,7 @@ func (staffMember) CheckRecentSignIn(context.Context) error { return nil }
 // serves buyers, and its staff on another mount.
 type abuseInstances struct {
 	f       *fixture
-	clients []*openrails.Client
+	engines []*openrails.Engine
 	public  []http.Handler
 	staff   []http.Handler
 	admin   staffMember
@@ -63,13 +63,11 @@ func newAbuseInstances(t *testing.T, n int, redis *openrails.RedisConfig) *abuse
 	cfg.Redis = redis
 	in := &abuseInstances{f: f, admin: staffMember(uuid.NewString())}
 	for range n {
-		client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+		bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		buyers, admins := http.NewServeMux(), http.NewServeMux()
-		require.NoError(t, openrailshttp.Mount(buyers, client, openrails.Routes{Auth: authtest.Deny{}}))
-		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: in.admin, RouteGroups: staffGroups}))
-		in.clients = append(in.clients, client)
+		require.NoError(t, openrailshttp.Mount(buyers, bill, openrails.Routes{Auth: authtest.Deny{}}))
+		require.NoError(t, openrailshttp.Mount(admins, bill, openrails.Routes{Auth: in.admin, RouteGroups: staffGroups}))
+		in.engines = append(in.engines, bill)
 		in.public, in.staff = append(in.public, buyers), append(in.staff, admins)
 	}
 	return in
@@ -183,9 +181,9 @@ func TestOneInstanceWithoutRedisEnforcesAbuseLimits(t *testing.T) {
 // an address challenged on one holds on the others.
 func TestInstancesWithRedisShareAbuseLimits(t *testing.T) {
 	in := newAbuseInstances(t, 2, &openrails.RedisConfig{Addr: e2eRedis(t)})
-	for i, client := range in.clients {
-		require.NoError(t, client.Start(t.Context()))
-		require.Eventually(t, func() bool { dep, ok := redisState(t, client); return ok && dep.Available }, 15*time.Second, 50*time.Millisecond, "instance %d reaches Redis", i)
+	for i, bill := range in.engines {
+		require.NoError(t, bill.Start(t.Context()))
+		require.Eventually(t, func() bool { dep, ok := redisState(t, bill); return ok && dep.Available }, 15*time.Second, 50*time.Millisecond, "instance %d reaches Redis", i)
 	}
 	in.limitsHold(t, true)
 	in.noPostgres(t)
@@ -198,13 +196,13 @@ func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
 	start := time.Now()
 	in := newAbuseInstances(t, 2, &openrails.RedisConfig{Addr: "127.0.0.1:1"})
 	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on Redis")
-	for i, client := range in.clients {
-		require.NoError(t, client.Start(t.Context()))
-		require.Eventually(t, func() bool { return degraded(t, client) }, 15*time.Second, 50*time.Millisecond, "instance %d is ready with Redis degraded", i)
+	for i, bill := range in.engines {
+		require.NoError(t, bill.Start(t.Context()))
+		require.Eventually(t, func() bool { return degraded(t, bill) }, 15*time.Second, 50*time.Millisecond, "instance %d is ready with Redis degraded", i)
 	}
 	in.limitsHold(t, false)
 	in.noPostgres(t)
-	for i, client := range in.clients {
-		require.Positive(t, engine.Graph(client).Runtime.AbuseState.Fallbacks(), "instance %d counts what memory took", i)
+	for i, bill := range in.engines {
+		require.Positive(t, engine.Graph(bill).Runtime.AbuseState.Fallbacks(), "instance %d counts what memory took", i)
 	}
 }

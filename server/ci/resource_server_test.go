@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
 )
@@ -293,7 +292,7 @@ func TestCustomersArePinnedToTheirIssuer(t *testing.T) {
 
 	native := newAccount(t, srv)
 	verifyEmail(t, srv, native.ID)
-	merchantClient, err := srv.Client().With(openrails.WithMerchantID(shopID))
+	merchantClient, err := srv.Engine().Merchant(shopID)
 	require.NoError(t, err)
 	_, err = merchantClient.UpdateCustomer(ctx, billing.CustomerID(uuid.MustParse(native.ID)), billing.UpdateCustomerParams{})
 	require.NoError(t, err, "the host's Go API makes its own user a customer")

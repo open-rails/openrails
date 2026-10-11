@@ -51,11 +51,13 @@ type Engine struct {
 	closeErr  error
 }
 
-// Of returns the engine behind an openrails.Client, nil for a remote one. The
-// root package sets it; operator tooling inside the module uses it.
+// Of returns the engine behind an openrails.Engine or one of its handles, nil
+// for a remote handle. The root package sets it; operator tooling inside the
+// module uses it.
 var Of func(client any) *Engine
 
-// Graph returns the application graph behind an embedded openrails.Client.
+// Graph returns the application graph behind an openrails.Engine or one of
+// its handles.
 func Graph(client any) *app.App {
 	if Of == nil {
 		return nil
@@ -243,6 +245,16 @@ func validRiverSchema(schema string) error {
 // ConfiguredMerchant is the declared merchant's ID, zero when unbound.
 func (e *Engine) ConfiguredMerchant() billing.MerchantID { return e.App.Runtime.ConfiguredMerchant() }
 
+// DeclaredMerchant is the merchant Config declares under slug.
+func (e *Engine) DeclaredMerchant(slug string) (billing.MerchantID, bool) {
+	slug = billing.NormalizeMerchantSlug(slug)
+	id := e.ConfiguredMerchant()
+	if slug == "" || id.IsZero() || slug != billing.NormalizeMerchantSlug(e.merchant.Slug) {
+		return billing.MerchantID{}, false
+	}
+	return id, true
+}
+
 // Start starts OpenRails' workers on goroutines Close stops: River, the loops
 // that run outside it and the progress monitor. fleet nil runs OpenRails' own
 // River client; otherwise fleet is the host's, composed with RiverJobs, and
@@ -252,7 +264,7 @@ func (e *Engine) Start(ctx context.Context, fleet *river.Client[pgx.Tx]) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return fmt.Errorf("openrails: client is closed")
+		return fmt.Errorf("openrails: engine is closed")
 	}
 	if e.stopWorkers != nil {
 		return fmt.Errorf("openrails: already started")

@@ -27,24 +27,22 @@ import (
 )
 
 // redisEngine is one engine over cfg's Redis, serving buyers.
-func redisEngine(t *testing.T, f *fixture, rc openrails.RedisConfig) (*openrails.Client, http.Handler) {
+func redisEngine(t *testing.T, f *fixture, rc openrails.RedisConfig) (*openrails.Engine, http.Handler) {
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "redis-" + uuid.NewString()[:8], DisplayName: "Redis"}
 	cfg.Redis = &rc
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	require.NoError(t, client.Start(t.Context()))
+	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+	require.NoError(t, bill.Start(t.Context()))
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
-	return client, mux
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}}))
+	return bill, mux
 }
 
 // redisState is the redis entry readiness reports while the engine is
 // ready; ok is false otherwise.
-func redisState(t *testing.T, client *openrails.Client) (dep app.ReadinessDependency, ok bool) {
-	deps, err := engine.Graph(client).Runtime.Ready(t.Context())
+func redisState(t *testing.T, bill *openrails.Engine) (dep app.ReadinessDependency, ok bool) {
+	deps, err := engine.Graph(bill).Runtime.Ready(t.Context())
 	if err != nil {
 		return dep, false
 	}
@@ -57,8 +55,8 @@ func redisState(t *testing.T, client *openrails.Client) (dep app.ReadinessDepend
 }
 
 // degraded reports an unavailable Redis on a ready engine.
-func degraded(t *testing.T, client *openrails.Client) bool {
-	dep, ok := redisState(t, client)
+func degraded(t *testing.T, bill *openrails.Engine) bool {
+	dep, ok := redisState(t, bill)
 	return ok && dep.Optional && !dep.Available && dep.Err != nil
 }
 

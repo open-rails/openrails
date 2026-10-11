@@ -39,7 +39,9 @@ const (
 )
 
 type Runtime struct {
-	Auth    *authkit.Client
+	Auth *authkit.Client
+	// Engine is the embedded engine; Client is its merchant's handle.
+	Engine  *openrails.Engine
 	Client  *openrails.Client
 	Catalog Catalog
 	// Solana is the loopback chain the armed Solana PSP reads.
@@ -107,20 +109,24 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		// checkout limit would soon refuse.
 		RateLimitsDisabled: true,
 	}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
+	engine, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
 	defer func() {
 		if err != nil {
-			_ = client.Close(context.Background())
+			_ = engine.Close(context.Background())
 		}
 	}()
-	if _, err := client.DeclarePSP(ctx, client.MerchantID(), billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
+	client, err := engine.MerchantBySlug(MerchantSlug)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
 		return nil, err
 	}
 	if workers {
-		if err := client.Start(ctx); err != nil {
+		if err := engine.Start(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -131,7 +137,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
-	return &Runtime{Auth: auth, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
+	return &Runtime{Auth: auth, Engine: engine, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
 }
 
 // billingRoutes is the billing surface the storefront and account pages call.
@@ -165,11 +171,11 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 	}
 	routes := billingRoutes
 	routes.Auth = r.Auth.Authenticator() // says who a request is; OpenRails decides what to admit
-	return openrailshttp.Mount(mux, r.Client, routes)
+	return openrailshttp.Mount(mux, r.Engine, routes)
 }
 
 func (r *Runtime) Close() {
-	_ = r.Client.Close(context.Background())
+	_ = r.Engine.Close(context.Background())
 	_ = r.Auth.Close(context.Background())
 	r.Solana.Close()
 	r.NMI.Close()

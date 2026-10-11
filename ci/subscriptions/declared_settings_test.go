@@ -31,7 +31,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
 	ctx := t.Context()
-	boot := func(slug string, settings billing.MerchantSettings, vault *vaulttest.Vault) (*openrails.Client, error) {
+	boot := func(slug string, settings billing.MerchantSettings, vault *vaulttest.Vault) (*openrails.Engine, *openrails.Client, error) {
 		cfg := openrails.Config{
 			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: settings},
@@ -39,7 +39,12 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		if vault != nil {
 			cfg.Vault = vault.Config()
 		}
-		return openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
+		bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
+		if err != nil {
+			return nil, nil, err
+		}
+		shop, err := bill.MerchantBySlug(slug)
+		return bill, shop, err
 	}
 	merchants := func() int {
 		var n int
@@ -47,9 +52,9 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		return n
 	}
 
-	_, err := boot("refused", billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "missing"}}}, nil)
+	_, _, err := boot("refused", billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "missing"}}}, nil)
 	require.ErrorContains(t, err, "undeclared policy")
-	_, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}}, nil)
+	_, _, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}}, nil)
 	require.ErrorContains(t, err, "profile.logo_url")
 	require.Zero(t, merchants(), "a refused declaration creates no merchant")
 
@@ -65,9 +70,9 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000, Currency: "USD"}},
 	}
 	slug := "declared-" + uuid.NewString()[:8]
-	client, err := boot(slug, declared, nil)
+	bill, client, err := boot(slug, declared, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
 
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
@@ -91,10 +96,10 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
 	})
 	require.Equal(t, "method_not_allowed", codeOf(err), "%v", err)
-	require.NoError(t, client.Close(ctx))
-	again, err := boot(slug, declared, nil)
+	require.NoError(t, bill.Close(ctx))
+	restarted, again, err := boot(slug, declared, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = again.Close(context.Background()) })
+	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
 	after, err := again.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 3, *after.Settings.ArrearsGraceDays, "the declaration carried the change")
@@ -109,25 +114,27 @@ func TestVaultMerchantSettings(t *testing.T) {
 	vault := vaulttest.New(t)
 	w := prepareWorld(t, 12)
 	ctx := t.Context()
-	boot := func(declared openrails.MerchantDeclaration) (*openrails.Client, error) {
-		client, err := openrails.New(ctx, openrails.Config{
+	boot := func(declared openrails.MerchantDeclaration) (*openrails.Engine, *openrails.Client, error) {
+		bill, err := openrails.New(ctx, openrails.Config{
 			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchant: declared, Vault: vault.Config(),
 		}, openrails.Deps{Postgres: w.pool, Clock: w.clock})
-		if err == nil {
-			t.Cleanup(func() { _ = client.Close(context.Background()) })
+		if err != nil {
+			return nil, nil, err
 		}
-		return client, err
+		t.Cleanup(func() { _ = bill.Close(context.Background()) })
+		shop, err := bill.MerchantBySlug(declared.Slug)
+		return bill, shop, err
 	}
 	slug := "vaulted-" + uuid.NewString()[:8]
 	grace := 7
-	_, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
+	_, _, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
 	require.ErrorContains(t, err, `merchant "`+slug+`" declares display_name, settings`)
 	var merchants int
 	require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.merchants`)).Scan(&merchants))
 	require.Zero(t, merchants, "a refused file creates no merchant")
 
-	client, err := boot(openrails.MerchantDeclaration{Slug: slug})
+	bill, client, err := boot(openrails.MerchantDeclaration{Slug: slug})
 	require.NoError(t, err)
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
@@ -150,8 +157,8 @@ func TestVaultMerchantSettings(t *testing.T) {
 	require.Equal(t, "revision_mismatch", codeOf(err), "%v", err)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
-	require.NoError(t, client.Close(ctx))
-	again, err := boot(openrails.MerchantDeclaration{Slug: slug})
+	require.NoError(t, bill.Close(ctx))
+	_, again, err := boot(openrails.MerchantDeclaration{Slug: slug})
 	require.NoError(t, err)
 	after, err := again.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)

@@ -63,15 +63,15 @@ func networkList[T any](w *world, path, authorization string, limit int) []T {
 // bills it on its own and OpenRails follows.
 func (w *world) providerRun(mid billing.MerchantID, customer billing.CustomerID) billing.SubscriptionID {
 	w.t.Helper()
-	ctx, at := w.t.Context(), openrails.ForMerchantID(mid)
+	ctx, shop := w.t.Context(), handle(w.t, w.srv, mid)
 	plan := "legacy_plan_" + uuid.NewString()[:8]
 	gateway := w.gatewayOf(mid)
 	gateway.AddPlan(nmimock.Plan{ID: plan, Name: "Legacy " + plan, Amount: "9.99", Days: 30})
-	product, err := w.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy"}, at)
+	product, err := shop.CreateProduct(ctx, billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy"})
 	require.NoError(w.t, err)
 	hours := 720
-	price, err := w.srv.Client().CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", Currency: "USD", UnitAmount: 9_990_000,
-		BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}}, at)
+	price, err := shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", Currency: "USD", UnitAmount: 9_990_000,
+		BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(w.t, err)
 	end := w.now().UTC().Add(20 * 24 * time.Hour).Truncate(24 * time.Hour)
 	start := end.Add(-time.Duration(hours) * time.Hour)
@@ -80,17 +80,17 @@ func (w *world) providerRun(mid billing.MerchantID, customer billing.CustomerID)
 	paid := gateway.AddScheduleSale(schedule, start)
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: gateway.Vault(vault).BillingID}
 	brand, last4, month, year := "visa", "1111", 12, 2035
-	result, err := w.srv.Client().ImportBilling(ctx, billing.DeclaredBilling{AsOf: w.now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
+	result, err := shop.ImportBilling(ctx, billing.DeclaredBilling{AsOf: w.now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 		Customers: []billing.DeclaredCustomer{{Customer: customer}},
 		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customer, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef,
 			Card: &billing.CardDetails{Brand: &brand, Last4: &last4, ExpMonth: &month, ExpYear: &year}}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + schedule, Customer: customer, Price: price.ID, Rail: "nmi", RailSubscriptionID: schedule,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
 		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: schedule, TransactionID: paid.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
-	}, at)
+	})
 	require.NoError(w.t, err)
 	require.Len(w.t, result.Imported, 1, "%+v", result)
-	subs, err := w.srv.Client().ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: customer}, at)
+	subs, err := shop.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: customer})
 	require.NoError(w.t, err)
 	for _, sub := range subs.Items {
 		if sub.RailSubscriptionID != nil && *sub.RailSubscriptionID == schedule {
@@ -104,13 +104,13 @@ func (w *world) providerRun(mid billing.MerchantID, customer billing.CustomerID)
 // order is an open order the merchant's backend made for its customer.
 func (w *world) order(mid billing.MerchantID, customer billing.CustomerID) billing.OrderID {
 	w.t.Helper()
-	ctx, at := w.t.Context(), openrails.ForMerchantID(mid)
+	ctx, shop := w.t.Context(), handle(w.t, w.srv, mid)
 	key := "item-" + uuid.NewString()[:8]
-	product, err := w.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Item " + key}, at)
+	product, err := shop.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Item " + key})
 	require.NoError(w.t, err)
-	price, err := w.srv.Client().CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000}, at)
+	price, err := shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000})
 	require.NoError(w.t, err)
-	o, err := w.srv.Client().CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: uuid.NewString()}, at)
+	o, err := shop.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: uuid.NewString()})
 	require.NoError(w.t, err)
 	return o.ID
 }
@@ -279,7 +279,7 @@ func TestNetworkPortal(t *testing.T) {
 		billing.CodeResourceNotFound, "another account's link")
 
 	// A card added at the shop, and one subscription moved to it.
-	psps, err := w.srv.Client().ListPSPs(ctx, billing.PSPListParams{}, openrails.ForMerchantID(w.shop))
+	psps, err := handle(w.t, w.srv, w.shop).ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
 	card := map[string]any{"psp_id": psps.Items[0].ID, "token": w.gatewayOf(w.shop).Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454"}),
 		"billing_details": map[string]any{"name": "Network Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
@@ -292,7 +292,7 @@ func TestNetworkPortal(t *testing.T) {
 	moved := decode[billing.Subscription](t, r)
 	require.NotNil(t, moved.PaymentMethodID)
 	require.Equal(t, added.ID, *moved.PaymentMethodID)
-	untouched, err := w.srv.Client().GetSubscription(ctx, martPlan, openrails.ForMerchantID(w.mart))
+	untouched, err := handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
 	require.NotNil(t, untouched.PaymentMethodID)
 	require.NotEqual(t, added.ID, *untouched.PaymentMethodID, "the mart's subscription keeps its card")
@@ -352,7 +352,7 @@ func TestNetworkPortal(t *testing.T) {
 			require.Equal(t, billing.MandateEndCustomerRevoked, *m.EndReason)
 		}
 	}
-	plan, err := w.srv.Client().GetSubscription(ctx, martPlan, openrails.ForMerchantID(w.mart))
+	plan, err := handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionActive, plan.Status, "revoking cancels nothing")
 	var event *billing.PaymentAuthorityHostEvent
@@ -377,7 +377,7 @@ func TestNetworkPortal(t *testing.T) {
 	require.Eventually(t, func() bool { return len(w.martGateway.Ledger(bobVault)) == 2 }, 30*time.Second, 100*time.Millisecond,
 		"the pass charges a renewal under an active agreement")
 	require.Len(t, w.martGateway.Ledger(martVault), 1, "no charge without the customer's authority")
-	plan, err = w.srv.Client().GetSubscription(ctx, martPlan, openrails.ForMerchantID(w.mart))
+	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionAwaitingMethod, plan.Status, "parked for the customer, not canceled")
 	require.True(t, plan.CurrentPeriodEndsAt.Equal(end), "the unpaid period is not granted")
@@ -394,7 +394,7 @@ func TestNetworkPortal(t *testing.T) {
 	require.False(t, renewal.ID.IsZero(), "the portal lists the open renewal")
 	require.Equal(t, billing.OrderOpen, renewal.Status)
 	w.due(clock, w.mart, end.Add(7*24*time.Hour))
-	plan, err = w.srv.Client().GetSubscription(ctx, martPlan, openrails.ForMerchantID(w.mart))
+	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionAwaitingMethod, plan.Status, "still waiting a week on")
 	r = w.network(http.MethodGet, mart+"/orders/"+renewal.ID.String(), session, nil)
@@ -412,7 +412,7 @@ func TestNetworkPortal(t *testing.T) {
 			idempotencyKey: uuid.NewString(), body: string(raw)})
 	}
 	w.refused(pay(*untouched.PaymentMethodID), http.StatusPaymentRequired, billing.CodePaymentMethodStale, "the revoked card")
-	psps, err = w.srv.Client().ListPSPs(ctx, billing.PSPListParams{}, openrails.ForMerchantID(w.mart))
+	psps, err = handle(w.t, w.srv, w.mart).ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
 	fresh := map[string]any{"psp_id": psps.Items[0].ID, "token": w.martGateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4000"}),
 		"billing_details": map[string]any{"name": "Network Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
@@ -423,7 +423,7 @@ func TestNetworkPortal(t *testing.T) {
 	paid := decode[billing.Order](t, r)
 	require.Equal(t, billing.OrderComplete, paid.Status)
 	require.Len(t, w.martGateway.Ledger(martVault), 1, "nothing on the revoked card")
-	plan, err = w.srv.Client().GetSubscription(ctx, martPlan, openrails.ForMerchantID(w.mart))
+	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionActive, plan.Status)
 	require.True(t, plan.CurrentPeriodEndsAt.Equal(paid.Renewal.PeriodEndsAt), "the paid period is granted")

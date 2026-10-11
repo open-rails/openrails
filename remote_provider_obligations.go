@@ -14,7 +14,7 @@ import (
 
 // These commands commit in OpenRails-owned transactions in every deployment.
 // They cannot join a host database transaction; an embedding host that must
-// commit its provider operation atomically uses the embedded Client's Tx
+// commit its provider operation atomically uses its engine handle's Tx
 // operations. Every command answers the operation.
 
 // providerOperationPath is an operation's path beneath root (the staff

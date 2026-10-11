@@ -35,7 +35,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 20_000_000})
 	require.NoError(t, err)
-	psp, err := client.DeclarePSP(ctx, client.MerchantID(), billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
+	psp, err := client.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
 	require.NoError(t, err)
 
 	newCustomer := func() billing.CustomerID {

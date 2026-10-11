@@ -45,7 +45,6 @@ import (
 type settings struct {
 	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
 	APIHost      string        // the merchant's API host on the platform
-	Merchant     string        // the merchant's name on the platform
 	Resource     string        // the platform's resource identifier: its tokens' aud
 	ServiceToken string        // the console's service token for this app, bound to its registration
 	Directory    string        // the platform's directory for this app's users (its AuthKit's /directory/scim/v2)
@@ -103,15 +102,12 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 	}, authkit.Deps{Postgres: db, Email: email})
 }
 
-// newBilling is the remote client: the same *openrails.Client as embedded,
-// over HTTP to the merchant's API host, with the service token. Like
-// embedded, catalog.yaml is the truth: each distinct document applies once.
+// newBilling is the remote handle: the same *openrails.Client as embedded,
+// over HTTP to the merchant's API host, with the service token, which is the
+// merchant's: every call acts on that merchant. Like embedded, catalog.yaml
+// is the truth: each distinct document applies once.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
-	bill, err := openrails.NewRemote(s.APIHost,
-		openrails.WithAPIKey(s.ServiceToken),
-		openrails.WithDefaultMerchant(s.Merchant), // the token is the merchant's, but each call still names it
-		openrails.WithTimeout(5*time.Second),
-	)
+	bill, err := openrails.NewRemoteMerchant(s.APIHost, openrails.RemoteCredential{APIKey: s.ServiceToken})
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +161,6 @@ func run(ctx context.Context) error {
 	s := settings{
 		PublicURL:    cmp.Or(os.Getenv("PUBLIC_URL"), "http://localhost:8080"),
 		APIHost:      os.Getenv("OPENRAILS_API_HOST"),
-		Merchant:     cmp.Or(os.Getenv("OPENRAILS_MERCHANT"), "onlydemo"),
 		Resource:     os.Getenv("OPENRAILS_RESOURCE"),
 		ServiceToken: os.Getenv("OPENRAILS_SERVICE_TOKEN"),
 		Directory:    os.Getenv("OPENRAILS_DIRECTORY"),
@@ -191,15 +186,14 @@ func run(ctx context.Context) error {
 		media = make(mediaKey, 32)
 		_, _ = rand.Read(media)
 	}
-	ak, bill, r, err := newApp(ctx, db, s, media)
+	ak, _, r, err := newApp(ctx, db, s, media)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	defer bill.Close(context.WithoutCancel(ctx))
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
-		return bill.Ready(ctx)
+		return nil // newBilling reached the platform: it applied the catalog
 	}
 	addr := cmp.Or(os.Getenv("ADDR"), ":8080")
 	server := &http.Server{Addr: addr, Handler: r, ReadHeaderTimeout: 5 * time.Second}

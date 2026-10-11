@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,15 +33,16 @@ func archiveFixture(t *testing.T, mid billing.MerchantID, customers int) []byte 
 }
 
 // A real book exceeds the 1 MiB JSON cap; both directions stream it with the
-// same credential, merchant assertion and selector as every other operation.
+// same credential and merchant check as every other operation.
 func TestMerchantArchiveStreamsBothDirections(t *testing.T) {
-	mid := billing.MerchantID(uuid.New())
+	mid := testMerchant
 	archive := archiveFixture(t, mid, 7000)
 	require.Greater(t, len(archive), 1<<20)
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, merchantBillingArchivePath, r.URL.Path)
-		require.Equal(t, "Bearer id:"+mid.String(), r.Header.Get("Authorization"))
-		require.Equal(t, "id:"+mid.String(), r.Header.Get(merchant.SelectorHeader))
+		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		require.Empty(t, r.Header.Values(merchant.SelectorHeader))
+		w.Header().Set(merchant.BoundHeader, mid.String())
 		if r.Method == http.MethodGet {
 			require.Equal(t, "application/x-ndjson", r.Header.Get("Accept"))
 			_, _ = w.Write(archive)
@@ -53,18 +53,17 @@ func TestMerchantArchiveStreamsBothDirections(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, bytes.Equal(archive, body), "uploaded archive changed or was truncated")
 		_, _ = fmt.Fprintf(w, `{"merchant_id":%q,"digest":"receipt","rows":"7000","already_imported":false}`, mid.String())
-	}, WithCredentialProvider(targetCredential))
+	})
 	var dst bytes.Buffer
-	require.NoError(t, client.ExportBillingArchive(t.Context(), &dst, ForMerchantID(mid)))
+	require.NoError(t, client.ExportBillingArchive(t.Context(), &dst))
 	require.True(t, bytes.Equal(archive, dst.Bytes()))
-	result, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(dst.Bytes()), ForMerchantID(mid))
+	result, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(dst.Bytes()))
 	require.NoError(t, err)
 	require.Equal(t, billing.BillingArchiveImport{MerchantID: mid, Digest: "receipt", Rows: 7000}, *result)
-	require.Equal(t, "fixture", client.merchantSlug, "per-call selection leaves the default")
 }
 
 func TestMerchantArchiveRefusals(t *testing.T) {
-	mid := billing.MerchantID(uuid.New())
+	mid := testMerchant
 	archive := archiveFixture(t, mid, 1)
 	var calls atomic.Int64
 	var handler atomic.Value
@@ -72,7 +71,7 @@ func TestMerchantArchiveRefusals(t *testing.T) {
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		handler.Load().(http.HandlerFunc)(w, r)
-	}, WithMerchantID(mid))
+	})
 
 	reply(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive[:len(archive)-8]) })
 	require.ErrorIs(t, client.ExportBillingArchive(t.Context(), io.Discard), billing.ErrUnreachable, "a truncated success is not an archive")
@@ -96,11 +95,19 @@ func TestMerchantArchiveRefusals(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrUnreachable, name)
 	}
 
+	// Another merchant's archive is discarded before a byte of it is written.
+	other := billing.MerchantID(uuid.New())
+	reply(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(merchant.BoundHeader, other.String())
+		_, _ = w.Write(archive)
+	})
+	var dst bytes.Buffer
+	var mismatch *BoundMerchantError
+	require.ErrorAs(t, client.ExportBillingArchive(t.Context(), &dst), &mismatch)
+	require.Equal(t, BoundMerchantError{Merchant: mid, Bound: other}, *mismatch)
+	require.Zero(t, dst.Len())
+
 	before := calls.Load()
-	other := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
-	require.ErrorIs(t, client.ExportBillingArchive(other, io.Discard), billing.ErrConflict)
-	_, err = client.ImportBillingArchive(other, bytes.NewReader(archive))
-	require.ErrorIs(t, err, billing.ErrConflict)
 	require.ErrorIs(t, client.ExportBillingArchive(t.Context(), nil), billing.ErrInvalid)
 	_, err = client.ImportBillingArchive(t.Context(), nil)
 	require.ErrorIs(t, err, billing.ErrInvalid)

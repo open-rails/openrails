@@ -56,10 +56,10 @@ func openServer(ctx context.Context, deps openrails.Deps) (*server.Server, *app.
 
 // openEngine builds the engine alone through openrails.New, like any host,
 // for commands that need no control plane.
-func openEngine(ctx context.Context, cfg *config.Config, deps openrails.Deps) (*openrails.Client, *app.App, error) {
-	client, err := openrails.New(ctx, *cfg, deps)
+func openEngine(ctx context.Context, cfg *config.Config, deps openrails.Deps) (*openrails.Engine, *app.App, error) {
+	eng, err := openrails.New(ctx, *cfg, deps)
 	if err != nil {
 		return nil, nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	return client, engine.Graph(client), nil
+	return eng, engine.Graph(eng), nil
 }

@@ -151,7 +151,7 @@ type Deps struct {
 // Server is a standalone OpenRails server.
 type Server struct {
 	cfg     Config
-	client  *openrails.Client
+	engine  *openrails.Engine
 	graph   *app.App
 	pool    *pgxpool.Pool
 	cp      *controlplane.ControlPlane
@@ -193,11 +193,11 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	s := &Server{cfg: cfg}
 	deps.Engine.UserInfo = customerDirectory{s}
-	client, err := openrails.New(ctx, cfg.Engine, deps.Engine)
+	eng, err := openrails.New(ctx, cfg.Engine, deps.Engine)
 	if err != nil {
 		return nil, err
 	}
-	s.client, s.graph = client, engine.Graph(client)
+	s.engine, s.graph = eng, engine.Graph(eng)
 	fail := func(err error) (*Server, error) {
 		_ = s.Close(context.WithoutCancel(ctx))
 		return nil, err
@@ -278,8 +278,9 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	return s, nil
 }
 
-// Client is the engine: the merchant Go API, as on any host.
-func (s *Server) Client() *openrails.Client { return s.client }
+// Engine is the engine, as on any host: Engine().Merchant(id) is the handle
+// of any live merchant, with every merchant-scoped operation.
+func (s *Server) Engine() *openrails.Engine { return s.engine }
 
 // AuthKit is the server's own AuthKit client.
 func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
@@ -307,13 +308,13 @@ func (s *Server) Routes() ([]openrails.Route, error) {
 // RiverJobs is the server's contribution to a host's River fleet: the
 // engine's jobs and AuthKit's. Pass the fleet to Start with
 // openrails.WithRiverClient.
-func (s *Server) RiverJobs() riverhelpers.Contribution { return s.client.RiverJobs() }
+func (s *Server) RiverJobs() riverhelpers.Contribution { return s.engine.RiverJobs() }
 
 // Start starts the background work, AuthKit's jobs included, on the engine's
 // own River or, with openrails.WithRiverClient, the host's fleet. Close stops
 // it.
 func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error {
-	return s.client.Start(ctx, opts...)
+	return s.engine.Start(ctx, opts...)
 }
 
 // Run serves Handler at Config.Addr and runs the background work until ctx
@@ -439,8 +440,8 @@ func shutdown(deadline time.Time, servers ...*http.Server) {
 // server's pool. The host's own pool, Redis and Vault stay open.
 func (s *Server) Close(ctx context.Context) error {
 	s.closeOnce.Do(func() {
-		if s.client != nil {
-			s.closeErr = s.client.Close(ctx)
+		if s.engine != nil {
+			s.closeErr = s.engine.Close(ctx)
 		}
 		if s.cp != nil {
 			s.cp.Close()

@@ -259,6 +259,8 @@ func startApp(t *testing.T) *app {
 	}, openrails.Deps{Postgres: db, UserInfo: ak.UserInfo(), FXTransport: fx.Transport()})
 	require.NoError(t, err)
 	t.Cleanup(func() { bill.Close(context.Background()) })
+	shop, err := bill.MerchantBySlug(merchant.Slug)
+	require.NoError(t, err)
 	require.NoError(t, ak.Start(ctx))
 	require.NoError(t, bill.Start(ctx))
 
@@ -270,7 +272,7 @@ func startApp(t *testing.T) *app {
 		Prefix:      "/billing",
 		RouteGroups: openrails.RouteGroups{Admin: true},
 	}))
-	courseRoutes(r, ak, bill, testMediaKey)
+	courseRoutes(r, ak, shop, testMediaKey)
 	serveApp(r, "web/dist")
 	server := httptest.NewServer(r)
 	t.Cleanup(server.Close)

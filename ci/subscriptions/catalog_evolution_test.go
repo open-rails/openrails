@@ -167,9 +167,9 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	}
 	boot := func(app *catalog.Application) {
 		t.Helper()
-		client, err := w.bootDeclared(t.Context(), app)
+		bill, _, err := w.bootDeclared(t.Context(), app)
 		require.NoError(t, err)
-		require.NoError(t, client.Close(t.Context()))
+		require.NoError(t, bill.Close(t.Context()))
 	}
 	boot(file(1_000_000))
 	c := w.client[remote]
@@ -368,9 +368,9 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 		}}
 	}
 	for _, amount := range []int64{4_000_000, 7_000_000} {
-		client, err := w.bootDeclared(t.Context(), declaration(amount))
+		bill, _, err := w.bootDeclared(t.Context(), declaration(amount))
 		require.NoError(t, err)
-		require.NoError(t, client.Close(t.Context()))
+		require.NoError(t, bill.Close(t.Context()))
 	}
 	c := w.client[embedded]
 	product, err := productByKey(t.Context(), c, "portable")
@@ -449,16 +449,18 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 					require.Equal(t, price.Version, revision, "current archives preserve the exact public version")
 				}
 			}
-			boot := func(app *catalog.Application) *openrails.Client {
+			boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
 				t.Helper()
-				client, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+				bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 					Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps}, Catalog: app,
 				}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 				require.NoError(t, err)
-				t.Cleanup(func() { _ = client.Close(context.Background()) })
-				return client
+				t.Cleanup(func() { _ = bill.Close(context.Background()) })
+				shop, err := bill.MerchantBySlug(w.slug)
+				require.NoError(t, err)
+				return bill, shop
 			}
-			stale := boot(declaration(4_000_000))
+			staleEngine, stale := boot(declaration(4_000_000))
 			still, err := priceByKey(t.Context(), stale, "portable", "purchase")
 			require.NoError(t, err)
 			require.Equal(t, current.ID, still.ID, "an applied hash remains a replay after restore and later API edits")
@@ -468,9 +470,9 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			balance, err := stale.GetBalance(t.Context(), buyer.cid(), "USD")
 			require.NoError(t, err)
 			require.EqualValues(t, 2_000_000, balance.BalanceAmount, "the retained money book is restored with the catalog")
-			require.NoError(t, stale.Close(t.Context()))
+			require.NoError(t, staleEngine.Close(t.Context()))
 			// The restored owners still name the API edits: a new file skips them.
-			next := boot(declaration(8_000_000))
+			nextEngine, next := boot(declaration(8_000_000))
 			price, err := priceByKey(t.Context(), next, "portable", "purchase")
 			require.NoError(t, err)
 			require.Equal(t, current.ID, price.ID, "a restored edit is still the edit's")
@@ -479,7 +481,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			price, err = priceByKey(t.Context(), next, "portable", "purchase")
 			require.NoError(t, err)
 			require.EqualValues(t, 3, price.Version, "new terms allocate after all restored versions")
-			require.NoError(t, next.Close(t.Context()))
+			require.NoError(t, nextEngine.Close(t.Context()))
 		})
 	}
 }

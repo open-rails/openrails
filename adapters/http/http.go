@@ -9,15 +9,15 @@ import (
 	"github.com/open-rails/openrails"
 )
 
-// Mount registers the routes selection selects (Client.Routes) on the root
+// Mount registers the routes selection selects (Engine.Routes) on the root
 // router: a *http.ServeMux, or a Chi root Mux (any router with Chi's
 // Method(string, string, http.Handler)). The API lands under
 // selection.Prefix: openrails.Routes{Prefix: "/billing"} serves /billing/v1/*.
-func Mount(target any, client *openrails.Client, selection openrails.Routes) error {
-	if client == nil {
-		return fmt.Errorf("openrailshttp: Mount requires a client")
+func Mount(target any, engine *openrails.Engine, selection openrails.Routes) error {
+	if engine == nil {
+		return fmt.Errorf("openrailshttp: Mount requires an engine")
 	}
-	routes, err := client.Routes(selection)
+	routes, err := engine.Routes(selection)
 	if err != nil {
 		return err
 	}

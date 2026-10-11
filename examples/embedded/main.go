@@ -52,18 +52,20 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authk
 	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
 }
 
-func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Client, error) {
+// newBilling builds the billing engine and the handle of your merchant: the
+// engine runs and mounts, the handle has every billing operation.
+func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Engine, *openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// What you sell. New applies each distinct catalog once, even across restarts.
 	// Later edits through the Go client remain available and are not undone by a replay.
 	products, err := catalog.ReadFile("catalog.yaml")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	cfg := openrails.Config{
@@ -76,10 +78,20 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
-	return openrails.New(ctx, cfg, openrails.Deps{
+	bill, err := openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,            // the same pool your app uses
 		UserInfo: ak.UserInfo(), // AuthKit's user lookup: each answer is the user's current email, name and username
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	// Your merchant's handle: the Go client your own code calls, in process.
+	shop, err := bill.MerchantBySlug(merchant.Slug)
+	if err != nil {
+		_ = bill.Close(context.WithoutCancel(ctx))
+		return nil, nil, err
+	}
+	return bill, shop, nil
 }
 
 func main() {
@@ -113,7 +125,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	bill, err := newBilling(ctx, db, ak)
+	bill, shop, err := newBilling(ctx, db, ak)
 	if err != nil {
 		return err
 	}
@@ -148,7 +160,7 @@ func run(ctx context.Context) error {
 		media = make(mediaKey, 32)
 		_, _ = rand.Read(media)
 	}
-	courseRoutes(r, ak, bill, media) // the course list, the gate on each course and its media
+	courseRoutes(r, ak, shop, media) // the course list, the gate on each course and its media
 	serveApp(r, "web/dist")          // the React app: its pages, the buy page among them
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {

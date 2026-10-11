@@ -23,7 +23,7 @@ func TestPublicConfigDegradesOnePSP(t *testing.T) {
 	})
 
 	for _, tp := range []topology{embedded} {
-		cfg := publicConfig(t, w.client[tp])
+		cfg := publicConfig(t, w.rt)
 		byRail := map[string]billing.PSPPaymentConfig{}
 		for _, psp := range cfg.Payment.PSPs {
 			byRail[psp.Rail] = psp

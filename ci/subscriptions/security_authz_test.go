@@ -106,7 +106,7 @@ func lastFour(w *world, rail string, entry ledgerEntry) string {
 // multi-merchant host runs them. Its staff are authorized only for itself.
 type rival struct {
 	slug   string
-	rt     *openrails.Client
+	rt     *openrails.Engine
 	server *httptest.Server
 	client *openrails.Client
 	auth   *verifier
@@ -174,13 +174,14 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 	return w.serve(slug, rt, routes)
 }
 
-func (w *world) serve(slug string, rt *openrails.Client, routes openrails.Routes) *rival {
+func (w *world) serve(slug string, rt *openrails.Engine, routes openrails.Routes) *rival {
 	t := w.t
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, rt, routes))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	client := rt
+	client, err := rt.MerchantBySlug(slug)
+	require.NoError(t, err)
 	auth, _ := routes.Auth.(*verifier)
 	return &rival{slug: slug, rt: rt, server: server, client: client, auth: auth}
 }
@@ -261,8 +262,9 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict}, merchantGet(server, staff, r.slug))
 	}
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, merchantGet(w.server.URL, e.c.token, w.slug), "a customer credential is not merchant authority")
-	crossed, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(r.slug),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return w.auth.token(t, "staff"), nil }))
+	// A's staff credential is no credential at B's mount.
+	crossed, err := openrails.NewRemoteMerchant(r.server.URL+mountPrefix, openrails.RemoteCredential{
+		Token: func(context.Context) (string, error) { return w.auth.token(t, "staff"), nil }})
 	require.NoError(t, err)
 	_, err = crossed.GetSubscription(ctx, e.sub)
 	require.Error(t, err)
@@ -270,8 +272,8 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.Error(t, err)
 
 	// A customer credential is never merchant authority.
-	customerRemote, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return e.c.token, nil }))
+	customerRemote, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{
+		Token: func(context.Context) (string, error) { return e.c.token, nil }})
 	require.NoError(t, err)
 	_, err = customerRemote.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "customer-refund"})
 	require.Error(t, err)

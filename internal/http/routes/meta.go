@@ -23,7 +23,7 @@ const (
 var metaRoutes = []Route{
 	{Method: GET, Path: "/health/live", Group: Meta, Auth: AuthPublic, NoConn: true,
 		Responses: []Reply{{200, Health{}}}, Bind: external(func(x *External) http.Handler { return x.Live })},
-	// Ready runs Client.Ready's checks; the failing dependency is logged, not
+	// Ready runs Engine.Ready's checks; the failing dependency is logged, not
 	// answered.
 	{Method: GET, Path: "/health/ready", Group: Meta, Auth: AuthPublic, NoConn: true,
 		Responses: []Reply{{200, Health{}}}, Errors: codes("service_unavailable"), Bind: external(func(x *External) http.Handler { return x.Ready })},

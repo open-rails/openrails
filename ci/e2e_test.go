@@ -68,11 +68,35 @@ func (f *fixture) config() openrails.Config {
 	}
 }
 
+// runtime is the handle of merchant slug on an engine of its own, closed at
+// cleanup.
 func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
-	return f.runtimeWithStripe(t, slug, nil)
+	t.Helper()
+	_, shop := f.runtimeWithStripe(t, slug, nil)
+	return shop
 }
 
-func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) *openrails.Client {
+// boot builds an engine, closed at cleanup, and the handle of the merchant
+// cfg declares.
+func (f *fixture) boot(t *testing.T, cfg openrails.Config, deps openrails.Deps) (*openrails.Engine, *openrails.Client) {
+	t.Helper()
+	bill, err := openrails.New(t.Context(), cfg, deps)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
+	return bill, declared(t, bill, cfg)
+}
+
+// declared is the handle of the merchant cfg declares on bill.
+func declared(t testing.TB, bill *openrails.Engine, cfg openrails.Config) *openrails.Client {
+	t.Helper()
+	shop, err := bill.MerchantBySlug(cfg.Merchant.Slug)
+	require.NoError(t, err)
+	return shop
+}
+
+// runtimeWithStripe is runtime with its engine, for a test that mounts or
+// starts it; transport, when set, arms a Stripe PSP over it.
+func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
@@ -88,10 +112,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 			},
 		}}
 	}
-	client, err := openrails.New(t.Context(), cfg, deps)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	return client
+	return f.boot(t, cfg, deps)
 }
 
 // runtimeDeclaring boots a merchant whose file declares settings.
@@ -99,10 +120,8 @@ func (f *fixture) runtimeDeclaring(t *testing.T, slug string, settings billing.M
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, Settings: settings}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	return client
+	_, shop := f.boot(t, cfg, openrails.Deps{Postgres: f.pool})
+	return shop
 }
 
 func (f *fixture) dsn(t *testing.T) string {
@@ -214,7 +233,7 @@ products:
 func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	f := newFixture(t)
 	provider := &stripeCheckoutFake{t: t}
-	client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
+	bill, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:          "premium-post-" + uuid.NewString()[:8],
@@ -231,7 +250,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := uuid.NewString()
-	session, err := sell(t, client, sale{customer: cid(customer), price: price.ID})
+	session, err := sell(t, bill, client, sale{customer: cid(customer), price: price.ID})
 	require.NoError(t, err)
 	require.EqualValues(t, 1_000_000, session.read().Total)
 	first, err := session.pay("pay-1", redirect("https://e2e.test/success"))

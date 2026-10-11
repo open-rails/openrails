@@ -127,14 +127,16 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			// A recorded payment is not a replacement for live merchant authorization.
 			sid := uuid.NewString()
 			token := w.auth.sessionToken(t, "staff", sid)
-			revoked, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+			revoked, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{Token: func(context.Context) (string, error) { return token, nil }})
 			require.NoError(t, err)
 			w.auth.revoked.Store(sid, struct{}{})
 			_, err = revoked.CreatePayment(ctx, params)
 			var refusal *billing.StatusError
 			require.ErrorAs(t, err, &refusal)
 			require.Equal(t, 401, refusal.Status)
-			_, err = client.CreatePayment(ctx, params, openrails.ForMerchantID(billing.MerchantID(uuid.New())))
+			stranger, err := w.rt.Merchant(billing.MerchantID(uuid.New()))
+			require.NoError(t, err)
+			_, err = stranger.CreatePayment(ctx, params)
 			require.Error(t, err, "the original invoice is not accessible in another book")
 			// Ledger counts and sums prove no replay/mismatch moved money again.
 			var transfers int

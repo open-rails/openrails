@@ -85,7 +85,7 @@ merchants:
 	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 	srv, err := boot()
 	require.NoError(t, err)
-	rt := srv.Client()
+	rt := srv.Engine()
 	graph := engine.Graph(rt)
 	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), slug)
 	require.NoError(t, err)

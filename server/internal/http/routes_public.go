@@ -55,7 +55,7 @@ func (s *Server) capabilities() *billing.Capabilities {
 	return &caps
 }
 
-// readyHandler serves /health/ready with the checks embedded Client.Ready
+// readyHandler serves /health/ready with the checks Engine.Ready
 // runs (#748), and 503 once the process drains. Which dependency failed, and
 // why, goes to the log: the route is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {

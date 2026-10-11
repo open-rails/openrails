@@ -72,7 +72,8 @@ func TestMutationFlagSurface(t *testing.T) {
 	require.ErrorContains(t, err, "--slug is required")
 }
 
-// Remote mode reaches the server through the public Client only: no local
+// Remote mode reaches the server through the public Client only, as the
+// merchant its token is bound to: it names no merchant, no local
 // configuration is loaded, and local-only flags are refused.
 func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	t.Setenv("ENV", "retired") // any local config load would reject this
@@ -81,6 +82,7 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer test-credential", r.Header.Get("Authorization"))
+		require.Empty(t, r.Header.Values("OpenRails-Merchant"))
 		paths = append(paths, r.Method+" "+r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPatch {
@@ -90,7 +92,7 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 		_, _ = w.Write([]byte(`{"revision":4,"display_name":"Old name","settings":{}}`))
 	}))
 	defer server.Close()
-	remote := []string{"--merchant", "shop", "--server-url", server.URL, "--token-file", tokenPath}
+	remote := []string{"--server-url", server.URL, "--token-file", tokenPath}
 
 	out, err := execute(newRootCmd(), append([]string{"get-merchant-config"}, remote...)...)
 	require.NoError(t, err)
@@ -110,9 +112,10 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	}{
 		"local config flag":      {append([]string{"get-merchant-config", "--config", "local.yaml"}, remote...), "local-only"},
 		"local posture flag":     {append([]string{"get-merchant-config", "--test-mode", "live"}, remote...), "local-only"},
-		"remote without token":   {[]string{"get-merchant-config", "--merchant", "shop", "--server-url", server.URL}, "--token-file"},
+		"merchant with remote":   {append([]string{"get-merchant-config", "--merchant", "shop"}, remote...), "--merchant is local-only"},
+		"remote without token":   {[]string{"get-merchant-config", "--server-url", server.URL}, "--token-file"},
 		"token without remote":   {[]string{"get-merchant-config", "--merchant", "shop", "--token-file", tokenPath}, "requires --server-url"},
-		"missing merchant":       {[]string{"get-merchant-config", "--server-url", server.URL, "--token-file", tokenPath}, "--merchant is required"},
+		"missing merchant":       {[]string{"get-merchant-config"}, "--merchant is required"},
 		"apply without document": {append([]string{"apply-merchant-config"}, remote...), "--file is required"},
 	} {
 		t.Run(name, func(t *testing.T) {

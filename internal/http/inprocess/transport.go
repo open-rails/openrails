@@ -3,56 +3,65 @@ package inprocess
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/requestauth"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/requestauth"
 )
 
-// NewTransport uses the same host authority and context isolation for embedded
-// clients and database-only operator commands. configuredMerchant is read on
-// each call so a runtime may be bound after constructing its client.
-func NewTransport(handler http.Handler, configuredMerchant func() billing.MerchantID) (http.RoundTripper, string) {
-	return newTransport(handler, configuredMerchant, "")
+// Directory reads a merchant's directory row.
+type Directory interface {
+	Get(context.Context, billing.MerchantID) (*merchants.Merchant, error)
 }
 
-// NewTransportWithResolver supports explicit per-operation merchant selectors.
-// Resolution does not grant authority; only the private capability creates a
-// host principal, and all other credentials retain normal verification.
-func NewTransportWithResolver(handler http.Handler, configuredMerchant func() billing.MerchantID, resolve func(context.Context, *http.Request) (billingauth.Target, error)) (http.RoundTripper, string) {
-	transport, capability := newTransport(handler, configuredMerchant, "")
-	transport.(*inprocessTransport).resolveTarget = resolve
-	return transport, capability
+// Live is id's row while it is a live merchant: billing.ErrMerchantUnresolved
+// for an unknown, deleted or archived one.
+func Live(ctx context.Context, directory Directory, id billing.MerchantID) (*merchants.Merchant, error) {
+	if id.IsZero() || directory == nil {
+		return nil, billing.ErrMerchantUnresolved
+	}
+	m, err := directory.Get(ctx, id)
+	switch {
+	case errors.Is(err, merchants.ErrMerchantNotFound):
+		return nil, billing.ErrMerchantUnresolved
+	case err != nil:
+		return nil, err
+	case m == nil || m.Status != merchants.StatusActive:
+		return nil, billing.ErrMerchantUnresolved
+	}
+	return m, nil
 }
 
-func newTransport(handler http.Handler, configuredMerchant func() billing.MerchantID, subject string) (http.RoundTripper, string) {
-	// Only the constructor's private default token provider receives this
-	// per-client capability. A forwarded caller credential cannot name a mode.
-	capability := rand.Text()
-	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability, subject: subject}, capability
+type merchantKey struct{}
+
+// WithMerchant names the merchant a handle's call acts on. Only code holding
+// the engine can set it, and no network request carries it: it is the
+// in-process root of trust.
+func WithMerchant(ctx context.Context, id billing.MerchantID) context.Context {
+	return context.WithValue(ctx, merchantKey{}, id)
+}
+
+// NewTransport dispatches a handle's calls into handler as the host itself,
+// bound to the merchant WithMerchant names, read live from directory on every
+// call.
+func NewTransport(handler http.Handler, directory Directory) http.RoundTripper {
+	return &inprocessTransport{handler: handler, directory: directory}
 }
 
 // inprocessTransport dispatches Client requests straight into the in-process
-// handler: no socket, one JSON round trip. Only the internal default host
-// credential gets the host principal (a context value); explicit customer
-// credentials verify normally. Network mounts never use it.
+// handler: no socket, one JSON round trip. The host principal is a context
+// value; network mounts never use it.
 type inprocessTransport struct {
-	resolveTarget      func(context.Context, *http.Request) (billingauth.Target, error)
-	handler            http.Handler
-	configuredMerchant func() billing.MerchantID
-	hostCredential     string
-	subject            string
+	handler   http.Handler
+	directory Directory
 }
 
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -63,51 +72,25 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		defer stop()
 		defer req.Body.Close()
 	}
-	ctx := req.Context()
-	// An unbound in-process client, and a runtime bound to another merchant
-	// after the client was built, are refused before any handler runs, as a
-	// 409 response: a RoundTrip error would surface as ErrUnreachable, wrong
-	// for a well-formed request the engine refuses.
-	mid, _ := merchant.FromContext(ctx)
-	refuse := func(message string) (*http.Response, error) {
+	mid, _ := req.Context().Value(merchantKey{}).(billing.MerchantID)
+	// Only the caller's cancellation and deadline reach the engine; every host
+	// context value is dropped (engineContext).
+	ctx := engineContext(req.Context())
+	m, err := Live(ctx, t.directory, mid)
+	if err != nil {
 		if stream && req.Body != nil {
 			_ = req.Body.Close()
 		}
-		return conflictResponse(req, message), nil
-	}
-	// Drop all ambient values before target resolution; retain only the trusted
-	// resolver's fresh result, including the requested forwarded name.
-	ctx = engineContext(ctx)
-	var slug string
-	if t.resolveTarget != nil {
-		selectionRequest := req.Clone(ctx)
-		target, err := t.resolveTarget(ctx, selectionRequest)
-		if err != nil {
-			var gate billingauth.GateError
-			if errors.As(err, &gate) {
-				return selectionErrorResponse(req, gate), nil
-			}
-			return refuse(err.Error())
+		// A refusal is a response: a RoundTrip error would surface as
+		// ErrUnreachable, wrong for a well-formed request the engine refuses.
+		if errors.Is(err, billing.ErrMerchantUnresolved) {
+			return unresolvedResponse(req, mid), nil
 		}
-		mid, slug = target.MerchantID, target.MerchantSlug
-		ctx = merchanttarget.WithResolved(selectionRequest.Context(), target)
+		return nil, fmt.Errorf("openrails: read merchant %s: %w", mid, err)
 	}
-	if mid.IsZero() {
-		return refuse("openrails: in-process client is not bound to a merchant")
-	}
-	// Live read: the runtime may be bound after its client was built.
-	if bound := t.configuredMerchant(); !bound.IsZero() && mid != bound {
-		return refuse(merchantMismatchMsg(bound, mid))
-	}
-	// Only the caller's cancellation and deadline reach the engine; every host
-	// context value is dropped (engineContext).
-	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
-		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, MerchantSlug: slug, Subject: t.subject})
-	}
-
-	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the
-	// bound merchant before any merchant-owned DB access.
-	ctx = merchant.WithID(ctx, mid)
+	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: m.ID, MerchantSlug: m.Slug})
+	// Pin the merchant before any merchant-owned DB access.
+	ctx = merchant.WithID(ctx, m.ID)
 	if stream {
 		return streamInprocessResponse(t.handler, req.Clone(ctx))
 	}
@@ -116,16 +99,16 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return w.response(req), nil
 }
 
-// conflictResponse synthesizes a 409 in the OpenRails error envelope for a
-// merchant binding conflict. The remote client parses it like any non-2xx
-// response, so the call surfaces as a StatusError (ErrConflict).
-func conflictResponse(req *http.Request, message string) *http.Response {
-	body, _ := json.Marshal(api.Coded(billing.CodeMerchantBindingMismatch, message).ToResponse())
+// unresolvedResponse is the 403 a handle whose merchant is not live gets, in
+// the OpenRails error envelope.
+func unresolvedResponse(req *http.Request, mid billing.MerchantID) *http.Response {
+	refusal := api.Coded(billing.CodeMerchantUnresolved, "merchant "+mid.String()+" is not a live merchant of this engine")
+	body, _ := json.Marshal(refusal.ToResponse())
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	return &http.Response{
-		Status:        fmt.Sprintf("%d %s", http.StatusConflict, http.StatusText(http.StatusConflict)),
-		StatusCode:    http.StatusConflict,
+		Status:        fmt.Sprintf("%d %s", refusal.HTTPStatus, http.StatusText(refusal.HTTPStatus)),
+		StatusCode:    refusal.HTTPStatus,
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
@@ -179,10 +162,6 @@ func (w *bufferedResponse) response(req *http.Request) *http.Response {
 	}
 }
 
-func merchantMismatchMsg(bound, pinned billing.MerchantID) string {
-	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
-}
-
 // engineContext keeps only the host's cancellation and deadline: every host
 // context value (session user, auth caches, a pinned connection, rate-limit
 // subjects) is dropped, so the engine attributes the call to the Client's
@@ -194,10 +173,3 @@ func engineContext(host context.Context) context.Context {
 type detachedValues struct{ context.Context }
 
 func (detachedValues) Value(any) any { return nil }
-
-func selectionErrorResponse(req *http.Request, failure billingauth.GateError) *http.Response {
-	body, _ := json.Marshal(billingauth.RefusalError(failure).ToResponse())
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
-	return &http.Response{StatusCode: failure.Status, Status: http.StatusText(failure.Status), Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1, Header: header, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Request: req}
-}

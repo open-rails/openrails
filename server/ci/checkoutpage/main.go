@@ -62,7 +62,9 @@ type harness struct {
 	nmi    *nmimock.Mock
 	stripe *stripemock.Mock
 	mid    billing.MerchantID
-	api    string
+	// shop is the merchant's handle on the server's engine.
+	shop *openrails.Client
+	api  string
 	// domain is the checkout host's name.
 	domain string
 	// checkout is the checkout host's origin; other is a site the merchant
@@ -137,6 +139,9 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	if h.mid.IsZero() {
 		return errors.New("checkoutpage: no configured merchant")
 	}
+	if h.shop, err = srv.Engine().Merchant(h.mid); err != nil {
+		return err
+	}
 	h.stripe.SendWebhooksTo(api+"/v1/webhooks/stripe/acct_e2e", "whsec_e2e")
 
 	mux := http.NewServeMux()
@@ -195,14 +200,14 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	ctx, at := r.Context(), openrails.ForMerchantID(h.mid)
+	ctx := r.Context()
 	key := "item-" + uuid.NewString()[:8]
-	product, err := h.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Course " + key[5:]}, at)
+	product, err := h.shop.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Course " + key[5:]})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	price, err := h.srv.Client().CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 12_500_000}, at)
+	price, err := h.shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 12_500_000})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -219,8 +224,8 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 	if in.CancelURL != "" {
 		checkout.CancelURL = &in.CancelURL
 	}
-	order, err := h.srv.Client().CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
-		Lines: []billing.OrderLineParams{{PriceID: price.ID}}, Checkout: checkout}, at)
+	order, err := h.shop.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
+		Lines: []billing.OrderLineParams{{PriceID: price.ID}}, Checkout: checkout})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -337,7 +342,7 @@ func (h *harness) advance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *harness) hostEvents(w http.ResponseWriter, r *http.Request) {
-	page, err := h.srv.Client().ListHostEvents(r.Context(), billing.HostEventListParams{Type: billing.HostEventType(strings.TrimSpace(r.URL.Query().Get("type")))}, openrails.ForMerchantID(h.mid))
+	page, err := h.shop.ListHostEvents(r.Context(), billing.HostEventListParams{Type: billing.HostEventType(strings.TrimSpace(r.URL.Query().Get("type")))})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

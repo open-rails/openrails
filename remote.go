@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -17,133 +18,214 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// Client executes the same typed billing operations over an HTTP or in-process
-// transport. Applications may define narrow interfaces for the methods they use.
+// Client is a handle on one merchant: every admin, catalog-edit,
+// merchant-config and programmatic operation, acting on that merchant alone.
+// Engine.Merchant makes one in process, Remote.Merchant and NewRemoteMerchant
+// over HTTP; a handle is cheap, safe for concurrent use and owns no lifecycle.
+// Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	// engine is the in-process engine behind New; nil for NewRemote.
-	engine       *engine.Engine
-	baseURL      string
-	merchantID   billing.MerchantID
-	merchantSlug string
-	// derived marks a Client made from another (With): it
-	// shares the engine and transport and does not own their lifecycle.
-	derived bool
+	// engine is the in-process engine behind an Engine's handle; nil otherwise.
+	engine *engine.Engine
+	// inprocess marks a handle over the in-process transport: its merchant
+	// travels as a private context value and it sends no credential.
+	inprocess bool
+	baseURL   string
+	client    *http.Client
+	timeout   time.Duration
+	// merchantID is the handle's merchant; zero on a NewRemoteMerchant handle,
+	// which adopts the one its credential's first answer names.
+	merchantID billing.MerchantID
+	adopted    atomic.Pointer[billing.MerchantID]
+	// token mints the per-call Bearer of a remote handle. It is the sole
+	// credential; a mint failure fails the call.
+	token func(context.Context) (string, error)
+}
+
+// MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
+// until a response names the merchant its credential is bound to.
+func (c *Client) MerchantID() billing.MerchantID {
+	if adopted := c.adopted.Load(); c.merchantID.IsZero() && adopted != nil {
+		return *adopted
+	}
+	return c.merchantID
+}
+
+// RemoteCredential is how a remote handle proves itself: exactly one of
+// APIKey and Token. A credential is bound to one merchant, the one its
+// handle's calls act on.
+type RemoteCredential struct {
+	// APIKey is a static OpenRails API key.
+	APIKey string
+	// Token returns the Bearer for each call: a merchant-bound access token
+	// the backend obtains from its issuer. It must be safe for concurrent
+	// use; an error or an empty token fails the call.
+	Token func(context.Context) (string, error)
+}
+
+// RemoteOptions configures NewRemote.
+type RemoteOptions struct {
+	// Credentials holds one credential per merchant the process acts on, by
+	// merchant ID. The server binds each credential to its merchant and
+	// names it on every merchant-bound response (the OpenRails-Bound-Merchant
+	// header); a handle whose credential was filed under another merchant's
+	// ID fails each call with a *BoundMerchantError and discards the
+	// response. The check follows the call: a write made with a misfiled
+	// credential has already run at the credential's merchant. A server that
+	// sends no such header is not checked.
+	Credentials map[billing.MerchantID]RemoteCredential
+	// HTTPClient is the transport (custom TLS or connection pooling). Nil
+	// uses Go's default.
+	HTTPClient *http.Client
+	// Timeout bounds each call without extending the caller's deadline, also
+	// through HTTPClient. Zero leaves the caller's context and the transport
+	// in charge.
+	Timeout time.Duration
+}
+
+// Remote is a standalone or hosted OpenRails server reached over HTTP, for
+// the merchants the process holds credentials for. It has nothing that spans
+// merchants: Merchant returns each one's handle.
+type Remote struct {
+	baseURL string
 	client  *http.Client
-	timeout time.Duration
-	// tokenFn mints the per-call Bearer (a host-signed AuthKit service JWT or
-	// an OpenRails-issued API key). It is the sole credential; a mint failure
-	// fails the call.
-	tokenFn      func(context.Context) (string, error)
-	credentialFn func(context.Context, CredentialTarget) (string, error)
-	// setupErr records invalid static options until construction validates them.
-	setupErr error
+	handles map[billing.MerchantID]*Client
 }
 
-// ClientOption configures a Client: New, NewRemote and Client.With take them.
-type ClientOption func(*Client)
-
-// WithMerchantID supplies an immutable default merchant UUID. Request options
-// may override it, but the server still enforces credential and runtime scope.
-func WithMerchantID(id billing.MerchantID) ClientOption {
-	return func(c *Client) {
-		if id.IsZero() {
-			c.setupErr = fmt.Errorf("openrails: merchant ID must not be zero")
-			return
-		}
-		c.merchantID = id
-		c.merchantSlug = ""
-	}
-}
-
-// MerchantID returns the Client's default UUID, or zero when its default is a
-// slug or each operation supplies its own selector.
-func (c *Client) MerchantID() billing.MerchantID { return c.merchantID }
-
-// WithHTTPClient injects a transport (custom TLS or connection pooling). When
-// unset, the client uses Go's default HTTP transport. An explicit WithTimeout
-// still bounds each request independently of this client's Timeout setting.
-func WithHTTPClient(hc *http.Client) ClientOption {
-	return func(r *Client) { r.client = hc }
-}
-
-// WithTokenProvider supplies the function that mints the Bearer token for
-// each call. Every client needs a credential: without one NewRemote fails. A
-// mint failure fails the call.
-func WithTokenProvider(fn func(context.Context) (string, error)) ClientOption {
-	return func(r *Client) { r.tokenFn, r.credentialFn = fn, nil }
-}
-
-// WithAPIKey authenticates every call with a static OpenRails API key. An
-// empty key fails construction.
-func WithAPIKey(key string) ClientOption {
-	key = strings.TrimSpace(key)
-	return func(c *Client) {
-		if key == "" {
-			c.setupErr = fmt.Errorf("openrails: WithAPIKey requires a nonempty key")
-			return
-		}
-		c.tokenFn = func(context.Context) (string, error) { return key, nil }
-		c.credentialFn = nil
-	}
-}
-
-// WithTimeout adds a per-request budget without extending a caller's earlier
-// deadline. It applies in both embedded and remote modes, including when a
-// custom HTTP client is supplied. By default the caller context and transport
-// own deadlines; a non-positive value leaves that behavior unchanged.
-func WithTimeout(d time.Duration) ClientOption {
-	return func(r *Client) { r.timeout = d }
-}
-
-// NewRemote builds the client for standalone or hosted HTTP. It validates static
-// configuration without I/O; Ready checks reachability.
-func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
-	r := &Client{
-		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-	}
-	if err := validateBaseURL(r.baseURL); err != nil {
+// NewRemote builds the client of a standalone or hosted server. It validates
+// static configuration without I/O; Ready checks reachability.
+func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if err := validateBaseURL(baseURL); err != nil {
 		return nil, err
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(r)
-		}
+	if len(opts.Credentials) == 0 {
+		return nil, fmt.Errorf("openrails: RemoteOptions.Credentials names no merchant")
 	}
-	if r.setupErr != nil {
-		return nil, r.setupErr
-	}
-	if r.tokenFn == nil && r.credentialFn == nil {
-		return nil, fmt.Errorf("openrails: token provider is required")
-	}
+	r := &Remote{baseURL: baseURL, client: opts.HTTPClient, handles: make(map[billing.MerchantID]*Client, len(opts.Credentials))}
 	if r.client == nil {
 		r.client = &http.Client{}
+	}
+	for id, credential := range opts.Credentials {
+		if id.IsZero() {
+			return nil, fmt.Errorf("openrails: RemoteOptions.Credentials holds a credential under the zero merchant ID")
+		}
+		handle, err := newRemoteHandle(baseURL, r.client, opts.Timeout, id, credential)
+		if err != nil {
+			return nil, fmt.Errorf("openrails: credential of merchant %s: %w", id, err)
+		}
+		r.handles[id] = handle
 	}
 	return r, nil
 }
 
-// With returns a client sharing c's transport, and an embedded client's engine,
-// with opts applied: another default merchant, a timeout, or a customer's own
-// credential (WithTokenProvider) over the in-process transport. c keeps the
-// lifecycle: Close the Client that New or NewRemote returned, not this one.
-func (c *Client) With(opts ...ClientOption) (*Client, error) {
-	if c == nil {
-		return nil, invalidErr("client is required")
+// NewRemoteMerchant is the handle of the one merchant credential is bound
+// to, on the server at baseURL: NewRemote and Merchant for a process that
+// acts on a single merchant. Its MerchantID is the one the server's first
+// merchant-bound response names (zero until then); a later response naming
+// another fails the call with a *BoundMerchantError. The caller's context
+// bounds each call.
+func NewRemoteMerchant(baseURL string, credential RemoteCredential) (*Client, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if err := validateBaseURL(baseURL); err != nil {
+		return nil, err
 	}
-	derived := *c
-	derived.derived = true
-	derived.setupErr = nil
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&derived)
-		}
+	handle, err := newRemoteHandle(baseURL, &http.Client{}, 0, billing.MerchantID{}, credential)
+	if err != nil {
+		return nil, fmt.Errorf("openrails: credential: %w", err)
 	}
-	if derived.setupErr != nil {
-		return nil, derived.setupErr
+	return handle, nil
+}
+
+func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration, id billing.MerchantID, credential RemoteCredential) (*Client, error) {
+	key := strings.TrimSpace(credential.APIKey)
+	token := credential.Token
+	switch {
+	case key != "" && token != nil:
+		return nil, fmt.Errorf("set APIKey or Token, not both")
+	case key != "":
+		token = func(context.Context) (string, error) { return key, nil }
+	case token == nil:
+		return nil, fmt.Errorf("an APIKey or a Token is required")
 	}
-	return &derived, nil
+	return &Client{baseURL: baseURL, client: client, timeout: timeout, merchantID: id, token: token}, nil
+}
+
+// Merchant is the handle of merchant id, acting with the credential filed
+// under it. A merchant with no credential is billing.ErrMerchantUnresolved.
+func (r *Remote) Merchant(id billing.MerchantID) (*Client, error) {
+	handle, ok := r.handles[id]
+	if !ok {
+		return nil, fmt.Errorf("%w: no credential for merchant %s (RemoteOptions.Credentials)", billing.ErrMerchantUnresolved, id)
+	}
+	return handle, nil
+}
+
+// Ready reports whether the server can serve: its /health/ready.
+func (r *Remote) Ready(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL+"/health/ready", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: %s/health/ready answered %d", billing.ErrUnreachable, r.baseURL, resp.StatusCode)
+	}
+	return nil
+}
+
+// Close releases the transport's idle connections; handles stay usable.
+func (r *Remote) Close(context.Context) error {
+	if r != nil {
+		r.client.CloseIdleConnections()
+	}
+	return nil
+}
+
+// BoundMerchantError reports a credential that acted on another merchant
+// than its handle's: the server answered for Bound. The response was
+// discarded, but the call ran at Bound, where a write may have taken effect.
+type BoundMerchantError struct {
+	// Merchant is the handle's: the ID the credential was filed under in
+	// RemoteOptions.Credentials, or the one a NewRemoteMerchant handle first
+	// saw.
+	Merchant billing.MerchantID
+	// Bound is the merchant the server acted on.
+	Bound billing.MerchantID
+}
+
+// Error names both merchants.
+func (e *BoundMerchantError) Error() string {
+	return fmt.Sprintf("openrails: the credential of merchant %s is bound to merchant %s; the response was discarded", e.Merchant, e.Bound)
+}
+
+// checkBound compares the merchant a response says it acted on with the
+// handle's; a NewRemoteMerchant handle adopts the first it sees. A response
+// without the header is not checked.
+func (c *Client) checkBound(header http.Header) error {
+	values := header.Values(merchant.BoundHeader)
+	if len(values) == 0 {
+		return nil
+	}
+	bound, err := billing.ParseMerchantID(strings.TrimSpace(values[0]))
+	if len(values) != 1 || err != nil || bound.IsZero() {
+		return fmt.Errorf("%w: malformed %s response header", billing.ErrUnreachable, merchant.BoundHeader)
+	}
+	if c.merchantID.IsZero() {
+		c.adopted.CompareAndSwap(nil, &bound)
+	}
+	if mine := c.MerchantID(); mine != bound {
+		return &BoundMerchantError{Merchant: mine, Bound: bound}
+	}
+	return nil
 }
 
 // validateBaseURL is the I/O-free static check on the configured base URL.
@@ -258,24 +340,18 @@ func requireTypedID(field string, id wireID) (string, error) {
 
 // bearer mints the credential for the next call. There is no fallback; a mint
 // failure or empty token errors the call so the issue surfaces.
-func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, error) {
-	if c.tokenFn == nil && c.credentialFn == nil {
-		return "", fmt.Errorf("openrails: no token provider configured (WithTokenProvider)")
+func (c *Client) bearer(ctx context.Context) (string, error) {
+	if c.token == nil {
+		return "", fmt.Errorf("openrails: the handle has no credential")
 	}
-	var tok string
-	var err error
-	if c.credentialFn != nil {
-		tok, err = c.credentialFn(ctx, target)
-	} else {
-		tok, err = c.tokenFn(ctx)
-	}
+	tok, err := c.token(ctx)
 	if err != nil {
 		return "", fmt.Errorf("openrails: mint token: %w", err)
 	}
-	if strings.TrimSpace(tok) == "" {
-		return "", fmt.Errorf("openrails: token provider returned empty token")
+	if tok = strings.TrimSpace(tok); tok == "" {
+		return "", fmt.Errorf("openrails: the credential's Token returned an empty token")
 	}
-	return strings.TrimSpace(tok), nil
+	return tok, nil
 }
 
 // ListEntitlements returns one page of the keys customers hold at params.At
@@ -478,34 +554,16 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 		}
 		response = &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}
 		return nil
-	}, requestOptions...)
+	})
 	return response, err
 }
 
-// withHTTPResponse gives JSON and streamed archive operations identical merchant
-// assertions, credentials, cancellation and timeouts. consume owns response
-// decoding, but cannot outlive the request or leak its body.
-func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error, requestOptions ...RequestOption) error {
-	target, err := c.requestTarget(requestOptions)
-	if err != nil {
-		return err
-	}
-	expectedMerchant := target.MerchantID
-	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
-		// A caller context may assert an ID, but never select a merchant. A
-		// slug cannot be compared with that assertion before server resolution.
-		if target.MerchantSlug != "" {
-			return invalidErr("merchant slug selection cannot be combined with an ambient merchant ID assertion")
-		}
-		if pinned != expectedMerchant {
-			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeMerchantBindingMismatch,
-				Message: fmt.Sprintf("openrails: call pinned to merchant %s but operation selects merchant %s", pinned, expectedMerchant)}}
-		}
-	}
-	if !expectedMerchant.IsZero() {
-		// The local transport uses this explicit request binding; HTTP
-		// servers resolve authority independently and verify the header.
-		ctx = merchant.WithID(ctx, expectedMerchant)
+// withHTTPResponse gives JSON and streamed archive operations the same
+// merchant binding, credential, cancellation and timeout. consume owns
+// response decoding, but cannot outlive the request or leak its body.
+func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
+	if c == nil || c.client == nil {
+		return fmt.Errorf("openrails: a Client comes from Engine.Merchant, Remote.Merchant or NewRemoteMerchant")
 	}
 	// Enforce the per-call timeout via a context deadline so it holds even when
 	// the host injected its own http.Client (which may have no Timeout). Only
@@ -518,36 +576,42 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
-	bearer, berr := c.bearer(ctx, target)
-	if berr != nil {
-		return berr
+	var bearer string
+	if c.inprocess {
+		// Holding the engine is the authority: the handle's merchant reaches
+		// the in-process transport as a context value, never as a header.
+		ctx = inprocess.WithMerchant(ctx, c.merchantID)
+	} else {
+		var err error
+		if bearer, err = c.bearer(ctx); err != nil {
+			return err
+		}
 	}
 	req, rerr := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 	if rerr != nil {
 		return fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	for name, values := range headers {
-		// Extra metadata cannot provide another spelling of the target header.
-		// Canonicalize all remaining names before replacing Authorization below.
-		if strings.EqualFold(name, merchant.SelectorHeader) {
-			continue
-		}
 		for _, value := range values {
 			req.Header.Add(name, value)
 		}
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	// Extra headers never carry a credential: the handle's is the only one.
+	req.Header.Del("Authorization")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}
-	// Exactly one selector: the server resolves it, authorizes the credential
-	// for that merchant, and refuses a credential bound to another.
-	req.Header.Set(merchant.SelectorHeader, merchant.Selector{Slug: target.MerchantSlug, ID: expectedMerchant}.String())
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := c.checkBound(resp.Header); err != nil {
+		return err
+	}
 	if err := consume(resp); err != nil {
 		return err
 	}

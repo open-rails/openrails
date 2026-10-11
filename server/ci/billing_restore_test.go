@@ -23,7 +23,8 @@ import (
 func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	t.Parallel()
 	slug := uniqueName("restore")
-	mid := newFixture(t).runtime(t, slug).MerchantID()
+	_, source := newFixture(t).runtime(t, slug)
+	mid := source.MerchantID()
 	target := newFixture(t)
 	srv := target.newServer(t, func(cfg *server.Config, _ *server.Deps) {
 		cfg.Engine.DB = &openrails.DBConfig{URL: strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))}

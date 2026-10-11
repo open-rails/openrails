@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -19,7 +18,7 @@ import (
 // checkout's page is never framed. The origins are exact.
 func TestHostedCheckoutEmbedded(t *testing.T) {
 	s := newCheckoutShop(t)
-	at := openrails.ForMerchantID(s.mid)
+	shop := handle(t, s.srv, s.mid)
 	customer := billing.CustomerID(uuid.New())
 	create := func(mode string) (billing.Order, string) {
 		t.Helper()
@@ -44,12 +43,12 @@ func TestHostedCheckoutEmbedded(t *testing.T) {
 		{"https://a.e2e.test", "https://b.e2e.test", "https://c.e2e.test", "https://d.e2e.test", "https://e.e2e.test", "https://f.e2e.test",
 			"https://g.e2e.test", "https://h.e2e.test", "https://i.e2e.test", "https://j.e2e.test", "https://k.e2e.test"},
 	} {
-		_, err := s.srv.Client().UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-			Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: origins}}}, at)
+		_, err := shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+			Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: origins}}})
 		require.Error(t, err, "%v is refused", origins)
 	}
-	_, err := s.srv.Client().UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}}, at)
+	_, err := shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
 	require.NoError(t, err)
 
 	embedded, secret := create("embedded")
@@ -77,8 +76,8 @@ func TestHostedCheckoutEmbedded(t *testing.T) {
 	require.Equal(t, "DENY", h.Get("X-Frame-Options"))
 
 	// Origins withdrawn: the page is framed by none, at once.
-	_, err = s.srv.Client().UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{}}}}, at)
+	_, err = shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{}}}})
 	require.NoError(t, err)
 	h = page(embedded)
 	require.True(t, strings.HasSuffix(h.Get("Content-Security-Policy"), "; frame-ancestors 'none'"))

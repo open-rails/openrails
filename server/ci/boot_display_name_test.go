@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
@@ -27,7 +26,7 @@ func TestBootManifestDisplayNameIsTheMerchants(t *testing.T) {
 
 	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), slug)
 	require.NoError(t, err)
-	state, err := srv.Client().GetMerchantConfiguration(t.Context(), openrails.ForMerchantID(m.ID))
+	state, err := handle(t, srv, m.ID).GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, "Boot Shop", state.DisplayName)
 }

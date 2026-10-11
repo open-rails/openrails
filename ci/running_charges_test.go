@@ -35,6 +35,7 @@ type chargeWorld struct {
 	f      *fixture
 	ctx    context.Context
 	clock  *clockwork.FakeClock
+	bill   *openrails.Engine
 	client *openrails.Client
 	db     *db.DB
 }
@@ -46,12 +47,10 @@ func newChargeWorld(t *testing.T) *chargeWorld {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(24 * time.Hour).Add(36 * time.Hour))
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "charges-" + uuid.NewString()[:8], DisplayName: "Charges"}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock})
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
-	return &chargeWorld{t: t, f: f, ctx: merchant.WithID(t.Context(), client.MerchantID()), clock: clock, client: client, db: database}
+	return &chargeWorld{t: t, f: f, ctx: merchant.WithID(t.Context(), client.MerchantID()), clock: clock, bill: bill, client: client, db: database}
 }
 
 func (w *chargeWorld) now() time.Time { return w.clock.Now().UTC() }
@@ -371,7 +370,7 @@ func TestBalanceMidChargeIsComputed(t *testing.T) {
 
 	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, w.client, openrails.Routes{Auth: auth}))
+	require.NoError(t, openrailshttp.Mount(mux, w.bill, openrails.Routes{Auth: auth}))
 	token := auth.Person(customer.String())
 	me := func() billing.Balance {
 		t.Helper()
@@ -676,8 +675,8 @@ func TestRunningChargeTxCommitsWithHostRows(t *testing.T) {
 	require.Equal(t, stopped, release(true), "a replayed stop answers the same")
 	require.Len(t, w.postings(customer), 1)
 
-	// A remote client has no host transaction to join.
-	remote, err := openrails.NewRemote("https://openrails.invalid", openrails.WithMerchantID(w.client.MerchantID()), openrails.WithAPIKey("key"))
+	// A remote handle has no host transaction to join.
+	remote, err := openrails.NewRemoteMerchant("https://openrails.invalid", openrails.RemoteCredential{APIKey: "key"})
 	require.NoError(t, err)
 	_, err = remote.StartRunningChargeTx(w.ctx, nil, params)
 	require.ErrorIs(t, err, openrails.ErrRemoteClient)
@@ -1060,7 +1059,7 @@ func TestDailyCheckpointPostsThroughMidnight(t *testing.T) {
 // its balance is told without anything calling the worker.
 func TestBalanceWatcherRunsOnTheEnginesRiver(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "watcher-"+uuid.NewString()[:8])
+	bill, client := f.runtimeWithStripe(t, "watcher-"+uuid.NewString()[:8], nil)
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	customer := billing.CustomerID(uuid.New())
 	startedAt := time.Now().UTC().Add(-time.Hour)
@@ -1069,7 +1068,7 @@ func TestBalanceWatcherRunsOnTheEnginesRiver(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, client.Start(t.Context()))
+	require.NoError(t, bill.Start(t.Context()))
 	require.Eventually(t, func() bool {
 		page, err := client.ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventBalanceDepleted})
 		return err == nil && len(page.Items) == 1 && page.Items[0].Balance.CustomerID == customer

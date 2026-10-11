@@ -125,6 +125,7 @@ func TestBillingArchiveFlagsRejectedBeforeOpeningRuntime(t *testing.T) {
 		"zero merchant":              {newBillingImportCmd, []string{"--merchant", "id:00000000-0000-0000-0000-000000000000", "--in", "s.jsonl"}, "nonzero"},
 		"url without token":          {newBillingExportCmd, []string{"--merchant", mid, "--url", "https://example.invalid", "--out", "s.jsonl"}, "together"},
 		"token without url":          {newBillingImportCmd, []string{"--merchant", mid, "--token-file", "secret", "--in", "s.jsonl"}, "together"},
+		"merchant with url":          {newBillingExportCmd, []string{"--merchant", mid, "--url", "https://example.invalid", "--token-file", "secret", "--out", "s.jsonl"}, "the token's merchant"},
 		"negative timeout":           {newBillingImportCmd, []string{"--merchant", mid, "--timeout=-1s", "--in", "s.jsonl"}, "negative"},
 		"stdout":                     {newBillingExportCmd, []string{"--merchant", mid, "--out=-"}, "standard streams"},
 		"stdin":                      {newBillingImportCmd, []string{"--merchant", mid, "--target-stopped", "--in=-"}, "standard streams"},
@@ -178,7 +179,7 @@ func TestBillingArchiveRemoteSkipsLocalConfiguration(t *testing.T) {
 		root.SetErr(io.Discard)
 		args := []string{"billing", "export", "--merchant", "ab181b77-1f3b-4bde-a7a7-a2a42f3c07ae"}
 		if remote {
-			args = append(args, "--url", "https://example.invalid", "--token-file", "credential")
+			args = []string{"billing", "export", "--url", "https://example.invalid", "--token-file", "credential"}
 		}
 		root.SetArgs(args)
 		err := root.Execute()

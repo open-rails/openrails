@@ -98,7 +98,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, nil)
 	ctx := t.Context()
-	require.NoError(t, engine.Graph(cp.Client()).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
+	require.NoError(t, engine.Graph(cp.Engine()).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 	admin := newAccount(t, cp)
 
 	slug := uniqueName("unbound")

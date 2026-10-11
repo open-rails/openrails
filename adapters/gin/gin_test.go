@@ -143,7 +143,7 @@ func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 	var nilBundle *Bundle
 	require.Error(t, nilBundle.Mount(engine))
 	require.Error(t, (&Bundle{}).Mount(nil))
-	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "client")
+	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "OpenRails engine")
 }
 
 var testMerchant = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))

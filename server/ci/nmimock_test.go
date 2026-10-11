@@ -36,9 +36,7 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
 		"nmi": openrails.NMIPSP{AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 	}}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
 	require.NoError(t, err)
@@ -51,7 +49,7 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
 	customer := authtest.SignIn(t, as.Client, authtest.NewUser(t, as.Client)).AccessToken
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
 	do := func(method, path string, body any, want int) map[string]any {
 		t.Helper()
 		var payload bytes.Buffer

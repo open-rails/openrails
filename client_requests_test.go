@@ -196,9 +196,9 @@ func failingTransport(t *testing.T) *http.Client {
 // invalid_param StatusError, so embedded and remote callers see one error.
 func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	ctx := context.Background()
-	c, err := NewRemote("http://openrails.invalid", WithDefaultMerchant("fixture"), WithHTTPClient(failingTransport(t)),
-		WithTokenProvider(func(context.Context) (string, error) { return "", errors.New("token provider must not run") }))
-	require.NoError(t, err)
+	opts := tokenCredential(func(context.Context) (string, error) { return "", errors.New("the credential must not be minted") })
+	opts.HTTPClient = failingTransport(t)
+	c := remoteHandle(t, "http://openrails.invalid", opts)
 	now := time.Now()
 	customerID := billing.CustomerID(uuid.New())
 	price, subscription, method := billing.PriceID(uuid.New()), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())

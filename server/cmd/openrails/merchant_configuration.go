@@ -10,8 +10,6 @@ import (
 
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 
-	"net/http"
-
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -38,11 +36,8 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 		Short: "Read or update merchant configuration through the Client",
 		Args:  cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(slug) == "" {
-				return fmt.Errorf("--merchant is required")
-			}
 			if serverURL != "" {
-				for _, flag := range []string{"config", "provider-write-mode", "test-mode"} {
+				for _, flag := range []string{"config", "provider-write-mode", "test-mode", "merchant"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s is local-only and cannot be used with --server-url", flag)
 					}
@@ -54,6 +49,9 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			}
 			if tokenFile != "" {
 				return fmt.Errorf("--token-file requires --server-url")
+			}
+			if strings.TrimSpace(slug) == "" {
+				return fmt.Errorf("--merchant is required")
 			}
 			path, _ := cmd.Flags().GetString("config")
 			cfg, err := hostconfig.LoadDatabase(path)
@@ -90,7 +88,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 				if _, err := readTokenFile(tokenFile); err != nil {
 					return err
 				}
-				client, err = openrails.NewRemote(serverURL, tokenFileCredential(tokenFile), openrails.WithDefaultMerchant(slug))
+				client, err = openrails.NewRemoteMerchant(serverURL, tokenFileCredential(tokenFile))
 			} else {
 				cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 				var cleanup func()
@@ -114,7 +112,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 		},
 	}
-	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug (selector, not authority)")
+	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug, for a local run; with --server-url the token's merchant is the one")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file holding an access token from the merchant's trusted issuer (client credentials), read on every call")
 	if apply {
@@ -148,7 +146,5 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	rt := &app.Runtime{DB: database, Config: cfg, Merchants: merchantsSvc, MerchantConfig: merchantsSvc.Config(), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	table := &router.Table{}
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/admin/configuration")
-	transport, capability := inprocess.NewTransport(table.Handler(), func() billing.MerchantID { return selected.ID })
-	client, err := openrails.NewRemote("http://openrails.invalid", openrails.WithHTTPClient(&http.Client{Transport: transport}), openrails.WithMerchantID(selected.ID), openrails.WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
-	return client, cleanup, err
+	return inprocessClient(inprocess.NewTransport(table.Handler(), merchantsSvc), selected.ID), cleanup, nil
 }

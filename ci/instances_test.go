@@ -35,6 +35,7 @@ import (
 // instance is one replica of a host app embedding OpenRails: its own
 // connections, River and HTTP mux over the database every replica shares.
 type instance struct {
+	bill   *openrails.Engine
 	client *openrails.Client
 	mux    *http.ServeMux
 	closed bool
@@ -48,7 +49,7 @@ func (in *instance) close(t *testing.T) {
 	in.closed = true
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	require.NoError(t, in.client.Close(ctx))
+	require.NoError(t, in.bill.Close(ctx))
 }
 
 func e2eRedis(t *testing.T) string {
@@ -106,14 +107,19 @@ products:
 		pool := connect(t, dsn)
 		wg.Go(func() {
 			<-start
-			client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, StripeTransport: stripe})
+			bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, StripeTransport: stripe})
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			client, err := bill.MerchantBySlug(cfg.Merchant.Slug)
 			if err != nil {
 				errs[i] = err
 				return
 			}
 			mux := http.NewServeMux()
-			errs[i] = openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}})
-			instances[i] = &instance{client: client, mux: mux}
+			errs[i] = openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}})
+			instances[i] = &instance{bill: bill, client: client, mux: mux}
 		})
 	}
 	close(start)
@@ -139,14 +145,14 @@ products:
 		_ = admin.QueryRow(t.Context(), `SELECT leader_id FROM billing_river.river_leader WHERE expires_at > now()`).Scan(&id)
 		return id
 	}
-	require.NoError(t, instances[0].client.Start(t.Context()))
+	require.NoError(t, instances[0].bill.Start(t.Context()))
 	require.Eventually(t, func() bool { return leader() != "" }, 30*time.Second, 20*time.Millisecond, "the first replica leads River")
 	first := leader()
 	for _, in := range instances[1:] {
-		require.NoError(t, in.client.Start(t.Context()))
+		require.NoError(t, in.bill.Start(t.Context()))
 	}
 	for i, in := range instances {
-		require.Eventually(t, func() bool { return in.client.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond, "replica %d ready", i)
+		require.Eventually(t, func() bool { return in.bill.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond, "replica %d ready", i)
 	}
 
 	t.Run("one execution per job", func(t *testing.T) {
@@ -177,9 +183,9 @@ products:
 		price, err := instances[0].client.ListPrices(t.Context(), billing.PriceListParams{ProductKey: key, Key: key + "-once"})
 		require.NoError(t, err)
 		require.Len(t, price.Items, 1)
-		session, err := sell(t, instances[0].client, sale{customer: cid(buyer), price: price.Items[0].ID})
+		session, err := sell(t, instances[0].bill, instances[0].client, sale{customer: cid(buyer), price: price.Items[0].ID})
 		require.NoError(t, err)
-		paying, err := session.on(instances[1].client).pay("pay-1", redirect("https://e2e.test/success"))
+		paying, err := session.on(instances[1].bill).pay("pay-1", redirect("https://e2e.test/success"))
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderPaymentRequiresAction, paying.Payment.Status)
 		sessions := stripe.CheckoutSessions()

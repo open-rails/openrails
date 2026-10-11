@@ -528,7 +528,7 @@ const DefaultSchema = "billing"
 // for this value, so hosts must keep it in lockstep.
 const MigratekitApp = "openrails"
 
-// RiverSchemaName is the schema of the River client Client.Start runs:
+// RiverSchemaName is the schema of the River client Engine.Start runs:
 // Database.RiverSchema, or the schema plus "_river".
 func RiverSchemaName(c *Config) string {
 	if c != nil {

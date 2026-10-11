@@ -148,13 +148,11 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
 	staff := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	deny := authtest.Deny{}
-	boot := func(assets fstest.MapFS) *openrails.Client {
+	boot := func(assets fstest.MapFS) *openrails.Engine {
 		deps := staff
 		deps.ConsoleAssets = assets
-		client, err := openrails.New(t.Context(), cfg, deps)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = client.Close(context.Background()) })
-		return client
+		bill, _ := f.boot(t, cfg, deps)
+		return bill
 	}
 	routes := openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
@@ -162,14 +160,14 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
 	require.ErrorContains(t, err, `<base href="/admin/">`)
 
-	client := boot(consoleBuild("host"))
-	_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: true})
+	bill := boot(consoleBuild("host"))
+	_, err = bill.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: true})
 	require.ErrorContains(t, err, "turn on at least one of RouteGroups.Admin")
 
 	// The host keeps its own /admin pages.
 	root := http.NewServeMux()
 	root.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
-	require.NoError(t, openrailshttp.Mount(root, client, routes))
+	require.NoError(t, openrailshttp.Mount(root, bill, routes))
 	requireConsoleAt(t, root, "/billing/admin", "host")
 	require.Equal(t, "host admin", get(root, "/admin/").Body.String())
 	w := get(root, "/billing/admin/config.json")
@@ -182,7 +180,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	require.Equal(t, "/billing/v1", bootstrap.APIBaseURL)
 
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups}))
+	require.NoError(t, openrailshttp.Mount(off, bill, openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups}))
 	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
 }
 
@@ -194,9 +192,7 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
 	routes := openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true}
 
 	for _, c := range []struct{ apiPath, base, want string }{
@@ -218,7 +214,7 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 		require.NoError(t, ak.Mount(host))
 		mount := routes
 		mount.AdminConsoleAuthBase = c.base
-		require.NoError(t, openrailshttp.Mount(host, client, mount))
+		require.NoError(t, openrailshttp.Mount(host, bill, mount))
 		w := get(host, "/billing/admin/config.json")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var boot struct {
@@ -236,7 +232,7 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 	for _, bad := range []string{"api/v1", "/api/v1/", "/", "https://billing.example.com/api/v1", "//billing.example.com/api/v1", "/api/../v1", "/api v1"} {
 		mount := routes
 		mount.AdminConsoleAuthBase = bad
-		err := openrailshttp.Mount(http.NewServeMux(), client, mount)
+		err := openrailshttp.Mount(http.NewServeMux(), bill, mount)
 		require.ErrorContains(t, err, fmt.Sprintf("invalid Routes.AdminConsoleAuthBase %q", bad))
 	}
 }
@@ -249,7 +245,7 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 // their holders. With the merchant's group, its holders too.
 func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, uniqueName("roles"))
+	bill, client := f.runtime(t, uniqueName("roles"))
 	mid := client.MerchantID().String()
 
 	rbac := authkit.NewRoles(authkit.CustomRoles)
@@ -271,7 +267,7 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 
 	host := http.NewServeMux()
 	require.NoError(t, ak.Mount(host))
-	require.NoError(t, openrailshttp.Mount(host, client, openrails.Routes{Auth: ak.Authenticator(), Prefix: "/billing", RouteGroups: adminGroups}))
+	require.NoError(t, openrailshttp.Mount(host, bill, openrails.Routes{Auth: ak.Authenticator(), Prefix: "/billing", RouteGroups: adminGroups}))
 
 	person := func(group iam.GroupRef, role iam.Role) (string, string) {
 		u := authkittest.NewUser(t, ak)

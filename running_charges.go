@@ -87,7 +87,7 @@ func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningC
 
 // StartRunningChargeTx is StartRunningCharge inside tx, a transaction from the
 // host's pool on the engine's database, so a charge starts in the commit that
-// records the work as ready. OpenRails binds the declared merchant and never
+// records the work as ready. OpenRails binds the handle's merchant and never
 // commits or rolls tx back; after an error the host rolls back. Embedded only:
 // a remote client returns ErrRemoteClient.
 func (c *Client) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error) {
@@ -96,7 +96,7 @@ func (c *Client) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params bil
 		return nil, err
 	}
 	params.Currency = normalizeCurrency(params.Currency)
-	return e.StartRunningChargeTx(ctx, tx, params)
+	return e.StartRunningChargeTx(ctx, c.merchantID, tx, params)
 }
 
 // StopRunningChargeTx is StopRunningCharge inside tx (see
@@ -107,5 +107,5 @@ func (c *Client) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference s
 	if err != nil {
 		return nil, err
 	}
-	return e.StopRunningChargeTx(ctx, tx, reference, params)
+	return e.StopRunningChargeTx(ctx, c.merchantID, tx, reference, params)
 }

@@ -1,4 +1,4 @@
-// Package openrailsfiber registers an OpenRails Client's routes natively on a Fiber v3 app.
+// Package openrailsfiber registers an OpenRails Engine's routes natively on a Fiber v3 app.
 package openrailsfiber
 
 import (
@@ -15,14 +15,14 @@ import (
 const RouteNamePrefix = "openrails."
 
 // Mount registers one native route per method and path of the routes
-// selection selects (Client.Routes) on the root app: the API under
+// selection selects (Engine.Routes) on the root app: the API under
 // selection.Prefix. Fiber keeps its native matching and 404/405 behavior;
 // configure CaseSensitive and StrictRouting on the host for exact matching.
-func Mount(app *fiber.App, client *openrails.Client, selection openrails.Routes) error {
-	if client == nil || app == nil {
-		return fmt.Errorf("openrailsfiber: Mount requires a Fiber app and a client")
+func Mount(app *fiber.App, engine *openrails.Engine, selection openrails.Routes) error {
+	if engine == nil || app == nil {
+		return fmt.Errorf("openrailsfiber: Mount requires a Fiber app and an engine")
 	}
-	routes, err := client.Routes(selection)
+	routes, err := engine.Routes(selection)
 	if err != nil {
 		return err
 	}

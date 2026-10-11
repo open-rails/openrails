@@ -39,24 +39,24 @@ type purchase struct {
 }
 
 // sell creates s's order through client and opens it as its customer on
-// client's mount.
-func sell(t *testing.T, client *openrails.Client, s sale) (*purchase, error) {
+// bill's mount.
+func sell(t *testing.T, bill *openrails.Engine, client *openrails.Client, s sale) (*purchase, error) {
 	t.Helper()
 	order, err := client.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: s.customer,
 		Lines: []billing.OrderLineParams{{PriceID: s.price, Amount: s.amount}}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		return nil, err
 	}
-	return (&purchase{t: t, order: *order}).on(client), nil
+	return (&purchase{t: t, order: *order}).on(bill), nil
 }
 
-// on is the purchase on client's mount: any process of its merchant serves
+// on is the purchase on bill's mount: any process of its merchant serves
 // its customer.
-func (p *purchase) on(client *openrails.Client) *purchase {
+func (p *purchase) on(bill *openrails.Engine) *purchase {
 	p.t.Helper()
 	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
-	require.NoError(p.t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: auth}))
+	require.NoError(p.t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth}))
 	return &purchase{t: p.t, page: mux, token: auth.Person(p.order.CustomerID.String()), order: p.order}
 }
 

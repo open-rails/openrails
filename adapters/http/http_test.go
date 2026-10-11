@@ -145,7 +145,7 @@ func TestMountRefusesInvalidTargets(t *testing.T) {
 	var nilBundle *Bundle
 	require.Error(t, nilBundle.Mount(http.NewServeMux()))
 	require.Error(t, (&Bundle{}).Mount(struct{}{}))
-	require.ErrorContains(t, Mount(http.NewServeMux(), nil, openrails.Routes{}), "requires a client")
+	require.ErrorContains(t, Mount(http.NewServeMux(), nil, openrails.Routes{}), "requires an engine")
 }
 
 var testMerchant = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))

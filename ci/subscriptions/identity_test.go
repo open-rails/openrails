@@ -141,8 +141,8 @@ func TestIntentsRecordSubjectInvokerAndCredential(t *testing.T) {
 		t.Helper()
 		e := enroll(t, w, "nmi", embedded)
 		payment := completed(w.payments(embedded, e.c.id))[0]
-		client, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
-			openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+		client, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{
+			Token: func(context.Context) (string, error) { return token, nil }})
 		require.NoError(t, err)
 		_, err = client.RefundPayment(t.Context(), payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "audit-" + uuid.NewString()})
 		require.NoError(t, err)

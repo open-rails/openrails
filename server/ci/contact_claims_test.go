@@ -70,12 +70,11 @@ merchants:
 	m, err := graph.Runtime.Merchants.GetBySlug(ctx, shop)
 	require.NoError(t, err)
 	trust(t, srv, m.ID, host.app(t, "viewer", nil))
-	at := openrails.ForMerchantID(m.ID)
-	engine := srv.Client()
+	members := handle(t, srv, m.ID)
 	hours := 720
-	product, err := engine.CreateProduct(ctx, billing.CreateProductParams{Key: "members", DisplayName: "Members", Entitlements: []string{"content:members"}}, at)
+	product, err := members.CreateProduct(ctx, billing.CreateProductParams{Key: "members", DisplayName: "Members", Entitlements: []string{"content:members"}})
 	require.NoError(t, err)
-	price, err := engine.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", Currency: "USD", UnitAmount: 9_990_000, BillingIntervalHours: &hours, AccessDurationHours: &hours}, at)
+	price, err := members.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", Currency: "USD", UnitAmount: 9_990_000, BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(t, err)
 
 	// A brand-new user: the first request is the purchase.
@@ -99,7 +98,7 @@ merchants:
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out), w.Body.String())
 		return out
 	}
-	psps, err := engine.ListPSPs(ctx, billing.PSPListParams{}, at)
+	psps, err := members.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
 	card := me(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "New Comer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})["id"]
@@ -113,7 +112,7 @@ merchants:
 	require.Equal(t, "apikey", receipt.Username)
 	require.Contains(t, receipt.Text+receipt.HTML, "9.99")
 
-	customers, err := engine.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{billing.CustomerID(uuid.MustParse(user))}}, at)
+	customers, err := members.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{billing.CustomerID(uuid.MustParse(user))}})
 	require.NoError(t, err)
 	require.Equal(t, "new@claims.test", *customers.Items[0].Contact.Email)
 	require.Equal(t, "New Comer", *customers.Items[0].Contact.Name)

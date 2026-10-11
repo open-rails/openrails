@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
@@ -25,18 +26,30 @@ import (
 // Client method and every Client method is exactly one merchant route. The
 // two lists below are every exception, each with its reason.
 
-// hostingMethods run, mount and derive: an engine's lifecycle, the HTTP
-// surface it hands its host, and clients made from a client.
-var hostingMethods = map[string]string{
-	"Start":       "starts the workers",
-	"Close":       "stops the engine",
-	"Ready":       "the readiness probe (/health/ready when remote)",
-	"Probes":      "the optional dependencies, for the host's supervisor",
-	"Routes":      "the HTTP surface the host mounts",
-	"SCIMHandler": "the SCIM service provider an in-process directory pushes to",
-	"RiverJobs":   "the jobs a host-owned River fleet runs",
-	"With":        "a client with other options over the same transport",
-	"MerchantID":  "the client's default merchant",
+// handleMethods say what a handle is; they call no route.
+var handleMethods = map[string]string{
+	"MerchantID": "the handle's merchant",
+}
+
+// engineMethods are everything an Engine has: its lifecycle, the HTTP surface
+// it hands its host, and its merchants' handles. No merchant's operation is
+// on it.
+var engineMethods = map[string]string{
+	"Start":          "starts the workers",
+	"Close":          "stops the engine",
+	"Ready":          "the readiness probe",
+	"Probes":         "the optional dependencies, for the host's supervisor",
+	"Routes":         "the HTTP surface the host mounts",
+	"RiverJobs":      "the jobs a host-owned River fleet runs",
+	"Merchant":       "a merchant's handle",
+	"MerchantBySlug": "the handle of a merchant Config declares",
+}
+
+// remoteMethods are everything a Remote has: nothing spans its merchants.
+var remoteMethods = map[string]string{
+	"Ready":    "the server's /health/ready",
+	"Close":    "releases idle connections",
+	"Merchant": "a merchant's handle",
 }
 
 // embeddedMethods are operations only an in-process engine offers. Each one
@@ -44,6 +57,7 @@ var hostingMethods = map[string]string{
 // merchant route can carry it; the reason names the host that calls it. The
 // control plane's cross-merchant operations are package server's.
 var embeddedMethods = map[string]string{
+	"SCIMHandler":                        "the SCIM service provider an in-process directory pushes to",
 	"DeclarePSP":                         "the hosted product: a PSP identity without credentials, for imported billing facts",
 	"OpenProviderOperationTx":            "host-four: OpenProviderOperation inside the host's transaction",
 	"GetProviderOperationTx":             "host-four: GetProviderOperation inside the host's transaction",
@@ -167,9 +181,10 @@ func newSurfaceProbe(t *testing.T) *surfaceProbe {
 		p.seen = append(p.seen, pattern)
 		return okResponse(`{}`), nil
 	})
-	client, err := NewRemote("http://openrails.invalid", WithAPIKey("k"), WithDefaultMerchant("fixture"), WithHTTPClient(&http.Client{Transport: transport}))
-	require.NoError(t, err)
-	p.client = client
+	p.client = remoteHandle(t, "http://openrails.invalid", RemoteOptions{
+		Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: {APIKey: "k"}},
+		HTTPClient:  &http.Client{Transport: transport},
+	})
 	return p
 }
 
@@ -219,7 +234,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 	for i := range ct.NumMethod() {
 		m := ct.Method(i)
 		names[m.Name] = true
-		if _, ok := hostingMethods[m.Name]; ok {
+		if _, ok := handleMethods[m.Name]; ok {
 			require.NotContains(t, embeddedMethods, m.Name)
 			continue
 		}
@@ -270,8 +285,8 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			t.Errorf("%s returns %s by value: return a pointer", m.Name, out)
 		}
 	}
-	for name := range hostingMethods {
-		require.True(t, names[name], "hostingMethods lists %s, which Client does not have", name)
+	for name := range handleMethods {
+		require.True(t, names[name], "handleMethods lists %s, which Client does not have", name)
 	}
 	for name := range embeddedMethods {
 		require.True(t, names[name], "embeddedMethods lists %s, which Client does not have", name)
@@ -290,6 +305,21 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 				t.Errorf("%s is a %s route: no Client method, not %v", r.Key(), r.Group, methodsOf[r.Key()])
 			}
 		}
+	}
+}
+
+// What spans merchants is on the Engine and the Remote, and nothing else is:
+// a merchant's operations are its handle's alone.
+func TestEngineAndRemoteCarryNoMerchantOperation(t *testing.T) {
+	for typ, want := range map[reflect.Type]map[string]string{
+		reflect.TypeFor[*Engine](): engineMethods,
+		reflect.TypeFor[*Remote](): remoteMethods,
+	} {
+		var got []string
+		for i := range typ.NumMethod() {
+			got = append(got, typ.Method(i).Name)
+		}
+		require.ElementsMatch(t, slices.Collect(maps.Keys(want)), got, "%s: a merchant's operation is a Client method; list anything else with its reason", typ)
 	}
 }
 

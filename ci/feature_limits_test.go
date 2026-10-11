@@ -46,16 +46,14 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "test-site", SecretKey: "test-secret"}
 	cfg.LLM = &openrails.LLMConfig{APIKey: "test", AskEnabled: true, CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	dashboardLLM, catalogLLM := &featureLimitLLM{}, &featureLimitLLM{}
-	graph := engine.Graph(client)
+	graph := engine.Graph(bill)
 	graph.Runtime.DashboardService.SetLLM(dashboardLLM)
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, RouteGroups: staffGroups})
+		routes, err := bill.Routes(openrails.Routes{Auth: hostKey{}, RouteGroups: staffGroups})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {

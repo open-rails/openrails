@@ -3,7 +3,7 @@
 // AuthKit, which is now also the OAuth issuer the server trusts: it mints the
 // browser's tokens for /v1/me, the backend's client-credentials
 // tokens, and pushes its users to the server's AuthKit over SCIM. newBilling builds the
-// client with NewRemote; content.go and web/src/pages.tsx are the embedded
+// client with NewRemoteMerchant; content.go and web/src/pages.tsx are the embedded
 // example's, unchanged.
 //
 // Run it from this directory with DATABASE_URL, after building the app
@@ -49,7 +49,6 @@ import (
 type settings struct {
 	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
 	OpenRailsURL string        // the server, and its resource identifier (auth.resource.id)
-	Merchant     string        // the merchant the server serves for this app (its merchant.yaml)
 	ClientSecret string        // the backend client's secret
 	SCIMInterval time.Duration // how often AuthKit pushes user changes to the server
 	SMTP         smtp.Server   // AuthKit's mail: the codes that prove each user's email
@@ -138,25 +137,24 @@ func backendCredentials(s settings) *authkit.ProvisioningClientCredentials {
 	}
 }
 
-// newBilling is the remote client: the same *openrails.Client as embedded,
-// over HTTP, with a client-credentials token from this app's AuthKit.
+// newBilling is the remote handle: the same *openrails.Client as embedded,
+// over HTTP, with a client-credentials token from this app's AuthKit. The
+// server trusts that issuer for one merchant, the one every call acts on.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
 	cc := backendCredentials(s)
 	tokens := (&clientcredentials.Config{
 		ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
 		EndpointParams: url.Values{"resource": {cc.Resource}},
 	}).TokenSource(context.WithoutCancel(ctx)) // caches each token until it expires
-	return openrails.NewRemote(s.OpenRailsURL,
-		openrails.WithTokenProvider(func(context.Context) (string, error) {
+	return openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{
+		Token: func(context.Context) (string, error) {
 			t, err := tokens.Token()
 			if err != nil {
 				return "", err
 			}
 			return t.AccessToken, nil
-		}),
-		openrails.WithDefaultMerchant(s.Merchant), // the issuer serves one merchant; naming it is explicit
-		openrails.WithTimeout(5*time.Second),
-	)
+		},
+	})
 }
 
 // newApp builds the app: its AuthKit (started: its River workers push the
@@ -199,7 +197,6 @@ func run(ctx context.Context) error {
 	s := settings{
 		PublicURL:    cmp.Or(os.Getenv("PUBLIC_URL"), "http://localhost:8080"),
 		OpenRailsURL: cmp.Or(os.Getenv("OPENRAILS_URL"), "http://localhost:3053"),
-		Merchant:     cmp.Or(os.Getenv("OPENRAILS_MERCHANT"), "onlydemo"),
 		ClientSecret: os.Getenv("OPENRAILS_CLIENT_SECRET"),
 		SCIMInterval: 30 * time.Second,
 		SMTP: smtp.Server{
@@ -227,10 +224,10 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	defer bill.Close(context.WithoutCancel(ctx))
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
-		return bill.Ready(ctx)
+		_, err := bill.GetCatalogRevision(ctx) // reaches the server as the app's merchant
+		return err
 	}
 	addr := cmp.Or(os.Getenv("ADDR"), ":8080")
 	server := &http.Server{Addr: addr, Handler: r, ReadHeaderTimeout: 5 * time.Second}

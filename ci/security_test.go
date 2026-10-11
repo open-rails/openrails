@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -36,9 +35,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
 		}},
 	}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: fake})
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", Entitlements: []string{"content:refunded"},
@@ -47,14 +44,14 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	session, err := sell(t, client, sale{customer: cid(userID), price: price.ID})
+	session, err := sell(t, bill, client, sale{customer: cid(userID), price: price.ID})
 	require.NoError(t, err)
 	_, err = session.pay("pay-1", redirect("https://example.test/success"))
 	require.NoError(t, err)
 	providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID := fake.metadata(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}}))
 	deliver := func(payload []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, account, secret, payload, time.Now())

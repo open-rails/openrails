@@ -42,20 +42,16 @@ func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.Provisi
 	return c.do(ctx, http.MethodDelete, "/v1/admin/provisioning-tokens/"+id.String(), nil, nil, options...)
 }
 
-// SCIMHandler is the SCIM 2.0 service provider for the Client's merchant, for
+// SCIMHandler is the SCIM 2.0 service provider for the handle's merchant, for
 // a directory in the same process (AuthKit's provisioning) to push its users
 // to without a network hop. Its paths are relative to the SCIM root (/Users,
 // /Bulk, /ServiceProviderConfig); it authenticates nothing, since holding the
-// Client is the authority. It fails on a remote Client and on an engine that
+// Engine is the authority. It fails on a remote handle and on an engine that
 // reads Deps.UserInfo.
 func (c *Client) SCIMHandler() (http.Handler, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	mid := c.merchantID
-	if mid.IsZero() {
-		mid = e.ConfiguredMerchant()
-	}
-	return e.SCIMHandler(mid)
+	return e.SCIMHandler(c.merchantID)
 }

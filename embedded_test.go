@@ -1,12 +1,9 @@
 package openrails
 
 import (
-	"context"
-	"net/http"
 	"reflect"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -29,47 +26,22 @@ func TestUsageSweepArgsMirrorEngineJob(t *testing.T) {
 	require.Equal(t, QueueBilling, UsageSweepArgs{}.InsertOpts().Queue)
 }
 
-// Hosting operations refuse a remote client instead of pretending.
-func TestRemoteClientRefusesHostingOperations(t *testing.T) {
-	c, err := NewRemote("https://billing.example", WithAPIKey("k"))
+// What only an engine's handle offers refuses a remote handle instead of
+// pretending.
+func TestRemoteHandleRefusesEmbeddedOperations(t *testing.T) {
+	c, err := NewRemoteMerchant("https://billing.example", RemoteCredential{APIKey: "k"})
 	require.NoError(t, err)
-	require.ErrorIs(t, c.Start(t.Context()), ErrRemoteClient)
-	_, err = c.Routes(Routes{Prefix: "/billing"})
+	_, err = c.DeclarePSP(t.Context(), billing.PSPDeclaration{})
 	require.ErrorIs(t, err, ErrRemoteClient)
-	require.Nil(t, c.Probes())
-	_, err = c.DeclarePSP(t.Context(), billing.MerchantID(uuid.New()), billing.PSPDeclaration{})
+	_, err = c.SCIMHandler()
 	require.ErrorIs(t, err, ErrRemoteClient)
-	require.NoError(t, c.Close(t.Context()))
+	_, err = c.OpenProviderOperationTx(t.Context(), nil, billing.OpenProviderOperationParams{})
+	require.ErrorIs(t, err, ErrRemoteClient)
 }
 
-// New authenticates as the host over its own transport: the options that
-// configure a remote client's credential or transport are refused before
-// anything opens, never dropped.
-func TestNewRefusesRemoteOptions(t *testing.T) {
-	token := func(context.Context) (string, error) { return "t", nil }
-	for name, opt := range map[string]ClientOption{
-		"WithAPIKey":             WithAPIKey("k"),
-		"WithTokenProvider":      WithTokenProvider(token),
-		"WithHTTPClient":         WithHTTPClient(&http.Client{}),
-		"WithCredentialProvider": WithCredentialProvider(func(context.Context, CredentialTarget) (string, error) { return "t", nil }),
-	} {
-		_, err := New(t.Context(), Config{}, Deps{}, opt)
-		require.ErrorContains(t, err, "New runs in process", name)
-	}
-	_, err := New(t.Context(), Config{}, Deps{}, WithMerchantID(billing.MerchantID{}))
-	require.ErrorContains(t, err, "merchant ID must not be zero", "an invalid option fails before the engine is built")
-}
-
-// Only the Client a constructor returned owns the engine and transport.
-func TestDerivedClientCannotClose(t *testing.T) {
-	c, err := NewRemote("https://billing.example", WithAPIKey("k"))
-	require.NoError(t, err)
-	derived, err := c.With(WithTimeout(1))
-	require.NoError(t, err)
-	again, err := derived.With()
-	require.NoError(t, err)
-	for _, d := range []*Client{derived, again} {
-		require.ErrorContains(t, d.Close(t.Context()), "derived client")
-	}
-	require.NoError(t, c.Close(t.Context()))
+// Merchant refuses the zero ID before anything is read.
+func TestEngineMerchantRefusesTheZeroID(t *testing.T) {
+	handle, err := (&Engine{}).Merchant(billing.MerchantID{})
+	require.ErrorIs(t, err, billing.ErrInvalid)
+	require.Nil(t, handle)
 }

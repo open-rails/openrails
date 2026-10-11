@@ -35,17 +35,15 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	})
-	engine := srv.Client()
 	// publish arms a merchant's NMI PSP and binds its API host, where its
 	// browsers read GET /v1/config.
 	publish := func(account string) string {
 		slug := "seller-" + uuid.NewString()[:8]
 		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
-		at := openrails.ForMerchantID(m.MerchantID)
-		_, err = engine.CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: account,
+		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: account,
 			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
-			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}}, at)
+			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 		require.NoError(t, err)
 		host := slug + ".e2e.test"
 		require.NoError(t, srv.SetMerchantAPIHost(ctx, m.MerchantID, host))

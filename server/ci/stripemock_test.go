@@ -39,9 +39,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 	}}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
+	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "credit-" + uuid.NewString()[:8], DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
 	require.NoError(t, err)
@@ -52,7 +50,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	user := authtest.NewUser(t, as.Client)
 	customer := authtest.SignIn(t, as.Client, user).AccessToken
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	stripe.SendWebhooksTo(srv.URL+"/billing/v1/webhooks/stripe/acct_test", "whsec_test")

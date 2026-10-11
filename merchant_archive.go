@@ -33,7 +33,7 @@ func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, reques
 			return fmt.Errorf("%w: incomplete or invalid billing archive: %w", billing.ErrUnreachable, err)
 		}
 		return nil
-	}, requestOptions...)
+	})
 }
 
 // ImportBillingArchive atomically restores an archive into an empty destination
@@ -66,7 +66,7 @@ func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader, reques
 			return fmt.Errorf("%w: archive receipt must contain one JSON value", billing.ErrUnreachable)
 		}
 		return nil
-	}, requestOptions...)
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -110,11 +110,11 @@ func (h *guardedHost) routes(groups openrails.RouteGroups) openrails.Routes {
 	return openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/billing", RouteGroups: groups}
 }
 
-// mount serves client's routes with groups on.
-func (h *guardedHost) mount(t *testing.T, client *openrails.Client, groups openrails.RouteGroups) (http.Handler, error) {
+// mount serves bill's routes with groups on.
+func (h *guardedHost) mount(t *testing.T, bill *openrails.Engine, groups openrails.RouteGroups) (http.Handler, error) {
 	t.Helper()
 	mux := http.NewServeMux()
-	return mux, openrailshttp.Mount(mux, client, h.routes(groups))
+	return mux, openrailshttp.Mount(mux, bill, h.routes(groups))
 }
 
 func bearerRequest(token string) func() *http.Request {
@@ -169,7 +169,7 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	client := f.runtime(t, "groups-"+uuid.NewString()[:8])
+	bill, client := f.runtime(t, "groups-"+uuid.NewString()[:8])
 	payment := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 	subscription := "/billing/v1/admin/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
 	// passes is a request the gate admitted: the handler answers, here that
@@ -194,7 +194,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	}
 
 	t.Run("admin reads and writes", func(t *testing.T) {
-		mux, err := h.mount(t, client, adminGroups)
+		mux, err := h.mount(t, bill, adminGroups)
 		require.NoError(t, err)
 		forbidden(t, mux, h.customer, http.MethodGet, "/billing/v1/admin/payments")
 		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/payments")
@@ -223,9 +223,9 @@ func TestRouteGroupPermissions(t *testing.T) {
 	// A merchant's own staff hold the merchant: names in its group: they act
 	// at that merchant and nowhere else, and a root holder at both.
 	t.Run("a merchant's own staff", func(t *testing.T) {
-		other := f.runtime(t, "other-"+uuid.NewString()[:8])
+		other, _ := f.runtime(t, "other-"+uuid.NewString()[:8])
 		staff := h.merchantStaff(t, client.MerchantID())
-		here, err := h.mount(t, client, adminGroups)
+		here, err := h.mount(t, bill, adminGroups)
 		require.NoError(t, err)
 		there, err := h.mount(t, other, adminGroups)
 		require.NoError(t, err)
@@ -244,7 +244,8 @@ func TestRouteGroupPermissions(t *testing.T) {
 	})
 
 	t.Run("merchant configuration", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "config-"+uuid.NewString()[:8]), openrails.RouteGroups{Admin: true, MerchantConfig: true})
+		config, _ := f.runtime(t, "config-"+uuid.NewString()[:8])
+		mux, err := h.mount(t, config, openrails.RouteGroups{Admin: true, MerchantConfig: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodGet, "/billing/v1/admin/psps")
 		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/psps")
@@ -253,7 +254,8 @@ func TestRouteGroupPermissions(t *testing.T) {
 	})
 
 	t.Run("the catalog alone", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "catalog-"+uuid.NewString()[:8]), openrails.RouteGroups{Catalog: true})
+		catalog, _ := f.runtime(t, "catalog-"+uuid.NewString()[:8])
+		mux, err := h.mount(t, catalog, openrails.RouteGroups{Catalog: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodPost, "/billing/v1/admin/catalog/products")
 		forbidden(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/catalog/products")
@@ -285,9 +287,9 @@ func TestAuthKitRefusals(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	h := newGuardedHostOn(t, pool)
-	client := f.runtime(t, "refusals-"+uuid.NewString()[:8])
+	bill, _ := f.runtime(t, "refusals-"+uuid.NewString()[:8])
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true})))
+	require.NoError(t, openrailshttp.Mount(mux, bill, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true})))
 	refund := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 
 	anonymous := httptest.NewRecorder()
@@ -340,8 +342,8 @@ func TestAuthKitRefusals(t *testing.T) {
 func TestMountFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	client := f.runtime(t, "groups-"+uuid.NewString()[:8])
-	require.ErrorContains(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{RouteGroups: adminGroups}), "Routes.Auth is required")
+	bill, _ := f.runtime(t, "groups-"+uuid.NewString()[:8])
+	require.ErrorContains(t, openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{RouteGroups: adminGroups}), "Routes.Auth is required")
 
 	// A host whose roles declare root's billing permissions alone.
 	rbac := authkit.NewRoles()
@@ -351,7 +353,7 @@ func TestMountFailsClosed(t *testing.T) {
 	bare := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
 		authtest.WithConfig(func(c *authkit.Config) { c.Roles = rbac })).Client.Authenticator()
-	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: bare, Prefix: "/a", RouteGroups: adminGroups}))
+	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{Auth: bare, Prefix: "/a", RouteGroups: adminGroups}))
 	for name, tc := range map[string]struct {
 		groups openrails.RouteGroups
 		err    string
@@ -359,11 +361,11 @@ func TestMountFailsClosed(t *testing.T) {
 		"a staff group it declares nothing for": {openrails.RouteGroups{Admin: true, Metrics: true}, `knows none of its permissions ["merchant:metrics:read" "root:metrics:read"]`},
 		"the programmatic routes":               {openrails.RouteGroups{Programmatic: true}, "/v1/app/"},
 	} {
-		err := openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: bare, Prefix: "/b", RouteGroups: tc.groups})
+		err := openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{Auth: bare, Prefix: "/b", RouteGroups: tc.groups})
 		require.ErrorContains(t, err, tc.err, name)
 		require.ErrorContains(t, err, "knows none of its permissions", name)
 	}
 
 	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
-	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/c", RouteGroups: every}))
+	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), bill, openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/c", RouteGroups: every}))
 }

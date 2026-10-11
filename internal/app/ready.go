@@ -56,13 +56,13 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 
 	var riverErr error
 	if !r.RiverBound() {
-		riverErr = fmt.Errorf("River is not running: call Client.Start")
+		riverErr = fmt.Errorf("River is not running: call Engine.Start")
 	}
 	add("river", false, riverErr)
 	if riverErr == nil && !r.externalRiverClient {
 		var consumerErr error
 		if !r.workerConsumerRunning.Load() {
-			consumerErr = fmt.Errorf("OpenRails' River is bound but not running: call Client.Start")
+			consumerErr = fmt.Errorf("OpenRails' River is bound but not running: call Engine.Start")
 		}
 		add("river_consumer", false, consumerErr)
 	}

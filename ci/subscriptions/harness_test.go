@@ -296,11 +296,11 @@ type world struct {
 	// deps adjusts the host hooks before start.
 	deps func(*openrails.Deps)
 	// booted sees the engine the moment New returns, before anything else runs.
-	booted func(*openrails.Client)
+	booted func(*openrails.Engine)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
-	rt     *openrails.Client
+	rt     *openrails.Engine
 	jobs   *river.Client[pgx.Tx]
 	server *httptest.Server
 	client map[topology]*openrails.Client
@@ -335,9 +335,9 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 // writeVaultDocs writes a merchant's configuration into Vault as an operator
 // does: one JSON document per object at the paths and in the shapes
 // docs/vault.md gives, then reloads it.
-func writeVaultDocs(t testing.TB, v *vaulttest.Vault, client *openrails.Client, declared openrails.MerchantDeclaration) {
+func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, declared openrails.MerchantDeclaration) {
 	t.Helper()
-	rt := engine.Graph(client).Runtime
+	rt := engine.Graph(bill).Runtime
 	id := rt.ConfiguredMerchant()
 	root := "openrails/merchants/" + id.UUID().String() + "/"
 	merchant := map[string]any{"display_name": declared.DisplayName, "settings": declared.Settings}
@@ -509,14 +509,15 @@ func (w *world) start() {
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, rt, routes))
 	w.server = httptest.NewServer(mux)
-	local := rt
+	local, err := rt.MerchantBySlug(w.slug)
+	require.NoError(t, err)
 	host := w.auth.hostToken(t)
-	over, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return host, nil }))
+	over, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{
+		Token: func(context.Context) (string, error) { return host, nil }})
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config := publicConfig(t, local)
+	config := publicConfig(t, rt)
 	w.psp = map[string]billing.PSPID{}
 	for _, psp := range config.Payment.PSPs {
 		w.psp[psp.Rail] = psp.PSPID

@@ -64,18 +64,18 @@ func TestHostedCheckoutRegistersItsHostForWallets(t *testing.T) {
 
 	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})
 	require.NoError(t, err)
-	at, ctx := openrails.ForMerchantID(entry.MerchantID), merchant.WithID(t.Context(), entry.MerchantID)
+	shop, ctx := handle(t, srv, entry.MerchantID), merchant.WithID(t.Context(), entry.MerchantID)
 	stripe.SeedPaymentMethodDomain("acct_known", checkoutHost, false)
 	declare := func(key, account string) billing.PSPID {
-		psp, err := srv.Client().CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, AccountID: account,
+		psp, err := shop.CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, AccountID: account,
 			Settings:    map[string]any{"publishable_key": "pk_test_" + key},
-			Credentials: map[string]string{"secret_key": "sk_test_" + account, "webhook_signing_secret": "whsec_" + key}}, at)
+			Credentials: map[string]string{"secret_key": "sk_test_" + account, "webhook_signing_secret": "whsec_" + key}})
 		require.NoError(t, err)
 		return psp.ID
 	}
 	fresh, known := declare("stripe", "acct_fresh"), declare("known", "acct_known")
 
-	rt := engine.Graph(srv.Client()).Runtime
+	rt := engine.Graph(srv.Engine()).Runtime
 	store := intents.NewStore(rt.DB)
 	run := func(psp billing.PSPID) gen.BillingProviderIntent {
 		t.Helper()
@@ -120,8 +120,8 @@ func TestHostedCheckoutRegistersItsHostForWallets(t *testing.T) {
 	// Sites registered for embedded checkouts are registered too: a wallet
 	// shows in a frame only when the framing page's domain is. Loopback
 	// sites are not.
-	_, err = srv.Client().UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}}, at)
+	_, err = shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
 	require.NoError(t, err)
 	for _, psp := range []billing.PSPID{fresh, known} {
 		require.Eventually(t, func() bool {

@@ -26,7 +26,7 @@ func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err erro
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return nil, fmt.Errorf("openrails: client is closed")
+		return nil, fmt.Errorf("openrails: engine is closed")
 	}
 	if e.App.Standalone {
 		return nil, fmt.Errorf("openrails: this engine is a standalone server's; mount server.Routes")

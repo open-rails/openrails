@@ -18,15 +18,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-func (f *fixture) fxEngine(t *testing.T, fx *fxfake.Server, start bool) *openrails.Client {
+func (f *fixture) fxEngine(t *testing.T, fx *fxfake.Server, start bool) *openrails.Engine {
 	t.Helper()
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool, FXTransport: fx.Transport()})
+	bill, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool, FXTransport: fx.Transport()})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
 	if start {
-		require.NoError(t, client.Start(t.Context()))
+		require.NoError(t, bill.Start(t.Context()))
 	}
-	return client
+	return bill
 }
 
 // Starting reads no rates. A refresh reads each currency's file once (34

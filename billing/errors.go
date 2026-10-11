@@ -90,6 +90,8 @@ func (e *StatusError) Is(target error) bool {
 		return e.Status == http.StatusConflict
 	case ErrPaymentRefused:
 		return e.Status == http.StatusPaymentRequired
+	case ErrMerchantUnresolved:
+		return e.Code == CodeMerchantUnresolved
 	case ErrInternal, ErrUnreachable:
 		return e.Status >= 500
 	case ErrInvalid:

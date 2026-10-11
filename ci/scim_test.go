@@ -268,11 +268,9 @@ func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 	mount := func(slug, declared string) (*openrails.Client, http.Handler) {
 		cfg := f.config()
 		cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, Secrets: openrails.MerchantSecrets{SCIMToken: declared}}
-		client, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
+		bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		mux := http.NewServeMux()
-		require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: openrails.RouteGroups{Programmatic: true}}))
+		require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: openrails.RouteGroups{Programmatic: true}}))
 		return client, mux
 	}
 	declared := "declared-" + strings.Repeat("x", 32)
