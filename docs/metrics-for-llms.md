@@ -7,10 +7,10 @@ token-lean tables. No SDK.
 
 ## Auth
 
-- A bearer credential (`Authorization: Bearer <token>`) that the host's
-  `Permissions.AdminRead` admits: on the standalone server a client-credentials
-  access token from the merchant's trusted issuer granting `server.MerchantBillingRead`, or a
-  hosted product's `viewer` API key.
+- A bearer credential (`Authorization: Bearer <token>`) holding
+  `billing.MerchantMetricsRead` at the merchant, or `billing.RootMetricsRead`:
+  on the standalone server a client-credentials access token from the
+  merchant's trusted issuer granting it, or an API key whose role holds it.
 - Every query is scoped to the credential's merchant (an explicit merchant predicate); the API serves
   **aggregates only**, never entity rows.
 - Prefix: standalone `/v1`, embedded typically `/billing/v1`.

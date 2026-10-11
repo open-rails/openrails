@@ -33,6 +33,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
 
@@ -98,11 +99,11 @@ func run(ctx context.Context) error {
 
 	rbac := authkit.NewRoles()
 
-	billingRead := rbac.Root.Permission("billing", "read")
-	billingManage := rbac.Root.Permission("billing", "manage")
-	catalogManage := rbac.Root.Permission("catalog", "manage")
-	configManage := rbac.Root.Permission("config", "manage")
-	metricsRead := rbac.Root.Permission("metrics", "read")
+	// OpenRails' permissions, by its own names. Held on root, they reach every
+	// merchant you serve.
+	perm := func(p billing.Permission) iam.Perm { return rbac.Root.Permission(p.Resource(), p.Action()) }
+	billingRead, billingManage := perm(billing.RootBillingRead), perm(billing.RootBillingManage)
+	catalogManage, configManage, metricsRead := perm(billing.RootCatalogManage), perm(billing.RootConfigManage), perm(billing.RootMetricsRead)
 
 	rbac.Root.Role("support", billingRead, billingManage)
 	rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
@@ -132,22 +133,10 @@ func run(ctx context.Context) error {
 		return err
 	}
 	// Billing. Public, customer (/me) and webhook routes are always mounted.
-	staff, err := ak.Scope(ctx, iam.RootGroup()) // where the roles above are held
-	if err != nil {
-		return err
-	}
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
 		Auth:        ak.Authenticator(), // says who a request is; OpenRails decides what to admit
-		Scope:       staff,              // where callers hold Permissions
 		Prefix:      "/billing",         // the API is served at /billing/v1/*
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
-		Permissions: openrails.Permissions{
-			AdminRead:      billingRead,
-			AdminUpdate:    billingManage,
-			Catalog:        catalogManage, // edits share the catalog with catalog.yaml
-			MerchantConfig: configManage,
-			Metrics:        metricsRead,
-		},
 	})
 	if err != nil {
 		return err

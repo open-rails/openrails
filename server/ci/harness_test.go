@@ -71,22 +71,8 @@ func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 	return client
 }
 
-// perm is a test host's own permission.
-type perm string
-
-func (p perm) String() string { return string(p) }
-
-// staffPermissions give every staff route group its own permission.
-var staffPermissions = openrails.Permissions{AdminRead: perm("root:billing:read"), AdminUpdate: perm("root:billing:manage"), Catalog: perm("root:catalog:manage"), MerchantConfig: perm("root:config:manage"), Metrics: perm("root:metrics:read")}
-
-// adminPermissions are the admin group's alone.
-var adminPermissions = openrails.Permissions{AdminRead: staffPermissions.AdminRead, AdminUpdate: staffPermissions.AdminUpdate}
-
 // adminGroups turns on the admin group alone.
 var adminGroups = openrails.RouteGroups{Admin: true}
-
-// staffScope is where a test host's staff hold its permissions.
-var staffScope = openrails.Scope{Authority: "test", ID: "staff"}
 
 // rescueClock is River's test clock pinned at one instant.
 type rescueClock struct{ at time.Time }

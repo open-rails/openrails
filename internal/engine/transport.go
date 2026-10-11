@@ -44,7 +44,7 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
 	opts := httproutes.HostOptions()
-	caps := embedhttp.CapabilitiesFor(rt, opts.Permissions, true, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
+	caps := embedhttp.CapabilitiesFor(rt, opts.Groups, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
 	opts.Capabilities = &caps
 	httproutes.RegisterStaffRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", rt), rt, opts)

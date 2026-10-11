@@ -10,10 +10,10 @@ order on one PSP; each pay creates one.
 
 | Client method | HTTP operation | Permission |
 | --- | --- | --- |
-| PreviewOrder | POST /v1/app/orders/preview | `Orders` |
-| CreateOrder | POST /v1/app/orders | `Orders` |
-| GetOrder, ListOrders | GET /v1/admin/orders[/{id}] | `AdminRead` |
-| CancelOrder | POST /v1/app/orders/{id}/cancel | `Orders` |
+| PreviewOrder | POST /v1/app/orders/preview | `merchant:orders:manage` or `root:orders:manage` |
+| CreateOrder | POST /v1/app/orders | `merchant:orders:manage` or `root:orders:manage` |
+| GetOrder, ListOrders | GET /v1/admin/orders[/{id}] | `merchant:billing:read` or `root:billing:read` |
+| CancelOrder | POST /v1/app/orders/{id}/cancel | `merchant:orders:manage` or `root:orders:manage` |
 
 `PreviewOrder` prices lines for one customer and lists the `payment_options`
 that can take them, in routing order; options report local readiness and never

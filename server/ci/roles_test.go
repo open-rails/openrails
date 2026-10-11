@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/staffperm"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
@@ -30,16 +30,13 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		}
 		return out
 	}
-	require.Equal(t, []string{staffperm.All}, held(controlplane.MerchantOwner))
-	require.ElementsMatch(t, []string{staffperm.BillingRead, staffperm.BillingManage}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
-	require.Equal(t, []string{staffperm.BillingRead}, held(controlplane.MerchantViewer), "viewer is read-only")
+	require.Equal(t, []string{"merchant:*"}, held(controlplane.MerchantOwner))
+	require.ElementsMatch(t, []string{string(billing.MerchantBillingRead), string(billing.MerchantBillingManage)}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
+	require.Equal(t, []string{string(billing.MerchantBillingRead)}, held(controlplane.MerchantViewer), "viewer is read-only")
 	for _, role := range []iam.Role{controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)
-		for _, p := range []string{
-			staffperm.CatalogManage, staffperm.ConfigManage, staffperm.MetricsRead, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage,
-			staffperm.EntitlementsRead, staffperm.CatalogRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead, staffperm.OrdersManage,
-		} {
-			require.NotContains(t, grants, p, "%s must not hold %s", role, p)
+		for _, p := range grants {
+			require.Contains(t, []billing.Permission{billing.MerchantBillingRead, billing.MerchantBillingManage}, billing.Permission(p), "%s must not hold %s", role, p)
 		}
 		for _, g := range grants {
 			require.NotContains(t, g, "*", "%s holds no pattern", role)

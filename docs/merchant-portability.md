@@ -24,7 +24,7 @@ live group ownership. Remote export/import require only `--url` and
 `--token-file`.
 
 The archive routes are `GET /v1/admin/billing-archive` (export) and `POST` on
-the same path (import), mounted and checked with `Permissions.MerchantConfig`.
+the same path (import), mounted with `RouteGroups.MerchantConfig`.
 Archive transfer streams with a 1 GiB bound; ordinary
 API requests retain their 1 MiB cap. The client verifies the archive footer and
 returns an error for incomplete downloads. The CLI publishes its private output

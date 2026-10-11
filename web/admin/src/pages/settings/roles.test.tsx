@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The Roles tab against the real api client, auth-ui session and query cache:
-// AuthKit's group routes for the scope the access read names.
+// AuthKit's group routes for the root group and the scope the access read
+// names.
 import { QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, expect, it, vi } from "vitest"
@@ -26,6 +27,7 @@ afterEach(async () => {
 
 const SCOPE = "11111111-2222-4333-8444-555555555555"
 const GROUP = `/groups/${SCOPE}`
+const ROOT = "/groups/root"
 const WHEN = "2026-10-10T00:00:00Z"
 
 const CATALOG = [
@@ -72,17 +74,56 @@ const me = (role: string, permissions: string[]): PermissionSet => ({
   permissions,
 })
 
+// nobody is AuthKit's answer for a group the caller holds no role in, or one
+// that does not exist.
+const nobody = { role: null, permissions: [] }
+
+const ROOT_CATALOG = [
+  "root:billing:read",
+  "root:billing:manage",
+  "root:members:read",
+  "root:roles:read",
+]
+const ROOT_SUPPORT = role("root:support", [
+  "root:billing:read",
+  "root:billing:manage",
+])
+const ROOT_ADMIN = role("root:staff-admin", ROOT_CATALOG)
+const ROOT_MEMBERS = [
+  {
+    subject: { kind: "user", id: "u-root-1" },
+    role: "root:support",
+    user: { id: "u-root-1", username: "rosa" },
+  },
+  {
+    subject: { kind: "user", id: "u-root-2" },
+    role: "root:support",
+    user: { id: "u-root-2", username: "remy" },
+  },
+  {
+    subject: { kind: "user", id: "u-root-3" },
+    role: "root:staff-admin",
+    user: { id: "u-root-3", username: "ada" },
+  },
+]
+
 const page = <T,>(data: T[]) => ({ data, next_cursor: null, total: null })
 
 function Roles() {
   const access = useRolesAccess()
-  return access ? <RolesTab access={access} /> : <p>No roles here</p>
+  if (access.length === 0) return <p>No roles here</p>
+  return access.map((each) => <RolesTab key={each.scope} access={each} />)
 }
 
-async function open(routes: Record<string, Reply>) {
+// open mounts the tab. routes' "GET /me/permissions" is the caller in the
+// merchant's group; root is the caller in the root group, nobody unless given.
+async function open(routes: Record<string, Reply>, root: unknown = nobody) {
   browserEnvironment()
+  const { "GET /me/permissions": mine = nobody, ...rest } = routes
   const requests = await server({
     "GET /admin/access": { ...FULL_ACCESS, scope_id: SCOPE },
+    "GET /me/permissions": (request: Recorded) =>
+      request.query === "group_id=root" ? root : mine,
     [`GET ${GROUP}/members`]: page([
       {
         subject: { kind: "user", id: "u-owner" },
@@ -96,7 +137,7 @@ async function open(routes: Record<string, Reply>) {
       },
     ]),
     [`GET ${GROUP}/api-keys`]: page([]),
-    ...routes,
+    ...rest,
   })
   selectMerchant("acme")
   await mount(
@@ -163,9 +204,12 @@ it("an owner composes a program role from the /v1/app permissions", async () => 
       return STOREFRONT
     },
   })
-  expect(requests.find((r) => r.path === "/me/permissions")?.query).toBe(
-    `group_id=${SCOPE}`
-  )
+  expect(
+    requests
+      .filter((r) => r.path === "/me/permissions")
+      .map((r) => r.query)
+      .sort()
+  ).toEqual([`group_id=${SCOPE}`, "group_id=root"])
   const text = document.body.textContent!
   for (const shown of ["Owner", "Everything", "Viewer", "1 member · 0 keys"])
     expect(text).toContain(shown)
@@ -268,4 +312,63 @@ it("roles show read-only without roles:manage, and not at all without roles:read
     "GET /me/permissions": me("merchant:viewer", ["merchant:billing:read"]),
   })
   expect(document.body.textContent).toContain("No roles here")
+})
+
+// A host that grants only root roles has no group for its merchant: AuthKit
+// answers nobody there, and the tab shows the root group's roles with their
+// holders, as all-merchants staff. With both, both show; with the merchant's
+// alone, only its own.
+it("the root group's holders show as all-merchants staff, beside the merchant's own", async () => {
+  const rootRoutes = {
+    [`GET ${ROOT}/roles`]: page([ROOT_SUPPORT, ROOT_ADMIN]),
+    [`GET ${ROOT}/members`]: page(ROOT_MEMBERS),
+  }
+  const admin = {
+    group_id: "g-root",
+    role: "root:staff-admin",
+    permissions: ROOT_CATALOG,
+  }
+
+  // Root roles only: no group for the merchant.
+  let requests = await open(rootRoutes, admin)
+  let text = document.body.textContent!
+  for (const shown of [
+    "All-merchants staff",
+    "support",
+    "2 members",
+    "staff-admin",
+    "1 member",
+  ])
+    expect(text).toContain(shown)
+  expect(text).not.toContain("No roles here")
+  expect(calls(requests)).not.toContain(`GET ${GROUP}/roles`)
+  await unmount()
+
+  // Both: the root group's first, then the merchant's own.
+  await open(
+    {
+      ...rootRoutes,
+      "GET /me/permissions": me("merchant:owner", CATALOG),
+      [`GET ${GROUP}/roles`]: page([OWNER, VIEWER]),
+    },
+    admin
+  )
+  text = document.body.textContent!
+  expect(text.indexOf("All-merchants staff")).toBeGreaterThanOrEqual(0)
+  expect(text.indexOf("Viewer")).toBeGreaterThan(
+    text.indexOf("All-merchants staff")
+  )
+  for (const shown of ["2 members", "Owner", "1 member · 0 keys"])
+    expect(text).toContain(shown)
+  await unmount()
+
+  // The merchant's group alone: no root section, and the root group is not read.
+  requests = await open({
+    "GET /me/permissions": me("merchant:owner", CATALOG),
+    [`GET ${GROUP}/roles`]: page([OWNER, VIEWER]),
+  })
+  text = document.body.textContent!
+  expect(text).toContain("Owner")
+  expect(text).not.toContain("All-merchants staff")
+  expect(calls(requests)).not.toContain(`GET ${ROOT}/roles`)
 })

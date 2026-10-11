@@ -8,21 +8,22 @@ import (
 
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/helpers/auth"
 	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest"
-	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
 // The standalone server's Authenticator, AuthKit's, passes the conformance
-// kit a host runs, in a merchant's scope (its AuthKit group): the owner's
-// session holding the merchant permissions there and nowhere else, a viewer
-// holding only the reads, a user holding none, a stale sign-in, the
-// merchant's owner API key, and the owner signed out last.
+// kit a host runs, in a merchant's scope (its AuthKit group, whose id is the
+// merchant's under the Authenticator's root authority): the owner's session
+// holding the merchant: permissions there and nowhere else, a viewer holding
+// only the reads, a user holding none, a stale sign-in, the merchant's owner
+// API key, and the owner signed out last.
 func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
@@ -37,11 +38,11 @@ func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 	_, err = ak.RevokeAccountSessions(ctx, iam.UserIdentity(gone.ID), gone.ID)
 	require.NoError(t, err)
 
-	root, err := ak.Scope(ctx, iam.RootGroup())
+	root, err := ak.Authenticator().(auth.Root).RootScope(ctx)
 	require.NoError(t, err)
 	scope, err := cp.MerchantScope(ctx, mid)
 	require.NoError(t, err)
-	require.NotEqual(t, root, scope, "a merchant's scope is its own group")
+	require.Equal(t, auth.Scope{Authority: root.Authority, ID: mid.String()}, scope, "a merchant's scope is its own group, where the gate asks")
 	reads, ok := controlplane.MerchantRole("viewer")
 	require.True(t, ok)
 	authtest.GrantRole(t, ak, iam.GroupByID(scope.ID), iam.UserSubject(viewer.ID), reads)
@@ -50,13 +51,12 @@ func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 		return bearerRequest(token)
 	}
 	session := authtest.SignIn(t, ak, owner).AccessToken
-	openrailstest.CheckAuth(t, openrails.Routes{
-		Auth: ak.Authenticator(), Scope: scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-		Permissions: openrails.Permissions{AdminRead: perm(server.MerchantBillingRead), AdminUpdate: perm(server.MerchantBillingManage)},
-	}, helpersauthtest.Cases{
+	openrailstest.CheckAuth(t, openrails.Routes{Auth: ak.Authenticator()}, helpersauthtest.Cases{
+		Scope:       scope,
+		Permissions: []string{string(billing.MerchantBillingRead), string(billing.MerchantBillingManage)},
 		Staff:       request(session),
 		User:        request(authtest.SignIn(t, ak, stranger).AccessToken),
-		Holders:     map[string]func() *http.Request{server.MerchantBillingRead: request(authtest.SignIn(t, ak, viewer).AccessToken)},
+		Holders:     map[string]func() *http.Request{string(billing.MerchantBillingRead): request(authtest.SignIn(t, ak, viewer).AccessToken)},
 		Stale:       request(authtest.StaleSession(t, ak, authtest.SignIn(t, ak, owner).AccessToken)),
 		Application: request(key.Secret),
 		Refused:     map[string]func() *http.Request{"forged": request(session + "x"), "signed out": request(signedOut), "a forged key": request(key.Secret + "x")},

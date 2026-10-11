@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
@@ -53,14 +54,14 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 }
 
 // Every staff route asks the gate before its handler, for the permission of
-// the group its blast radius sets: a read, a write on customers, or the
-// merchant's own configuration.
+// the group its blast radius sets, in both personas: a read, a write on
+// customers, or the merchant's own configuration.
 func TestMerchantRouteAuthorization(t *testing.T) {
-	gate := &recordingAuth{who: authtest.User(userA), allowed: map[string]bool{}}
+	gate := &recordingAuth{who: authtest.User(userA), allowed: map[billing.Permission]bool{}}
 	rt := gatedRuntime(t)
-	table := merchantSurface(rt, Options{Auth: gate, Scope: testScope, Permissions: staffPermissions})
+	table := merchantSurface(rt, Options{Auth: gate, Groups: everyGroup})
 	h := table.Handler()
-	asked := map[string]string{}
+	asked := map[string]Pair{}
 	for _, key := range routeKeys(table) {
 		if key == "GET /v1/admin/access" {
 			continue
@@ -74,12 +75,12 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 				perms = append(perms, perm)
 			}
 		}
-		require.Len(t, perms, 1, "%s reached its handler without authorization, or asked twice", key)
-		asked[key] = perms[0]
+		require.Len(t, perms, 2, "%s reached its handler without authorization, or asked a name twice", key)
+		asked[key] = Pair{Merchant: billing.Permission(perms[0]), Root: billing.Permission(perms[1])}
 	}
 
-	read, write, catalog, admin, metrics := staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics
-	for key, perm := range map[string]string{
+	read, write, catalog, admin, metrics := needAdminRead, needAdminUpdate, needCatalog, needMerchantConfig, needMetrics
+	for key, perm := range map[string]Pair{
 		"GET /v1/admin/billing-archive":                                     admin,
 		"POST /v1/admin/billing-archive":                                    admin,
 		"POST /v1/admin/billing-import":                                     admin,
@@ -156,7 +157,7 @@ func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
 		}
 		rt := &app.Runtime{Config: cfg}
 		table := &router.Table{}
-		RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "root:config:manage"}})
+		RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{MerchantConfig: true}})
 		keys := routeKeys(table)
 		for _, key := range reads {
 			require.Contains(t, keys, key, "editable=%v", editable)
@@ -176,8 +177,8 @@ func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
 func TestCatalogWritePolicy(t *testing.T) {
 	rt := &app.Runtime{Config: &config.Config{}}
 	staff, edits := &router.Table{}, &router.Table{}
-	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
-	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Catalog: "root:catalog:manage"}})
+	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{Admin: true}})
+	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{Catalog: true}})
 	require.Contains(t, routeKeys(staff), "POST /admin/credit-grants")
 	require.NotContains(t, routeKeys(staff), "POST /admin/psps/refresh", "the PSP pull is the merchant configuration's")
 	for _, key := range routeKeys(staff) {
@@ -208,7 +209,7 @@ func TestAdminOperationLimits(t *testing.T) {
 	state := abusestate.New(nil)
 	at := time.Date(2026, 1, 1, 12, 0, 30, 0, time.UTC) // mid-window: no window ends during the test
 	state.SetClock(func() time.Time { return at })
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(state), Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(state), Groups: config.RouteGroups{Admin: true}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

@@ -86,29 +86,20 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err
 	}
-	perms, err := embedhttp.RoutePermissions(sel)
-	if err != nil {
-		return nil, err
-	}
-	logMount(sel, perms, len(table.Entries))
+	logMount(sel, len(table.Entries))
 	return routebundle.FromTable(table), nil
 }
 
-// logMount names the Auth each mounted route group answers to: the admin API at
-// WARN, since it moves money.
-func logMount(sel config.Routes, perms httproutes.Permissions, routes int) {
-	fields := log.Fields{"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth), "programmatic": sel.RouteGroups.Programmatic}
-	if perms != (httproutes.Permissions{}) {
-		fields["scope_authority"], fields["scope_id"] = sel.Scope.Authority, sel.Scope.ID
+// logMount names the Auth the mounted route groups answer to: the admin API
+// at WARN, since it moves money.
+func logMount(sel config.Routes, routes int) {
+	g := sel.RouteGroups
+	fields := log.Fields{
+		"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth),
+		"admin": g.Admin, "catalog": g.Catalog, "merchant_config": g.MerchantConfig, "metrics": g.Metrics, "programmatic": g.Programmatic,
 	}
-	for _, n := range httproutes.AppNeeds {
-		if perm := *perms.Field(n); perm != "" {
-			fields[strings.ToLower(string(n))] = perm
-		}
-	}
-	if perms.Staff() != (httproutes.Permissions{}) {
-		fields["customer_read"], fields["customer_update"], fields["catalog"], fields["merchant_config"], fields["metrics"] = perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics
-		log.WithFields(fields).Warn("openrails: staff routes mounted; each asks the caller's Can for its group's permission in Routes.Scope")
+	if httproutes.StaffGroups(g) {
+		log.WithFields(fields).Warn("openrails: staff routes mounted; each asks the caller's Can for its permission at the merchant or in the root scope")
 		return
 	}
 	log.WithFields(fields).Info("openrails: routes mounted")

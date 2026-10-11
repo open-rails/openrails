@@ -6,8 +6,10 @@ export type OpenRailsRoute = {
   path: string
   group: string
   auth: string
-  // A staff route's Routes.Permissions field; another route's own permission.
-  permission: string | null
+  // What a staff or programmatic route's caller holds: merchant at the
+  // merchant it acts on (null: a route about no one merchant), or root in
+  // the root scope.
+  permission: { merchant: string | null; root: string } | null
   // A user in person also needs a recent sign-in.
   sensitive: boolean
   // The configuration the route needs; null when always mounted.

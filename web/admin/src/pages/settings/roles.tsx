@@ -46,10 +46,11 @@ import {
 } from "@/lib/roles"
 import { toastApiError } from "@/lib/toast"
 
-// RolesTab lists the roles of the scope staff hold their permissions in and
-// lets those holding roles:manage define their own: least privilege for a
-// program's API key or a teammate. Giving a role to a teammate or a new API
-// key needs the team's or the keys' own permissions.
+// RolesTab lists the roles of one scope staff hold their permissions in, the
+// root group's as all-merchants staff, with who holds each, and lets those
+// holding roles:manage define their own: least privilege for a program's API
+// key or a teammate. Giving a role to a teammate or a new API key needs the
+// team's or the keys' own permissions.
 export function RolesTab({ access }: { access: RolesAccess }) {
   const roles = useQuery(rolesQueries.list(access.scope))
   const members = useQuery({
@@ -88,11 +89,13 @@ export function RolesTab({ access }: { access: RolesAccess }) {
     <section className="grid gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="grid max-w-2xl gap-1">
-          <h2 className="text-base font-semibold">Roles</h2>
+          <h2 className="text-base font-semibold">
+            {access.everyMerchant ? "All-merchants staff" : "Roles"}
+          </h2>
           <p className="text-sm text-pretty text-muted-foreground">
-            A role is a set of permissions held by a teammate or an API key.
-            Define your own so each holds only what it needs: a storefront's
-            key, for example, only checks entitlements and reads offers.
+            {access.everyMerchant
+              ? "Roles held in the root group. Their holders act at every merchant."
+              : "A role is a set of permissions held by a teammate or an API key. Define your own so each holds only what it needs: a storefront's key, for example, only checks entitlements and reads offers."}
           </p>
         </div>
         {access.manage && (
@@ -322,7 +325,7 @@ function RoleDialog({
               </p>
               {section.perms.map((perm) => {
                 const info = permissionInfo(perm, access.persona)
-                const routes = appRoutes(info)
+                const routes = appRoutes(perm)
                 const held = access.held.has(perm)
                 const id = `perm-${perm.replaceAll(":", "-")}`
                 return (

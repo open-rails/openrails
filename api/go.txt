@@ -324,20 +324,6 @@ pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
 pkg openrails, type PSPSignerConfig struct
 pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty"`
 pkg openrails, type PSPSignerConfig struct, Mode string `yaml:"mode,omitempty"`
-pkg openrails, type Permissions = config.Permissions
-pkg openrails, type Permissions struct
-pkg openrails, type Permissions struct, AdminRead fmt.Stringer
-pkg openrails, type Permissions struct, AdminUpdate fmt.Stringer
-pkg openrails, type Permissions struct, Catalog fmt.Stringer
-pkg openrails, type Permissions struct, Costs fmt.Stringer
-pkg openrails, type Permissions struct, Customers fmt.Stringer
-pkg openrails, type Permissions struct, Entitlements fmt.Stringer
-pkg openrails, type Permissions struct, Events fmt.Stringer
-pkg openrails, type Permissions struct, MerchantConfig fmt.Stringer
-pkg openrails, type Permissions struct, Metrics fmt.Stringer
-pkg openrails, type Permissions struct, Offers fmt.Stringer
-pkg openrails, type Permissions struct, Orders fmt.Stringer
-pkg openrails, type Permissions struct, Usage fmt.Stringer
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
@@ -378,10 +364,8 @@ pkg openrails, type Routes struct
 pkg openrails, type Routes struct, AdminConsole bool
 pkg openrails, type Routes struct, AdminConsoleAuthBase string
 pkg openrails, type Routes struct, Auth billingauth.Authenticator
-pkg openrails, type Routes struct, Permissions config.Permissions
 pkg openrails, type Routes struct, Prefix string
 pkg openrails, type Routes struct, RouteGroups config.RouteGroups
-pkg openrails, type Routes struct, Scope billingauth.Scope
 pkg openrails, type SMTPConfig = config.SMTPConfig
 pkg openrails, type SMTPConfig struct
 pkg openrails, type SMTPConfig struct, From config.EmailAddress
@@ -389,7 +373,6 @@ pkg openrails, type SMTPConfig struct, Host string
 pkg openrails, type SMTPConfig struct, Password string
 pkg openrails, type SMTPConfig struct, Port int
 pkg openrails, type SMTPConfig struct, Username string
-pkg openrails, type Scope = billingauth.Scope
 pkg openrails, type SolanaPSP struct
 pkg openrails, type SolanaPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type SolanaPSP struct, PrivateKey string `psp:"secrets.private_key"`
@@ -700,12 +683,24 @@ pkg openrails/billing, const MaxPageLimit untyped int = 500
 pkg openrails/billing, const MaxRunningChargeRatePerHour untyped int = 1000000000000
 pkg openrails/billing, const MaxUsageBatchItems untyped int = 1000
 pkg openrails/billing, const MerchantActive MerchantStatus = "active"
+pkg openrails/billing, const MerchantBillingManage Permission = "merchant:billing:manage"
+pkg openrails/billing, const MerchantBillingRead Permission = "merchant:billing:read"
+pkg openrails/billing, const MerchantCatalogManage Permission = "merchant:catalog:manage"
+pkg openrails/billing, const MerchantCatalogRead Permission = "merchant:catalog:read"
+pkg openrails/billing, const MerchantConfigManage Permission = "merchant:config:manage"
+pkg openrails/billing, const MerchantCostsManage Permission = "merchant:costs:manage"
+pkg openrails/billing, const MerchantCustomersRead Permission = "merchant:customers:read"
 pkg openrails/billing, const MerchantDeleted MerchantStatus = "deleted"
+pkg openrails/billing, const MerchantEntitlementsRead Permission = "merchant:entitlements:read"
+pkg openrails/billing, const MerchantEventsRead Permission = "merchant:events:read"
 pkg openrails/billing, const MerchantGroupPersona untyped string = "merchant"
+pkg openrails/billing, const MerchantMetricsRead Permission = "merchant:metrics:read"
+pkg openrails/billing, const MerchantOrdersManage Permission = "merchant:orders:manage"
 pkg openrails/billing, const MerchantRetirementRefusedActive MerchantRetirementRefusal = "active"
 pkg openrails/billing, const MerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = "group_mismatch"
 pkg openrails/billing, const MerchantRetirementRefusedNotLive MerchantRetirementRefusal = "not_live"
 pkg openrails/billing, const MerchantRetirementRefusedReserved MerchantRetirementRefusal = "reserved"
+pkg openrails/billing, const MerchantUsageManage Permission = "merchant:usage:manage"
 pkg openrails/billing, const MigrationApplied PriceMigrationDisposition = "applied"
 pkg openrails/billing, const MigrationBlocked PriceMigrationDisposition = "blocked"
 pkg openrails/billing, const MigrationCancelAtPeriodEnd MigrationFallback = "cancel_at_period_end"
@@ -799,11 +794,23 @@ pkg openrails/billing, const RailNMI Rail = "nmi"
 pkg openrails/billing, const RailSolana Rail = "solana"
 pkg openrails/billing, const RailStripe Rail = "stripe"
 pkg openrails/billing, const RenewalIDPrefix untyped string = "cyc_"
-pkg openrails/billing, const RootAdminRateLimitsUnlock untyped string = "root:admin-rate-limits:unlock"
-pkg openrails/billing, const RootMerchantsDelete untyped string = "root:merchants:delete"
-pkg openrails/billing, const RootMerchantsRead untyped string = "root:merchants:read"
-pkg openrails/billing, const RootMerchantsRestore untyped string = "root:merchants:restore"
-pkg openrails/billing, const RootWorkerHealthRead untyped string = "root:worker-health:read"
+pkg openrails/billing, const RootAdminRateLimitsUnlock Permission = "root:admin-rate-limits:unlock"
+pkg openrails/billing, const RootBillingManage Permission = "root:billing:manage"
+pkg openrails/billing, const RootBillingRead Permission = "root:billing:read"
+pkg openrails/billing, const RootCatalogManage Permission = "root:catalog:manage"
+pkg openrails/billing, const RootCatalogRead Permission = "root:catalog:read"
+pkg openrails/billing, const RootConfigManage Permission = "root:config:manage"
+pkg openrails/billing, const RootCostsManage Permission = "root:costs:manage"
+pkg openrails/billing, const RootCustomersRead Permission = "root:customers:read"
+pkg openrails/billing, const RootEntitlementsRead Permission = "root:entitlements:read"
+pkg openrails/billing, const RootEventsRead Permission = "root:events:read"
+pkg openrails/billing, const RootMerchantsDelete Permission = "root:merchants:delete"
+pkg openrails/billing, const RootMerchantsRead Permission = "root:merchants:read"
+pkg openrails/billing, const RootMerchantsRestore Permission = "root:merchants:restore"
+pkg openrails/billing, const RootMetricsRead Permission = "root:metrics:read"
+pkg openrails/billing, const RootOrdersManage Permission = "root:orders:manage"
+pkg openrails/billing, const RootUsageManage Permission = "root:usage:manage"
+pkg openrails/billing, const RootWorkerHealthRead Permission = "root:worker-health:read"
 pkg openrails/billing, const RunningChargeIDPrefix untyped string = "rch_"
 pkg openrails/billing, const RunningChargeRunning RunningChargeState = "running"
 pkg openrails/billing, const RunningChargeStopped RunningChargeState = "stopped"
@@ -868,6 +875,7 @@ pkg openrails/billing, func ParseRunningChargeID(string) (RunningChargeID, error
 pkg openrails/billing, func ParseSubscriptionID(string) (SubscriptionID, error)
 pkg openrails/billing, func ParseUsageEventID(string) (UsageEventID, error)
 pkg openrails/billing, func PaymentFailureFrom(error) (*PaymentFailure, bool)
+pkg openrails/billing, func Permissions() []Permission
 pkg openrails/billing, func SourceRef(string, string) string
 pkg openrails/billing, func ValidateMerchantSlug(string) error
 pkg openrails/billing, method (*Admission) Active() bool
@@ -1005,6 +1013,9 @@ pkg openrails/billing, method (PaymentMethodID) IsZero() bool
 pkg openrails/billing, method (PaymentMethodID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PaymentMethodID) String() string
 pkg openrails/billing, method (PaymentMethodID) UUID() uuid.UUID
+pkg openrails/billing, method (Permission) Action() string
+pkg openrails/billing, method (Permission) Persona() string
+pkg openrails/billing, method (Permission) Resource() string
 pkg openrails/billing, method (PriceID) IsZero() bool
 pkg openrails/billing, method (PriceID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PriceID) String() string
@@ -2496,6 +2507,7 @@ pkg openrails/billing, type PendingAction struct, Action string `json:"action"`
 pkg openrails/billing, type PendingAction struct, Hint string `json:"hint"`
 pkg openrails/billing, type PendingAction struct, PSP string `json:"psp"`
 pkg openrails/billing, type PendingAction struct, PatchRequired map[string]map[string]map[string]string `json:"patch_required"`
+pkg openrails/billing, type Permission string
 pkg openrails/billing, type PreviewMyOrderParams struct
 pkg openrails/billing, type PreviewMyOrderParams struct, Cart bool `json:"cart,omitempty"`
 pkg openrails/billing, type PreviewMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`
@@ -3455,20 +3467,8 @@ pkg openrails/openrailstest/stripemock, type Options struct, Clock func() time.T
 pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"
-pkg openrails/server, const MerchantBillingManage untyped string = "merchant:billing:manage"
-pkg openrails/server, const MerchantBillingRead untyped string = "merchant:billing:read"
-pkg openrails/server, const MerchantCatalogManage untyped string = "merchant:catalog:manage"
-pkg openrails/server, const MerchantCatalogRead untyped string = "merchant:catalog:read"
-pkg openrails/server, const MerchantConfigManage untyped string = "merchant:config:manage"
-pkg openrails/server, const MerchantCostsManage untyped string = "merchant:costs:manage"
-pkg openrails/server, const MerchantCustomersRead untyped string = "merchant:customers:read"
-pkg openrails/server, const MerchantEntitlementsRead untyped string = "merchant:entitlements:read"
-pkg openrails/server, const MerchantEventsRead untyped string = "merchant:events:read"
-pkg openrails/server, const MerchantMetricsRead untyped string = "merchant:metrics:read"
-pkg openrails/server, const MerchantOrdersManage untyped string = "merchant:orders:manage"
 pkg openrails/server, const MerchantRolesManage untyped string = "merchant:roles:manage"
 pkg openrails/server, const MerchantRolesRead untyped string = "merchant:roles:read"
-pkg openrails/server, const MerchantUsageManage untyped string = "merchant:usage:manage"
 pkg openrails/server, func MerchantRole(string) (iam.Role, bool)
 pkg openrails/server, func MerchantRoles() []iam.Role
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)

@@ -50,7 +50,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 
 	var created iam.GroupRole
 	decode(call(t, handler, owner, http.MethodPost, groups+"/roles", "", map[string]any{
-		"name": "storefront", "permissions": []string{server.MerchantCatalogRead, server.MerchantEntitlementsRead},
+		"name": "storefront", "permissions": []string{string(billing.MerchantCatalogRead), string(billing.MerchantEntitlementsRead)},
 	}), http.StatusCreated, &created)
 	storefront := created.Name.String()
 	require.Equal(t, "merchant:custom-storefront", storefront)
@@ -71,9 +71,9 @@ func TestMerchantCustomRoles(t *testing.T) {
 		catalog = append(catalog, perm.String())
 	}
 	require.Subset(t, catalog, []string{
-		server.MerchantBillingRead, server.MerchantBillingManage, server.MerchantCatalogManage, server.MerchantConfigManage, server.MerchantMetricsRead,
-		server.MerchantEntitlementsRead, server.MerchantCatalogRead, server.MerchantUsageManage, server.MerchantCostsManage, server.MerchantEventsRead,
-		server.MerchantOrdersManage, server.MerchantRolesRead, server.MerchantRolesManage,
+		string(billing.MerchantBillingRead), string(billing.MerchantBillingManage), string(billing.MerchantCatalogManage), string(billing.MerchantConfigManage), string(billing.MerchantMetricsRead),
+		string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage), string(billing.MerchantCostsManage), string(billing.MerchantEventsRead),
+		string(billing.MerchantOrdersManage), server.MerchantRolesRead, server.MerchantRolesManage,
 	})
 
 	var minted iam.APIKeyCreated
@@ -119,18 +119,18 @@ func TestMerchantCustomRoles(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	require.Equal(t, "custom-storefront", listed[0].Role)
-	require.Equal(t, []string{server.MerchantCatalogRead, server.MerchantEntitlementsRead}, listed[0].Permissions)
+	require.Equal(t, []string{string(billing.MerchantCatalogRead), string(billing.MerchantEntitlementsRead)}, listed[0].Permissions)
 
 	// Only the owner manages roles: a viewer neither reads nor changes them.
 	viewer := newAccount(t, srv)
 	decode(call(t, handler, owner, http.MethodPut, groups+"/members/users/"+viewer.ID, "", map[string]any{"role": "merchant:viewer"}), http.StatusOK, nil)
 	viewerToken := authtest.SignIn(t, srv.AuthKit(), viewer).AccessToken
 	decode(call(t, handler, viewerToken, http.MethodGet, groups+"/roles", "", nil), http.StatusForbidden, nil)
-	decode(call(t, handler, viewerToken, http.MethodPatch, rolePath, "", map[string]any{"permissions": []string{server.MerchantUsageManage}}), http.StatusForbidden, nil)
+	decode(call(t, handler, viewerToken, http.MethodPatch, rolePath, "", map[string]any{"permissions": []string{string(billing.MerchantUsageManage)}}), http.StatusForbidden, nil)
 
 	// An edit applies on the next request, to every holder.
 	decode(call(t, handler, owner, http.MethodPatch, rolePath, "", map[string]any{
-		"permissions": []string{server.MerchantCatalogRead, server.MerchantUsageManage},
+		"permissions": []string{string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage)},
 	}), http.StatusOK, nil)
 	decode(products(key), http.StatusOK, nil)
 	refused(entitlements(key), "the edit took entitlements away")
@@ -139,7 +139,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 	require.Equal(t, "invalid_param", errorCode(t, w), "past the gate: the handler's own answer to an empty batch")
 	listed, err = srv.ListUserMerchants(ctx, teammate.ID)
 	require.NoError(t, err)
-	require.Equal(t, []string{server.MerchantCatalogRead, server.MerchantUsageManage}, listed[0].Permissions)
+	require.Equal(t, []string{string(billing.MerchantCatalogRead), string(billing.MerchantUsageManage)}, listed[0].Permissions)
 
 	// Deleting it revokes the keys carrying it and takes it from the team.
 	decode(call(t, handler, owner, http.MethodDelete, rolePath, "", nil), http.StatusNoContent, nil)

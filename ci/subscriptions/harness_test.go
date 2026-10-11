@@ -62,43 +62,43 @@ const (
 	remote   topology = "remote"
 )
 
-// The harness host's own permissions, held in its root scope, for the staff
-// route groups and the programmatic routes it mounts.
-type perm string
-
-func (p perm) String() string { return string(p) }
-
+// OpenRails' permissions as the harness host's roles hold them: the root:
+// names, in its root scope.
 const (
-	staffReads   perm = "root:billing:read"
-	staffWrites  perm = "root:billing:manage"
-	staffCatalog perm = "root:catalog:manage"
-	staffConfig  perm = "root:config:manage"
-	staffMetrics perm = "root:metrics:read"
+	staffReads   = billing.RootBillingRead
+	staffWrites  = billing.RootBillingManage
+	staffCatalog = billing.RootCatalogManage
+	staffConfig  = billing.RootConfigManage
+	staffMetrics = billing.RootMetricsRead
 
-	appEntitlements perm = "root:entitlements:read"
-	appOffers       perm = "root:catalog:read"
-	appUsage        perm = "root:usage:manage"
-	appCosts        perm = "root:costs:manage"
-	appEvents       perm = "root:events:read"
-	appOrders       perm = "root:orders:manage"
+	appEntitlements = billing.RootEntitlementsRead
+	appOffers       = billing.RootCatalogRead
+	appUsage        = billing.RootUsageManage
+	appCosts        = billing.RootCostsManage
+	appEvents       = billing.RootEventsRead
+	appOrders       = billing.RootOrdersManage
 )
 
-var permissions = openrails.Permissions{
-	AdminRead: staffReads, AdminUpdate: staffWrites, Catalog: staffCatalog, MerchantConfig: staffConfig, Metrics: staffMetrics,
-	Entitlements: appEntitlements, Offers: appOffers, Usage: appUsage, Costs: appCosts, Events: appEvents, Orders: appOrders,
-}
-
-// everyPermission is what the "staff" and host roles hold.
-var everyPermission = []perm{staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics, appEntitlements, appOffers, appUsage, appCosts, appEvents, appOrders}
+// everyPermission is what the "staff" and host roles hold: every root: name.
+var everyPermission = func() (out []billing.Permission) {
+	for _, p := range billing.Permissions() {
+		if p.Persona() == "root" {
+			out = append(out, p)
+		}
+	}
+	return out
+}()
 
 // routeGroups turns on every route group the harness mounts.
 var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 
 // verifier is a neutral host's Authenticator: HS256 tokens. Its "staff"
-// role holds every permission, "support" the staff reads and writes but not
-// the merchant's configuration, "reader" the reads, "host" the host's own
-// backend (an application with an API key) all of them, "only:<perm>" that
-// one permission and "but:<perm>" every other, in staffScope.
+// role holds every root: permission, "support" the staff reads and writes
+// but not the merchant's configuration, "reader" the reads, "host" the
+// host's own backend (an application with an API key) all of them,
+// "only:<perm>" that one permission and "but:<perm>" every other, in
+// rootScope; "in:<scope id>:<perm>" holds one permission in that scope, a
+// merchant's being its id.
 // A token's role is its subject unless it names one; UUID subjects are
 // native customers. Like AuthKit, its checks are live: a session revoked
 // after its token was minted is refused as a revoked credential. A sign-in
@@ -111,10 +111,21 @@ type verifier struct {
 	down atomic.Bool
 }
 
-var _ openrails.Authenticator = (*verifier)(nil)
+var (
+	_ openrails.Authenticator = (*verifier)(nil)
+	_ auth.Root               = (*verifier)(nil)
+)
 
-// staffScope is where the verifier's roles hold their permissions.
-var staffScope = openrails.Scope{Authority: issuer, ID: "staff"}
+// rootScope is where the verifier's roles hold their root: permissions.
+var rootScope = auth.Scope{Authority: issuer, ID: "root"}
+
+// RootScope is rootScope (helpers/auth Root).
+func (*verifier) RootScope(context.Context) (auth.Scope, error) { return rootScope, nil }
+
+// heldIn is the role holding perm in the scope of this id alone.
+func heldIn(scopeID string, perm billing.Permission) string {
+	return "in:" + scopeID + ":" + string(perm)
+}
 
 // hostApp is the host backend's application subject.
 const hostApp = "host"
@@ -177,22 +188,26 @@ func (v *verifier) Authenticate(r *http.Request) (auth.Verified, error) {
 
 func (got verified) Identity() openrails.Identity { return got.id }
 
-// Can is the role's permissions, exactly, in staffScope.
-func (got verified) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
-	if scope != staffScope {
+// Can is the role's permissions, exactly, in the scope it holds them in.
+func (got verified) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
+	if in, ok := strings.CutPrefix(got.role, "in:"); ok {
+		id, perm, _ := strings.Cut(in, ":")
+		return scope == (auth.Scope{Authority: issuer, ID: id}) && permission == perm, nil
+	}
+	if scope != rootScope {
 		return false, nil
 	}
-	held := map[string][]perm{
+	held := map[string][]billing.Permission{
 		"staff": everyPermission, hostApp: everyPermission,
 		"support": {staffReads, staffWrites}, "reader": {staffReads},
 	}[got.role]
 	if only, ok := strings.CutPrefix(got.role, "only:"); ok {
-		held = []perm{perm(only)}
+		held = []billing.Permission{billing.Permission(only)}
 	}
 	if but, ok := strings.CutPrefix(got.role, "but:"); ok {
-		held = slices.DeleteFunc(slices.Clone(everyPermission), func(p perm) bool { return p == perm(but) })
+		held = slices.DeleteFunc(slices.Clone(everyPermission), func(p billing.Permission) bool { return p == billing.Permission(but) })
 	}
-	return slices.Contains(held, perm(permission)), nil
+	return slices.Contains(held, billing.Permission(permission)), nil
 }
 
 // CheckRecentSignIn: a person signed in within 15 minutes, in a session.
@@ -451,7 +466,7 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
-	routes := openrails.Routes{Auth: w.auth, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, RouteGroups: routeGroups}
 	if w.mount != nil {
 		w.mount(&routes)
 	}

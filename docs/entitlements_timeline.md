@@ -27,7 +27,8 @@ for its holders.
 ## Reading access
 
 Your backend gates content with the programmatic route (an application
-holding `Permissions.Entitlements`, `RouteGroups.Programmatic`; in process,
+holding `billing.MerchantEntitlementsRead` or `billing.RootEntitlementsRead`,
+with `RouteGroups.Programmatic`; in process,
 the `Client`):
 
 - `POST /v1/app/entitlements/check` —
@@ -35,7 +36,7 @@ the `Client`):
   `{"entitlements": {key: bool}, "quantities": {key: n}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
   for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
 
-Staff read with the admin API (`Permissions.AdminRead`):
+Staff read with the admin API (`billing.MerchantBillingRead` or `billing.RootBillingRead`):
 
 - `GET /v1/admin/entitlements?customer_id=&entitlement=&prefix=&at=&cursor=&limit=` —
   the keys customers hold at one instant, by customer then key in byte order

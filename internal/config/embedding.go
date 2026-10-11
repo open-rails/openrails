@@ -1,10 +1,6 @@
 package config
 
-import (
-	"fmt"
-
-	"github.com/open-rails/openrails/internal/billingauth"
-)
+import "github.com/open-rails/openrails/internal/billingauth"
 
 // Routes is the HTTP surface the adapters mount on the root router, and the
 // host's auth that says who its requests are. The public, customer (/v1/me)
@@ -13,24 +9,24 @@ import (
 type Routes struct {
 	// Auth says who a request is; OpenRails decides what each route admits
 	// and answers refusals itself. It asks Authenticate once per request,
-	// then the Verified's Can for a staff route's permission in Scope and,
-	// for a person on a route that moves money or removes access,
+	// then the Verified's Can for a staff or programmatic route's permission
+	// and, for a person on a route that moves money or removes access,
 	// CheckRecentSignIn. Required.
+	//
+	// With a route group on, Auth is a helpers/auth Root, as AuthKit's
+	// ak.Authenticator() is. A route acting on merchant M admits its
+	// merchant: permission held in M's scope ({Authority: RootScope's, ID:
+	// M's id}) or its root: twin held in RootScope. The names are
+	// billing.Permissions: declare them in your auth and grant them in its
+	// roles. Mount fails for a route neither of whose names Auth knows
+	// (helpers/auth PermissionCatalog); a name it does not know is never
+	// asked.
 	Auth billingauth.Authenticator
-	// Scope is where callers hold Permissions, such as AuthKit's
-	// ak.Scope(ctx, iam.RootGroup()). Required with any permission given,
-	// and refused without one.
-	Scope billingauth.Scope
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
 	// Empty is the root.
 	Prefix string
 	// RouteGroups turns route groups on; each is off by default.
 	RouteGroups RouteGroups
-	// Permissions are what a caller must hold for each staff group that is
-	// on, and for each programmatic route. Mount fails when a staff group is
-	// on without its permission, or a permission is given for a group that
-	// is off.
-	Permissions Permissions
 	// AdminConsole serves the staff dashboard at Prefix's /admin, over the
 	// staff routes, signing staff in through the host's AuthKit JSON API on
 	// the same origin (AdminConsoleAuthBase). It has one area per staff
@@ -49,75 +45,34 @@ type Routes struct {
 type RouteGroups struct {
 	// Admin is customer support (/v1/admin): customers, their
 	// subscriptions, payments, refunds, orders, credits, access and usage.
-	// Callers need Permissions.AdminRead; changes also
-	// Permissions.AdminUpdate, without which it is read-only.
+	// Its reads need billing.MerchantBillingRead or RootBillingRead, its
+	// changes MerchantBillingManage or RootBillingManage.
 	Admin bool
 	// Catalog is the catalog: products, prices, meters and their rates,
 	// archiving a product, applying a catalog document, moving subscribers
-	// between prices. It needs Permissions.Catalog. With Config.Catalog, the
-	// file skips what an edit changed.
+	// between prices. It needs billing.MerchantCatalogManage or
+	// RootCatalogManage. With Config.Catalog, the file skips what an edit
+	// changed.
 	Catalog bool
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
 	// billing import and export, the dashboard layout. It needs
-	// Permissions.MerchantConfig.
+	// billing.MerchantConfigManage or RootConfigManage.
 	MerchantConfig bool
 	// Metrics is the merchant's business metrics, read-only: revenue, sales,
-	// the metrics queries and the dashboard. It needs Permissions.Metrics.
+	// the metrics queries and the dashboard. It needs
+	// billing.MerchantMetricsRead or RootMetricsRead.
 	Metrics bool
 	// Programmatic is the routes the host's backend calls over HTTP at
 	// /v1/app: entitlement checks, offers, usage and admissions, provider
 	// operations, host events and SCIM provisioning. They take an
 	// application Auth says a request is (its Identity's SubjectKind) and
-	// refuse a person. Each route mounts only with its permission
-	// (Permissions.Entitlements, Offers, Usage, Costs, Events), which the
-	// application holds in Routes.Scope, so a program gets only what its
-	// task needs. SCIM takes any application at the merchant or the
-	// merchant's provisioning token, and is not mounted with Deps.UserInfo,
-	// which reads the directory instead. Embedded, the Client calls the same
-	// operations in process without it.
+	// refuse a person. Each route needs its own permission (entitlements,
+	// offers, usage, costs, events, orders, customers), so a program's role
+	// grants only what its task needs. SCIM takes any application at the
+	// merchant or the merchant's provisioning token, and is not mounted with
+	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
+	// calls the same operations in process without it.
 	Programmatic bool
-}
-
-// Permissions are Routes.Permissions: the host's permissions, such as
-// AuthKit's iam.Perm, one per staff group that is on and per programmatic
-// task, which callers hold in Routes.Scope. Mount reads each String() once,
-// and refuses one the Auth does not know when it can say
-// (auth.PermissionCatalog). Name them persona:resource:action, the persona
-// being where they are held: root:billing:read in AuthKit's root group,
-// merchant:billing:read in a merchant's group on the standalone server.
-type Permissions struct {
-	// AdminRead is what the admin group's callers hold.
-	AdminRead fmt.Stringer
-	// AdminUpdate is what its changes also need: cancellations, refunds,
-	// credit grants. Optional: without it the admin group is read-only.
-	AdminUpdate fmt.Stringer
-	// Catalog is what the catalog group's callers hold.
-	Catalog fmt.Stringer
-	// MerchantConfig is what the merchant-config group's callers hold.
-	MerchantConfig fmt.Stringer
-	// Metrics is what the metrics group's callers hold. Support staff who
-	// help customers need only AdminRead.
-	Metrics fmt.Stringer
-
-	// The programmatic routes' (RouteGroups.Programmatic), each mounting
-	// only its routes. Entitlements is the content gate
-	// (POST /v1/app/entitlements/check).
-	Entitlements fmt.Stringer
-	// Offers is what a customer may buy, by entitlement or product key
-	// (GET /v1/app/catalog/products, the Client's ListOffers).
-	Offers fmt.Stringer
-	// Usage charges customers: admissions and usage events.
-	Usage fmt.Stringer
-	// Costs is provider operations: the host's own upstream costs.
-	Costs fmt.Stringer
-	// Events is host events: reading and acknowledging them.
-	Events fmt.Stringer
-	// Orders is merchant orders: unpaid orders for a customer to pay on your
-	// site, previewed, created and withdrawn (POST /v1/app/orders).
-	Orders fmt.Stringer
-	// Customers is finding the merchant's customers: by openrails.dev
-	// account (GET /v1/app/customers), where the customer network runs.
-	Customers fmt.Stringer
 }
 
 // ConsoleMount is where a standalone server serves the admin console, and

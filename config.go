@@ -27,10 +27,6 @@ type (
 	Routes = config.Routes
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
 	RouteGroups = config.RouteGroups
-	// Permissions is Routes.Permissions: what a caller must hold for each
-	// staff route group.
-	Permissions = config.Permissions
-
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
 	MerchantDeclaration = config.MerchantDeclaration
@@ -97,8 +93,6 @@ type (
 	// who a request is (AuthKit's ak.Authenticator()). OpenRails builds its
 	// gates from the Verified it returns.
 	Authenticator = billingauth.Authenticator
-	// Scope is Routes.Scope: where callers hold Permissions (helpers/auth).
-	Scope = billingauth.Scope
 	// Identity is who the Authenticator says a request is (helpers/auth):
 	// the Subject whose authority and money is used, the Invoker acting for
 	// it when that is someone else, and the Credential it was proven with.

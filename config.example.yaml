@@ -182,11 +182,13 @@ captcha:
 
 
 # Route groups beyond the public, customer and webhook routes, each off until
-# turned on here. Each route checks the server's own merchant permission
-# (merchant:<resource>:<action>); programmatic (/v1/app, with SCIM
+# turned on here. Each route checks its permission: the merchant: name
+# (merchant:<resource>:<action>) in the merchant's own group, or the root:
+# name on root; programmatic (/v1/app, with SCIM
 # provisioning) takes a merchant's application credential, never a person,
-# holding merchant:entitlements:read, catalog:read, usage:manage,
-# costs:manage, events:read or orders:manage for each route.
+# holding merchant:entitlements:read, merchant:catalog:read,
+# merchant:usage:manage, merchant:costs:manage, merchant:events:read or
+# merchant:orders:manage for each route.
 route_groups:
   admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
   catalog: true          # products, prices, meters, price migrations

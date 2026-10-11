@@ -244,7 +244,7 @@ as a deposit) takes `amount`, a decimal string within the price's bounds; a
 fixed price refuses one.
 
 A merchant order is one your backend creates for a customer (`CreateOrder`,
-`POST /v1/app/orders` with the `Orders` permission): it is `open` for 30 days
+`POST /v1/app/orders` with `merchant:orders:manage` or `root:orders:manage`): it is `open` for 30 days
 unless `expires_at` says otherwise, and the customer pays it on your site with
 `POST /v1/me/orders/{id}/pay`. Staff read orders and never pay them.
 

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
-
 	"github.com/open-rails/openrails/internal/http/router"
 
 	log "github.com/sirupsen/logrus"
@@ -71,10 +69,8 @@ type Server struct {
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	adminConsole  *config.ConsoleMount
-	// groups are the route groups the server mounts; permissions their
-	// staff permissions.
-	groups      config.RouteGroups
-	permissions httproutes.Permissions
+	// groups are the route groups the server mounts.
+	groups config.RouteGroups
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
@@ -207,7 +203,6 @@ func New(deps Dependencies) (*Server, error) {
 		consoleAssets:     deps.ConsoleAssets,
 		adminConsole:      deps.AdminConsole,
 		groups:            deps.RouteGroups,
-		permissions:       permissionsFor(deps.RouteGroups),
 		browserTierRoutes: middleware.NewBrowserTierRoutes(),
 	}
 

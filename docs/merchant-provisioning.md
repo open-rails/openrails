@@ -315,8 +315,8 @@ authenticates with a client-credentials access token from the merchant's
 trusted issuer ([standalone](standalone-integration.md#deployment)).
 
 A key holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
-(`server.MerchantBillingRead`: read-only, the right choice for LLM agents),
-`support` (`server.MerchantBillingRead` and `server.MerchantBillingManage`:
+(`billing.MerchantBillingRead`: read-only, the right choice for LLM agents),
+`support` (`billing.MerchantBillingRead` and `billing.MerchantBillingManage`:
 acts on customers) and `owner` (everything, the merchant's configuration and
 the programmatic routes included). A program's key holds a custom role the
 merchant defines with only the `/v1/app` permissions its task needs
@@ -352,7 +352,7 @@ Merchant routes are scoped to the authenticated merchant; cross-merchant
 operations are the standalone operator's: the server's Go methods and the
 `openrails` CLI, never a route. PSPs, settings and alert webhooks change only
 where Vault holds the configuration; with a file they are read-only. Catalog
-routes are `Permissions.Catalog`'s, and a document skips what an edit set; the embedded
+routes are the catalog group's (`RouteGroups.Catalog`), and a document skips what an edit set; the embedded
 in-process Client is the process owner and writes its own catalog whatever the
 mount says. Catalog data always
 lives in the database. See [self-hosting-mode1.md](self-hosting-mode1.md).

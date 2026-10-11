@@ -88,7 +88,10 @@ export function SettingsPage() {
     activeMerchant
   )
   const roles = useRolesAccess()
-  const values = [...(roles ? ["roles"] : []), ...hosted.map((h) => h.value)]
+  const values = [
+    ...(roles.length > 0 ? ["roles"] : []),
+    ...hosted.map((h) => h.value),
+  ]
   const first = settingsTab(null, config, admin, values)
   const tab = settingsTab(params.get("tab"), config, admin, values)
 
@@ -128,7 +131,7 @@ export function SettingsPage() {
               Customer controls
             </TabsTrigger>
           )}
-          {roles && (
+          {roles.length > 0 && (
             <TabsTrigger value="roles" className={LINE_TAB}>
               Roles
             </TabsTrigger>
@@ -160,9 +163,13 @@ export function SettingsPage() {
           <CustomerControlsTab />
         </TabsContent>
       )}
-      {roles && (
+      {roles.length > 0 && (
         <TabsContent value="roles">
-          <RolesTab access={roles} />
+          <div className="grid gap-10">
+            {roles.map((access) => (
+              <RolesTab key={access.scope} access={access} />
+            ))}
+          </div>
         </TabsContent>
       )}
       {hosted.map((h) => (

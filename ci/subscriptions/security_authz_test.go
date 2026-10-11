@@ -154,7 +154,7 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 	if w.vault != nil && slug != w.slug {
 		writeVaultDocs(t, w.vault, rt, openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps})
 	}
-	routes := openrails.Routes{Auth: v, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
+	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, RouteGroups: routeGroups}
 	if slug != w.slug {
 		return w.serve(slug, rt, routes)
 	}

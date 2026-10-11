@@ -11,9 +11,11 @@ OpenRails authenticates nobody itself, and the host writes no middleware for
 it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 `Routes.Auth`, who the request is (`Authenticate`, once per request), and
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
-for a staff or programmatic route's permission in `Routes.Scope`, and its
-recent sign-in (helpers/auth `RecentSignInChecker`) for a person. AuthKit
-provides one as `ak.Authenticator()`. The standalone server mounts its routes
+for a staff or programmatic route's permission, and its recent sign-in
+(helpers/auth `RecentSignInChecker`) for a person. The host names no
+permission and no scope: the names are OpenRails' own ([below](#permissions)),
+and the scopes come from the Authenticator's `RootScope` (helpers/auth `Root`).
+AuthKit provides one as `ak.Authenticator()`. The standalone server mounts its routes
 with its own AuthKit's, exactly like an embedded host, and the in-process Go
 client brings its own host authority.
 
@@ -21,9 +23,9 @@ client brings its own host authority.
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
+| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope), then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
-| application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission in the merchant's scope | an application (its `Identity.SubjectKind`) holding that permission, never a person |
+| application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
 OpenRails binds the merchant a customer route serves before it asks
 `Authenticate`; the host reads it with `openrails.RequestMerchant` rather than
@@ -42,49 +44,80 @@ error="insufficient_user_authentication", max_age="900"` and the provider's
 challenge as the error's metadata. A Verified without `Can` holds nothing; an
 identity without a subject or invoker is refused, so an Authenticator that
 checks nothing admits no one; each handler checks the verdict again before it
-runs. A mount whose groups need `Auth`, or a permission without `Scope`,
-fails. `openrailstest.CheckAuth` checks an Authenticator against this contract
-in the host's CI.
+runs. A route group never mounts without `Auth`, behind an `Auth` that is not
+a helpers/auth `Root`, or with a route neither of whose permissions the `Auth`
+knows (helpers/auth `PermissionCatalog`); a name it does not know is never
+asked. `openrailstest.CheckAuth` checks an Authenticator against this contract
+in the host's CI, with the route groups' `root:` permissions.
 
 ## Permissions
 
 A permission is `persona:resource:action`, with AuthKit's actions `read` and
-`manage`. The resource and action are fixed; the persona is where the
-permission is held. Embedded, the host's staff and programs hold them in the
-site's root group (`Scope: ak.Scope(ctx, iam.RootGroup())`), so they are
-`root:…`, and the host passes them in `Routes.Permissions`: OpenRails names
-none itself. On the standalone server they are held in each merchant's group,
-so they are `merchant:…`, the server's constants below.
+`manage`. The names are OpenRails' own: the `billing.Permission` constants,
+listed by `billing.Permissions()`. A host declares them in its auth and grants
+them in its roles from the constants, so a renamed one fails its build.
 
-| `Routes.Permissions` | Embedded | Standalone server | Covers |
+Every permission has two names, the persona being where it is held. A route
+acting on merchant M admits a caller holding either:
+
+- the `merchant:` name in M's own scope: `{Authority: RootScope's, ID: M's
+  id}`, with AuthKit the group whose id is the merchant's;
+- the `root:` name in the Authenticator's `RootScope`, with AuthKit the root
+  group. It reaches every merchant.
+
+Grants are ordinary per-user roles, embedded and standalone alike: a person
+holding a role in one merchant's group acts at that merchant, one holding a
+root role at all of them.
+
+| Routes | `merchant:` | `root:` | Covers |
 |---|---|---|---|
-| `AdminRead` | `root:billing:read` | `server.MerchantBillingRead` | customer support's reads |
-| `AdminUpdate` | `root:billing:manage` | `server.MerchantBillingManage` | refunds, cancellations, credits |
-| `Catalog` | `root:catalog:manage` | `server.MerchantCatalogManage` | catalog edits |
-| `MerchantConfig` | `root:config:manage` | `server.MerchantConfigManage` | PSPs and their refresh, settings |
-| `Metrics` | `root:metrics:read` | `server.MerchantMetricsRead` | metrics and their assistants |
-| `Entitlements` | `root:entitlements:read` | `server.MerchantEntitlementsRead` | `POST /v1/app/entitlements/check` |
-| `Offers` | `root:catalog:read` | `server.MerchantCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |
-| `Usage` | `root:usage:manage` | `server.MerchantUsageManage` | admissions and usage events |
-| `Costs` | `root:costs:manage` | `server.MerchantCostsManage` | provider operations |
-| `Events` | `root:events:read` | `server.MerchantEventsRead` | host events |
-| `Orders` | `root:orders:manage` | `server.MerchantOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
-| `Customers` | `root:customers:read` | `server.MerchantCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |
+| admin, reads | `billing.MerchantBillingRead` | `billing.RootBillingRead` | customer support's reads |
+| admin, changes | `billing.MerchantBillingManage` | `billing.RootBillingManage` | refunds, cancellations, credits |
+| catalog | `billing.MerchantCatalogManage` | `billing.RootCatalogManage` | the catalog and its edits |
+| merchant config | `billing.MerchantConfigManage` | `billing.RootConfigManage` | PSPs and their refresh, settings |
+| metrics | `billing.MerchantMetricsRead` | `billing.RootMetricsRead` | metrics and their assistants |
+| `/v1/app` | `billing.MerchantEntitlementsRead` | `billing.RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
+| `/v1/app` | `billing.MerchantCatalogRead` | `billing.RootCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |
+| `/v1/app` | `billing.MerchantUsageManage` | `billing.RootUsageManage` | admissions, usage events and running charges |
+| `/v1/app` | `billing.MerchantCostsManage` | `billing.RootCostsManage` | provider operations |
+| `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
+| `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
+| `/v1/app` | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |
 
-The last seven are the programmatic routes' (`RouteGroups.Programmatic`): each
-`/v1/app` route mounts only with its permission, so a program gets only what
-its task needs. `Mount` refuses a permission for a group that is off.
+A route group that is on mounts all its routes; what a caller may use is its
+roles. Each `/v1/app` route has its own permission, so a program's role grants
+only what its task needs. The names are `merchant:billing:read`,
+`root:billing:read` and so on: each route's pair is in
+[api/routes.md](api/routes.md).
+
+With AuthKit, declare each name on its persona and build roles from them:
+
+```go
+rbac := authkit.NewRoles()
+merchant := rbac.Persona(billing.MerchantGroupPersona)
+for _, p := range billing.Permissions() {
+	if p.Persona() == billing.MerchantGroupPersona {
+		merchant.Permission(p.Resource(), p.Action()) // held in a merchant's group
+	} else {
+		rbac.Root.Permission(p.Resource(), p.Action()) // held on root: every merchant
+	}
+}
+```
+
+A host that grants only root roles declares the `root:` names alone; `Mount`
+needs one known name per route.
 
 ### Roles
 
 Permissions are held through roles. On the standalone server a merchant's team
 members and API keys hold a declared role (`server.MerchantRoles`: `viewer`,
 `support`, `owner`) or one the merchant defines: a custom role,
-`merchant:custom-<name>`, holding any of the permissions above. There are no
-preset program roles; a merchant composes what each program needs. A
-storefront's key holding `server.MerchantCatalogRead` and
-`server.MerchantEntitlementsRead` lists offers and checks entitlements, and is
-refused everything else.
+`merchant:custom-<name>`, holding any of the `merchant:` permissions above.
+There are no preset program roles; a merchant composes what each program
+needs. A storefront's key holding `billing.MerchantCatalogRead` and
+`billing.MerchantEntitlementsRead` lists offers and checks entitlements, and is
+refused everything else. The server declares the `root:` names on root too;
+its root owner holds them all.
 
 - Custom roles are AuthKit's (the merchant persona's `CustomRoles`), in the
   merchant's group. Defining, changing and deleting one takes
@@ -108,9 +141,12 @@ refused everything else.
 Embedded, the host's AuthKit and roles are its own and OpenRails changes
 nothing. A host lets its staff define roles by opting in the persona they hold
 their permissions in: `authkit.NewRoles(authkit.CustomRoles)` for the root
-group (`Routes.Scope` above), `rbac.Persona(name, authkit.CustomRoles)` for
-another. The console then shows its Roles page to staff holding
-`root:roles:read`, where its `auth_base_url` serves AuthKit's group routes.
+group, `rbac.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)` for a
+merchant's own. The console's Roles page, where its `auth_base_url` serves
+AuthKit's group routes, then shows the root group's roles and their holders as
+all-merchants staff, and the merchant's group's, each to those holding its
+persona's `roles:read` there. A host that grants only root roles has no group
+for its merchant, and the page shows the root group alone.
 
 An identity has three parts:
 
@@ -140,7 +176,8 @@ The server's AuthKit decides who every request is. OpenRails maps merchants to
 AuthKit groups and nothing more:
 
 - **A merchant's scope is its AuthKit group**, whose id is the merchant's id
-  (`Server.MerchantScope`). Staff routes ask `Can(scope, permission)` there.
+  (`Server.MerchantScope`). Staff routes ask `Can` for the `merchant:` name
+  there, else for the `root:` name in the root group.
 - **The merchant a request is for** comes from its API host, its
   `OpenRails-Merchant` selector, the scope its credential is bound to (an API
   key's group, a trusted issuer's group) and the configured merchant. They must

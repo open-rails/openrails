@@ -114,7 +114,7 @@ export function AppLayout() {
               ) : scope === "merchant" &&
                 access &&
                 !hasAnyArea(access) &&
-                !(roles && pathname === "/settings") ? (
+                !(roles.length > 0 && pathname === "/settings") ? (
                 <NoAccess />
               ) : scope === "merchant" &&
                 access &&

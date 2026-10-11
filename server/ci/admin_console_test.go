@@ -12,10 +12,13 @@ import (
 	"testing/fstest"
 
 	"github.com/open-rails/authkit"
+	authkittest "github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/server"
 )
@@ -153,7 +156,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 		t.Cleanup(func() { _ = client.Close(context.Background()) })
 		return client
 	}
-	routes := openrails.Routes{Auth: deny, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
+	routes := openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
 	require.ErrorContains(t, err, "needs a console build")
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
@@ -179,7 +182,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	require.Equal(t, "/billing/v1", bootstrap.APIBaseURL)
 
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions}))
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups}))
 	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
 }
 
@@ -194,7 +197,7 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	routes := openrails.Routes{Auth: authtest.Deny{}, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
+	routes := openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: adminGroups, AdminConsole: true}
 
 	for _, c := range []struct{ apiPath, base, want string }{
 		{"", "", "/api/v1"},
@@ -236,4 +239,107 @@ func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
 		err := openrailshttp.Mount(http.NewServeMux(), client, mount)
 		require.ErrorContains(t, err, fmt.Sprintf("invalid Routes.AdminConsoleAuthBase %q", bad))
 	}
+}
+
+// The embedded console's Roles page asks the host's AuthKit who holds what in
+// the two scopes staff hold OpenRails' permissions in: the root group, whose
+// holders act at every merchant, and the merchant's own, which a host that
+// grants only root roles never creates. With no group for the merchant the
+// page's calls still answer: nobody there, and the root group's roles with
+// their holders. With the merchant's group, its holders too.
+func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
+	f := newFixture(t)
+	client := f.runtime(t, uniqueName("roles"))
+	mid := client.MerchantID().String()
+
+	rbac := authkit.NewRoles(authkit.CustomRoles)
+	merchant := rbac.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)
+	perms := map[billing.Permission]iam.Perm{}
+	for _, p := range billing.Permissions() {
+		if p.Persona() == billing.MerchantGroupPersona {
+			perms[p] = merchant.Permission(p.Resource(), p.Action())
+		} else {
+			perms[p] = rbac.Root.Permission(p.Resource(), p.Action())
+		}
+	}
+	support := rbac.Root.Role("support", perms[billing.RootBillingRead], perms[billing.RootBillingManage])
+	admin := rbac.Root.Role("staff-admin", perms[billing.RootBillingRead], rbac.Root.Members.Read, rbac.Root.Roles.Read)
+	manager := merchant.Role("manager", perms[billing.MerchantBillingRead], merchant.Members.Read, merchant.Roles.Read)
+	ak, _ := authkittest.New(t,
+		authkittest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
+		authkittest.WithConfig(func(c *authkit.Config) { c.Roles = rbac }))
+
+	host := http.NewServeMux()
+	require.NoError(t, ak.Mount(host))
+	require.NoError(t, openrailshttp.Mount(host, client, openrails.Routes{Auth: ak.Authenticator(), Prefix: "/billing", RouteGroups: adminGroups}))
+
+	person := func(group iam.GroupRef, role iam.Role) (string, string) {
+		u := authkittest.NewUser(t, ak)
+		authkittest.GrantRole(t, ak, group, iam.UserSubject(u.ID), role)
+		return u.ID, authkittest.SignIn(t, ak, u).AccessToken
+	}
+	type permissionSet struct {
+		Role        *string  `json:"role"`
+		Permissions []string `json:"permissions"`
+	}
+	// The console's calls: the access read, then AuthKit's.
+	scopeOf := func(token string) string {
+		w := call(t, host, token, http.MethodGet, "/billing/v1/admin/access", "", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return decode[billing.AdminAccess](t, w).ScopeID
+	}
+	me := func(token, group string) permissionSet {
+		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/me/permissions?group_id="+group, "", nil)
+		require.Equal(t, http.StatusOK, w.Code, "%s: %s", group, w.Body.String())
+		return decode[permissionSet](t, w)
+	}
+	// holders are a group's members by role, as its roles list them.
+	holders := func(token, group string) map[string][]string {
+		w := call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/roles", "", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		out := map[string][]string{}
+		for _, role := range decode[struct{ Data []iam.GroupRole }](t, w).Data {
+			out[role.Name.String()] = []string{}
+		}
+		w = call(t, host, token, http.MethodGet, ak.APIBase()+"/groups/"+group+"/members?kind=user&expand=user", "", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		for _, member := range decode[struct{ Data []iam.GroupMember }](t, w).Data {
+			out[member.Role.String()] = append(out[member.Role.String()], member.Subject.ID)
+		}
+		return out
+	}
+
+	// Root roles only: the merchant has no group.
+	first, _ := person(iam.RootGroup(), support)
+	second, supportToken := person(iam.RootGroup(), support)
+	adminID, adminToken := person(iam.RootGroup(), admin)
+	require.Equal(t, mid, scopeOf(adminToken))
+	require.Equal(t, permissionSet{Permissions: []string{}}, me(adminToken, mid), "no group: nobody, not an error")
+	inRoot := me(adminToken, "root")
+	require.Equal(t, admin.String(), *inRoot.Role)
+	require.Subset(t, inRoot.Permissions, []string{string(billing.RootBillingRead), rbac.Root.Roles.Read.String(), rbac.Root.Members.Read.String()})
+	staff := holders(adminToken, "root")
+	require.ElementsMatch(t, []string{first, second}, staff[support.String()], "the holders of root:billing:read and root:billing:manage")
+	require.Equal(t, []string{adminID}, staff[admin.String()])
+	// Staff holding only OpenRails' root: names act, and AuthKit shows them no one.
+	require.Equal(t, mid, scopeOf(supportToken))
+	require.ElementsMatch(t, []string{string(billing.RootBillingRead), string(billing.RootBillingManage)}, me(supportToken, "root").Permissions)
+	require.Equal(t, http.StatusForbidden, call(t, host, supportToken, http.MethodGet, ak.APIBase()+"/groups/root/members", "", nil).Code)
+
+	// The merchant's own group: its holders, and nobody on root.
+	_, err := ak.CreateGroup(t.Context(), iam.NewGroup{ID: mid, Persona: merchant.Persona})
+	require.NoError(t, err)
+	managerID, managerToken := person(iam.GroupByID(mid), manager)
+	require.Equal(t, mid, scopeOf(managerToken))
+	require.Equal(t, permissionSet{Permissions: []string{}}, me(managerToken, "root"))
+	require.Equal(t, manager.String(), *me(managerToken, mid).Role)
+	require.Equal(t, []string{managerID}, holders(managerToken, mid)[manager.String()])
+	require.Equal(t, http.StatusForbidden, call(t, host, managerToken, http.MethodGet, ak.APIBase()+"/groups/root/members", "", nil).Code)
+
+	// Both: someone holding a role in each reads each.
+	authkittest.GrantRole(t, ak, iam.GroupByID(mid), iam.UserSubject(adminID), manager)
+	require.Equal(t, admin.String(), *me(adminToken, "root").Role)
+	require.Equal(t, manager.String(), *me(adminToken, mid).Role)
+	require.ElementsMatch(t, []string{first, second}, holders(adminToken, "root")[support.String()])
+	require.ElementsMatch(t, []string{managerID, adminID}, holders(adminToken, mid)[manager.String()])
 }

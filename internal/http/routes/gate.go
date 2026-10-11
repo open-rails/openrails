@@ -30,8 +30,9 @@ import (
 // The route gate builds every gate from the mount's Authenticator, which only
 // says who a request is. It asks it once (Authenticate) and binds the
 // Verified; then, by the route's tier, it checks who the subject is, pins the
-// merchant, asks the Verified's Can for the route's permission in that
-// merchant's scope and, for a person on a Sensitive route, its
+// merchant, asks the Verified's Can for the route's permission (its
+// merchant: name in that merchant's scope, else its root: name in the
+// Authenticator's root scope) and, for a person on a Sensitive route, its
 // CheckRecentSignIn. It answers every refusal itself, as auth.Refuse says,
 // and binds the verdict in its own context, where handlers re-check it.
 
@@ -57,14 +58,6 @@ func isNil(v any) bool {
 }
 
 func authName(a any) string { return fmt.Sprintf("%T", a) }
-
-// ScopeFunc is where a merchant's staff hold the mount's Permissions.
-type ScopeFunc func(ctx context.Context, mid billing.MerchantID) (billingauth.Scope, error)
-
-// FixedScope is scope at every merchant: an embedded mount's Routes.Scope.
-func FixedScope(scope billingauth.Scope) ScopeFunc {
-	return func(context.Context, billing.MerchantID) (billingauth.Scope, error) { return scope, nil }
-}
 
 // MerchantResolver finds the merchant an authenticated request acts on when
 // its credential names none.
@@ -338,29 +331,86 @@ func (e *Env) requestMerchant(r *httprequest.Request, route Route, a any, v bill
 	return target, pin(r, target)
 }
 
-// scope is where mid's staff hold the mount's Permissions.
-func (e *Env) scope(ctx context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
-	if e.Scope == nil {
-		return billingauth.Scope{}, errors.Join(auth.ErrUnavailable, fault("a staff route ran without Options.Scope"))
+// rootScope is where a's root: permissions are held (helpers/auth Root). A
+// panic, or a scope that is not whole, is the provider's fault.
+func rootScope(ctx context.Context, a any) (scope billingauth.Scope, err error) {
+	root, ok := a.(auth.Root)
+	if !ok {
+		return billingauth.Scope{}, errors.Join(auth.ErrUnavailable, fault(authName(a)+" has no RootScope"))
 	}
-	s, err := e.Scope(ctx, mid)
+	defer func() {
+		if p := recover(); p != nil {
+			scope, err = billingauth.Scope{}, errors.Join(auth.ErrUnavailable, fault(fmt.Sprintf("%s.RootScope panicked: %v", authName(a), p)))
+		}
+	}()
+	scope, err = root.RootScope(ctx)
 	switch {
 	case err != nil:
 		return billingauth.Scope{}, err
-	case s.Authority == "" || s.ID == "":
-		return billingauth.Scope{}, errors.Join(auth.ErrUnavailable, fault("merchant "+mid.String()+" has no scope"))
+	case scope.Authority == "" || scope.ID == "":
+		return billingauth.Scope{}, errors.Join(auth.ErrUnavailable, fault(authName(a)+".RootScope named no scope"))
 	}
-	return s, nil
+	return scope, nil
 }
 
-// permitted asks the Verified's Can for perm at mid.
-func (e *Env) permitted(r *httprequest.Request, route Route, a any, v billingauth.Verified, mid billing.MerchantID, perm string) bool {
-	scope, err := e.scope(r.Request.Context(), mid)
+// merchantScope is where mid's own staff and credentials hold their
+// merchant: permissions: the scope of root's authority whose id is the
+// merchant's.
+func merchantScope(root billingauth.Scope, mid billing.MerchantID) billingauth.Scope {
+	return billingauth.Scope{Authority: root.Authority, ID: mid.String()}
+}
+
+// asked is pair without the names a does not know (auth.PermissionCatalog),
+// which are never asked: a host declares only the persona it grants in.
+// Without a catalog both are asked.
+func asked(a any, pair Pair) Pair {
+	catalog, ok := a.(auth.PermissionCatalog)
+	if !ok {
+		return pair
+	}
+	if pair.Merchant != "" && !catalog.KnownPermission(string(pair.Merchant)) {
+		pair.Merchant = ""
+	}
+	if pair.Root != "" && !catalog.KnownPermission(string(pair.Root)) {
+		pair.Root = ""
+	}
+	return pair
+}
+
+// needs is the pair route's gate asks of a. Mounting fails when a has no
+// root scope to ask in, or knows neither name.
+func needs(route Route, a billingauth.Authenticator) Pair {
+	if _, ok := a.(auth.Root); !ok {
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: staff and programmatic routes ask its RootScope"})
+	}
+	pair := route.Needs()
+	if pair == (Pair{}) {
+		return pair
+	}
+	known := asked(a, pair)
+	if known == (Pair{}) {
+		panic(MountError{Route: route.Key(), Reason: fmt.Sprintf("Routes.Auth knows none of its permissions %q", pair.Names())})
+	}
+	return known
+}
+
+// holds reports whether v holds pair at mid: its merchant: name in mid's
+// scope, else its root: name in root.
+func holds(ctx context.Context, v billingauth.Verified, root billingauth.Scope, mid billing.MerchantID, pair Pair) (bool, error) {
+	if ok, err := can(ctx, v, merchantScope(root, mid), string(pair.Merchant)); ok || err != nil {
+		return ok && err == nil, err
+	}
+	return can(ctx, v, root, string(pair.Root))
+}
+
+// permitted asks the Verified's Can for pair at mid.
+func (e *Env) permitted(r *httprequest.Request, route Route, a any, v billingauth.Verified, mid billing.MerchantID, pair Pair) bool {
+	root, err := rootScope(r.Request.Context(), a)
 	if err != nil {
 		refuse(r, route, a, stepCan, err)
 		return false
 	}
-	allowed, err := can(r.Request.Context(), v, scope, perm)
+	allowed, err := holds(r.Request.Context(), v, root, mid, pair)
 	switch {
 	case err != nil:
 		refuse(r, route, a, stepCan, err)
@@ -374,11 +424,12 @@ func (e *Env) permitted(r *httprequest.Request, route Route, a any, v billingaut
 
 // boundHere admits a credential bound to a scope (helpers/auth Bound), such
 // as a group's API key or a trusted issuer's token, only at the merchant
-// whose scope it is. On a mount whose merchant comes from each request
-// (ResolveMerchant), an application or a customer must be bound: a server's
-// merchants each trust their own credentials.
+// whose scope it is; staff may also be bound to the root scope. On a mount
+// whose merchant comes from each request (ResolveMerchant), an application
+// or a customer must be bound: a server's merchants each trust their own
+// credentials.
 func (e *Env) boundHere(r *httprequest.Request, route Route, a any, v billingauth.Verified, mid billing.MerchantID, required bool) bool {
-	ok, err := e.boundTo(r.Request.Context(), v, mid, required)
+	ok, err := boundTo(r.Request.Context(), a, v, mid, required, route.Auth != AuthCustomer)
 	switch {
 	case err != nil:
 		refuse(r, route, a, stepCan, err)
@@ -390,9 +441,9 @@ func (e *Env) boundHere(r *httprequest.Request, route Route, a any, v billingaut
 	return true
 }
 
-// boundTo reports whether v may act at mid by its bound scope. A mount
-// without Scope binds nothing.
-func (e *Env) boundTo(ctx context.Context, v billingauth.Verified, mid billing.MerchantID, required bool) (bool, error) {
+// boundTo reports whether v may act at mid by its bound scope. A customer's
+// binding is checked only where it is required.
+func boundTo(ctx context.Context, a any, v billingauth.Verified, mid billing.MerchantID, required, staff bool) (bool, error) {
 	var bound billingauth.Scope
 	if b, ok := v.(auth.Bound); ok {
 		bound = b.BoundScope()
@@ -400,14 +451,14 @@ func (e *Env) boundTo(ctx context.Context, v billingauth.Verified, mid billing.M
 	switch {
 	case bound == (billingauth.Scope{}):
 		return !required, nil
-	case e.Scope == nil && !required:
+	case !staff && !required:
 		return true, nil
 	}
-	scope, err := e.scope(ctx, mid)
+	root, err := rootScope(ctx, a)
 	if err != nil {
 		return false, err
 	}
-	return bound == scope, nil
+	return bound == merchantScope(root, mid) || staff && bound == root, nil
 }
 
 // servesMany reports a mount whose merchant comes from each request.
@@ -420,6 +471,9 @@ func (e *Env) customerGates(route Route) []router.Middleware {
 	a := e.Customers
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a customer route needs Routes.Auth"})
+	}
+	if _, ok := a.(auth.Root); !ok && e.servesMany() {
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: each merchant's customers are bound to its scope"})
 	}
 	var out []router.Middleware
 	if e.ResolveMerchant == nil {
@@ -654,22 +708,19 @@ func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.Cus
 }
 
 // staffGates gates a merchant-tier route: the request's merchant, a person
-// or an application holding the route's permission in its scope and, for a
-// person on an operation that moves money or removes access, a recent
-// sign-in.
+// or an application holding the route's permission there or in the root
+// scope and, for a person on an operation that moves money or removes
+// access, a recent sign-in.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "an admin route needs Routes.Auth"})
 	}
-	perm := e.Permissions.For(route)
-	if strings.TrimSpace(perm) == "" {
-		panic(MountError{Route: route.Key(), Reason: "no permission (Routes.Permissions)"})
+	pair := needs(route, a)
+	if pair == (Pair{}) {
+		panic(MountError{Route: route.Key(), Reason: "an admin route declares no permission"})
 	}
-	if e.Scope == nil {
-		panic(MountError{Route: route.Key(), Reason: "an admin route needs Routes.Scope"})
-	}
-	return append(e.preAuth(), verify(route, a), e.staffCheck(route, a, perm))
+	return append(e.preAuth(), verify(route, a), e.staffCheck(route, a, pair))
 }
 
 // preAuth pins the mount's configured merchant before the request is
@@ -723,7 +774,7 @@ func bindStaff(r *httprequest.Request, c billingauth.Identity, route Route, targ
 	r.Request = r.Request.WithContext(billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Route: route.Key(), Merchant: target.MerchantID}))
 }
 
-func (e *Env) staffCheck(route Route, a billingauth.Authenticator, perm string) router.Middleware {
+func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			v, c, ok := subject(r, route, a)
@@ -731,7 +782,7 @@ func (e *Env) staffCheck(route Route, a billingauth.Authenticator, perm string) 
 				return
 			}
 			target, ok := e.requestMerchant(r, route, a, v)
-			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, false) || !e.permitted(r, route, a, v, target.MerchantID, perm) {
+			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, false) || !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
 			}
 			// An application has no sign-in to renew: its permission is the
@@ -758,19 +809,18 @@ func (e *Env) staffCan(r *http.Request, routeKey string) error {
 	if !ok || !verified {
 		return billingauth.ErrUnauthenticated
 	}
-	route, ok := routeByKey(routeKey)
-	perm := ""
-	if ok {
-		perm = e.Permissions.For(route)
+	var pair Pair
+	if route, ok := routeByKey(routeKey); ok && e.on(route) {
+		pair = asked(e.Auth, route.Needs())
 	}
-	if perm == "" {
+	if pair == (Pair{}) {
 		return billingauth.ErrForbidden
 	}
-	scope, err := e.scope(r.Context(), staff.Merchant)
+	root, err := rootScope(r.Context(), e.Auth)
 	if err != nil {
 		return err
 	}
-	allowed, err := can(r.Context(), v, scope, perm)
+	allowed, err := holds(r.Context(), v, root, staff.Merchant, pair)
 	switch {
 	case err != nil:
 		return err
@@ -843,17 +893,14 @@ func (e *Env) appGates(route Route) []router.Middleware {
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a programmatic route needs Routes.Auth"})
 	}
-	perm := e.Permissions.For(route)
-	switch {
-	case route.Auth == AuthApplication && strings.TrimSpace(perm) == "":
-		panic(MountError{Route: route.Key(), Reason: "no permission (Routes.Permissions." + string(route.Needs()) + ")"})
-	case perm != "" && e.Scope == nil:
-		panic(MountError{Route: route.Key(), Reason: "a programmatic route needs Routes.Scope"})
+	pair := needs(route, a)
+	if route.Auth == AuthApplication && pair == (Pair{}) {
+		panic(MountError{Route: route.Key(), Reason: "a programmatic route declares no permission"})
 	}
-	return append(e.preAuth(), verify(route, a), e.appCheck(route, a, perm))
+	return append(e.preAuth(), verify(route, a), e.appCheck(route, a, pair))
 }
 
-func (e *Env) appCheck(route Route, a billingauth.Authenticator, perm string) router.Middleware {
+func (e *Env) appCheck(route Route, a billingauth.Authenticator, pair Pair) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			v, c, ok := subject(r, route, a)
@@ -868,7 +915,7 @@ func (e *Env) appCheck(route Route, a billingauth.Authenticator, perm string) ro
 			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, e.servesMany()) {
 				return
 			}
-			if perm != "" && !e.permitted(r, route, a, v, target.MerchantID, perm) {
+			if pair != (Pair{}) && !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
 			}
 			bindStaff(r, c, route, target)
@@ -1000,9 +1047,7 @@ func (e *Env) signedInGates(route Route) []router.Middleware {
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a staff route needs Routes.Auth"})
 	}
-	if e.Scope == nil {
-		panic(MountError{Route: route.Key(), Reason: "a staff route needs Routes.Scope"})
-	}
+	needs(route, a)
 	return append(e.preAuth(), verify(route, a), func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			v, c, ok := subject(r, route, a)
@@ -1018,9 +1063,9 @@ func (e *Env) signedInGates(route Route) []router.Middleware {
 }
 
 // adminAccess answers what the caller may use of each mounted staff group,
-// asking the Verified's Can for each group's permission: what a console
-// shows its user. A group counts only where it is mounted and the caller
-// holds it.
+// asking the Verified's Can for each group's permission, at the merchant or
+// in the root scope: what a console shows its user. A group counts only
+// where it is mounted and the caller holds it.
 func adminAccess(e *Env) router.Handler {
 	return func(r *httprequest.Request) {
 		ctx := r.Request.Context()
@@ -1031,23 +1076,22 @@ func adminAccess(e *Env) router.Handler {
 			refuseCode(r, route, e.Auth, billing.CodeAuthenticationRequired, "the access read ran without a Verified")
 			return
 		}
-		scope, err := e.scope(ctx, staff.Merchant)
+		root, err := rootScope(ctx, e.Auth)
 		if err != nil {
 			refuse(r, route, e.Auth, stepCan, err)
 			return
 		}
 		var failed error
-		holds := func(perm string) bool {
-			if perm == "" || failed != nil {
+		has := func(on bool, pair Pair) bool {
+			if !on || failed != nil {
 				return false
 			}
-			ok, err := can(ctx, v, scope, perm)
+			ok, err := holds(ctx, v, root, staff.Merchant, asked(e.Auth, pair))
 			if err != nil {
 				failed = err
 			}
 			return ok && err == nil
 		}
-		p := e.Permissions
 		level := func(read, update bool) billing.AccessLevel {
 			switch {
 			case read && update:
@@ -1057,13 +1101,14 @@ func adminAccess(e *Env) router.Handler {
 			}
 			return billing.AccessNone
 		}
-		support := holds(p.AdminRead)
+		g := e.Groups
+		support := has(g.Admin, needAdminRead)
 		access := billing.AdminAccess{
-			Admin:          level(support, support && holds(p.AdminUpdate)),
-			Catalog:        holds(p.Catalog),
-			MerchantConfig: holds(p.MerchantConfig),
-			Metrics:        holds(p.Metrics),
-			ScopeID:        scope.ID,
+			Admin:          level(support, support && has(g.Admin, needAdminUpdate)),
+			Catalog:        has(g.Catalog, needCatalog),
+			MerchantConfig: has(g.MerchantConfig, needMerchantConfig),
+			Metrics:        has(g.Metrics, needMetrics),
+			ScopeID:        merchantScope(root, staff.Merchant).ID,
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

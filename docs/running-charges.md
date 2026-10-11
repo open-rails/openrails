@@ -18,7 +18,8 @@ day. One stored instant per customer says when its balance is next looked at.
 
 ## Routes and methods
 
-Your backend's routes, behind `Permissions.Usage`, each write with an
+Your backend's routes, behind `billing.MerchantUsageManage` or
+`billing.RootUsageManage`, each write with an
 `Idempotency-Key` ([routes](api/routes.md)):
 
 | Route | Go method | Answers |

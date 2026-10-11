@@ -36,16 +36,16 @@ import (
  "time"
  "github.com/open-rails/helpers/auth"
  "github.com/open-rails/openrails"
+ "github.com/open-rails/openrails/billing"
  gin "github.com/open-rails/openrails/adapters/gin"
  fiber "github.com/open-rails/openrails/adapters/fiber"
 )
 var _ = gin.Mount
 var _ = fiber.Mount
-var staff = openrails.Scope{Authority: "https://identity.example", ID: "billing"}
+var staff = auth.Scope{Authority: "https://identity.example", ID: "billing"}
 type ownAuth struct{}
 type session struct{ signedIn time.Time }
-type perm string
-func (p perm) String() string { return string(p) }
+func (ownAuth) RootScope(context.Context) (auth.Scope, error) { return staff, nil }
 func (ownAuth) Authenticate(r *http.Request) (auth.Verified, error) {
  if r.Header.Get("Authorization") == "" { return nil, auth.ErrUnauthenticated }
  return session{signedIn: time.Now()}, nil
@@ -55,8 +55,8 @@ func (session) Identity() openrails.Identity {
  return openrails.Identity{Issuer: "https://identity.example", Subject: id, SubjectKind: openrails.SubjectUser,
   Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}
 }
-func (session) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
- return scope == staff && permission == "root:billing:read", nil
+func (session) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
+ return scope == staff && permission == string(billing.RootBillingRead), nil
 }
 func (s session) CheckRecentSignIn(context.Context) error {
  if time.Since(s.signedIn) > 15*time.Minute { return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute} }
@@ -64,7 +64,7 @@ func (s session) CheckRecentSignIn(context.Context) error {
 }
 func main() {
  var a openrails.Authenticator = ownAuth{}
- routes := openrails.Routes{Auth: a, Scope: staff, RouteGroups: openrails.RouteGroups{Admin: true}, Permissions: openrails.Permissions{AdminRead: perm("root:billing:read")}}
+ routes := openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
  cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
  if routes.Auth == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
 }

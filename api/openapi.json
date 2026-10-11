@@ -671,7 +671,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Orders",
+        "x-openrails-permission": {
+          "merchant": "merchant:orders:manage",
+          "root": "root:orders:manage"
+        },
         "x-openrails-errors": [
           "already_owned",
           "invalid_param",
@@ -740,7 +743,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Orders",
+        "x-openrails-permission": {
+          "merchant": "merchant:orders:manage",
+          "root": "root:orders:manage"
+        },
         "x-openrails-errors": [
           "already_owned",
           "checkout_embed_origins_required",
@@ -803,7 +809,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Orders",
+        "x-openrails-permission": {
+          "merchant": "merchant:orders:manage",
+          "root": "root:orders:manage"
+        },
         "x-openrails-errors": [
           "order_not_cancelable",
           "resource_not_found",
@@ -931,7 +940,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query",
@@ -979,7 +991,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "resource_not_found",
           "service_unavailable"
@@ -1025,7 +1040,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -1074,7 +1092,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -1139,7 +1160,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -1428,7 +1452,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Offers",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query"
@@ -1465,7 +1492,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -1516,7 +1546,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -1595,7 +1628,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -1639,7 +1675,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "allowance_meter_not_found",
           "allowance_source_in_use",
@@ -1704,7 +1743,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -1803,7 +1845,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query"
@@ -1867,7 +1912,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-operation-limit": "grant",
@@ -1928,7 +1976,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-operation-limit": "destructive",
@@ -1997,7 +2048,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -2055,7 +2109,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-mounted-when": "catalog_copilot",
         "x-openrails-errors": [
           "invalid_param",
@@ -2104,7 +2161,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -2240,7 +2300,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2291,7 +2354,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2348,7 +2414,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -2400,7 +2469,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -2533,7 +2605,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2593,7 +2668,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2653,7 +2731,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -2740,7 +2821,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2906,7 +2990,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -2954,7 +3041,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "subscription_not_found"
@@ -3009,7 +3099,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -3064,7 +3157,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -3137,7 +3233,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -3225,7 +3324,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "card_declined",
           "customer_action_required",
@@ -3304,7 +3406,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "card_declined",
@@ -3361,7 +3466,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -3464,7 +3572,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -3511,7 +3622,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "price_change_currency_mismatch",
@@ -3562,7 +3676,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "price_migration_not_found"
@@ -3608,7 +3725,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Catalog",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
@@ -4340,7 +4460,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -4388,7 +4511,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Entitlements",
+        "x-openrails-permission": {
+          "merchant": "merchant:entitlements:read",
+          "root": "root:entitlements:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "service_credential_customer_scope_denied"
@@ -4494,7 +4620,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -4549,7 +4678,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -4603,7 +4735,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -4783,7 +4918,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "service_unavailable"
@@ -4830,7 +4968,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "customer_not_found",
           "invalid_customer_id",
@@ -4885,7 +5026,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -4947,7 +5091,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -5055,7 +5202,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_customer_id",
@@ -5103,7 +5253,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "credit_grant_not_found",
           "invalid_param"
@@ -5158,7 +5311,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -5262,7 +5418,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_cursor",
@@ -5318,7 +5477,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_customer_id",
@@ -5483,7 +5645,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5546,7 +5711,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "admission_not_found",
           "idempotency_key_reused",
@@ -5605,7 +5773,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5660,7 +5831,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5715,7 +5889,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5845,7 +6022,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "currency_unsupported",
           "idempotency_key_reused",
@@ -5938,7 +6118,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query"
@@ -6001,7 +6184,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "idempotency_key_reused",
           "invalid_param",
@@ -6050,7 +6236,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Usage",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
         "x-openrails-errors": [
           "running_charge_not_found"
         ],
@@ -6113,7 +6302,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Costs",
+        "x-openrails-permission": {
+          "merchant": "merchant:costs:manage",
+          "root": "root:costs:manage"
+        },
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6200,7 +6392,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query"
@@ -6247,7 +6442,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "provider_operation_not_found"
@@ -6309,7 +6507,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Costs",
+        "x-openrails-permission": {
+          "merchant": "merchant:costs:manage",
+          "root": "root:costs:manage"
+        },
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6377,7 +6578,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Costs",
+        "x-openrails-permission": {
+          "merchant": "merchant:costs:manage",
+          "root": "root:costs:manage"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "provider_operation_conflict",
@@ -6445,7 +6649,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Costs",
+        "x-openrails-permission": {
+          "merchant": "merchant:costs:manage",
+          "root": "root:costs:manage"
+        },
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6506,7 +6713,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -6566,7 +6776,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -6707,7 +6920,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor"
         ],
@@ -6753,7 +6969,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -6825,7 +7044,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -7048,7 +7270,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor"
         ],
@@ -7094,7 +7319,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -7234,7 +7462,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor"
         ],
@@ -7280,7 +7511,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -7483,7 +7717,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param"
@@ -7957,7 +8194,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -8003,7 +8243,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8057,7 +8300,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "psp_not_found",
@@ -8111,7 +8357,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8163,7 +8412,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -8199,7 +8451,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "service_unavailable"
@@ -8304,7 +8559,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -8344,7 +8602,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8384,7 +8645,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-mounted-when": "merchant_directory",
         "x-openrails-errors": [
           "merchant_unresolved",
@@ -8456,7 +8720,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -8499,7 +8766,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8541,7 +8811,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8597,7 +8870,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
@@ -8638,7 +8914,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "billing_archive_unavailable",
@@ -8682,7 +8961,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "billing_archive_integrity",
@@ -8734,7 +9016,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "as_of_required",
@@ -8843,7 +9128,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Events",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_host_event_request"
@@ -8898,7 +9186,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Events",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -8976,7 +9267,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Metrics",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
         "x-openrails-errors": [
           "metrics_query_invalid",
           "service_unavailable"
@@ -9013,7 +9307,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Metrics",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -9046,7 +9343,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Metrics",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -9088,7 +9388,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": [
           "dashboard_invalid",
           "service_unavailable"
@@ -9134,7 +9437,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Metrics",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
         "x-openrails-mounted-when": "metrics_ask",
         "x-openrails-errors": [
           "invalid_param",
@@ -9183,7 +9489,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "Metrics",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
         "x-openrails-mounted-when": "dashboard_generation",
         "x-openrails-errors": [
           "dashboard_invalid",
@@ -9294,7 +9603,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_cursor",
           "service_unavailable"
@@ -9341,7 +9653,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:read",
+          "root": "root:billing:read"
+        },
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found",
@@ -9397,7 +9712,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": {
+          "merchant": "merchant:billing:manage",
+          "root": "root:billing:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "finding_action_failed",
@@ -9601,7 +9919,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9642,7 +9963,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param"
@@ -9682,7 +10006,10 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -9840,7 +10167,10 @@
           }
         ],
         "x-openrails-auth": "application",
-        "x-openrails-permission": "Customers",
+        "x-openrails-permission": {
+          "merchant": "merchant:customers:read",
+          "root": "root:customers:read"
+        },
         "x-openrails-mounted-when": "customer_network",
         "x-openrails-errors": [
           "service_unavailable"

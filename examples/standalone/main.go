@@ -41,6 +41,7 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // settings are the app's deployment: where it and the OpenRails server are,
@@ -59,6 +60,14 @@ const (
 	webClient     = "courses-web"     // the React app: trades the user's session for an OpenRails token
 	backendClient = "courses-backend" // this server: its own client-credentials tokens
 )
+
+// backendPermissions are what the backend's tokens carry on the server:
+// customer support's reads, the content gate and offers, by OpenRails' names
+// for the merchant's own staff, and AuthKit's own for the SCIM pushes.
+var backendPermissions = []string{
+	string(billing.MerchantBillingRead), string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead),
+	"merchant:directory:manage",
+}
 
 // newAuth is a development AuthKit, now also the authorization server
 // OpenRails trusts: it mints access tokens for the OpenRails server and
@@ -85,7 +94,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				// A customer's own billing; the merchant API.
 				Scopes: []string{"openrails:self", "openrails:merchant"},
 				// The most a token may carry.
-				Permissions: []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read", "merchant:directory:manage"},
+				Permissions: backendPermissions,
 				// The user's email in every token: a receipt reaches a brand-new buyer.
 				ContactClaims: true,
 			}},
@@ -98,9 +107,8 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				ID:           backendClient, // confidential: this server and the SCIM pushes
 				SecretSHA256: hex.EncodeToString(secret[:]),
 				Resources:    []string{s.OpenRailsURL},
-				// Customer support's reads, the content gate, offers, and the SCIM pushes.
-				Permissions: []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read", "merchant:directory:manage"},
-				GrantTypes:  []authkit.OAuthGrantType{authkit.GrantClientCredentials},
+				Permissions:  backendPermissions,
+				GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 			}},
 		},
 

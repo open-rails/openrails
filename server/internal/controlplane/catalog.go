@@ -9,9 +9,10 @@
 // route.
 //
 // Merchant-local authority is evaluated in the caller's merchant permission
-// group using the server's own `merchant:` permissions (staffperm), which
-// guard the admin API's routes. Cross-merchant directory authority belongs
-// to root/platform control, not merchant groups.
+// group using OpenRails' `merchant:` permissions (billing.Permissions), which
+// guard the admin API's routes; their `root:` twins, held in the root group,
+// reach every merchant. Cross-merchant directory authority belongs to
+// root/platform control, not merchant groups.
 package controlplane
 
 import (
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 // Roles is the standalone server's permission model: two flat personas beside
@@ -55,36 +55,35 @@ var (
 		declared(billing.RootMerchantsRead), declared(billing.RootMerchantsDelete), declared(billing.RootMerchantsRestore))
 )
 
-// catalogPerms registers every OpenRails permission. members:*,
+// catalogPerms registers every OpenRails permission, each on its persona:
+// the routes' (billing.Permissions) and the platform operator's. members:*,
 // credentials:*, directory:* and roles:* are AuthKit's built-ins and are not
 // declared again.
-var catalogPerms = func() map[string]iam.Perm {
-	out := map[string]iam.Perm{}
-	declare := func(p *authkit.PersonaDef, perms ...string) {
-		for _, perm := range perms {
-			_, rest, _ := strings.Cut(perm, ":")
-			resource, action, _ := strings.Cut(rest, ":")
-			out[perm] = p.Permission(resource, action)
-		}
-	}
-	declare(merchantPersona, staffperm.Declared...)
-	declare(Roles.Root.PersonaDef,
+var catalogPerms = func() map[billing.Permission]iam.Perm {
+	out := map[billing.Permission]iam.Perm{}
+	for _, perm := range append(billing.Permissions(),
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
-		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)
+		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock) {
+		persona := Roles.Root.PersonaDef
+		if perm.Persona() == billing.MerchantGroupPersona {
+			persona = merchantPersona
+		}
+		out[perm] = persona.Permission(perm.Resource(), perm.Action())
+	}
 	return out
 }()
 
-func declared(perm string) iam.Perm { return catalogPerms[perm] }
+func declared(perm billing.Permission) iam.Perm { return catalogPerms[perm] }
 
 // APIKeyPrefix is the fixed OpenRails API-key marker.
 const APIKeyPrefix = "openrails"
 
 var (
-	supportGrants = []string{staffperm.BillingRead, staffperm.BillingManage}
-	viewerGrants  = []string{staffperm.BillingRead}
+	supportGrants = []billing.Permission{billing.MerchantBillingRead, billing.MerchantBillingManage}
+	viewerGrants  = []billing.Permission{billing.MerchantBillingRead}
 )
 
-func merchantRole(name string, perms ...string) iam.Role {
+func merchantRole(name string, perms ...billing.Permission) iam.Role {
 	grants := make([]iam.Grant, 0, len(perms))
 	for _, perm := range perms {
 		grants = append(grants, declared(perm))

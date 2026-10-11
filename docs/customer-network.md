@@ -99,8 +99,8 @@ merchant's client never does; an operator declaring it is refused at boot.
 ## Finding the customer of an account
 
 A merchant whose customer signs in with openrails.dev finds its own customer by
-the account's id: `GET /v1/app/customers?network_account_id=` (the `Customers`
-permission, `merchant:customers:read` on the server; `Client.ListNetworkCustomers`)
+the account's id: `GET /v1/app/customers?network_account_id=`
+(`merchant:customers:read`, or `root:customers:read`; `Client.ListNetworkCustomers`)
 answers a page of at most one.
 
 ## Unlinking

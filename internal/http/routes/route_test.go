@@ -153,7 +153,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	at := func(base string) router.Router { return recorder{base: base, seen: seen} }
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Scope: testScope, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Groups: everyGroup, Capabilities: &billing.Capabilities{}, External: External{
 		Live: raw, Ready: raw,
 	}}
 	customers := CustomerMount{Auth: authtest.Deny{}, Providers: providers}
@@ -224,7 +224,7 @@ func sorted(list []string) []string {
 }
 
 // A route without its handler or its feature is not mounted, and a staff
-// route only with its group's permission.
+// route only with its group.
 func TestMountHonorsConfiguration(t *testing.T) {
 	seen := map[string]int{}
 	RegisterMetaRoutes(recorder{seen: seen}, Options{Capabilities: &billing.Capabilities{}})
@@ -236,20 +236,18 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.NotContains(t, seen, "GET /v1/checkout-attempts/{id}/solana-pay")
 	require.Contains(t, seen, "GET /v1/catalog/products")
 
-	reads, staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
-	mount := func(seen map[string]int, perms Permissions) {
-		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: perms})
+	staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}
+	mount := func(seen map[string]int, groups config.RouteGroups) {
+		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Groups: groups})
 	}
 	metrics := map[string]int{}
-	mount(reads, Permissions{AdminRead: "r"})
-	mount(staff, Permissions{AdminRead: "r", AdminUpdate: "w"})
-	mount(edits, Permissions{Catalog: "e"})
-	mount(configuration, Permissions{MerchantConfig: "c"})
-	mount(metrics, Permissions{Metrics: "m"})
-	require.Contains(t, reads, "GET /v1/admin/payments")
-	require.Contains(t, reads, "POST /v1/admin/subscriptions/{id}/change/preview", "a preview is a read")
-	require.NotContains(t, reads, "POST /v1/admin/payments/{id}/refunds", "an update needs AdminUpdate")
-	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds")
+	mount(staff, config.RouteGroups{Admin: true})
+	mount(edits, config.RouteGroups{Catalog: true})
+	mount(configuration, config.RouteGroups{MerchantConfig: true})
+	mount(metrics, config.RouteGroups{Metrics: true})
+	require.Contains(t, staff, "GET /v1/admin/payments")
+	require.Contains(t, staff, "POST /v1/admin/subscriptions/{id}/change/preview")
+	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds", "the admin group mounts its changes with its reads")
 	require.NotContains(t, staff, "GET /v1/admin/catalog/products", "the catalog is its own group")
 	require.NotContains(t, staff, "POST /v1/admin/price-migrations")
 	require.NotContains(t, staff, "POST /v1/admin/metrics/query")
@@ -265,7 +263,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, metrics, "GET /v1/admin/dashboard")
 	require.Contains(t, metrics, "POST /v1/admin/metrics/query")
 	require.NotContains(t, metrics, "GET /v1/admin/payments")
-	for _, seen := range []map[string]int{reads, staff, edits, configuration, metrics} {
+	for _, seen := range []map[string]int{staff, edits, configuration, metrics} {
 		require.Contains(t, seen, "GET /v1/admin/access", "every staff group brings the access read")
 	}
 }
@@ -328,5 +326,36 @@ func TestIDsFilterIsBoundedAndAlone(t *testing.T) {
 			require.Contains(t, rec.Body.String(), `"invalid_query"`, query)
 			require.Contains(t, rec.Body.String(), `"ids"`, query)
 		}
+	}
+}
+
+// billing.Permissions is the route catalog's permissions and no more: every
+// staff and programmatic route names a pair of them, and each guards a route.
+func TestExportedPermissionsAreTheCatalogs(t *testing.T) {
+	used := map[billing.Permission]bool{}
+	for _, r := range Catalog() {
+		pair := r.Needs()
+		require.Equal(t, r.Staff() || r.Auth == AuthApplication, pair != (Pair{}), r.Key())
+		require.NoError(t, pair.check(), r.Key())
+		for _, name := range pair.Names() {
+			used[name] = true
+		}
+	}
+	for _, perm := range billing.Permissions() {
+		require.True(t, used[perm], "%s guards no route", perm)
+		delete(used, perm)
+	}
+	require.Empty(t, used, "a route's permission is not in billing.Permissions")
+
+	// A route about no one merchant names its root: permission alone; any
+	// other pair is one permission in both personas.
+	require.NoError(t, Pair{Root: billing.RootBillingRead}.check())
+	for _, bad := range []Pair{
+		{Merchant: billing.MerchantBillingRead},
+		{Merchant: billing.MerchantBillingRead, Root: billing.RootBillingManage},
+		{Merchant: billing.RootBillingRead, Root: billing.RootBillingRead},
+		{Merchant: billing.MerchantBillingRead, Root: billing.RootMerchantsRead},
+	} {
+		require.Error(t, bad.check(), "%v", bad)
 	}
 }

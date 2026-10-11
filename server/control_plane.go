@@ -6,7 +6,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
@@ -51,38 +50,20 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 	return operator.ListActiveMerchantIDs(ctx, s.cp, page)
 }
 
-// The permissions the server's merchant persona declares, held in each
-// merchant's group: its staff routes' (AdminRead, AdminUpdate, Catalog,
-// MerchantConfig, Metrics) and its programmatic routes' (Entitlements,
-// Offers, Usage, Costs, Events, Orders, Customers). Owners hold them all, support MerchantBillingRead
-// and MerchantBillingManage, viewers MerchantBillingRead.
+// AuthKit's built-in permissions over the roles a merchant defines from
+// billing.Permissions' merchant: names (its persona's CustomRoles), held by
+// the owner: reading what each role grants, and creating, changing and
+// deleting its custom roles. The routes' own permissions are
+// billing.Permissions.
 const (
-	MerchantBillingRead   = staffperm.BillingRead
-	MerchantBillingManage = staffperm.BillingManage
-	MerchantCatalogManage = staffperm.CatalogManage
-	MerchantConfigManage  = staffperm.ConfigManage
-	MerchantMetricsRead   = staffperm.MetricsRead
-
-	MerchantEntitlementsRead = staffperm.EntitlementsRead
-	MerchantCatalogRead      = staffperm.CatalogRead
-	MerchantUsageManage      = staffperm.UsageManage
-	MerchantCostsManage      = staffperm.CostsManage
-	MerchantEventsRead       = staffperm.EventsRead
-	MerchantOrdersManage     = staffperm.OrdersManage
-	MerchantCustomersRead    = staffperm.CustomersRead
-)
-
-// AuthKit's built-in permissions over the roles a merchant defines from the
-// permissions above (its persona's CustomRoles), held by the owner: reading
-// what each role grants, and creating, changing and deleting its custom roles.
-const (
-	MerchantRolesRead   = staffperm.RolesRead
-	MerchantRolesManage = staffperm.RolesManage
+	MerchantRolesRead   = "merchant:roles:read"
+	MerchantRolesManage = "merchant:roles:manage"
 )
 
 // MerchantRoles are the roles the server declares for a merchant's team
-// members and API keys, least privilege first: viewer, support, owner. A
-// merchant adds its own (MerchantRole).
+// members and API keys, least privilege first: viewer
+// (billing.MerchantBillingRead), support (and MerchantBillingManage), owner
+// (every merchant: permission). A merchant adds its own (MerchantRole).
 func MerchantRoles() []iam.Role { return controlplane.MerchantRoles() }
 
 // MerchantRole is the merchant role named name: a declared one ("viewer"), or
@@ -91,8 +72,9 @@ func MerchantRoles() []iam.Role { return controlplane.MerchantRoles() }
 func MerchantRole(name string) (iam.Role, bool) { return controlplane.MerchantRole(name) }
 
 // MerchantScope is where merchant id's staff and credentials hold their
-// permissions: its AuthKit group, whose id is the merchant's. A hosted
-// product asks a request's AuthKit Verified Can(scope, MerchantBillingRead) there.
+// merchant: permissions: its AuthKit group, whose id is the merchant's. A
+// hosted product asks a request's AuthKit Verified
+// Can(scope, billing.MerchantBillingRead) there.
 // billing.ErrMerchantUnresolved when the merchant is not live.
 func (s *Server) MerchantScope(ctx context.Context, id billing.MerchantID) (auth.Scope, error) {
 	return s.cp.MerchantScope(ctx, id)

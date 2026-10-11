@@ -83,7 +83,7 @@ func newCheckoutShop(t *testing.T) *checkoutShop {
 	trust(t, s.srv, s.mid, issuer.app(t, "owner", nil))
 	s.backend = issuer.mint(t, func(c jwt.MapClaims) {
 		c["sub"], c["client_id"] = "backend", "backend"
-		c["permissions"] = []string{server.MerchantOrdersManage, server.MerchantBillingRead}
+		c["permissions"] = []string{string(billing.MerchantOrdersManage), string(billing.MerchantBillingRead)}
 		c["exp"] = time.Now().Add(time.Hour).Unix()
 	})
 	return s

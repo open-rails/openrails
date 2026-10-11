@@ -124,8 +124,10 @@ export type OpenRailsRoute = {
   path: string
   group: string
   auth: string
-  // A staff route's Routes.Permissions field; another route's own permission.
-  permission: string | null
+  // What a staff or programmatic route's caller holds: merchant at the
+  // merchant it acts on (null: a route about no one merchant), or root in
+  // the root scope.
+  permission: { merchant: string | null; root: string } | null
   // A user in person also needs a recent sign-in.
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
@@ -143,8 +145,12 @@ export const OPENRAILS_ROUTES = [
 	sets := map[string][]string{}
 	for _, r := range m.routes {
 		perm, when := "null", "null"
-		if p := routePermission(r); p != "" {
-			perm = fmt.Sprintf("%q", p)
+		if pair := r.Needs(); pair != (routes.Pair{}) {
+			merchant := "null"
+			if pair.Merchant != "" {
+				merchant = fmt.Sprintf("%q", pair.Merchant)
+			}
+			perm = fmt.Sprintf("{ merchant: %s, root: %q }", merchant, pair.Root)
 		}
 		if r.When != routes.Always {
 			when = fmt.Sprintf("%q", r.When)

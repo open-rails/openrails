@@ -21,7 +21,7 @@ var customerNetworkRoutes = []Route{
 	{Method: POST, Path: "/v1/me/network-link", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, Checkout: CheckoutLink,
 		Request: billing.CreateNetworkLinkParams{}, Responses: []Reply{{200, billing.CustomerLink{}}, {201, billing.CustomerLink{}}},
 		Errors: networkLinkErrors, Handler: h(handlers.CreateNetworkLink)},
-	{Method: GET, Path: "/v1/app/customers", Group: App, Auth: AuthApplication, Name: "ListNetworkCustomers", Permission: NeedCustomers, When: FeatureCustomerNetwork,
+	{Method: GET, Path: "/v1/app/customers", Group: App, Auth: AuthApplication, Name: "ListNetworkCustomers", Permission: needCustomers, When: FeatureCustomerNetwork,
 		Query: params(text("network_account_id")), Responses: []Reply{{200, billing.ListPage[billing.Customer]{}}},
 		Errors: codes("service_unavailable"), Handler: h(handlers.ListNetworkCustomers)},
 }

@@ -248,7 +248,7 @@ and construct a new engine. With `Config.Vault.KVMount` named, Vault holds it:
 `Config.Merchant` names the merchant only (`Slug`, `APIHost`; declaring more is
 refused), and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
 and the alert-webhook methods edit it at the revision they read
-([vault.md](vault.md)). `Permissions.MerchantConfig` publishes those routes
+([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
 with the rest of the merchant's configuration; the edits mount only with
 Vault. Imported billing facts attributed to a PSP without credentials need its
 identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
@@ -307,7 +307,8 @@ OpenRails asks it once per request and builds every gate from its answer, a
 |---|---|
 | `Authenticate(r)` | on every customer, staff and programmatic route and the access read, once |
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
-| `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff route, with your permission for the route's group (`Routes.Permissions`) in `Routes.Scope`, checked live; without it the request holds nothing |
+| `RootScope(ctx)` (`auth.Root`) | where your staff hold `root:` permissions; needed with any route group on |
+| `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff and programmatic route, with the route's permission: its `merchant:` name in the merchant's own scope (`{Authority: RootScope's, ID: the merchant's id}`), else its `root:` name in `RootScope`, checked live; without it the request holds nothing |
 | `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | then, when a person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An application has no sign-in to renew; a person whose credential has none (a personal API key) is refused 403 `step_up_unavailable` |
 
 OpenRails answers every refusal itself, with the status and challenge
@@ -337,42 +338,46 @@ verdict again before it runs.
   `CredentialAccessToken`, with its id for audit. Only a user acting in person
   (not with an API key or signed token) starts a payment for itself.
 
-OpenRails names no permissions: you turn route groups on in
-`Routes.RouteGroups`, give each its permission of your own in
-`Routes.Permissions`, and grant them to roles in your RBAC, named
-`root:<resource>:<action>` as [auth](auth.md#permissions) lists:
+You name no permission and no scope: you turn route groups on in
+`Routes.RouteGroups`, and each route checks its own permission, one of
+`billing.Permissions()`. Declare those names in your RBAC from the constants
+and grant them to roles, as [auth](auth.md#permissions) lists:
 `root:billing:read`, `root:billing:manage`, `root:catalog:manage`,
 `root:config:manage`, `root:metrics:read`, `root:entitlements:read`,
 `root:catalog:read`, `root:usage:manage`, `root:costs:manage`,
-`root:events:read`. The admin
-group's reads need `AdminRead` and its updates `AdminUpdate` (each route's
-level is OpenRails'; without `AdminUpdate` the group is read-only), the catalog
-`Catalog`, the merchant's own configuration `MerchantConfig` and the business
-metrics `Metrics`. The groups are independent; one turned on without its
-permission, or a permission given for a group that is off, fails the mount.
+`root:events:read`, `root:orders:manage`, and each one's `merchant:` twin
+(`merchant:billing:read`, …) for staff of one merchant alone. The admin
+group's reads need `root:billing:read` and its updates `root:billing:manage`
+(each route's level is OpenRails'; read-only staff hold a role with the read
+alone), the catalog `root:catalog:manage`, the merchant's own configuration
+`root:config:manage` and the business metrics `root:metrics:read`. A group
+that is on mounts all its routes.
 The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 `RouteGroups.Programmatic`) admit the application your `Auth` says a request
 is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
-a person: `Entitlements` for the content gate, `Usage` for admissions and
-usage events, `Costs` for provider operations, `Events` for host events
-(`Customers` finds a customer by openrails.dev account, only where the
-[customer network](customer-network.md) runs). Each
-mounts only with its permission, so a program gets only what its task needs.
-`Routes.Scope` is where callers hold the permissions: AuthKit's
-`ak.Scope(ctx, iam.RootGroup())` for root roles, with `Auth:
-ak.Authenticator()`. It is required with any permission given and refused
-without one; a permission your Authenticator says it does not know
-(`auth.PermissionCatalog`) fails the mount. A host with its own sessions
-implements `Authenticate` and its `Verified` directly (the README's
-"Using your own auth"); its `Identity` must name a person `SubjectUser` and an
-application's credential `SubjectApplication`, since the programmatic routes
-refuse a person whatever it holds. `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
+a person: `root:entitlements:read` for the content gate, `root:usage:manage`
+for admissions and usage events, `root:costs:manage` for provider operations,
+`root:events:read` for host events, `root:orders:manage` for orders
+(`root:customers:read` finds a customer by openrails.dev account, only where
+the [customer network](customer-network.md) runs). Give a program a role
+holding only what its task needs.
+With any route group on, `Auth` is a helpers/auth `Root`, as
+`ak.Authenticator()` is: its `RootScope` is AuthKit's root group, and a
+merchant's own scope is the AuthKit group whose id is the merchant's. `Mount`
+fails for a route neither of whose names your Authenticator knows
+(`auth.PermissionCatalog`), and never asks a name it does not know, so a host
+that grants only root roles declares the `root:` names alone. A host with its
+own sessions implements `Authenticate`, `RootScope` and its `Verified`
+directly (the README's "Using your own auth"); its `Identity` must name a
+person `SubjectUser` and an application's credential `SubjectApplication`,
+since the programmatic routes refuse a person whatever it holds.
+`openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
 checks an implementation in your CI with helpers' conformance kit
 (`github.com/open-rails/helpers/auth/authtest`): anonymous, refused, staff, a
 user holding nothing, one-permission holders, a stale sign-in and your
-application, each permission in exactly `Routes.Scope`, and staff signed out
-last; it fails on any acceptance or mix-up, and on a person whose subject is
-not a canonical UUID.
+application, each of the route groups' `root:` permissions in exactly your
+`RootScope`, and staff signed out last; it fails on any acceptance or mix-up,
+and on a person whose subject is not a canonical UUID.
 
 An `openrails.Routes` selects the routes `client.Routes` returns; mount them
 on your root router with the adapter for it. Validation happens here: a mount
@@ -394,11 +399,11 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
 | (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, Solana Pay, the customer routes (`/v1/me/*` for `Config.Merchant`, orders included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
-| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
-| `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
-| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
-| `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
-| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Offers`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `root:billing:read`, updates `root:billing:manage` |
+| `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With `Config.Catalog`, the file skips what an edit changed |
+| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `root:config:manage` |
+| `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:costs:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
 | `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
@@ -420,7 +425,7 @@ staff in through your AuthKit's JSON API on the same origin: at
 not the default), else `/api/v1`. It
 needs a staff group on and a console build (`Deps.ConsoleAssets`); `Mount` fails
 without either. Each area appears only to staff holding its group's permission
-(`GET /v1/admin/access`): customer support, read-only without `AdminUpdate`;
+(`GET /v1/admin/access`): customer support, read-only without `root:billing:manage`;
 the catalog; the PSP, settings and notification pages; and the metrics
 dashboard, whose layout editing also needs `MerchantConfig`.
 See [admin-console.md](admin-console.md).
@@ -579,7 +584,7 @@ team UI. Worker health is the host's `Client.Probes` (`openrails_job_progress`).
 A customer usually buys with their own credential: their browser creates and
 pays an order at `/v1/me/orders`. `Client.CreateOrder` creates an unpaid order
 for them with the merchant's credential instead, in process or remote with an
-application key holding `Permissions.Orders`, for a host whose own purchase
+application key holding `root:orders:manage`, for a host whose own purchase
 rules decide what a customer may buy. Either way only the customer pays it,
 signed in (billing-ui's `<OrderCheckout orderId>`): staff never buy for
 someone else.

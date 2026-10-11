@@ -7,21 +7,19 @@ import (
 	"testing"
 
 	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// perm is a host's permission, as AuthKit's iam.Perm is.
-type perm string
-
-func (p perm) String() string { return string(p) }
-
+// The admin group's root: permissions, which CheckAuth fills in.
 const (
-	read  perm = "root:customers:read"
-	write perm = "root:customers:update"
+	read  = billing.RootBillingRead
+	write = billing.RootBillingManage
 )
 
 const (
@@ -31,8 +29,7 @@ const (
 )
 
 func routesWith(a openrails.Authenticator) openrails.Routes {
-	return openrails.Routes{Auth: a, Scope: authtest.Scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-		Permissions: openrails.Permissions{AdminRead: read, AdminUpdate: write}}
+	return openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
 }
 
 func request(token string) func() *http.Request {
@@ -57,16 +54,16 @@ func (r *recorder) Fatalf(format string, args ...any) { r.failures = append(r.fa
 func (r *recorder) Helper()                           {}
 
 func cases(fake *authtest.Fake) helpersauthtest.Cases {
-	staff := fake.Person(staffID, read.String(), write.String())
+	staff := fake.Person(staffID, read, write)
 	return helpersauthtest.Cases{
 		Staff: request(staff),
 		User:  request(fake.Person(customerID)),
 		Holders: map[string]func() *http.Request{
-			read.String():  request(fake.Person("44444444-4444-4444-8444-444444444444", read.String())),
-			write.String(): request(fake.Person("55555555-5555-4555-8555-555555555555", write.String())),
+			string(read):  request(fake.Person("44444444-4444-4444-8444-444444444444", read)),
+			string(write): request(fake.Person("55555555-5555-4555-8555-555555555555", write)),
 		},
-		Stale:       request(fake.Issue(authtest.Grant{Identity: authtest.User(staleID), Permissions: []string{read.String(), write.String()}, Stale: true})),
-		Application: request(fake.Machine("key_1", read.String(), write.String())),
+		Stale:       request(fake.Issue(authtest.Grant{Identity: authtest.User(staleID), Permissions: []billing.Permission{read, write}, Stale: true})),
+		Application: request(fake.Machine("key_1", read, write)),
 		Refused:     map[string]func() *http.Request{"forged": request("test_forged"), "malformed": request("not-a-token")},
 		Revoke:      func() { fake.Revoke(staff) },
 	}
@@ -78,7 +75,8 @@ func TestCheckAuthPassesAConformingAuthenticator(t *testing.T) {
 }
 
 // The checks fail an Authenticator that breaks the contract the gates rely
-// on, or the mount's own Scope and Permissions.
+// on, or cases that are not the mount's: its groups' root: permissions, held
+// in the Authenticator's root scope.
 func TestCheckAuthCatchesABrokenAuthenticator(t *testing.T) {
 	fake := &authtest.Fake{}
 	for name, tc := range map[string]struct {
@@ -88,21 +86,26 @@ func TestCheckAuthCatchesABrokenAuthenticator(t *testing.T) {
 		"a pass-through Authenticator":  {routesWith(authtest.PassThrough{}), nil},
 		"a Can ignoring the permission": {routesWith(anyPermission{fake}), nil},
 		"a person as the application": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
-			c.Application = request(fake.Person("66666666-6666-4666-8666-666666666666", read.String(), write.String()))
+			c.Application = request(fake.Person("66666666-6666-4666-8666-666666666666", read, write))
 			return c
 		}},
-		"no application with Programmatic": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+		"no application with Programmatic": {openrails.Routes{Auth: fake, RouteGroups: openrails.RouteGroups{Programmatic: true}}, func(c helpersauthtest.Cases) helpersauthtest.Cases {
 			c.Application = nil
 			return c
 		}},
 		"an opaque staff subject": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
-			c.Staff = request(fake.Person("staff-1", read.String(), write.String()))
+			c.Staff = request(fake.Person("staff-1", read, write))
 			return c
 		}},
-		"another scope than the mount's": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+		"a scope that is not the root scope": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
 			c.Scope = billingauth.Scope{Authority: "test", ID: "other"}
 			return c
 		}},
+		"permissions that are not the route groups'": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+			c.Permissions = []string{string(billing.RootCatalogManage)}
+			return c
+		}},
+		"an Authenticator with no root scope": {routesWith(rootless{fake}), nil},
 	} {
 		c := cases(fake)
 		if tc.cases != nil {
@@ -114,6 +117,13 @@ func TestCheckAuthCatchesABrokenAuthenticator(t *testing.T) {
 			t.Errorf("%s passed", name)
 		}
 	}
+}
+
+// rootless is an Authenticator that is no helpers/auth Root.
+type rootless struct{ a *authtest.Fake }
+
+func (r rootless) Authenticate(req *http.Request) (billingauth.Verified, error) {
+	return r.a.Authenticate(req)
 }
 
 // anyPermission grants whoever holds any permission at all.
@@ -131,9 +141,30 @@ type anyGrant struct{ authtest.Verified }
 
 func (v anyGrant) Can(ctx context.Context, scope billingauth.Scope, _ string) (bool, error) {
 	for _, p := range v.Grant.Permissions {
-		if ok, err := v.Verified.Can(ctx, scope, p); ok || err != nil {
+		if ok, err := v.Verified.Can(ctx, scope, string(p)); ok || err != nil {
 			return ok, err
 		}
 	}
 	return false, nil
+}
+
+// CheckAuth asks for the root: permission of every route the groups mount on
+// an embedded engine, and no more: the customer network's are the standalone
+// server's.
+func TestCheckAuthFillsTheRouteGroupsPermissions(t *testing.T) {
+	fake := &authtest.Fake{}
+	held := []billing.Permission{
+		billing.RootBillingRead, billing.RootBillingManage, billing.RootCatalogManage, billing.RootConfigManage, billing.RootMetricsRead,
+		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageManage, billing.RootCostsManage, billing.RootEventsRead, billing.RootOrdersManage,
+	}
+	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
+	staff := fake.Person(staffID, held...)
+	c := helpersauthtest.Cases{Staff: request(staff), User: request(fake.Person(customerID)), Application: request(fake.Machine("key_1", held...))}
+	openrailstest.CheckAuth(t, openrails.Routes{Auth: fake, RouteGroups: every}, c)
+
+	// One permission short, the staff member does not hold what the groups need.
+	c.Staff = request(fake.Person(staffID, held[1:]...))
+	r := &recorder{TB: t}
+	openrailstest.CheckAuth(r, openrails.Routes{Auth: fake, RouteGroups: every}, c)
+	require.NotEmpty(t, r.failures)
 }

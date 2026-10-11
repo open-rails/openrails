@@ -27,19 +27,19 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// guardedHost is an AuthKit host whose root roles hold its own staff
-// permissions, as the README declares them, beside a stricter one for the
-// merchant's configuration, and whose backend holds a root API key with the
-// programmatic ones too.
+// guardedHost is an AuthKit host that declares OpenRails' permissions from
+// billing.Permissions, each on its persona: its root roles hold the root:
+// names, as the README declares them, and a merchant's own staff the
+// merchant: ones in that merchant's group. Its backend holds a root API key
+// with every root: name.
 type guardedHost struct {
 	ak                        *authkit.Client
-	scope                     openrails.Scope
-	read, update, admin       iam.Perm
-	entitlements, events      iam.Perm
+	perms                     map[billing.Permission]iam.Perm
+	merchant                  iam.Persona
 	roles                     map[string]iam.Role
 	customer, reader, support string // access tokens
 	owner, gone               string
-	app                       string // the backend's API key, holding every permission
+	app                       string // the backend's API key, holding every root: permission
 }
 
 func newGuardedHost(t *testing.T, f *fixture) *guardedHost {
@@ -50,35 +50,49 @@ func newGuardedHost(t *testing.T, f *fixture) *guardedHost {
 func newGuardedHostOn(t *testing.T, pool *pgxpool.Pool) *guardedHost {
 	t.Helper()
 	rbac := authkit.NewRoles(authkit.APIKeys)
-	h := &guardedHost{
-		read:         rbac.Root.Permission("billing", "read"),
-		update:       rbac.Root.Permission("billing", "manage"),
-		admin:        rbac.Root.Permission("config", "manage"),
-		entitlements: rbac.Root.Permission("entitlements", "read"),
-		events:       rbac.Root.Permission("events", "read"),
+	merchant := rbac.Persona(billing.MerchantGroupPersona)
+	h := &guardedHost{perms: map[billing.Permission]iam.Perm{}, merchant: merchant.Persona}
+	var everyRoot []iam.Grant
+	for _, p := range billing.Permissions() {
+		if p.Persona() == billing.MerchantGroupPersona {
+			h.perms[p] = merchant.Permission(p.Resource(), p.Action())
+			continue
+		}
+		h.perms[p] = rbac.Root.Permission(p.Resource(), p.Action())
+		everyRoot = append(everyRoot, h.perms[p])
 	}
 	h.roles = map[string]iam.Role{
-		"reader":  rbac.Root.Role("reader", h.read),
-		"support": rbac.Root.Role("support", h.read, h.update),
-		"admin":   rbac.Root.Role("billing-admin", h.read, h.update, h.admin, h.entitlements, h.events),
+		"reader":  rbac.Root.Role("reader", h.perms[billing.RootBillingRead]),
+		"support": rbac.Root.Role("support", h.perms[billing.RootBillingRead], h.perms[billing.RootBillingManage]),
+		"admin":   rbac.Root.Role("billing-admin", everyRoot...),
+		// A merchant's own staff, in its group.
+		"merchant-support": merchant.Role("support", h.perms[billing.MerchantBillingRead], h.perms[billing.MerchantBillingManage]),
 	}
 	as := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = pool }),
 		authtest.WithConfig(func(c *authkit.Config) { c.Roles = rbac }))
 	h.ak = as.Client
-	scope, err := h.ak.Scope(t.Context(), iam.RootGroup())
-	require.NoError(t, err)
-	h.scope = scope
 	h.customer, h.reader, h.support, h.owner = h.token(t, ""), h.token(t, "reader"), h.token(t, "support"), h.token(t, "admin")
 	gone := authtest.NewUser(t, h.ak)
 	authtest.GrantRole(t, h.ak, iam.RootGroup(), iam.UserSubject(gone.ID), h.roles["support"])
 	h.gone = authtest.SignIn(t, h.ak, gone).AccessToken
-	_, err = h.ak.RevokeAccountSessions(t.Context(), iam.UserIdentity(gone.ID), gone.ID)
+	_, err := h.ak.RevokeAccountSessions(t.Context(), iam.UserIdentity(gone.ID), gone.ID)
 	require.NoError(t, err)
 	key, err := h.ak.CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.RootGroup(), iam.NewAPIKey{Name: "billing-backend", Role: h.roles["admin"]})
 	require.NoError(t, err)
 	h.app = key.Secret
 	return h
+}
+
+// merchantStaff signs in a new user holding the merchant support role in
+// mid's own group, whose id is the merchant's.
+func (h *guardedHost) merchantStaff(t *testing.T, mid billing.MerchantID) string {
+	t.Helper()
+	group, err := h.ak.CreateGroup(t.Context(), iam.NewGroup{ID: mid.String(), Persona: h.merchant})
+	require.NoError(t, err)
+	u := authtest.NewUser(t, h.ak)
+	authtest.GrantRole(t, h.ak, iam.GroupByID(group.ID), iam.UserSubject(u.ID), h.roles["merchant-support"])
+	return authtest.SignIn(t, h.ak, u).AccessToken
 }
 
 // token signs in a new user holding role in the root group ("" holds none).
@@ -91,22 +105,16 @@ func (h *guardedHost) token(t *testing.T, role string) string {
 	return authtest.SignIn(t, h.ak, u).AccessToken
 }
 
-// routes mounts perms, each one's route group on, guarded by AuthKit's
-// Authenticator in the root group's scope.
-func (h *guardedHost) routes(perms openrails.Permissions, programmatic bool) openrails.Routes {
-	groups := openrails.RouteGroups{Admin: perms.AdminRead != nil, Catalog: perms.Catalog != nil, MerchantConfig: perms.MerchantConfig != nil, Metrics: perms.Metrics != nil, Programmatic: programmatic}
-	routes := openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/billing", RouteGroups: groups, Permissions: perms}
-	if perms != (openrails.Permissions{}) {
-		routes.Scope = h.scope
-	}
-	return routes
+// routes turns groups on, guarded by AuthKit's Authenticator alone.
+func (h *guardedHost) routes(groups openrails.RouteGroups) openrails.Routes {
+	return openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/billing", RouteGroups: groups}
 }
 
-// mount serves client's routes with perms.
-func (h *guardedHost) mount(t *testing.T, client *openrails.Client, perms openrails.Permissions) (http.Handler, error) {
+// mount serves client's routes with groups on.
+func (h *guardedHost) mount(t *testing.T, client *openrails.Client, groups openrails.RouteGroups) (http.Handler, error) {
 	t.Helper()
 	mux := http.NewServeMux()
-	return mux, openrailshttp.Mount(mux, client, h.routes(perms, false))
+	return mux, openrailshttp.Mount(mux, client, h.routes(groups))
 }
 
 func bearerRequest(token string) func() *http.Request {
@@ -118,18 +126,19 @@ func bearerRequest(token string) func() *http.Request {
 }
 
 // AuthKit's Authenticator passes the conformance kit with the host's Routes:
-// staff holding each permission exactly, in exactly the root group, a stale
-// sign-in, the backend's API key, and staff signed out last.
+// staff holding each of the route groups' root: permissions exactly, in
+// exactly the root group (its RootScope), a stale sign-in, the backend's API
+// key, and staff signed out last.
 func TestAuthKitPassesCheckAuth(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
 	staff := authtest.NewUser(t, h.ak)
-	authtest.GrantRole(t, h.ak, iam.RootGroup(), iam.UserSubject(staff.ID), h.roles["support"])
-	openrailstest.CheckAuth(t, h.routes(openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update}, true), helpersauthtest.Cases{
+	authtest.GrantRole(t, h.ak, iam.RootGroup(), iam.UserSubject(staff.ID), h.roles["admin"])
+	openrailstest.CheckAuth(t, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true}), helpersauthtest.Cases{
 		Staff:       bearerRequest(authtest.SignIn(t, h.ak, staff).AccessToken),
 		User:        bearerRequest(h.customer),
-		Holders:     map[string]func() *http.Request{h.read.String(): bearerRequest(h.reader)},
-		Stale:       bearerRequest(authtest.StaleSession(t, h.ak, h.support)),
+		Holders:     map[string]func() *http.Request{string(billing.RootBillingRead): bearerRequest(h.reader)},
+		Stale:       bearerRequest(authtest.StaleSession(t, h.ak, h.owner)),
 		Application: bearerRequest(h.app),
 		Refused:     map[string]func() *http.Request{"forged": bearerRequest(h.customer + "x"), "signed out": bearerRequest(h.gone)},
 		Revoke: func() {
@@ -151,10 +160,12 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 	return answer{w.Code, w.Body.String(), w.Header().Get("WWW-Authenticate")}
 }
 
-// Each admin route checks the host's AdminRead or AdminUpdate by its level,
-// each catalog route Catalog, each merchant-config route MerchantConfig; a
-// group that is off is not mounted. A write that moves money still needs a
-// recent sign-in, and the machine checkout-attempt routes are gone.
+// Each admin route checks its permission by its level, each catalog and
+// merchant-config route its group's: the root: name (root:billing:read) in
+// AuthKit's root group or the merchant: name (merchant:billing:read) in the
+// merchant's own. A group that is off is not mounted. A write that moves
+// money still needs a recent sign-in, and the machine checkout-attempt
+// routes are gone.
 func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
@@ -183,7 +194,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	}
 
 	t.Run("admin reads and writes", func(t *testing.T) {
-		mux, err := h.mount(t, client, openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update})
+		mux, err := h.mount(t, client, adminGroups)
 		require.NoError(t, err)
 		forbidden(t, mux, h.customer, http.MethodGet, "/billing/v1/admin/payments")
 		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/payments")
@@ -209,17 +220,31 @@ func TestRouteGroupPermissions(t *testing.T) {
 		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/checkout-sessions")
 	})
 
-	t.Run("reads alone mount no write", func(t *testing.T) {
-		mux, err := h.mount(t, client, openrails.Permissions{AdminRead: h.read})
+	// A merchant's own staff hold the merchant: names in its group: they act
+	// at that merchant and nowhere else, and a root holder at both.
+	t.Run("a merchant's own staff", func(t *testing.T) {
+		other := f.runtime(t, "other-"+uuid.NewString()[:8])
+		staff := h.merchantStaff(t, client.MerchantID())
+		here, err := h.mount(t, client, adminGroups)
 		require.NoError(t, err)
-		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/payments")
-		passes(t, mux, h.reader, http.MethodPost, "/billing/v1/admin/subscriptions/"+billing.SubscriptionID(uuid.New()).String()+"/change/preview")
-		unmounted(t, mux, http.MethodPost, payment)
-		unmounted(t, mux, http.MethodPost, subscription)
+		there, err := h.mount(t, other, adminGroups)
+		require.NoError(t, err)
+		passes(t, here, staff, http.MethodGet, "/billing/v1/admin/payments")
+		passes(t, here, staff, http.MethodPost, payment)
+		forbidden(t, there, staff, http.MethodGet, "/billing/v1/admin/payments")
+		forbidden(t, there, staff, http.MethodPost, payment)
+		passes(t, there, h.reader, http.MethodGet, "/billing/v1/admin/payments")
+
+		access := func(mux http.Handler, token string) billing.AdminAccess {
+			return decode[billing.AdminAccess](t, call(t, mux, token, http.MethodGet, "/billing/v1/admin/access", "", nil))
+		}
+		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: client.MerchantID().String()}, access(here, staff))
+		require.Equal(t, access(here, staff), access(here, h.support), "the access read answers the same levels for either name")
+		require.Equal(t, billing.AccessNone, access(there, staff).Admin)
 	})
 
 	t.Run("merchant configuration", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "config-"+uuid.NewString()[:8]), openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update, MerchantConfig: h.admin})
+		mux, err := h.mount(t, f.runtime(t, "config-"+uuid.NewString()[:8]), openrails.RouteGroups{Admin: true, MerchantConfig: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodGet, "/billing/v1/admin/psps")
 		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/psps")
@@ -228,7 +253,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 	})
 
 	t.Run("the catalog alone", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "catalog-"+uuid.NewString()[:8]), openrails.Permissions{Catalog: h.admin})
+		mux, err := h.mount(t, f.runtime(t, "catalog-"+uuid.NewString()[:8]), openrails.RouteGroups{Catalog: true})
 		require.NoError(t, err)
 		forbidden(t, mux, h.support, http.MethodPost, "/billing/v1/admin/catalog/products")
 		forbidden(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/catalog/products")
@@ -262,7 +287,7 @@ func TestAuthKitRefusals(t *testing.T) {
 	h := newGuardedHostOn(t, pool)
 	client := f.runtime(t, "refusals-"+uuid.NewString()[:8])
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, h.routes(openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update, Entitlements: h.entitlements, Events: h.events}, true)))
+	require.NoError(t, openrailshttp.Mount(mux, client, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true})))
 	refund := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 
 	anonymous := httptest.NewRecorder()
@@ -309,29 +334,36 @@ func TestAuthKitRefusals(t *testing.T) {
 	require.Equal(t, http.StatusOK, ask(t, mux, h.support, http.MethodGet, "/billing/v1/admin/payments", nil).status, "back once AuthKit is")
 }
 
-// Mount fails closed: a group on without its permission, a permission for a
-// group that is off or AuthKit does not know, a permission without Scope or
-// a Scope without one, and any group without Auth.
+// Mount fails closed: any group without Auth, and a route neither of whose
+// permissions the host's AuthKit declares, which is named. A host that
+// declares only the root: names mounts every group.
 func TestMountFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
 	client := f.runtime(t, "groups-"+uuid.NewString()[:8])
-	ak := h.ak.Authenticator()
+	require.ErrorContains(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{RouteGroups: adminGroups}), "Routes.Auth is required")
+
+	// A host whose roles declare root's billing permissions alone.
+	rbac := authkit.NewRoles()
+	for _, p := range []billing.Permission{billing.RootBillingRead, billing.RootBillingManage} {
+		rbac.Root.Permission(p.Resource(), p.Action())
+	}
+	bare := authtest.NewAuthorizationServer(t,
+		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
+		authtest.WithConfig(func(c *authkit.Config) { c.Roles = rbac })).Client.Authenticator()
+	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: bare, Prefix: "/a", RouteGroups: adminGroups}))
 	for name, tc := range map[string]struct {
-		routes openrails.Routes
+		groups openrails.RouteGroups
 		err    string
 	}{
-		"admin without its read":             {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminUpdate: h.update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		"an empty read":                      {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: iam.Perm{}}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		"a group that is off":                {openrails.Routes{Auth: ak, Permissions: openrails.Permissions{Catalog: h.admin}}, "Permissions.Catalog is given, but RouteGroups.Catalog is off"},
-		"no Auth":                            {openrails.Routes{Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "Routes.Auth is required"},
-		"no Scope":                           {openrails.Routes{Auth: ak, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "without Routes.Scope"},
-		"a Scope, no permission":             {openrails.Routes{Auth: ak, Scope: h.scope}, "Routes.Scope is given, but no permission is"},
-		"programmatic off":                   {openrails.Routes{Auth: ak, Scope: h.scope, Permissions: openrails.Permissions{Events: h.events}}, "Permissions.Events is given, but RouteGroups.Programmatic is off"},
-		"an unknown permission":              {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: perm("root:billing:raed")}}, `does not know the permission "root:billing:raed"`},
-		"an unknown programmatic permission": {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: openrails.RouteGroups{Programmatic: true}, Permissions: openrails.Permissions{Usage: perm("root:usage:manage")}}, `does not know the permission "root:usage:manage"`},
+		"a staff group it declares nothing for": {openrails.RouteGroups{Admin: true, Metrics: true}, `knows none of its permissions ["merchant:metrics:read" "root:metrics:read"]`},
+		"the programmatic routes":               {openrails.RouteGroups{Programmatic: true}, "/v1/app/"},
 	} {
-		err := openrailshttp.Mount(http.NewServeMux(), client, tc.routes)
+		err := openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: bare, Prefix: "/b", RouteGroups: tc.groups})
 		require.ErrorContains(t, err, tc.err, name)
+		require.ErrorContains(t, err, "knows none of its permissions", name)
 	}
+
+	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
+	require.NoError(t, openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Auth: h.ak.Authenticator(), Prefix: "/c", RouteGroups: every}))
 }

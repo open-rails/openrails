@@ -1,15 +1,14 @@
 package embedhttp
 
 import (
-	"fmt"
 	"net/http"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
@@ -20,7 +19,7 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, true, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"hosted_extra": true})
+	caps := CapabilitiesFor(nil, config.RouteGroups{Admin: true, Programmatic: true}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"hosted_extra": true})
 	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": true}, caps.RouteGroups)
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
@@ -31,21 +30,18 @@ func TestCapabilities(t *testing.T) {
 
 	// Merchant-config edits need the group and an editable source.
 	editable := &app.Runtime{Config: &config.Config{Vault: &config.VaultConfig{KVMount: "kv"}}}
-	require.False(t, CapabilitiesFor(editable, httproutes.Permissions{AdminRead: "r", AdminUpdate: "w"}, false, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
-	require.False(t, CapabilitiesFor(&app.Runtime{Config: &config.Config{}}, httproutes.Permissions{MerchantConfig: "c"}, false, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
-	config := CapabilitiesFor(editable, httproutes.Permissions{MerchantConfig: "c"}, false, routesurface.ProviderRoutes{}, nil)
+	require.False(t, CapabilitiesFor(editable, config.RouteGroups{Admin: true}, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
+	require.False(t, CapabilitiesFor(&app.Runtime{Config: &config.Config{}}, config.RouteGroups{MerchantConfig: true}, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
+	config := CapabilitiesFor(editable, config.RouteGroups{MerchantConfig: true}, routesurface.ProviderRoutes{}, nil)
 	require.True(t, config.Features["merchant_config_edits"])
 	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, config.RouteGroups)
 }
 
-// Route selection is refused unless each route group has the Auth and the
-// permission it needs, and no permission is given for a group that is off:
-// nothing mounts open.
+// Route selection is refused without the Auth its routes need: any route
+// needs one, a staff or programmatic group one with a root scope. Nothing
+// mounts open.
 func TestRoutesValidation(t *testing.T) {
 	auth := &authtest.Fake{}
-	read, update, catalog, admin, metrics := authtest.Perm("r"), authtest.Perm("u"), authtest.Perm("c"), authtest.Perm("a"), authtest.Perm("m")
-	usage, events := authtest.Perm("g"), authtest.Perm("e")
-	programmatic := config.RouteGroups{Programmatic: true}
 	for _, tc := range []struct {
 		name string
 		sel  config.Routes
@@ -54,29 +50,11 @@ func TestRoutesValidation(t *testing.T) {
 		{"no Auth: the customer routes need it", config.Routes{}, "Routes.Auth is required"},
 		{"a typed nil Auth", config.Routes{Auth: (*authtest.Fake)(nil)}, "Routes.Auth is required"},
 		{"public, customer and webhooks", config.Routes{Auth: auth}, ""},
-		{"admin reads", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
-		{"admin reads and updates", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, AdminUpdate: update}}, ""},
-		{"admin on without its read", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminUpdate: update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		{"a typed nil permission is none", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil)}}, "without Permissions.AdminRead"},
-		{"admin permissions with admin off", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read}}, "Permissions.AdminRead is given, but RouteGroups.Admin is off"},
-		{"an update with admin off", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog, AdminUpdate: update}}, "Permissions.AdminUpdate is given"},
-		{"the catalog alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog}}, ""},
-		{"the catalog without its permission", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}}, "RouteGroups.Catalog is on without Permissions.Catalog"},
-		{"merchant configuration alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: admin}}, ""},
-		{"metrics alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Metrics: true}, Permissions: config.Permissions{Metrics: metrics}}, ""},
-		{"metrics given, off", config.Routes{Auth: auth, Permissions: config.Permissions{Metrics: metrics}}, "RouteGroups.Metrics is off"},
-		{"programmatic with SCIM alone", config.Routes{Auth: auth, RouteGroups: programmatic}, ""},
-		{"programmatic usage", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Usage: usage}}, ""},
-		{"programmatic usage and events", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Usage: usage, Events: events}}, ""},
-		{"a programmatic permission without Scope", config.Routes{Auth: auth, RouteGroups: programmatic, Permissions: config.Permissions{Events: events}}, "without Routes.Scope"},
-		{"a programmatic permission, programmatic off", config.Routes{Auth: auth, Scope: authtest.Scope, Permissions: config.Permissions{Usage: usage}}, "Permissions.Usage is given, but RouteGroups.Programmatic is off"},
-		{"a programmatic permission with only staff on", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, Events: events}}, "Permissions.Events is given, but RouteGroups.Programmatic is off"},
-		{"a programmatic permission the Auth does not know", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Costs: authtest.Perm("misspelled")}}, `does not know the permission "misspelled"`},
-		{"a staff group without Scope", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
-		{"a Scope without its ID", config.Routes{Auth: auth, Scope: billingauth.Scope{Authority: "test"}, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
-		{"a Scope without a permission", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic}, "Routes.Scope is given, but no permission is"},
-		{"a permission the Auth does not know", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: authtest.Perm("misspelled")}}, `does not know the permission "misspelled"`},
-		{"permissions the Auth knows", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
+		{"public, customer and webhooks, no root scope", config.Routes{Auth: rootless{auth}}, ""},
+		{"admin", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}}, ""},
+		{"every group", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}, ""},
+		{"a staff group, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Metrics: true}}, "helpers/auth Root"},
+		{"programmatic, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Programmatic: true}}, "helpers/auth Root"},
 	} {
 		err := ValidateRoutes(tc.sel)
 		if tc.err == "" {
@@ -87,22 +65,33 @@ func TestRoutesValidation(t *testing.T) {
 	}
 }
 
-// catalogued knows the permissions r, u, c, a, m, g and e.
-type catalogued struct{ *authtest.Fake }
+// rootless is an Authenticator that is no helpers/auth Root.
+type rootless struct{ a *authtest.Fake }
 
-func (catalogued) KnownPermission(p string) bool {
-	return strings.Contains("rucamge", p) && len(p) == 1
+func (r rootless) Authenticate(req *http.Request) (billingauth.Verified, error) {
+	return r.a.Authenticate(req)
+}
+
+// catalogued knows only its own permissions (helpers/auth PermissionCatalog).
+type catalogued struct {
+	*authtest.Fake
+	known []billing.Permission
+}
+
+func (c catalogued) KnownPermission(p string) bool {
+	return slices.Contains(c.known, billing.Permission(p))
 }
 
 // The combined handler refuses to mount the admin API without its Auth,
 // and only the configuration and checkout routes join the permissive-CORS
-// browser tier.
+// browser tier. A group that is on mounts its reads and its changes.
 func TestNewRoutes(t *testing.T) {
-	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{Permissions: httproutes.Permissions{AdminRead: "r"}}) })
+	admin := config.RouteGroups{Admin: true}
+	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{Groups: admin}) })
 
 	asm := &Assembler{Runtime: &app.Runtime{Config: &config.Config{}}, Auth: &authtest.Fake{}}
 	noWebhooks := routesurface.ProviderRoutes{}
-	table := asm.NewRoutes(Options{Permissions: httproutes.Permissions{AdminRead: "r"}, ProviderRoutes: &noWebhooks})
+	table := asm.NewRoutes(Options{Groups: admin, ProviderRoutes: &noWebhooks})
 	var keys []string
 	for _, e := range table.Entries {
 		key := e.Method + " " + e.Path
@@ -115,8 +104,36 @@ func TestNewRoutes(t *testing.T) {
 	require.Contains(t, keys, "OPTIONS /billing/v1/config")
 	require.Contains(t, keys, "GET /billing/v1/admin/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
-	require.NotContains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "writes need AdminUpdate")
+	require.Contains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "the admin group mounts its changes")
 	require.NotContains(t, keys, "GET /billing/v1/admin/psps", "configuration needs MerchantConfig")
+}
+
+// A route whose permissions the Auth knows neither of is not mounted, and
+// the mount fails naming it; one name is enough.
+func TestMountNeedsAKnownPermission(t *testing.T) {
+	rt := &app.Runtime{Config: &config.Config{}}
+	mount := func(known ...billing.Permission) (err error) {
+		defer func() {
+			if v := recover(); v != nil {
+				err = v.(httproutes.MountError)
+			}
+		}()
+		(&Assembler{Runtime: rt, Auth: catalogued{Fake: &authtest.Fake{}, known: known}}).NewRoutes(Options{Groups: config.RouteGroups{Admin: true}})
+		return nil
+	}
+	require.NoError(t, mount(billing.RootBillingRead, billing.RootBillingManage), "the root: names alone")
+	require.NoError(t, mount(billing.MerchantBillingRead, billing.MerchantBillingManage), "the merchant: names alone")
+	require.NoError(t, mount(billing.MerchantBillingRead, billing.RootBillingManage))
+
+	err := mount(billing.RootBillingRead)
+	require.ErrorContains(t, err, string(billing.MerchantBillingManage))
+	require.ErrorContains(t, err, string(billing.RootBillingManage))
+	var mountErr httproutes.MountError
+	require.ErrorAs(t, err, &mountErr)
+	method, path, _ := strings.Cut(mountErr.Route, " ")
+	route, ok := httproutes.Lookup(method, path)
+	require.True(t, ok, "the error names the route: %q", mountErr.Route)
+	require.Equal(t, httproutes.LevelUpdate, route.Level)
 }
 
 // An explicit route selection wins; without one an unbound runtime mounts
@@ -144,23 +161,4 @@ func TestValidateRouteTable(t *testing.T) {
 		console, entry("GET", "/admin"), entry("POST", "/admin/custom/subscriptions/{id}/cancel"),
 		entry("GET", "/a/{id}/x"), entry("POST", "/a/{name}/y"),
 	}}))
-}
-
-// Every Need names a field of the routes' Permissions and of the host's
-// config.Permissions, and every field of either is a Need: a new programmatic
-// permission (AppNeeds) is added in each, or this names what is missing.
-func TestEveryNeedIsAField(t *testing.T) {
-	needs := map[string]bool{}
-	for _, n := range httproutes.AllNeeds() {
-		needs[string(n)] = true
-		require.NotNil(t, (&httproutes.Permissions{}).Field(n), "routes.Permissions.Field(%s)", n)
-		f, ok := reflect.TypeOf(config.Permissions{}).FieldByName(string(n))
-		require.True(t, ok, "config.Permissions has no field %s", n)
-		require.Equal(t, reflect.TypeOf((*fmt.Stringer)(nil)).Elem(), f.Type, "config.Permissions.%s", n)
-	}
-	for _, typ := range []reflect.Type{reflect.TypeOf(httproutes.Permissions{}), reflect.TypeOf(config.Permissions{})} {
-		for i := range typ.NumField() {
-			require.True(t, needs[typ.Field(i).Name], "%s.%s is no Need", typ, typ.Field(i).Name)
-		}
-	}
 }

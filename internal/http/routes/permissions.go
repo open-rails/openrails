@@ -1,129 +1,84 @@
 package routes
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
 
-// Permissions are the host's permissions, as the gate asks the Verified's Can
-// for them: the staff groups' (the admin group's reads and updates, the
-// catalog, the merchant's configuration, its business metrics) and the
-// programmatic routes' (entitlement checks, offers, usage, provider costs,
-// host events, merchant orders, customer lookups). An empty one leaves its routes unmounted. Each field is
-// named by a Need.
-type Permissions struct {
-	AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics      string
-	Entitlements, Offers, Usage, Costs, Events, Orders, Customers string
-}
-
-// Need names the Routes.Permissions field a route's caller holds.
-type Need string
-
-const (
-	NeedAdminRead      Need = "AdminRead"
-	NeedAdminUpdate    Need = "AdminUpdate"
-	NeedCatalog        Need = "Catalog"
-	NeedMerchantConfig Need = "MerchantConfig"
-	NeedMetrics        Need = "Metrics"
-	// The programmatic routes': a route declares its own (Route.Permission).
-	NeedEntitlements Need = "Entitlements"
-	NeedOffers       Need = "Offers"
-	NeedUsage        Need = "Usage"
-	NeedCosts        Need = "Costs"
-	NeedEvents       Need = "Events"
-	NeedOrders       Need = "Orders"
-	NeedCustomers    Need = "Customers"
+	"github.com/open-rails/openrails/billing"
 )
 
-// StaffNeeds are the staff groups' permissions.
-var StaffNeeds = []Need{NeedAdminRead, NeedAdminUpdate, NeedCatalog, NeedMerchantConfig, NeedMetrics}
+// Pair is the two names of the permission a route checks, either of which
+// admits its caller: Merchant held in the scope of the merchant the request
+// acts on, Root in the Authenticator's root scope. A route about no one
+// merchant names Root alone.
+type Pair struct{ Merchant, Root billing.Permission }
 
-// AppNeeds are the permissions a programmatic route may declare. A new one is
-// a Need here, a field of Permissions (and of the public config.Permissions)
-// named by it, and its case in Field; TestEveryNeedIsAField names what is
-// missing.
-var AppNeeds = []Need{NeedEntitlements, NeedOffers, NeedUsage, NeedCosts, NeedEvents, NeedOrders, NeedCustomers}
-
-// AllNeeds is every Permissions field.
-func AllNeeds() []Need { return append(append([]Need(nil), StaffNeeds...), AppNeeds...) }
-
-// Field is p's field n names; nil for an unknown Need.
-func (p *Permissions) Field(n Need) *string {
-	switch n {
-	case NeedAdminRead:
-		return &p.AdminRead
-	case NeedAdminUpdate:
-		return &p.AdminUpdate
-	case NeedCatalog:
-		return &p.Catalog
-	case NeedMerchantConfig:
-		return &p.MerchantConfig
-	case NeedMetrics:
-		return &p.Metrics
-	case NeedEntitlements:
-		return &p.Entitlements
-	case NeedOffers:
-		return &p.Offers
-	case NeedUsage:
-		return &p.Usage
-	case NeedCosts:
-		return &p.Costs
-	case NeedEvents:
-		return &p.Events
-	case NeedOrders:
-		return &p.Orders
-	case NeedCustomers:
-		return &p.Customers
-	}
-	return nil
-}
-
-// Validate refuses AdminUpdate without AdminRead.
-func (p Permissions) Validate() error {
-	if p.AdminUpdate != "" && p.AdminRead == "" {
-		return fmt.Errorf("openrails: Permissions.AdminUpdate needs AdminRead")
-	}
-	return nil
-}
-
-// only is p's needs alone.
-func (p Permissions) only(needs []Need) Permissions {
-	var out Permissions
-	for _, n := range needs {
-		*out.Field(n) = *p.Field(n)
+// Names are the pair's names, Merchant's first.
+func (p Pair) Names() []billing.Permission {
+	var out []billing.Permission
+	for _, name := range []billing.Permission{p.Merchant, p.Root} {
+		if name != "" {
+			out = append(out, name)
+		}
 	}
 	return out
 }
 
-// Staff is p's staff groups' permissions alone.
-func (p Permissions) Staff() Permissions { return p.only(StaffNeeds) }
-
-// App is p's programmatic routes' permissions alone.
-func (p Permissions) App() Permissions { return p.only(AppNeeds) }
-
-// For is the permission a route checks: "" when it needs none, or its
-// permission is not given and it is not mounted.
-func (p Permissions) For(r Route) string {
-	if f := p.Field(r.Needs()); f != nil {
-		return *f
+// check refuses a pair that is not one exported permission's names: a
+// root: name of billing.Permissions and, but for a route about no one
+// merchant, its merchant: twin.
+func (p Pair) check() error {
+	if p == (Pair{}) {
+		return nil
 	}
-	return ""
+	exported := billing.Permissions()
+	if p.Root.Persona() != "root" || !slices.Contains(exported, p.Root) {
+		return fmt.Errorf("its root permission %q is not a root: name of billing.Permissions", p.Root)
+	}
+	if p.Merchant == "" {
+		return nil
+	}
+	if p.Merchant.Persona() != billing.MerchantGroupPersona || !slices.Contains(exported, p.Merchant) ||
+		p.Merchant.Resource() != p.Root.Resource() || p.Merchant.Action() != p.Root.Action() {
+		return fmt.Errorf("its permissions %q and %q are not one permission's merchant: and root: names", p.Merchant, p.Root)
+	}
+	return nil
 }
 
-// Needs names the Routes.Permissions field a route checks: a staff route's
-// group's (and level's), a programmatic route's own, none for SCIM.
-func (r Route) Needs() Need {
+// The staff groups' pairs, and the programmatic routes' own (Route.Permission).
+var (
+	needAdminRead      = Pair{billing.MerchantBillingRead, billing.RootBillingRead}
+	needAdminUpdate    = Pair{billing.MerchantBillingManage, billing.RootBillingManage}
+	needCatalog        = Pair{billing.MerchantCatalogManage, billing.RootCatalogManage}
+	needMerchantConfig = Pair{billing.MerchantConfigManage, billing.RootConfigManage}
+	needMetrics        = Pair{billing.MerchantMetricsRead, billing.RootMetricsRead}
+
+	needEntitlements = Pair{billing.MerchantEntitlementsRead, billing.RootEntitlementsRead}
+	needOffers       = Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}
+	needUsage        = Pair{billing.MerchantUsageManage, billing.RootUsageManage}
+	needCosts        = Pair{billing.MerchantCostsManage, billing.RootCostsManage}
+	needEvents       = Pair{billing.MerchantEventsRead, billing.RootEventsRead}
+	needOrders       = Pair{billing.MerchantOrdersManage, billing.RootOrdersManage}
+	needCustomers    = Pair{billing.MerchantCustomersRead, billing.RootCustomersRead}
+)
+
+// Needs is the pair a route checks: a staff route's group's (and level's), a
+// programmatic route's own, none for any other route.
+func (r Route) Needs() Pair {
 	switch r.Group {
 	case CatalogAdmin:
-		return NeedCatalog
+		return needCatalog
 	case MerchantConfig:
-		return NeedMerchantConfig
+		return needMerchantConfig
 	case Metrics:
-		return NeedMetrics
+		return needMetrics
 	case Admin:
 		if r.Level == LevelUpdate {
-			return NeedAdminUpdate
+			return needAdminUpdate
 		}
-		return NeedAdminRead
+		return needAdminRead
 	case App:
 		return r.Permission
 	}
-	return ""
+	return Pair{}
 }

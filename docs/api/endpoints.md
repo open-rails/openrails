@@ -75,14 +75,14 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Public: `/v1/config`, `/v1/catalog/products` | none |
 | Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
-| Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
+| Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
 | Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
-Every staff and programmatic route is gated by the host's permission for it
-(`Routes.Permissions`; each route's is in [routes.md](routes.md)), whatever
-the credential. On the standalone server the permissions are its merchant
-persona's ([auth](../auth.md#permissions)): an API key carries its role's, a trusted issuer's token
+Every staff and programmatic route is gated by its permission (each route's
+pair is in [routes.md](routes.md)), whatever the credential: the `merchant:`
+name held at the merchant, or the `root:` name held in the root scope
+([auth](../auth.md#permissions)). On the standalone server an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. A person also needs a recent sign-in on a
 `sensitive` route: otherwise `401 step_up_required` (RFC 9470: `WWW-Authenticate:
@@ -322,8 +322,8 @@ one-time); `access_duration_hours` independently determines access (`null`: no
 scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
-Reads and writes are the catalog route group, `RouteGroups.Catalog` with
-`Permissions.Catalog`: without it they are not mounted. A document skips what
+Reads and writes are the catalog route group, `RouteGroups.Catalog`: without
+it they are not mounted. A document skips what
 an edit set ([catalog ownership](../catalog-ownership.md)). The in-process Client
 is not gated. JSON/YAML batches are deduplicated permanently by content hash,
 even after intervening edits.

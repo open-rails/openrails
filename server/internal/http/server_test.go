@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -17,8 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
@@ -31,7 +30,7 @@ func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRe
 func TestStandaloneMetaRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	groups := config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
-	srv := &Server{groups: groups, permissions: permissionsFor(groups)}
+	srv := &Server{groups: groups}
 	srv.registerStandaloneMetaRoutes(mux)
 	require.True(t, srv.nativeBrowser["GET /v1/config"], "a browser reads the configuration from any origin")
 	require.False(t, srv.nativeBrowser["GET /health/live"])
@@ -66,7 +65,7 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	// merchant-config group on.
 	for _, kvMount := range []string{"", "kv"} {
 		mux := http.NewServeMux()
-		(&Server{cfg: &config.Config{}, groups: groups, permissions: permissionsFor(groups), runtime: &app.Runtime{
+		(&Server{cfg: &config.Config{}, groups: groups, runtime: &app.Runtime{
 			Config: &config.Config{Vault: &config.VaultConfig{KVMount: kvMount}},
 		}}).registerStandaloneMetaRoutes(mux)
 		w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/config", nil))
@@ -87,6 +86,10 @@ func (a *challenging) Authenticate(r *http.Request) (auth.Verified, error) {
 
 func (*challenging) AllowedHeaders() []string { return []string{"Authorization", "Proof"} }
 func (*challenging) ExposedHeaders() []string { return []string{"WWW-Authenticate", "Proof-Nonce"} }
+
+func (*challenging) RootScope(context.Context) (auth.Scope, error) {
+	return auth.Scope{Authority: "https://auth.example", ID: "root"}, nil
+}
 
 // #469: the self-service surface is always mounted. Its CORS names the
 // headers AuthKit's credentials travel in; a refused credential is a generic
@@ -207,14 +210,4 @@ func TestRouteBudgetOutlivesServerWriteTimeout(t *testing.T) {
 	cancel()
 	req.SuccessJSON(map[string]any{"ok": true})
 	require.Equal(t, http.StatusOK, rec.Code, "a writer without a connection deadline still serves")
-}
-
-// The server names its own merchant permission for every Routes.Permissions
-// field, each one the merchant persona declares.
-func TestMerchantPermissionsCoverEveryNeed(t *testing.T) {
-	for _, n := range httproutes.AllNeeds() {
-		perm := *merchantPermissions.Field(n)
-		require.Contains(t, staffperm.Declared, perm, "Routes.Permissions.%s", n)
-	}
-	require.Len(t, staffperm.Declared, len(httproutes.AllNeeds()))
 }

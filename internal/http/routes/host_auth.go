@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
@@ -15,10 +16,20 @@ import (
 // HostAuth is the in-process transport's Authenticator: the embedding host's
 // own principal, a context value the transport attaches and no network
 // request can carry. It is an application holding every permission at its
-// own merchant, which its credential names. It admits no customer.
+// own merchant, which its credential names, and in its root scope. It
+// admits no customer.
 type HostAuth struct{}
 
-var _ billingauth.Authenticator = HostAuth{}
+var (
+	_ billingauth.Authenticator = HostAuth{}
+	_ auth.Root                 = HostAuth{}
+)
+
+// hostRoot is where the host holds its root: permissions.
+var hostRoot = billingauth.Scope{Authority: billingauth.HostIssuer, ID: "root"}
+
+// RootScope is the host's own root scope (helpers/auth Root).
+func (HostAuth) RootScope(context.Context) (billingauth.Scope, error) { return hostRoot, nil }
 
 // Authenticate admits the in-process host principal.
 func (HostAuth) Authenticate(r *http.Request) (billingauth.Verified, error) {
@@ -59,10 +70,11 @@ func (v hostVerified) BoundScope() billingauth.Scope {
 	return billingauth.HostScope(target.MerchantID)
 }
 
-// Can grants the host every permission at its own merchant.
+// Can grants the host every permission at its own merchant and in its root
+// scope.
 func (v hostVerified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
 	target, ok := billingauth.NamedMerchant(v)
-	return ok && permission != "" && scope == billingauth.HostScope(target.MerchantID), nil
+	return ok && permission != "" && (scope == billingauth.HostScope(target.MerchantID) || scope == hostRoot), nil
 }
 
 // CheckRecentSignIn: an application has no sign-in of its own.
@@ -90,18 +102,6 @@ func HostOptions() Options {
 	return Options{
 		Auth:            HostAuth{},
 		ResolveMerchant: CredentialOnly,
-		Scope: func(_ context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
-			return billingauth.HostScope(mid), nil
-		},
-		Permissions: hostPermissions(),
+		Groups:          config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
 	}
-}
-
-// hostPermissions gives every Permissions field the host's own.
-func hostPermissions() Permissions {
-	var p Permissions
-	for _, n := range AllNeeds() {
-		*p.Field(n) = "host"
-	}
-	return p
 }

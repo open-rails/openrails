@@ -33,17 +33,15 @@ const EmbeddedV1Prefix = embeddedMount + "/v1"
 // embeddedMount is where an embedded host mounts the API root.
 const embeddedMount = "/billing"
 
-// Options is what the handler mounts beside the public and webhook routes:
-// the staff route groups Permissions gives a permission.
+// Options is what the handler mounts beside the public and webhook routes.
 type Options struct {
-	Permissions    httproutes.Permissions
+	// Groups are the staff groups that are on and, with Programmatic, the
+	// programmatic routes (/v1/app) and SCIM, unless the runtime reads the
+	// host's directory.
+	Groups         config.RouteGroups
 	ProviderRoutes *routesurface.ProviderRoutes
 	// Capabilities is what GET /v1/config reports; nil derives it.
 	Capabilities *Capabilities
-	// Programmatic mounts the programmatic routes (/v1/app) Permissions
-	// gives a permission, and SCIM unless the runtime reads the host's
-	// directory.
-	Programmatic bool
 }
 
 // Assembler builds the embedded billing surface from the application graph.
@@ -53,9 +51,8 @@ type Assembler struct {
 	CaptchaStore *captcha.ChallengeStore
 	AdminLimiter *middleware.AdminOperationLimiter
 	// Auth is the mount's Routes.Auth: who a staff, programmatic or
-	// checkout-session request is. Scope is Routes.Scope.
-	Auth  billingauth.Authenticator
-	Scope billingauth.Scope
+	// checkout-session request is.
+	Auth billingauth.Authenticator
 }
 
 // FromApp builds an Assembler from the application graph.
@@ -98,7 +95,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 
 	// The public configuration (GET /v1/config) is always on, so even a
 	// minimal deployment is discoverable.
-	capabilities := CapabilitiesFor(s.Runtime, opts.Permissions, opts.Programmatic, providerRoutes, nil)
+	capabilities := CapabilitiesFor(s.Runtime, opts.Groups, providerRoutes, nil)
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
@@ -113,23 +110,21 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		Auth:           s.Auth,
 		ProviderRoutes: &providerRoutes,
 	})
-	if opts.Permissions.Staff() != (httproutes.Permissions{}) {
+	if httproutes.StaffGroups(opts.Groups) {
 		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
-			Scope:        httproutes.FixedScope(s.Scope),
 			AdminLimiter: s.AdminLimiter,
-			Permissions:  opts.Permissions,
+			Groups:       opts.Groups,
 			Capabilities: &capabilities,
 		})
 	}
 	if providerRoutes.Webhooks {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 	}
-	if opts.Programmatic {
+	if opts.Groups.Programmatic {
 		httproutes.RegisterAppRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
-			Scope:        httproutes.FixedScope(s.Scope),
-			Permissions:  opts.Permissions.App(),
+			Groups:       opts.Groups,
 			Capabilities: &capabilities,
 		})
 	}
@@ -181,7 +176,7 @@ func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routes
 }
 
 func (s *Assembler) validateAuthBoundary(opts Options) error {
-	if (opts.Permissions != (httproutes.Permissions{}) || opts.Programmatic) && (s == nil || httproutes.IsNilAuth(s.Auth)) {
+	if (httproutes.StaffGroups(opts.Groups) || opts.Groups.Programmatic) && (s == nil || httproutes.IsNilAuth(s.Auth)) {
 		return httproutes.MountError{Route: "admin API", Reason: "needs Routes.Auth"}
 	}
 	return nil

@@ -106,11 +106,12 @@ staff edit configuration over HTTP at the revision they read. See
 [merchant configuration](merchant-configuration.md) and [vault.md](vault.md).
 
 The server mounts the admin API and the merchant's configuration, guarded by
-its merchant persona's permissions ([auth](auth.md#permissions)):
-`server.MerchantBillingRead` for reads, `server.MerchantBillingManage` for
-actions on customers, `server.MerchantConfigManage` for the configuration
-(PSPs, settings, billing import and export), `server.MerchantCatalogManage`
-for catalog edits.
+OpenRails' permissions ([auth](auth.md#permissions)), held in the merchant's
+group: `billing.MerchantBillingRead` for reads, `billing.MerchantBillingManage`
+for actions on customers, `billing.MerchantConfigManage` for the configuration
+(PSPs, settings, billing import and export), `billing.MerchantCatalogManage`
+for catalog edits. Each one's `root:` twin, held in the server's root group,
+reaches every merchant.
 
 Catalogs always use database state, edited over HTTP (the remote Client
 included). `openrails apply-catalog` and the
@@ -479,8 +480,8 @@ foundation; the `openrails` CLI covers the operator's (`merchants`,
 Who a request is, and what it may do, is AuthKit's: a hosted product
 authenticates a request with `srv.AuthKit().Authenticator()` and asks the
 answer's `Can(ctx, scope, permission)`, with `srv.MerchantScope(ctx, id)` for a
-merchant's permissions (`server.MerchantBillingRead` and the others) or
-`ak.Scope(ctx, iam.RootGroup())` for the operator's. Teams, invitations and API
+merchant's permissions (`billing.MerchantBillingRead` and the others) or the
+Authenticator's `RootScope` for the `root:` ones and the operator's. Teams, invitations and API
 keys are AuthKit's (`ak.SetGroupRole`, `ak.CreateAPIKey`, its invitations) in
 the merchant's group. `Client` is the engine.
 

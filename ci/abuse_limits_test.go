@@ -27,18 +27,19 @@ import (
 )
 
 // staffMember says every request is the merchant's staff member of this id,
-// holding every permission in staffScope and signed in recently.
+// holding every permission in staffRoot and signed in recently.
 type staffMember string
 
 func (m staffMember) Authenticate(*http.Request) (auth.Verified, error) { return m, nil }
+func (staffMember) RootScope(context.Context) (auth.Scope, error)       { return staffRoot, nil }
 
 func (m staffMember) Identity() openrails.Identity {
 	return openrails.Identity{Issuer: "test", Subject: string(m), SubjectKind: openrails.SubjectUser,
 		Invoker: openrails.Invoker{Issuer: "test", ID: string(m)}, Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: "s_staff"}}
 }
 
-func (staffMember) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
-	return scope == staffScope && permission != "", nil
+func (staffMember) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
+	return scope == staffRoot && permission != "", nil
 }
 
 func (staffMember) CheckRecentSignIn(context.Context) error { return nil }
@@ -67,7 +68,7 @@ func newAbuseInstances(t *testing.T, n int, redis *openrails.RedisConfig) *abuse
 		t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 		buyers, admins := http.NewServeMux(), http.NewServeMux()
 		require.NoError(t, openrailshttp.Mount(buyers, client, openrails.Routes{Auth: authtest.Deny{}}))
-		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: in.admin, Scope: staffScope, RouteGroups: staffGroups, Permissions: staffPermissions}))
+		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: in.admin, RouteGroups: staffGroups}))
 		in.clients = append(in.clients, client)
 		in.public, in.staff = append(in.public, buyers), append(in.staff, admins)
 	}

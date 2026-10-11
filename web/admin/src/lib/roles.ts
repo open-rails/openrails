@@ -1,7 +1,8 @@
-// Roles are AuthKit's, in the group the staff's permissions are held in
-// (GET /v1/admin/access's scope_id; on the standalone server the merchant's
-// own): the roles its persona declares and the custom ones the merchant
-// defines. The console calls AuthKit's group routes at auth_base_url.
+// Roles are AuthKit's, in the two groups staff hold their permissions in:
+// the root group, whose roles apply at every merchant, and the merchant's own
+// (GET /v1/admin/access's scope_id), with the roles its persona declares and
+// the custom ones the merchant defines. The console calls AuthKit's group
+// routes at auth_base_url.
 import {
   mutationOptions,
   queryOptions,
@@ -25,10 +26,15 @@ import {
 import { useAccess } from "@/lib/capabilities"
 import { merchantQueryKeys, queryKeys } from "@/lib/queries"
 
+// ROOT_SCOPE is AuthKit's name for its root group.
+export const ROOT_SCOPE = "root"
+
 // What the caller may do with the scope's roles, from their permissions
 // there: the Roles tab shows with roles:read and edits with roles:manage.
 export interface RolesAccess {
   scope: string
+  // everyMerchant: the root group, whose staff act at every merchant.
+  everyMerchant: boolean
   persona: string
   held: ReadonlySet<string>
   read: boolean
@@ -49,6 +55,7 @@ export function rolesAccess(
   const holds = (perm: string) => held.has(`${persona}:${perm}`)
   return {
     scope,
+    everyMerchant: scope === ROOT_SCOPE,
     persona,
     held,
     read: holds("roles:read"),
@@ -60,15 +67,20 @@ export function rolesAccess(
   }
 }
 
-// useRolesAccess is null until known, and where there are no roles to
-// manage: no AuthKit API here, or no role in the scope.
-export function useRolesAccess(): RolesAccess | null {
+// useRolesAccess is the scopes whose roles the caller may read: the root
+// group's (all-merchants staff), then the merchant's own, which a host that
+// grants only root roles has none of. Empty until known, and where there are
+// no roles to manage: no AuthKit API here, or no role in either.
+export function useRolesAccess(): RolesAccess[] {
   const scope = useAccess()?.scope_id ?? ""
   const enabled = scope !== "" && authKitServed()
-  const me = useQuery({ ...rolesQueries.me(scope), enabled })
-  if (!enabled || !me.data) return null
-  const access = rolesAccess(scope, me.data)
-  return access?.read ? access : null
+  const root = useQuery({ ...rolesQueries.me(ROOT_SCOPE), enabled })
+  const own = useQuery({ ...rolesQueries.me(scope), enabled })
+  if (!enabled) return []
+  return [
+    root.data ? rolesAccess(ROOT_SCOPE, root.data) : null,
+    own.data ? rolesAccess(scope, own.data) : null,
+  ].filter((access): access is RolesAccess => access?.read ?? false)
 }
 
 const authKitServed = () => {
@@ -188,73 +200,62 @@ export const rolesMutations = {
 
 // The permissions a role may hold, by what they open. Programs are the
 // /v1/app routes an API key calls; staff, the console's areas; access,
-// AuthKit's own over the team, keys and roles. Keyed by resource:action, so
-// they read the same whatever persona holds them.
+// AuthKit's own over the team, keys and roles.
 export type PermissionSection = "programs" | "staff" | "access"
 
 export interface PermissionInfo {
   label: string
   section: PermissionSection
-  // The Routes.Permissions field whose routes it opens.
-  field?: string
 }
 
-export const PERMISSIONS: Record<string, PermissionInfo> = {
-  "entitlements:read": {
+// OpenRails' own, by their merchant: names; a root: twin reads the same.
+const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
+  "merchant:entitlements:read": {
     label: "Check entitlements",
     section: "programs",
-    field: "Entitlements",
   },
-  "catalog:read": {
-    label: "Read offers",
-    section: "programs",
-    field: "Offers",
-  },
-  "orders:manage": {
+  "merchant:catalog:read": { label: "Read offers", section: "programs" },
+  "merchant:orders:manage": {
     label: "Create and cancel orders",
     section: "programs",
-    field: "Orders",
   },
-  "usage:manage": {
+  "merchant:usage:manage": {
     label: "Admit and record usage (charges customers)",
     section: "programs",
-    field: "Usage",
   },
-  "costs:manage": {
+  "merchant:costs:manage": {
     label: "Record provider costs",
     section: "programs",
-    field: "Costs",
   },
-  "events:read": {
+  "merchant:events:read": {
     label: "Read and acknowledge host events",
     section: "programs",
-    field: "Events",
   },
-  "billing:read": {
+  "merchant:customers:read": {
+    label: "Find a customer by openrails.dev account",
+    section: "programs",
+  },
+  "merchant:billing:read": {
     label: "Read customers, subscriptions and payments",
     section: "staff",
-    field: "AdminRead",
   },
-  "billing:manage": {
+  "merchant:billing:manage": {
     label: "Refunds, cancellations and credits",
     section: "staff",
-    field: "AdminUpdate",
   },
-  "catalog:manage": {
-    label: "Edit the catalog",
-    section: "staff",
-    field: "Catalog",
-  },
-  "config:manage": {
+  "merchant:catalog:manage": { label: "Edit the catalog", section: "staff" },
+  "merchant:config:manage": {
     label: "PSPs and merchant settings",
     section: "staff",
-    field: "MerchantConfig",
   },
-  "metrics:read": {
+  "merchant:metrics:read": {
     label: "Metrics and the dashboard",
     section: "staff",
-    field: "Metrics",
   },
+}
+
+// AuthKit's built-ins, the same on every persona, by resource and action.
+const ACCESS_PERMISSIONS: Record<string, PermissionInfo> = {
   "members:read": { label: "See the team", section: "access" },
   "members:manage": {
     label: "Invite, change and remove team members",
@@ -316,14 +317,19 @@ export function permissionInfo(
 ): PermissionInfo | null {
   const prefix = `${persona}:`
   if (!perm.startsWith(prefix)) return null
-  return PERMISSIONS[perm.slice(prefix.length)] ?? null
+  const rest = perm.slice(prefix.length)
+  return (
+    ROUTE_PERMISSIONS[`merchant:${rest}`] ?? ACCESS_PERMISSIONS[rest] ?? null
+  )
 }
 
-// appRoutes are the /v1/app routes a programmatic permission opens.
-export function appRoutes(info: PermissionInfo | null): OpenRailsRoute[] {
-  if (info?.section !== "programs") return []
+// appRoutes are the /v1/app routes a permission opens, by either of a
+// route's names.
+export function appRoutes(perm: string): OpenRailsRoute[] {
   return OPENRAILS_ROUTES.filter(
-    (route) => route.group === "app" && route.permission === info.field
+    (route) =>
+      route.group === "app" &&
+      (route.permission?.merchant === perm || route.permission?.root === perm)
   )
 }
 

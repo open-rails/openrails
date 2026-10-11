@@ -56,7 +56,8 @@ milestone order, each verifiable before the next:
    push at boot. Verify: catalog list routes return the products.
 4. **Mount routes.** Pass the host's auth as `Auth` in an `openrails.Routes`
    (AuthKit's `ak.Authenticator()`, or the README's `Authenticate` adapter over
-   the host's sessions), with `Scope` and the route groups you want; mount with
+   the host's sessions), with the route groups you want, and grant the host's
+   staff the `billing.Permissions()` those groups check; mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify with
    `openrailstest.CheckAuth` in a test, then that an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.

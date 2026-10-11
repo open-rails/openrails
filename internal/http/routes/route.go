@@ -39,19 +39,21 @@ const (
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
 	// Admin is customer support, staff work on customers: staff, machines
-	// and the Go client alike, each route behind the host's AdminRead or
-	// AdminUpdate by its Level.
+	// and the Go client alike, each route behind billing.MerchantBillingRead
+	// or MerchantBillingManage by its Level, or their root: twins.
 	Admin Group = "admin"
 	// CatalogAdmin is the catalog, its reads and edits, document
-	// applications and moving subscribers between prices, behind the host's
-	// Catalog. A document skips an object whose field an edit set differently.
+	// applications and moving subscribers between prices, behind
+	// billing.MerchantCatalogManage or its root: twin. A document skips an
+	// object whose field an edit set differently.
 	CatalogAdmin Group = "catalog"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
-	// billing import and export, the dashboard layout, behind the host's
-	// MerchantConfig.
+	// billing import and export, the dashboard layout, behind
+	// billing.MerchantConfigManage or its root: twin.
 	MerchantConfig Group = "merchant_config"
 	// Metrics is the merchant's business metrics, read-only: revenue and
-	// sales, the metrics queries and the dashboard, behind the host's Metrics.
+	// sales, the metrics queries and the dashboard, behind
+	// billing.MerchantMetricsRead or its root: twin.
 	Metrics Group = "metrics"
 	// Access is what the signed-in caller may use of the staff groups:
 	// any person or application the host's auth says it is, mounted with any
@@ -77,9 +79,10 @@ const (
 	AuthPublic Tier = "public"
 	// AuthCustomer: a person acting for itself, as the customer.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: a person or an application holding the route's group
-	// permission in the request's merchant's scope (Can); a person also
-	// signed in recently (CheckRecentSignIn) on a Sensitive route.
+	// AuthMerchant: a person or an application holding the route's
+	// permission (Needs): its merchant: name in the request's merchant's
+	// scope, or its root: name in the root scope (Can); a person also signed
+	// in recently (CheckRecentSignIn) on a Sensitive route.
 	AuthMerchant Tier = "merchant"
 	// AuthSignedIn: a person or an application at the request's merchant; no
 	// permission.
@@ -129,8 +132,9 @@ const (
 )
 
 // Level is a customer-support or catalog route's: a read, or an update. A
-// support read mounts with AdminRead, an update with AdminUpdate; a
-// catalog update refuses while the catalog is not edited over HTTP.
+// support read needs billing.MerchantBillingRead, an update
+// MerchantBillingManage, or their root: twins; a catalog update refuses
+// while the catalog is not edited over HTTP.
 // Lookups, previews, checks and queries sent as POST are reads.
 type Level string
 
@@ -278,9 +282,9 @@ type Route struct {
 	Name string
 	// Level is an admin route's: read or write.
 	Level Level
-	// Permission is a programmatic route's: the Routes.Permissions field its
-	// caller holds. A staff route's follows from its Group and Level.
-	Permission Need
+	// Permission is a programmatic route's: the pair its caller holds one
+	// of. A staff route's follows from its Group and Level (Needs).
+	Permission Pair
 	// Sensitive: the route moves money or removes access; a person needs a
 	// recent sign-in for it.
 	Sensitive bool
@@ -314,8 +318,8 @@ type Route struct {
 // Key is the route's identity: "GET /v1/admin/payments/{id}".
 func (r Route) Key() string { return r.Method + " " + r.Path }
 
-// Staff reports a route behind a group permission: Admin's,
-// CatalogAdmin's, MerchantConfig's and Metrics'.
+// Staff reports a route of a staff group: Admin, CatalogAdmin,
+// MerchantConfig and Metrics.
 func (r Route) Staff() bool {
 	return r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig || r.Group == Metrics
 }
@@ -383,8 +387,11 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
 			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
 		}
-		if (r.Auth == AuthApplication) != (r.Permission != "") || r.Permission != "" && !slices.Contains(AppNeeds, r.Permission) {
-			panic(fmt.Sprintf("routes: %s: a programmatic route, and only one, names its permission, one of %v (a new one is added to AppNeeds)", r.Key(), AppNeeds))
+		if (r.Auth == AuthApplication) != (r.Permission != Pair{}) {
+			panic("routes: " + r.Key() + ": a programmatic route, and only one, names its permission")
+		}
+		if err := r.Needs().check(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		switch r.Checkout {
 		case "":

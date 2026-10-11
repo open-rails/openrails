@@ -14,7 +14,7 @@ import (
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.CustomerMount{Auth: s.auth, ResolveMerchant: s.resolveMerchant, Scope: s.scope, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
+		s.runtime, httproutes.CustomerMount{Auth: s.auth, ResolveMerchant: s.resolveMerchant, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
 			NativeIssuer: s.controlPlane.Issuer()})
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).

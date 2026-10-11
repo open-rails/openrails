@@ -21,7 +21,7 @@ import (
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
-		Auth: s.auth, Scope: s.scope, ResolveMerchant: s.resolveMerchant, NativeIssuer: s.controlPlane.Issuer(),
+		Auth: s.auth, ResolveMerchant: s.resolveMerchant, NativeIssuer: s.controlPlane.Issuer(),
 	})
 }
 
@@ -51,7 +51,7 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 
 // capabilities is what the standalone server serves: every bundle.
 func (s *Server) capabilities() *billing.Capabilities {
-	caps := embedhttp.CapabilitiesFor(s.runtime, s.permissions, s.groups.Programmatic, embedhttp.ProviderRoutesForRuntime(s.runtime, nil), nil)
+	caps := embedhttp.CapabilitiesFor(s.runtime, s.groups, embedhttp.ProviderRoutesForRuntime(s.runtime, nil), nil)
 	return &caps
 }
 

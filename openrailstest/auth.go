@@ -2,42 +2,37 @@
 package openrailstest
 
 import (
-	"fmt"
 	"net/http"
-	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/google/uuid"
-	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/helpers/auth/authtest"
 
 	"github.com/open-rails/openrails"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
 // CheckAuth fails t when routes.Auth breaks the contract OpenRails' gates
-// rely on: helpers' authtest.Check with routes' Scope and Permissions, which
-// it fills into c (a Scope or Permissions c sets must be the same), and
-// OpenRails' own rule that a person's subject is a canonical UUID, as its
-// customers are. With RouteGroups.Programmatic, c.Application is required.
-// A mount with no permission gives no Scope or Permissions: c names its
-// own.
+// rely on: helpers' authtest.Check with the root: permissions of the route
+// groups routes turns on (billing.Permissions), which it fills into c
+// (Permissions c sets must be the same), held in the Authenticator's
+// RootScope, so c.Scope stays zero; and OpenRails' own rule that a person's
+// subject is a canonical UUID, as its customers are. With
+// RouteGroups.Programmatic, c.Application is required. A mount with no
+// group on gives no Permissions: c names its own, and their Scope.
 func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 	t.Helper()
 	if routes.Auth == nil {
 		t.Fatal("openrailstest: CheckAuth needs Routes.Auth")
 		return
 	}
-	if perms := permissions(routes.Permissions); len(perms) > 0 {
-		switch {
-		case c.Scope != (auth.Scope{}) && c.Scope != routes.Scope:
-			t.Fatalf("openrailstest: Cases.Scope %+v is not Routes.Scope %+v", c.Scope, routes.Scope)
-			return
-		case len(c.Permissions) > 0 && !sameSet(c.Permissions, perms):
-			t.Fatalf("openrailstest: Cases.Permissions %q are not Routes.Permissions %q", c.Permissions, perms)
+	if perms := rootPermissions(routes.RouteGroups); len(perms) > 0 {
+		if len(c.Permissions) > 0 && !sameSet(c.Permissions, perms) {
+			t.Fatalf("openrailstest: Cases.Permissions %q are not the route groups' root: permissions %q", c.Permissions, perms)
 			return
 		}
-		c.Scope, c.Permissions = routes.Scope, perms
+		c.Permissions = perms
 	}
 	if routes.RouteGroups.Programmatic && c.Application == nil {
 		t.Fatal("openrailstest: RouteGroups.Programmatic takes your backend's application: Cases.Application is required")
@@ -61,17 +56,16 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 	authtest.Check(t, routes.Auth, c)
 }
 
-// permissions are each permission routes gives, once each.
-func permissions(p openrails.Permissions) []string {
+// rootPermissions are the root: permissions of the routes g turns on, once
+// each. The customer network's routes are the standalone server's alone.
+func rootPermissions(g openrails.RouteGroups) []string {
 	var out []string
-	v := reflect.ValueOf(p)
-	for i := range v.NumField() {
-		perm, _ := v.Field(i).Interface().(fmt.Stringer)
-		if perm == nil || reflect.ValueOf(perm).Kind() == reflect.Pointer && reflect.ValueOf(perm).IsNil() {
+	for _, r := range httproutes.Catalog() {
+		if !httproutes.Serves(g, r) || r.When == httproutes.FeatureCustomerNetwork {
 			continue
 		}
-		if s := perm.String(); s != "" && !slices.Contains(out, s) {
-			out = append(out, s)
+		if perm := string(r.Needs().Root); perm != "" && !slices.Contains(out, perm) {
+			out = append(out, perm)
 		}
 	}
 	return out

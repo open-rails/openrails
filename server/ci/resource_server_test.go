@@ -24,7 +24,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/open-rails/openrails/server"
 )
 
@@ -60,7 +59,7 @@ func (k issuerKey) mint(t *testing.T, edit func(jwt.MapClaims)) string {
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(), "auth_time": now.Unix(),
-		"scope": billing.ScopeMerchant, "permissions": []string{staffperm.BillingRead},
+		"scope": billing.ScopeMerchant, "permissions": []string{string(billing.MerchantBillingRead)},
 	}
 	if edit != nil {
 		edit(claims)
@@ -335,7 +334,7 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 				Clients: []authkit.OAuthClientConfig{
 					{ID: console, SecretSHA256: authtest.ClientSecretSHA256(secret), RedirectURIs: []string{callback}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode}},
 					{ID: worker, SecretSHA256: authtest.ClientSecretSHA256(secret), Resources: []string{resourceID},
-						Permissions: []string{staffperm.BillingRead}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
+						Permissions: []string{string(billing.MerchantBillingRead)}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
 				},
 			}
 		}))

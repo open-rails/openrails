@@ -44,7 +44,8 @@ automatically.
   the field, as in `credit_limits[0].amount`. A customer that does not exist
   is `404 customer_not_found` (settings never create one), and an undeclared
   policy is `404 billing_policy_not_found`.
-- The read needs `Permissions.AdminRead` and the write `AdminUpdate`. Every
+- The read needs `billing.MerchantBillingRead` and the write
+  `billing.MerchantBillingManage`, or their `root:` twins. Every
   field can change the customer's spending authority, so the write is
   sensitive: a person needs a recent sign-in for it (`step_up_required`). Writes count against the
   per-administrator grant limit, one per item.

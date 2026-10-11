@@ -46,7 +46,7 @@ merchant-bound Client, in every deployment (`openrails.New` in process, or
 `openrails.NewRemote`). Resolve a public name once and bind the Client to
 the captured UUID. **HTTP**: `POST /v1/admin/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
-mounted and checked with `Permissions.MerchantConfig`, like the merchant's
+mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
 other configuration. The HTTP body cap (1 MiB) forces large books to
 batch.
 

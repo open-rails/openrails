@@ -11,10 +11,11 @@ const (
 
 // AdminAccess is what the caller may use of each staff area at the merchant,
 // counting an area only where its group is on and the caller holds its
-// permission: what the admin console shows them. Admin is customer support,
-// read-only without AdminUpdate. ScopeID is the scope those permissions are
-// held in (Routes.Scope's ID): on the standalone server the merchant's
-// AuthKit group, whose roles the console's Roles page manages.
+// permission, at the merchant or in the root scope: what the admin console
+// shows them. Admin is customer support, read-only without
+// MerchantBillingManage or RootBillingManage. ScopeID is the merchant's own
+// scope's id, the merchant's: its AuthKit group, whose roles the console's
+// Roles page manages.
 type AdminAccess struct {
 	Admin          AccessLevel `json:"admin"`
 	Catalog        bool        `json:"catalog"`

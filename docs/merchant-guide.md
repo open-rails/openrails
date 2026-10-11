@@ -15,8 +15,8 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 
 The database is the catalog. The authorized in-process client can always edit
 individual records or apply a JSON/YAML batch. The catalog over HTTP is its own
-route group: an embedded host turns on `RouteGroups.Catalog` with
-`Permissions.Catalog`; the standalone server turns on `route_groups.catalog`. A
+route group: an embedded host turns on `RouteGroups.Catalog`; the standalone
+server turns on `route_groups.catalog`. A
 document skips what an edit set ([catalog ownership](catalog-ownership.md)).
 
 Each batch is applied atomically once per merchant, identified by a canonical
@@ -214,11 +214,11 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 ### Managing customers day-to-day
 
 All merchant-admin operations live under `/v1/admin/*` (same public port; each
-route behind its group's permission: on the standalone server
-`server.MerchantBillingRead` for reads, `server.MerchantBillingManage` for
-actions on customers, `server.MerchantCatalogManage` for the catalog,
-`server.MerchantConfigManage` for the merchant's configuration,
-`server.MerchantMetricsRead` for business metrics); your backend's own calls
+route behind its group's permission, held in the merchant's group:
+`billing.MerchantBillingRead` for reads, `billing.MerchantBillingManage` for
+actions on customers, `billing.MerchantCatalogManage` for the catalog,
+`billing.MerchantConfigManage` for the merchant's configuration,
+`billing.MerchantMetricsRead` for business metrics); your backend's own calls
 live under `/v1/app/*`, taking its application credential holding each
 route's permission ([auth](auth.md#permissions)). Auth is a trusted issuer's access token (client credentials
 for a backend), a user session, or, on a hosted product, a merchant API key. Full
@@ -297,7 +297,7 @@ grandfathered). A purchase under review is a finding
 resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
 and ends access, `ignore` keeps both.
 
-Granting credits is money-in, an `AdminUpdate`. Each grant item's `source_id`
+Granting credits is money-in, an admin change (`billing.MerchantBillingManage`). Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 

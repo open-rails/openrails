@@ -1,5 +1,6 @@
 // Package authtest is an Authenticator for tests: bearer tokens it issues
-// name an identity and the permissions its subject holds in Scope.
+// name an identity and the permissions its subject holds in the root scope,
+// or in one merchant's.
 package authtest
 
 import (
@@ -13,16 +14,25 @@ import (
 
 	auth "github.com/open-rails/helpers/auth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 )
 
-// Scope is where Fake's subjects hold their permissions.
-var Scope = billingauth.Scope{Authority: "test", ID: "staff"}
+// Root is the fakes' root scope: where a Grant holds its permissions unless
+// it names a Scope.
+var Root = billingauth.Scope{Authority: "test", ID: "root"}
+
+// MerchantScope is where mid's own staff hold their permissions.
+func MerchantScope(mid billing.MerchantID) billingauth.Scope {
+	return billingauth.Scope{Authority: Root.Authority, ID: mid.String()}
+}
 
 // Grant is what one token carries.
 type Grant struct {
 	Identity    billingauth.Identity
-	Permissions []string
+	Permissions []billing.Permission
+	// Scope is where Permissions are held; zero is Root.
+	Scope billingauth.Scope
 	// Stale fails CheckRecentSignIn: the sign-in is too old to move money.
 	Stale bool
 }
@@ -34,7 +44,13 @@ type Fake struct {
 	grants map[string]Grant
 }
 
-var _ billingauth.Authenticator = (*Fake)(nil)
+var (
+	_ billingauth.Authenticator = (*Fake)(nil)
+	_ auth.Root                 = (*Fake)(nil)
+)
+
+// RootScope is Root (helpers/auth Root).
+func (*Fake) RootScope(context.Context) (billingauth.Scope, error) { return Root, nil }
 
 // Issue returns a token for g.
 func (f *Fake) Issue(g Grant) string {
@@ -65,13 +81,13 @@ func Application(id string) billingauth.Identity {
 	return billingauth.Identity{Issuer: "test", Subject: id, SubjectKind: billingauth.SubjectApplication, Invoker: billingauth.Invoker{Issuer: "test", ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "k_" + id}}
 }
 
-// Person issues a token for a user with perms.
-func (f *Fake) Person(id string, perms ...string) string {
+// Person issues a token for a user with perms in Root.
+func (f *Fake) Person(id string, perms ...billing.Permission) string {
 	return f.Issue(Grant{Identity: User(id), Permissions: perms})
 }
 
-// Machine issues a token for an API key with perms.
-func (f *Fake) Machine(id string, perms ...string) string {
+// Machine issues a token for an API key with perms in Root.
+func (f *Fake) Machine(id string, perms ...billing.Permission) string {
 	return f.Issue(Grant{Identity: Application(id), Permissions: perms})
 }
 
@@ -91,13 +107,17 @@ func (f *Fake) Authenticate(r *http.Request) (billingauth.Verified, error) {
 }
 
 // Verified is a Grant as a request's Verified: it holds its permissions in
-// Scope, and a person signed in recently unless Stale.
+// its scope, and a person signed in recently unless Stale.
 type Verified struct{ Grant Grant }
 
 func (v Verified) Identity() billingauth.Identity { return v.Grant.Identity }
 
 func (v Verified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
-	return scope == Scope && permission != "" && slices.Contains(v.Grant.Permissions, permission), nil
+	held := v.Grant.Scope
+	if held == (billingauth.Scope{}) {
+		held = Root
+	}
+	return scope == held && permission != "" && slices.Contains(v.Grant.Permissions, billing.Permission(permission)), nil
 }
 
 // CheckRecentSignIn: an application, or a person's key, has no sign-in of
@@ -120,6 +140,7 @@ type PassThrough struct{}
 var _ billingauth.Authenticator = PassThrough{}
 
 func (PassThrough) Authenticate(*http.Request) (billingauth.Verified, error) { return nobody{}, nil }
+func (PassThrough) RootScope(context.Context) (billingauth.Scope, error)     { return Root, nil }
 
 type nobody struct{}
 
@@ -133,3 +154,5 @@ var _ billingauth.Authenticator = Deny{}
 func (Deny) Authenticate(*http.Request) (billingauth.Verified, error) {
 	return nil, auth.ErrUnauthenticated
 }
+
+func (Deny) RootScope(context.Context) (billingauth.Scope, error) { return Root, nil }

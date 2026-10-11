@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
@@ -29,10 +30,9 @@ import (
 type Options struct {
 	// Auth is the mount's Authenticator: who a request on a staff or
 	// programmatic route is and, on checkout sessions, who presents one.
+	// With a group on it is a helpers/auth Root: its RootScope is where
+	// root: permissions are held.
 	Auth billingauth.Authenticator
-	// Scope is where a merchant's staff and applications hold Permissions;
-	// every route behind one needs it.
-	Scope ScopeFunc
 	// ResolveMerchant finds the merchant an authenticated request acts on
 	// when its credential names none (the standalone server's sessions);
 	// CredentialOnly finds none. Nil serves the configured merchant, pinned
@@ -49,9 +49,9 @@ type Options struct {
 	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// Permissions are what a caller holds in Scope for each staff and
-	// programmatic route; a route without its permission is not mounted.
-	Permissions Permissions
+	// Groups are the staff and programmatic route groups the mount serves,
+	// each route behind its own permission (Route.Needs).
+	Groups config.RouteGroups
 
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
 	// it; without it the public read is not mounted.
@@ -343,25 +343,49 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterStaffRoutes mounts the staff groups opts.Permissions gives a
-// permission, each route behind it, and with any of them the access read, on
-// a router rooted at /v1.
+// RegisterStaffRoutes mounts the staff groups opts.Groups turns on, each
+// route behind its permission, and with any of them the access read, on a
+// router rooted at /v1.
 func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.AbuseState)
 	}
-	any := opts.Permissions.Staff() != (Permissions{})
-	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) || any && r.Group == Access })
+	env := newEnv(rt, opts)
+	any := StaffGroups(opts.Groups)
+	env.mount(rr, "/v1", func(r Route) bool { return r.Staff() && env.on(r) || any && r.Group == Access })
 }
 
 // RegisterStaffRoutesUnder mounts the staff routes under prefix, on a router
 // rooted at /v1: the CLI's database-only runtimes serve one resource.
 func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
-	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) && under(prefix)(r) })
+	env := newEnv(rt, opts)
+	env.mount(rr, "/v1", func(r Route) bool { return r.Staff() && env.on(r) && under(prefix)(r) })
 }
 
-// mounts reports a staff route its group's permission mounts.
-func (p Permissions) mounts(r Route) bool { return r.Staff() && p.For(r) != "" }
+// StaffGroups reports whether any staff group is on.
+func StaffGroups(g config.RouteGroups) bool {
+	return g.Admin || g.Catalog || g.MerchantConfig || g.Metrics
+}
+
+// on reports a staff or programmatic route whose group the mount serves.
+func (e *Env) on(r Route) bool { return Serves(e.Groups, r) }
+
+// Serves reports a staff or programmatic route whose group g turns on.
+func Serves(g config.RouteGroups, r Route) bool {
+	switch r.Group {
+	case Admin:
+		return g.Admin
+	case CatalogAdmin:
+		return g.Catalog
+	case MerchantConfig:
+		return g.MerchantConfig
+	case Metrics:
+		return g.Metrics
+	case App:
+		return g.Programmatic
+	}
+	return false
+}
 
 // RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
 // The configured provider identity resolves its merchant in the runtime
@@ -370,14 +394,15 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
 }
 
-// RegisterAppRoutes mounts the programmatic routes (Routes.Programmatic)
-// opts.Permissions gives a permission, each behind it, on a router rooted at
-// /v1: SCIM provisioning too, unless the runtime reads the host's user
+// RegisterAppRoutes mounts the programmatic routes, with
+// opts.Groups.Programmatic, each behind its permission, on a router rooted
+// at /v1: SCIM provisioning too, unless the runtime reads the host's user
 // directory instead of keeping a pushed copy.
 func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	scim := rt != nil && !rt.HostUserInfo
-	newEnv(rt, opts).mount(rr, "/v1", in(App, func(r Route) bool {
-		return r.Auth == AuthApplication && opts.Permissions.For(r) != "" || r.Auth == AuthProvisioning && scim
+	env := newEnv(rt, opts)
+	env.mount(rr, "/v1", in(App, func(r Route) bool {
+		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning && scim)
 	}))
 }
 
@@ -442,15 +467,12 @@ func checkoutScope(route Route) router.Middleware {
 // CustomerMount is one customer surface: the Authenticator that says who
 // its customers are and the merchant they buy from. Without a Merchant, a
 // server's surface (SelectedMerchant) serves the merchant each request
-// selects; with ResolveMerchant, the merchant the credential names;
-// otherwise the configured one.
+// selects; with ResolveMerchant, the merchant the credential names, which a
+// customer's credential must be bound to (Auth is then a helpers/auth
+// Root); otherwise the configured one.
 type CustomerMount struct {
-	Auth            billingauth.Authenticator
-	ResolveMerchant MerchantResolver
-	// Scope is where a merchant's credentials are bound: with
-	// ResolveMerchant, a customer's credential must be bound to the
-	// merchant's.
-	Scope            ScopeFunc
+	Auth             billingauth.Authenticator
+	ResolveMerchant  MerchantResolver
 	Merchant         billingauth.Target
 	SelectedMerchant bool
 	Providers        routesurface.ProviderRoutes
@@ -458,7 +480,7 @@ type CustomerMount struct {
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, Scope: m.Scope, NativeIssuer: m.NativeIssuer})
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, NativeIssuer: m.NativeIssuer})
 	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
 	return env
 }

@@ -319,7 +319,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 }
 
 // The harness's own Authenticator passes the conformance kit a host runs in
-// its CI, with the mount's Scope and Permissions.
+// its CI, with its mount's route groups: their root: permissions, held in
+// its root scope.
 func TestHarnessAuthConforms(t *testing.T) {
 	t.Parallel()
 	v := &verifier{secret: []byte("conformance-" + uuid.NewString())}
@@ -338,10 +339,10 @@ func TestHarnessAuthConforms(t *testing.T) {
 		return v.issue(t, grant{subject: uuid.NewString(), role: role, sid: "s_" + role + uuid.NewString()[:8], signedIn: signedIn})
 	}
 	staff := grant{subject: uuid.NewString(), role: "staff", sid: "s_staff"}
-	openrailstest.CheckAuth(t, openrails.Routes{Auth: v, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}, helpersauthtest.Cases{
+	openrailstest.CheckAuth(t, openrails.Routes{Auth: v, Prefix: mountPrefix, RouteGroups: routeGroups}, helpersauthtest.Cases{
 		Staff:   req(v.issue(t, staff)),
 		User:    req(v.token(t, customer)),
-		Holders: map[string]func() *http.Request{staffReads.String(): req(person("reader", time.Time{}))},
+		Holders: map[string]func() *http.Request{string(staffReads): req(person("reader", time.Time{}))},
 		Stale:   req(person("staff", time.Now().Add(-time.Hour))),
 		Refused: map[string]func() *http.Request{
 			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),

@@ -183,7 +183,6 @@
       "type NMIPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"settings.webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"settings.tokenization_key\"`\n\n\tTokenizationURL string `psp:\"settings.tokenization_url\"`\n\n\tEndpointDeployment string `psp:\"settings.endpoint_deployment\"`\n\n\tCardEntry string `psp:\"settings.card_entry\"`\n}",
       "type PSPConfig = config.PSPConfig",
       "type PSPSignerConfig = config.PSPSignerConfig",
-      "type Permissions = config.Permissions",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
       "type ProviderSandboxConfig = config.ProviderSandboxConfig",
       "type RateLimit = config.RateLimit",
@@ -194,7 +193,6 @@
       "type RouteGroups = config.RouteGroups",
       "type Routes = config.Routes",
       "type SMTPConfig = config.SMTPConfig",
-      "type Scope = billingauth.Scope",
       "type SolanaPSP struct {\n\tArchived bool `psp:\"archived\"`\n\n\tPrivateKey string `psp:\"secrets.private_key\"`\n\n\tTransitKey string `psp:\"signer.key\"`\n\n\tRPCProvider string `psp:\"settings.rpc_provider\"`\n\n\tRPCAPIKey string `psp:\"settings.rpc_api_key\"`\n\n\tTokens map[string]SolanaToken `psp:\"settings.tokens\"`\n\n\tRecipientWallet string `psp:\"settings.recipient_wallet\"`\n}",
       "type SolanaToken struct {\n\tMint string\n\tName string\n}",
       "type StartOption func(*startOptions)",
@@ -267,6 +265,7 @@
       "const (\n\tMandateRecurring MandateKind = \"recurring\"\n\n\tMandateUnscheduled MandateKind = \"unscheduled\"\n\n\tMandateCardOnFile MandateKind = \"card_on_file\"\n)",
       "const (\n\tMaxEntitlementPrefixes  = 10\n\tDefaultHeldEntitlements = 1000\n\tMaxHeldEntitlements     = 10000\n)",
       "const (\n\tMerchantActive MerchantStatus = \"active\"\n\n\tMerchantDeleted MerchantStatus = \"deleted\"\n)",
+      "const (\n\tMerchantBillingRead Permission = \"merchant:billing:read\"\n\tRootBillingRead     Permission = \"root:billing:read\"\n\n\tMerchantBillingManage Permission = \"merchant:billing:manage\"\n\tRootBillingManage     Permission = \"root:billing:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantCostsManage Permission = \"merchant:costs:manage\"\n\tRootCostsManage     Permission = \"root:costs:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tMigrationKeepGrandfathered MigrationFallback = \"keep_grandfathered\"\n\n\tMigrationCancelAtPeriodEnd MigrationFallback = \"cancel_at_period_end\"\n)",
@@ -288,7 +287,7 @@
       "const (\n\tProviderRefundRevokeOnFull = \"revoke_on_full\"\n\tProviderRefundRevokeOnAny  = \"revoke_on_any\"\n\tProviderRefundKeep         = \"keep\"\n)",
       "const (\n\tPurchaseActionRefund PurchaseAction = \"refund\"\n\n\tPurchaseActionReview PurchaseAction = \"review\"\n)",
       "const (\n\tRailNMI    Rail = \"nmi\"\n\tRailCCBill Rail = \"ccbill\"\n\tRailStripe Rail = \"stripe\"\n\tRailSolana Rail = \"solana\"\n)",
-      "const (\n\tRootMerchantsRead    = \"root:merchants:read\"\n\tRootMerchantsDelete  = \"root:merchants:delete\"\n\tRootMerchantsRestore = \"root:merchants:restore\"\n\n\tRootWorkerHealthRead      = \"root:worker-health:read\"\n\tRootAdminRateLimitsUnlock = \"root:admin-rate-limits:unlock\"\n)",
+      "const (\n\tRootMerchantsRead    Permission = \"root:merchants:read\"\n\tRootMerchantsDelete  Permission = \"root:merchants:delete\"\n\tRootMerchantsRestore Permission = \"root:merchants:restore\"\n\n\tRootWorkerHealthRead      Permission = \"root:worker-health:read\"\n\tRootAdminRateLimitsUnlock Permission = \"root:admin-rate-limits:unlock\"\n)",
       "const (\n\tRunningChargeRunning RunningChargeState = \"running\"\n\tRunningChargeStopped RunningChargeState = \"stopped\"\n)",
       "const (\n\tScheduledChangeChange ScheduledChangeSource = \"change\"\n\n\tScheduledChangeMigration ScheduledChangeSource = \"migration\"\n)",
       "const (\n\tScopeMerchant = \"openrails:merchant\"\n\tScopeSelf     = \"openrails:self\"\n)",
@@ -476,6 +475,9 @@
       "func (p *CreateProductParams) UnmarshalJSON(raw []byte) error",
       "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error",
       "func (p ListPage[T]) MarshalJSON() ([]byte, error)",
+      "func (p Permission) Action() string",
+      "func (p Permission) Persona() string",
+      "func (p Permission) Resource() string",
       "func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error)",
       "func (r AccessCutoverReport) Unapproved() int",
       "func (r AdmissionResult) Err() error",
@@ -523,6 +525,7 @@
       "func ParseSubscriptionID(s string) (SubscriptionID, error)",
       "func ParseUsageEventID(s string) (UsageEventID, error)",
       "func PaymentFailureFrom(err error) (*PaymentFailure, bool)",
+      "func Permissions() []Permission",
       "func SourceRef(sourceType, id string) string",
       "func ValidateMerchantSlug(s string) error",
       "type APIHostClaim struct {\n\tAPIHost   string        `json:\"api_host\"`\n\tCreatedAt time.Time     `json:\"created_at\"`\n\tDNSRecord APIHostRecord `json:\"dns_record\"`\n}",
@@ -807,6 +810,7 @@
       "type PaymentSettledEvent struct {\n\tPaymentID      PaymentID       `json:\"payment_id\"`\n\tCustomerID     CustomerID      `json:\"customer_id\"`\n\tOrderID        *OrderID        `json:\"order_id,omitempty\"`\n\tPriceID        *PriceID        `json:\"price_id,omitempty\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id,omitempty\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tCurrency       string          `json:\"currency\"`\n}",
       "type PaymentStatus string",
       "type PendingAction struct {\n\tPSP           string                                  `json:\"psp\"`\n\tAction        string                                  `json:\"action\"`\n\tHint          string                                  `json:\"hint\"`\n\tPatchRequired map[string]map[string]map[string]string `json:\"patch_required\"`\n}",
+      "type Permission string",
       "type PreviewMyOrderParams struct {\n\tLines []OrderLineParams `json:\"lines,omitempty\"`\n\tCart  bool              `json:\"cart,omitempty\"`\n}",
       "type PreviewOrderParams struct {\n\tCustomerID CustomerID        `json:\"customer_id\"`\n\tLines      []OrderLineParams `json:\"lines\"`\n}",
       "type PreviewPSPRoutingParams struct {\n\tPriceID PriceID `json:\"price_id\"`\n\n\tCountry string `json:\"country\"`\n\tPSP     string `json:\"psp\"`\n}",
@@ -1030,7 +1034,6 @@
       "type CredentialKind = auth.CredentialKind",
       "type Identity = auth.Identity",
       "type Invoker = auth.Invoker",
-      "type Scope = auth.Scope",
       "type SubjectKind = auth.SubjectKind"
     ],
     "internal/cardguard": [
@@ -1072,13 +1075,12 @@
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPSignerConfig struct {\n\tMode string `yaml:\"mode,omitempty\"`\n\tKey  string `yaml:\"key,omitempty\"`\n}",
-      "type Permissions struct {\n\tAdminRead fmt.Stringer\n\n\tAdminUpdate fmt.Stringer\n\n\tCatalog fmt.Stringer\n\n\tMerchantConfig fmt.Stringer\n\n\tMetrics fmt.Stringer\n\n\tEntitlements fmt.Stringer\n\n\tOffers fmt.Stringer\n\n\tUsage fmt.Stringer\n\n\tCosts fmt.Stringer\n\n\tEvents fmt.Stringer\n\n\tOrders fmt.Stringer\n\n\tCustomers fmt.Stringer\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr string\n\n\tURL string\n\n\tUsername string\n\tPassword string\n\tDB       int\n\n\tTLS bool\n\n\tCACert string\n}",
       "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
-      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tScope billingauth.Scope\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tPermissions Permissions\n\n\tAdminConsole bool\n\n\tAdminConsoleAuthBase string\n}",
+      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tAdminConsole bool\n\n\tAdminConsoleAuthBase string\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type UserInfo = userinfo.Lookup",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tAuthMount string\n\n\tKVMount string\n\n\tTransitMount string\n}"
@@ -1142,8 +1144,7 @@
     ],
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
-      "const (\n\tMerchantBillingRead   = staffperm.BillingRead\n\tMerchantBillingManage = staffperm.BillingManage\n\tMerchantCatalogManage = staffperm.CatalogManage\n\tMerchantConfigManage  = staffperm.ConfigManage\n\tMerchantMetricsRead   = staffperm.MetricsRead\n\n\tMerchantEntitlementsRead = staffperm.EntitlementsRead\n\tMerchantCatalogRead      = staffperm.CatalogRead\n\tMerchantUsageManage      = staffperm.UsageManage\n\tMerchantCostsManage      = staffperm.CostsManage\n\tMerchantEventsRead       = staffperm.EventsRead\n\tMerchantOrdersManage     = staffperm.OrdersManage\n\tMerchantCustomersRead    = staffperm.CustomersRead\n)",
-      "const (\n\tMerchantRolesRead   = staffperm.RolesRead\n\tMerchantRolesManage = staffperm.RolesManage\n)",
+      "const (\n\tMerchantRolesRead   = \"merchant:roles:read\"\n\tMerchantRolesManage = \"merchant:roles:manage\"\n)",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) ClaimMerchantAPIHost(ctx context.Context, id billing.MerchantID, host string) (*billing.MerchantAPIHost, error)",
       "func (s *Server) Client() *openrails.Client",
@@ -1940,6 +1941,9 @@
     "billing/payments.go": {
       "time": "time"
     },
+    "billing/permissions.go": {
+      "strings": "strings"
+    },
     "billing/price_migrations.go": {
       "time": "time",
       "uuid": "github.com/google/uuid"
@@ -2152,8 +2156,7 @@
       "vaultapi": "github.com/hashicorp/vault/api"
     },
     "internal/config/embedding.go": {
-      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
-      "fmt": "fmt"
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",
@@ -4515,12 +4518,10 @@
       "http": "net/http"
     },
     "openrailstest/auth.go": {
-      "auth": "github.com/open-rails/helpers/auth",
       "authtest": "github.com/open-rails/helpers/auth/authtest",
-      "fmt": "fmt",
       "http": "net/http",
+      "httproutes": "github.com/open-rails/openrails/internal/http/routes",
       "openrails": "github.com/open-rails/openrails",
-      "reflect": "reflect",
       "slices": "slices",
       "testing": "testing",
       "uuid": "github.com/google/uuid"
@@ -4688,8 +4689,7 @@
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
       "iam": "github.com/open-rails/authkit/iam",
-      "operator": "github.com/open-rails/openrails/server/internal/operator",
-      "staffperm": "github.com/open-rails/openrails/internal/staffperm"
+      "operator": "github.com/open-rails/openrails/server/internal/operator"
     },
     "server/errors.go": {
       "merchants": "github.com/open-rails/openrails/internal/merchants"

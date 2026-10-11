@@ -14,21 +14,23 @@ It has four areas, one per staff route group: customer support
 (`Metrics`: the dashboard's charts, the Ops gauges). On load it asks
 `GET /v1/admin/access`, which any signed-in staff member may call, and shows an
 area only when its group is on and the staff member holds its permission.
-Customer support is read-only without `AdminUpdate`, and the dashboard's
-layout is editable only to
-someone holding both `Metrics` and `MerchantConfig`. Someone holding none of
-the four sees only that they have no access. Each catalog edit sends the
+Customer support is read-only without `merchant:billing:manage` (or
+`root:billing:manage`), and the dashboard's layout is editable only to
+someone holding both the metrics and the merchant-config permission. Someone
+holding none of them sees only that they have no access. Each catalog edit sends the
 revision it loaded, so a product, price, meter or rate another person changed
 meanwhile is refused and reloaded, and applying a catalog document lists what
 an edit kept.
 
 Settings also has a **Roles** page, AuthKit's rather than an area's: the
-access read names the scope staff hold their permissions in (`scope_id`), and
-the console asks the AuthKit API at `auth_base_url` for the caller's
-permissions there. It shows to staff holding that persona's `roles:read`
-(`server.MerchantRolesRead` on the standalone server): the declared roles and
-the merchant's custom ones with what each grants. With `roles:manage` they
-create, edit and delete custom roles from the persona's permissions, the
+console asks the AuthKit API at `auth_base_url` for the caller's permissions
+in the root group and in the merchant's own scope, which the access read names
+(`scope_id`, the AuthKit group whose id is the merchant's). It shows each to
+staff holding that persona's `roles:read` (`server.MerchantRolesRead` on the
+standalone server): the root group's roles and who holds them as all-merchants
+staff, then the merchant's declared roles and its custom ones with what each
+grants. A merchant with no group of its own shows the root group alone. With
+`roles:manage` they create, edit and delete custom roles from the persona's permissions, the
 `/v1/app` ones listed with the routes they open; a permission they do not hold
 cannot be granted. A role is given to a teammate (with `members:manage`) or to
 a new API key, its secret shown once (with `credentials:manage`). See
@@ -49,11 +51,9 @@ On is one switch, where the HTTP surface is chosen:
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
-    Auth:                 ak.Authenticator(),
-    Scope:                staff,      // ak.Scope(ctx, iam.RootGroup()): where staff hold the permissions
-    Prefix:               "/billing", // the API at /billing/v1/*, the console at /billing/admin
+    Auth:                 ak.Authenticator(), // staff hold root:billing:read and root:billing:manage in its root group
+    Prefix:               "/billing",         // the API at /billing/v1/*, the console at /billing/admin
     RouteGroups:          openrails.RouteGroups{Admin: true},
-    Permissions:          openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage}, // root:billing:read, root:billing:manage
     AdminConsole:         true,
     AdminConsoleAuthBase: ak.APIBase(), // where AuthKit's JSON API is mounted; empty is /api/v1
 })
@@ -267,9 +267,9 @@ Standalone SaaS deployments that do serve it in production should front it with
 their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
-Who may sign in is decided by the admin API, not the console: embedded, each
-route asks the mount's `Auth` for its permission (`Routes.Permissions`) in
-`Routes.Scope`.
+Who may sign in is decided by the admin API, not the console: each route asks
+the mount's `Auth` for its permission, at the merchant or in the root scope
+([auth](auth.md#permissions)).
 
 ### Viewing it
 

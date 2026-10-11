@@ -239,7 +239,12 @@ func (m *model) operation(r routes.Route) *obj {
 		op.set("security", []any{newObj("bearer", []string{})})
 	}
 	op.set("x-openrails-auth", string(r.Auth))
-	if perm := routePermission(r); perm != "" {
+	if pair := r.Needs(); pair != (routes.Pair{}) {
+		perm := newObj()
+		if pair.Merchant != "" {
+			perm.set("merchant", string(pair.Merchant))
+		}
+		perm.set("root", string(pair.Root))
 		op.set("x-openrails-permission", perm)
 	}
 	if r.Sensitive {
@@ -325,7 +330,3 @@ func (m *model) openAPI() ([]byte, error) {
 	)
 	return marshalIndent(doc)
 }
-
-// routePermission is what a route's caller must hold: a staff or
-// programmatic route's Routes.Permissions field.
-func routePermission(r routes.Route) string { return string(r.Needs()) }

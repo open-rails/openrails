@@ -126,10 +126,7 @@ func TestDocsNameWhatExists(t *testing.T) {
 				}
 			}
 			for _, m := range prosePerm.FindAllStringSubmatch(line, -1) {
-				// An embedded host holds the server's merchant permissions in
-				// its root group: the same resource and action as root:.
-				merchant, embedded := strings.CutPrefix(m[1], "root:")
-				if !goAPI["permissions"][m[1]] && !(embedded && goAPI["permissions"]["merchant:"+merchant]) {
+				if !goAPI["permissions"][m[1]] {
 					t.Errorf("%s: %s is not a permission in api/go.txt", at, m[1])
 				}
 			}
@@ -333,7 +330,7 @@ func readGoAPI(t *testing.T, file string) map[string]map[string]bool {
 	require.NoError(t, err)
 	decl := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:const|var|func|type) (\w+)`)
 	member := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:type (\w+) (?:struct|interface), |method \(\*?(\w+)(?:\[[^\]]*\])?\) )(\w+)`)
-	permission := regexp.MustCompile(`^pkg openrails/(?:billing|server), const \w+ untyped string = "((?:merchant|root):[^"]+)"`)
+	permission := regexp.MustCompile(`^pkg openrails/(?:billing|server), const \w+ (?:Permission|untyped string) = "((?:merchant|root):[^"]+)"`)
 	word := regexp.MustCompile(`\b[A-Z]\w+`)
 	out := map[string]map[string]bool{"permissions": {}, "names": {}}
 	for _, line := range strings.Split(string(body), "\n") {

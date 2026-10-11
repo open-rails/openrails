@@ -31,6 +31,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/fxfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
@@ -230,8 +231,8 @@ func startApp(t *testing.T) *app {
 	db := freshDatabase(t, dsn, queries)
 
 	rbac := authkit.NewRoles()
-	billingRead := rbac.Root.Permission("billing", "read")
-	billingManage := rbac.Root.Permission("billing", "manage")
+	billingRead := rbac.Root.Permission(billing.RootBillingRead.Resource(), billing.RootBillingRead.Action())
+	billingManage := rbac.Root.Permission(billing.RootBillingManage.Resource(), billing.RootBillingManage.Action())
 	rbac.Root.Role("support", billingRead, billingManage)
 	ak, err := newAuth(ctx, db, rbac)
 	require.NoError(t, err)
@@ -264,14 +265,10 @@ func startApp(t *testing.T) *app {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	require.NoError(t, authkitgin.Mount(r, ak))
-	staff, err := ak.Scope(ctx, iam.RootGroup())
-	require.NoError(t, err)
 	require.NoError(t, openrailsgin.Mount(r, bill, openrails.Routes{
 		Auth:        ak.Authenticator(),
-		Scope:       staff,
 		Prefix:      "/billing",
 		RouteGroups: openrails.RouteGroups{Admin: true},
-		Permissions: openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage},
 	}))
 	courseRoutes(r, ak, bill, testMediaKey)
 	serveApp(r, "web/dist")

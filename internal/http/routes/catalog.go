@@ -30,7 +30,7 @@ var (
 var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic,
 		Query: params(repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_query"), Handler: h(handlers.ListPublicProducts)},
-	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: NeedOffers, Name: "ListOffers",
+	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: needOffers, Name: "ListOffers",
 		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
 	{Method: GET, Path: "/v1/admin/catalog/revision", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetCatalogRevision", Level: LevelRead,

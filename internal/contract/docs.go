@@ -19,12 +19,12 @@ var groupTitles = []struct {
 	{routes.Meta, "Process", "Health and capability discovery. Only the standalone server serves the root paths."},
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
-	{routes.Admin, "Admin: customer support", "Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, an update its `Permissions.AdminUpdate`."},
-	{routes.CatalogAdmin, "Catalog", "The catalog, with `RouteGroups.Catalog`: its reads and edits and price migrations, every route behind the host's `Permissions.Catalog`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},
-	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route behind the host's `Permissions.MerchantConfig`."},
-	{routes.Metrics, "Business metrics", "Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`, every route behind the host's `Permissions.Metrics`."},
+	{routes.Admin, "Admin: customer support", "Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go client alike."},
+	{routes.CatalogAdmin, "Catalog", "The catalog, with `RouteGroups.Catalog`: its reads and edits and price migrations. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},
+	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, with `RouteGroups.MerchantConfig`."},
+	{routes.Metrics, "Business metrics", "Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`."},
 	{routes.Access, "Access", "What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group."},
-	{routes.App, "Programmatic (`/v1/app`)", "The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission: `Permissions.Entitlements` for the content gate, `Usage` for admissions and usage events, `Costs` for provider operations, `Events` for host events. A route mounts only with its permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission."},
+	{routes.App, "Programmatic (`/v1/app`)", "The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},
 	{routes.Network, "Customer network (`/v1/network`)", "The openrails.dev account across the merchants it is linked at, where the standalone server runs the customer network: an account of the server's own signed in to it, having accepted the network terms. At `{merchant_id}` it acts as the customer its link there names, through the same operations as `/v1/me`; a sensitive route needs a recent sign-in."},
 }
@@ -48,7 +48,7 @@ func (m *model) routesMD() []byte {
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
 	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).\n\n")
-	b.WriteString("**Permission** is, for a staff or programmatic route, the `Routes.Permissions` field the host's Auth checks; the route is mounted only when it is given.\n\n")
+	b.WriteString("**Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.\n\n")
 	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
 	titled := map[routes.Group]bool{}
 	for _, g := range groupTitles {
@@ -73,8 +73,12 @@ func (m *model) routesMD() []byte {
 		b.WriteString("| Method | Path | Tier | Permission | Request | Response | Notes |\n|---|---|---|---|---|---|---|\n")
 		for _, r := range list {
 			perm := "—"
-			if needs := r.Needs(); needs != "" {
-				perm = "`" + string(needs) + "`"
+			if names := r.Needs().Names(); len(names) > 0 {
+				quoted := make([]string, len(names))
+				for i, name := range names {
+					quoted[i] = "`" + string(name) + "`"
+				}
+				perm = strings.Join(quoted, "<br>")
 			}
 			var replies []string
 			for _, reply := range r.Responses {
