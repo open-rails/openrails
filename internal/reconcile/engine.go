@@ -496,6 +496,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			finding.RecommendedAction = "invoice receipt remains unresolved: " + err.Error()
 		}
 	}
+	findings = e.deferOperationCharges(ctx, provider, binding.ID, fetcher, snap, findings)
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	bindApplyActions(findings, binding.ID, runID)
 

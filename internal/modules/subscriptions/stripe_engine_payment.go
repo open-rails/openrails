@@ -178,8 +178,13 @@ func (s *StripeService) engineScoped(p StripeEnginePaymentParams) (*StripeServic
 	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	return &scoped, nil
 }
+
+// StripeOperationMetadata is the PaymentIntent metadata key naming the
+// OpenRails operation that created it.
+const StripeOperationMetadata = "openrails_engine_operation"
+
 func (p StripeEnginePaymentParams) metadata() map[string]string {
-	values := map[string]string{"openrails_engine_operation": p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial)}
+	values := map[string]string{StripeOperationMetadata: p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial)}
 	if m := p.Instrument.Mandate; m != nil {
 		values["openrails_agreement"], values["openrails_mandate"] = m.InitialTransactionID, m.ID.String()
 	}
