@@ -192,6 +192,8 @@ github.com/open-rails/authkit v1.22.1 h1:PXTWSdYw0/iubCLQa2t3efUxpdwXkZU8swSj6nS
 github.com/open-rails/authkit v1.22.1/go.mod h1:Wjuwi9zv9fTSabArvdCrpJwdF2PQu/Ovh1X4IqT2Epo=
 github.com/open-rails/helpers v1.9.0 h1:KH7CxeEW/a/fMkv4hGvlkBdlZUgv2sSyESqrgzTdeZU=
 github.com/open-rails/helpers v1.9.0/go.mod h1:USlSGNYBaNY6/+dLAmB1H610EDSCprhUGmQyBg1NGfM=
+github.com/open-rails/helpers v1.10.1-0.20261011234644-fa076c81f396 h1:0dJ7izi2N9QcGLUVEer/PY8h0D0NlGFeZWEPEgh6YqU=
+github.com/open-rails/helpers v1.10.1-0.20261011234644-fa076c81f396/go.mod h1:USlSGNYBaNY6/+dLAmB1H610EDSCprhUGmQyBg1NGfM=
 github.com/open-rails/migratekit v1.10.0 h1:ujeSd7Arz7etqkRhRUaHevOZy2PFX9+8874xZqOgzNs=
 github.com/open-rails/migratekit v1.10.0/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=
