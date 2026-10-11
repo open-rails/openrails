@@ -519,13 +519,15 @@ Route sections: [Customer routes — 36](#customer-routes--36) · [Application r
 
 **Code:** [internal/http/handlers/stripe_portal.go:23](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/http/handlers/stripe_portal.go#L23) · [internal/http/handlers/stripe_portal.go:74](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/http/handlers/stripe_portal.go#L74) · [internal/modules/subscriptions/stripe_portal.go:27](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/modules/subscriptions/stripe_portal.go#L27) · [internal/http/routes/payment_methods.go:27](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/http/routes/payment_methods.go#L27)
 
-### 026. `GET /v1/me/payment-operations/{id}/authentication`
+### 026. Historical route: `GET me/payment-operations/{id}/authentication`
+
+**Removed from master:** This path is relative to the version-one API root. Commit `96b6da83a` removed it. The assessment below records behavior at the reviewed commit; it is not a recommendation to restore the route or implement changes against the removed workflow.
 
 **Refine · Medium priority**
 
-**Current:** The service validates the payer under the existing Present credential policy, merchant binding and immutable operation ownership before resolving Stripe credentials. Terminal operations return status only; unresolved ones recover the original provider intent reference and obtain its client secret. The handler sends no-store.
+**At the reviewed commit:** The service validates the payer under the existing Present credential policy, merchant binding and immutable operation ownership before resolving Stripe credentials. Terminal operations return status only; unresolved ones recover the original provider intent reference and obtain its client secret. The handler sends no-store.
 
-**Our recommendation:** Keep this privileged authentication read, and add a separate owner-scoped, secret-free GET /v1/me/payment-operations/{id} for uniform status across operation kinds. Make provider-specific authentication payloads explicitly tagged.
+**Our recommendation at the reviewed commit:** Keep this privileged authentication read, and add a separate owner-scoped, secret-free operation-status read for uniform status across operation kinds. Make provider-specific authentication payloads explicitly tagged.
 
 **Why / tradeoff:** Orders and subscriptions already expose recovery and replay can resume work, so the missing read is not a demonstrated unrecoverable-payment defect. It would simplify polling without requesting secrets or replaying a mutation. A new read requires an explicit customer-safe projection of each supported operation kind.
 
@@ -534,13 +536,15 @@ Route sections: [Customer routes — 36](#customer-routes--36) · [Application r
 **Overlap review:** See D1 in [Duplication and overlap](#duplication-and-overlap): share the payment-action parser and status interpretation while retaining the distinct resource workflows.
 
 
-### 027. `POST /v1/me/payment-operations/{id}/authentication/confirm`
+### 027. Historical route: `POST me/payment-operations/{id}/authentication/confirm`
+
+**Removed from master:** This path is relative to the version-one API root. Commit `96b6da83a` removed it. The assessment below records behavior at the reviewed commit; it is not a recommendation to restore the route or implement changes against the removed workflow.
 
 **Refine · Medium priority**
 
-**Current:** The same Present-policy and ownership gate selects the immutable operation and VerifyByID drives provider reconciliation. The response is PaymentOperation with current status, not a browser-supplied success result. The billing UI client currently discards this response and returns Promise<void>.
+**At the reviewed commit:** The same Present-policy and ownership gate selects the immutable operation and VerifyByID drives provider reconciliation. The response is PaymentOperation with current status, not a browser-supplied success result. The billing UI client currently discards this response and returns Promise<void>.
 
-**Our recommendation:** Keep confirmation as a repeatable command on the existing operation, but have the SDK return the operation it receives and use a secret-free status read for subsequent polling.
+**Our recommendation at the reviewed commit:** Keep confirmation as a repeatable command on the existing operation, but have the SDK return the operation it receives and use a secret-free status read for subsequent polling.
 
 **Why / tradeoff:** This preserves the strong provider-truth boundary while letting a caller distinguish completed, failed and still-unresolved confirmation immediately. Returning the body from the SDK is additive; a uniform read avoids conflating a successful HTTP request with a settled payment.
 
