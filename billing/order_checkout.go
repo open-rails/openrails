@@ -2,12 +2,28 @@ package billing
 
 import "time"
 
+// CheckoutUIMode is where a checkout's page runs (Stripe's ui_mode).
+type CheckoutUIMode string
+
+const (
+	// CheckoutHosted: the customer is sent to the checkout URL.
+	CheckoutHosted CheckoutUIMode = "hosted"
+	// CheckoutEmbedded: the merchant's page frames the checkout URL
+	// (billing-ui's EmbeddedCheckout), only on the origins its settings
+	// register (checkout.embed_origins).
+	CheckoutEmbedded CheckoutUIMode = "embedded"
+)
+
 // OrderCheckoutParams asks for a hosted checkout on a merchant order: a
 // short-lived checkout URL on the deployment's checkout host where the
 // customer pays, then returns to SuccessURL. {ORDER_ID} in either URL
 // becomes the order's id. Fulfil on order.completed, never the redirect.
 type OrderCheckoutParams struct {
-	SuccessURL string `json:"success_url"`
+	// UIMode is hosted (the default) or embedded. An embedded checkout tells
+	// the framing page when it completes; that page goes to SuccessURL
+	// unless it handles the completion itself.
+	UIMode     CheckoutUIMode `json:"ui_mode,omitempty"`
+	SuccessURL string         `json:"success_url"`
 	// CancelURL is the page's back link; without one the page shows none.
 	CancelURL *string `json:"cancel_url,omitempty"`
 	// ExpiresAt is 30 minutes to 24 hours away and no later than the order;
@@ -23,9 +39,10 @@ type OrderCheckoutParams struct {
 type OrderCheckout struct {
 	// URL is the checkout URL. Only the response that created it carries
 	// it; every other read is null.
-	URL                 *string   `json:"url"`
-	ExpiresAt           time.Time `json:"expires_at"`
-	SuccessURL          string    `json:"success_url"`
-	CancelURL           *string   `json:"cancel_url"`
-	SavedPaymentMethods bool      `json:"saved_payment_methods"`
+	URL                 *string        `json:"url"`
+	UIMode              CheckoutUIMode `json:"ui_mode"`
+	ExpiresAt           time.Time      `json:"expires_at"`
+	SuccessURL          string         `json:"success_url"`
+	CancelURL           *string        `json:"cancel_url"`
+	SavedPaymentMethods bool           `json:"saved_payment_methods"`
 }

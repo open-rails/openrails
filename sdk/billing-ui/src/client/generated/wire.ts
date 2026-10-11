@@ -433,6 +433,7 @@ export type Order = {
 
 export type OrderCheckout = {
   url: string | null
+  ui_mode: "embedded" | "hosted"
   expires_at: string
   success_url: string
   cancel_url: string | null
@@ -713,12 +714,19 @@ export type PublicConfig = {
   payment: PaymentConfig | null
   merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
+  network: PublicNetwork | null
 }
 
 export type PublicMerchant = {
   display_name: string
   logo_url: string | null
   support_url: string | null
+  embed_origins: string[]
+}
+
+export type PublicNetwork = {
+  issuer: string
+  client_id: string
 }
 
 export type Quantity = {

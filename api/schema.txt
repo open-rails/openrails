@@ -60,6 +60,7 @@ migration 0056_customer_links.up.sql sha256:a7d2c1371f1c6fd77a3067991a7c16bb32e8
 migration 0057_renewal_orders.up.sql sha256:e2ef66ff62458528d59f388aebace2f36cb863f8711059910a1de5fe947b0c59
 migration 0058_customer_link_account_index.up.sql sha256:3cb9305805d37f9800c383e86b1375994036a8d4047af3832ece9e8c66922821
 migration 0059_payment_authority_events.up.sql sha256:08cc0d1a8136eb105ec16ffd5f1b40ea768005126809c414ce69fa044c87935e
+migration 0060_checkout_ui_mode.up.sql sha256:131f7e20e0a12d75b7fcacec2a06211b9f1b7ed0664fbad59f8e3fd087f8e393
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1409,11 +1410,13 @@ table billing.orders
   column period_ends_at timestamp with time zone
   column due_at timestamp with time zone
   column voided_at timestamp with time zone
+  column checkout_ui_mode text
   constraint orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_canceled_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint orders_checkout_cancel_url_check CHECK ((checkout_cancel_url <> ''::text))
   constraint orders_checkout_check CHECK ((((checkout_secret_hash IS NULL) = (checkout_expires_at IS NULL)) AND ((checkout_secret_hash IS NULL) = (checkout_success_url IS NULL)) AND ((checkout_secret_hash IS NULL) = (checkout_saved_payment_methods IS NULL)) AND ((checkout_cancel_url IS NULL) OR (checkout_secret_hash IS NOT NULL)) AND ((checkout_secret_hash IS NULL) OR ((origin = 'merchant'::text) AND (octet_length(checkout_secret_hash) = 32) AND (checkout_expires_at <= expires_at)))))
   constraint orders_checkout_success_url_check CHECK ((checkout_success_url <> ''::text))
+  constraint orders_checkout_ui_mode_check CHECK ((((checkout_ui_mode = ANY (ARRAY['hosted'::text, 'embedded'::text])) AND (checkout_secret_hash IS NOT NULL)) OR ((checkout_ui_mode IS NULL) AND (checkout_secret_hash IS NULL))))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
   constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL)))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
@@ -1436,6 +1439,7 @@ table billing.orders
   constraint orders_succeeded_check CHECK (((payment_status = 'succeeded'::text) = ((status = 'complete'::text) OR (payment_id IS NOT NULL))))
   constraint orders_total_check CHECK ((total >= 0))
   constraint orders_void_check CHECK (((status = 'void'::text) = (voided_at IS NOT NULL)))
+  index CREATE INDEX orders_checkout_embedded_idx ON billing.orders USING btree (id) WHERE (checkout_ui_mode = 'embedded'::text)
   index CREATE UNIQUE INDEX orders_checkout_secret_hash_key ON billing.orders USING btree (checkout_secret_hash) WHERE (checkout_secret_hash IS NOT NULL)
   index CREATE INDEX orders_closed_at_unpaid_idx ON billing.orders USING btree (merchant_id, COALESCE(canceled_at, expired_at)) WHERE ((status = ANY (ARRAY['canceled'::text, 'expired'::text])) AND (payment_id IS NULL) AND (attempt_id IS NULL))
   index CREATE INDEX orders_created_at_id_idx ON billing.orders USING btree (merchant_id, created_at DESC, id DESC)

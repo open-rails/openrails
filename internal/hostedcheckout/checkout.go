@@ -36,6 +36,7 @@ type Checkout struct {
 	MerchantID          billing.MerchantID
 	OrderID             billing.OrderID
 	CustomerID          billing.CustomerID
+	UIMode              billing.CheckoutUIMode
 	ExpiresAt           time.Time
 	SuccessURL          string
 	CancelURL           *string
@@ -63,11 +64,19 @@ func Plan(p billing.OrderCheckoutParams, order billing.OrderID, now time.Time, o
 	case orderExpiry != nil && expires.After(*orderExpiry):
 		return Checkout{}, apperr.Invalidf("checkout.expires_at is after the order's expires_at").WithParam("checkout.expires_at")
 	}
+	mode := p.UIMode
+	switch mode {
+	case "":
+		mode = billing.CheckoutHosted
+	case billing.CheckoutHosted, billing.CheckoutEmbedded:
+	default:
+		return Checkout{}, apperr.Invalidf("checkout.ui_mode is hosted or embedded").WithParam("checkout.ui_mode")
+	}
 	success, err := returnURL("checkout.success_url", p.SuccessURL, order)
 	if err != nil {
 		return Checkout{}, err
 	}
-	c := Checkout{OrderID: order, ExpiresAt: expires, SuccessURL: success, SavedPaymentMethods: p.SavedPaymentMethods}
+	c := Checkout{OrderID: order, UIMode: mode, ExpiresAt: expires, SuccessURL: success, SavedPaymentMethods: p.SavedPaymentMethods}
 	if p.CancelURL != nil {
 		cancel, err := returnURL("checkout.cancel_url", *p.CancelURL, order)
 		if err != nil {

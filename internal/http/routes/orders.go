@@ -44,7 +44,7 @@ var ordersRoutes = []Route{
 		Request: billing.PreviewOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMerchantOrder)},
 	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CreateOrder", IdempotencyKey: true,
 		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}},
-		Errors: codes("already_owned", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
+		Errors: codes("already_owned", "checkout_embed_origins_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
 	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CancelOrder", IdempotencyKey: true,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMerchantOrder)},
 	{Method: GET, Path: "/v1/admin/orders", Group: Admin, Auth: AuthMerchant, Name: "ListOrders", Level: LevelRead,

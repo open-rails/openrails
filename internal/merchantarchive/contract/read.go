@@ -90,16 +90,18 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
-		// Orders before renewals had none of their columns; before hosted
-		// checkout none of its; before the payment axis one status.
+		// Orders before ui_mode had hosted checkouts only; before renewals
+		// none of their columns; before hosted checkout none of its; before
+		// the payment axis one status.
 		if p.Name == "orders" {
 			missing := len(p.Columns) - len(r.Values)
-			if missing == orderRenewalColumns+orderCheckoutColumns+1 {
+			if missing == 1+orderRenewalColumns+orderCheckoutColumns+1 {
 				r.Values = splitOrderStatus(p, r.Values)
 				missing--
 			}
-			if missing == orderRenewalColumns || missing == orderRenewalColumns+orderCheckoutColumns {
-				r.Values = append(r.Values, make([]*string, missing)...)
+			if missing == 1 || missing == 1+orderRenewalColumns || missing == 1+orderRenewalColumns+orderCheckoutColumns {
+				r.Values = append(r.Values, make([]*string, missing-1)...)
+				r.Values = append(r.Values, hostedIfCheckout(p, r.Values))
 			}
 		}
 		if !legacy {
@@ -311,11 +313,22 @@ func renamePaymentStatus(p Profile, values []*string) {
 // splitOrderStatus is an order of one status as migration 49 split it: the
 // order's own status and its payment's.
 // orderCheckoutColumns are the hosted checkout's columns on orders, before
-// the orderRenewalColumns, which are last.
+// the orderRenewalColumns, then checkout_ui_mode, last.
 const (
 	orderCheckoutColumns = 5
 	orderRenewalColumns  = 5
 )
+
+// hostedIfCheckout is the ui_mode of an order archived before it had one:
+// hosted when it has a checkout.
+func hostedIfCheckout(p Profile, values []*string) *string {
+	for i, c := range p.Columns[:len(values)] {
+		if c.Name == "checkout_secret_hash" && values[i] != nil {
+			return new("hosted")
+		}
+	}
+	return nil
+}
 
 func splitOrderStatus(p Profile, values []*string) []*string {
 	status, payment := "", "requires_payment_method"

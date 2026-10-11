@@ -109,11 +109,36 @@ func TestHostedCheckoutRegistersItsHostForWallets(t *testing.T) {
 	require.Len(t, stripe.Submitted("/v1/payment_method_domains/"+domains[0]["id"].(string)+"/validate"), 1)
 
 	// A merchant's next checkout finds both registered and queues nothing.
-	require.NoError(t, rt.RegisterCheckoutDomain(t.Context(), entry.MerchantID, nil))
+	require.NoError(t, rt.RegisterCheckoutDomain(t.Context(), entry.MerchantID))
 	for _, psp := range []billing.PSPID{fresh, known} {
 		row, err := store.GetByIdempotencyKey(ctx, intents.StripePaymentMethodDomainKey(psp.UUID(), checkoutHost))
 		require.NoError(t, err)
 		require.Equal(t, intents.StatusSucceeded, row.Status)
 	}
 	require.Len(t, stripe.Submitted("/v1/payment_method_domains"), 1)
+
+	// Sites registered for embedded checkouts are registered too: a wallet
+	// shows in a frame only when the framing page's domain is. Loopback
+	// sites are not.
+	_, err = srv.Client().UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+		Settings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}}, at)
+	require.NoError(t, err)
+	for _, psp := range []billing.PSPID{fresh, known} {
+		require.Eventually(t, func() bool {
+			_, err := store.GetByIdempotencyKey(ctx, intents.StripePaymentMethodDomainKey(psp.UUID(), "shop.e2e.test"))
+			return err == nil
+		}, 10*time.Second, 20*time.Millisecond, "registering an embed origin queues its registration")
+		_, err = store.GetByIdempotencyKey(ctx, intents.StripePaymentMethodDomainKey(psp.UUID(), "localhost"))
+		require.Error(t, err)
+	}
+	row, err := store.GetByIdempotencyKey(ctx, intents.StripePaymentMethodDomainKey(fresh.UUID(), "shop.e2e.test"))
+	require.NoError(t, err)
+	row, err = rt.IntentRunner().ExecuteByID(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, row.Status)
+	names := []any{}
+	for _, d := range stripe.PaymentMethodDomains("acct_fresh") {
+		names = append(names, d["domain_name"])
+	}
+	require.ElementsMatch(t, []any{checkoutHost, "shop.e2e.test"}, names)
 }

@@ -49,15 +49,30 @@ var captchaOrigins = map[string]origins{
 }
 
 // frameAncestors is the page's one framing decision: no site frames it
-// (Stripe Checkout refuses iframes too). Its CSP and X-Frame-Options both
+// (Stripe Checkout refuses iframes too) but an embedded checkout's, which the
+// origins its merchant registered frame. Its CSP and X-Frame-Options both
 // follow from it.
-const frameAncestors = "'none'"
+func frameAncestors(origins []string) string {
+	if len(origins) == 0 {
+		return "'none'"
+	}
+	return strings.Join(origins, " ")
+}
+
+// Policy is the page's Content-Security-Policy but its frame-ancestors.
+type Policy string
+
+// Framed is the whole policy for a page the origins may frame (none: no
+// site).
+func (p Policy) Framed(origins []string) string {
+	return string(p) + "; frame-ancestors " + frameAncestors(origins)
+}
 
 // ContentSecurityPolicy is the page's: its own scripts, the rails' field
 // origins, the captcha provider's when the deployment challenges (captcha,
-// "" for none), the issuers it signs shoppers in at (their token endpoints),
-// any https logo, and the framing decision.
-func ContentSecurityPolicy(captcha string, issuers ...string) string {
+// "" for none), the issuers it signs shoppers in at (their token endpoints)
+// and any https logo; Framed adds the framing decision.
+func ContentSecurityPolicy(captcha string, issuers ...string) Policy {
 	all := railOrigins
 	if o, ok := captchaOrigins[captcha]; ok {
 		all = append(append([]origins{}, all...), o)
@@ -77,7 +92,7 @@ func ContentSecurityPolicy(captcha string, issuers ...string) string {
 		}
 		return name + " " + strings.Join(out, " ")
 	}
-	return strings.Join([]string{
+	return Policy(strings.Join([]string{
 		"default-src 'none'",
 		directive("script-src", []string{"'self'"}, script),
 		directive("frame-src", frame),
@@ -88,23 +103,35 @@ func ContentSecurityPolicy(captcha string, issuers ...string) string {
 		"form-action 'none'",
 		"base-uri 'none'",
 		"object-src 'none'",
-		"frame-ancestors " + frameAncestors,
-	}, "; ")
+	}, "; "))
 }
 
+// Framing answers the origins that may frame a request's page; none frames
+// it unless it is an embedded checkout's.
+type Framing func(*http.Request) []string
+
 // HeadersHTTP sets the checkout host's security headers on every answer,
-// with policy as its Content-Security-Policy.
-func HeadersHTTP(policy string) func(http.Handler) http.Handler {
+// with policy as its Content-Security-Policy, framed as framing says.
+// X-Frame-Options cannot list origins, so a framed page sends none.
+func HeadersHTTP(policy Policy, framing Framing) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var origins []string
+			if framing != nil {
+				origins = framing(r)
+			}
 			h := w.Header()
-			h.Set("Content-Security-Policy", policy)
-			if frameAncestors == "'none'" {
+			h.Set("Content-Security-Policy", policy.Framed(origins))
+			if len(origins) == 0 {
 				h.Set("X-Frame-Options", "DENY")
 			}
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "no-referrer")
-			h.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+			// The sign-in return keeps its opener: a framed page's sign-in
+			// popup hands its code back to the frame that opened it.
+			if r.URL.Path != SignInPath {
+				h.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+			}
 			h.Set("Permissions-Policy", `payment=(self "https://js.stripe.com" "https://*.js.stripe.com"), camera=(), microphone=(), geolocation=()`)
 			h.Set("Server", "")
 			next.ServeHTTP(w, r)

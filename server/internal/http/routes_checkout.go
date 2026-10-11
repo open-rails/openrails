@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/server/internal/network"
 )
 
 // buildCheckout serves the hosted checkout at origin: the page, and the
@@ -45,7 +46,13 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 	if s.runtime.Network != nil {
 		if iss, err := url.Parse(s.controlPlane.Issuer()); err == nil && iss.Host != "" {
 			issuers = append(issuers, iss.Scheme+"://"+iss.Host)
+			s.runtime.CheckoutNetwork = &billing.PublicNetwork{Issuer: s.controlPlane.Issuer(), ClientID: network.CheckoutClientID}
 		}
+	}
+	store := hostedcheckout.NewStore(s.runtime.DB)
+	var settings hostedcheckout.MerchantSettings
+	if s.runtime.Merchants != nil {
+		settings = s.runtime.Merchants
 	}
 	mux.Handle("GET /c/{order_id}", page)
 	mux.Handle("GET "+hostedcheckout.SignInPath, page)
@@ -55,10 +62,10 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 	s.checkoutHandler = middleware.ChainHTTP(mux.Handler(),
 		middleware.RecoverHTTP(),
 		middleware.RequestLogHTTP(),
-		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha, issuers...)),
+		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha, issuers...), store.Framing(settings)),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		billingauth.ExplicitCredentials,
-		hostedcheckout.ResolveHTTP(hostedcheckout.NewStore(s.runtime.DB), s.runtime.Clock.Now),
+		hostedcheckout.ResolveHTTP(store, s.runtime.Clock.Now),
 		s.sharedRateLimit,
 	)
 	s.runtime.HostedCheckoutOrigin = origin

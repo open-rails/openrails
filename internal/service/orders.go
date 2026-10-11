@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -757,6 +758,11 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if err != nil {
 			return nil, false, err
 		}
+		if plan.UIMode == billing.CheckoutEmbedded {
+			if err := s.embedOriginsDeclared(ctx); err != nil {
+				return nil, false, err
+			}
+		}
 		if params.ExpiresAt == nil {
 			ttl = plan.ExpiresAt.Sub(now)
 		}
@@ -800,7 +806,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		// registered as its payment-method domain now.
 		if mid, err := merchant.Require(ctx); err == nil {
 			s.rt.Go("checkout domain registration", func(ctx context.Context) {
-				if err := s.rt.RegisterCheckoutDomain(ctx, mid, nil); err != nil && ctx.Err() == nil {
+				if err := s.rt.RegisterCheckoutDomain(ctx, mid); err != nil && ctx.Err() == nil {
 					log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("checkout domain: cannot queue its registration")
 				}
 			})
@@ -813,6 +819,29 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	}
 	return view, replayed, err
 }
+
+// embedOriginsDeclared refuses an embedded checkout the merchant registered
+// no origin to frame.
+func (s *Service) embedOriginsDeclared(ctx context.Context) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if s.rt.Merchants == nil {
+		return errEmbedOriginsRequired
+	}
+	_, settings, err := s.rt.Merchants.MerchantSettings(ctx, mid)
+	if err != nil {
+		return err
+	}
+	if len(merchantconfig.EmbedOrigins(settings)) == 0 {
+		return errEmbedOriginsRequired
+	}
+	return nil
+}
+
+var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "checkout_embed_origins_required",
+	"an embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins").WithParam("checkout.ui_mode")
 
 // CancelMerchantOrder withdraws an open order the merchant created.
 func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {

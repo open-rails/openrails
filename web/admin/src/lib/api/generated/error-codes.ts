@@ -31,6 +31,7 @@ export type OpenRailsErrorCode =
   | "checkout_attempt_closed"
   | "checkout_attempt_expired"
   | "checkout_attempts_exhausted"
+  | "checkout_embed_origins_required"
   | "checkout_expired"
   | "checkout_not_found"
   | "checkout_offer_unavailable"
@@ -245,6 +246,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
   checkout_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout attempt expired before it was paid." },
   checkout_attempts_exhausted: { status: 409, type: "invalid_request_error", meaning: "The checkout took its most card attempts; the merchant creates a new order." },
+  checkout_embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   checkout_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout URL expired; the merchant creates a new order." },
   checkout_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout URL is unknown or no longer valid." },
   checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },

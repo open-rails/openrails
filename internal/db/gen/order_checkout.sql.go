@@ -32,7 +32,7 @@ func (q *Queries) CountOrderDeclines(ctx context.Context, arg CountOrderDeclines
 }
 
 const getOrderCheckout = `-- name: GetOrderCheckout :one
-SELECT id, customer_id, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods
+SELECT id, customer_id, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, checkout_ui_mode
 FROM billing.orders
 WHERE merchant_id = $1::uuid AND checkout_secret_hash = $2::bytea
 `
@@ -49,6 +49,7 @@ type GetOrderCheckoutRow struct {
 	CheckoutSuccessUrl          *string
 	CheckoutCancelUrl           *string
 	CheckoutSavedPaymentMethods *bool
+	CheckoutUiMode              *string
 }
 
 func (q *Queries) GetOrderCheckout(ctx context.Context, arg GetOrderCheckoutParams) (GetOrderCheckoutRow, error) {
@@ -61,8 +62,41 @@ func (q *Queries) GetOrderCheckout(ctx context.Context, arg GetOrderCheckoutPara
 		&i.CheckoutSuccessUrl,
 		&i.CheckoutCancelUrl,
 		&i.CheckoutSavedPaymentMethods,
+		&i.CheckoutUiMode,
 	)
 	return i, err
+}
+
+const resolveEmbeddedCheckoutMerchant = `-- name: ResolveEmbeddedCheckoutMerchant :many
+SELECT o.merchant_id
+FROM billing.orders o
+JOIN billing.merchants m ON m.id = o.merchant_id
+WHERE o.id = $1::uuid AND o.checkout_ui_mode = 'embedded'
+  AND m.deleted_at IS NULL AND m.status = 'active'
+LIMIT 2
+`
+
+// Credential directory: the merchant whose embedded checkout page an order
+// id names, to frame it by that merchant's origins. The id is not a
+// credential; two rows reveal ambiguity, never a choice.
+func (q *Queries) ResolveEmbeddedCheckoutMerchant(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, resolveEmbeddedCheckoutMerchant, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveOrderCheckoutMerchant = `-- name: ResolveOrderCheckoutMerchant :many
@@ -103,8 +137,9 @@ SET checkout_secret_hash = $1::bytea,
     checkout_success_url = $3::text,
     checkout_cancel_url = $4::text,
     checkout_saved_payment_methods = $5::boolean,
-    updated_at = $6::timestamptz
-WHERE merchant_id = $7::uuid AND id = $8::uuid
+    checkout_ui_mode = $6::text,
+    updated_at = $7::timestamptz
+WHERE merchant_id = $8::uuid AND id = $9::uuid
   AND origin = 'merchant' AND status = 'open' AND checkout_secret_hash IS NULL
 `
 
@@ -114,6 +149,7 @@ type SetOrderCheckoutParams struct {
 	SuccessUrl          string
 	CancelUrl           *string
 	SavedPaymentMethods bool
+	UiMode              string
 	Now                 time.Time
 	MerchantID          uuid.UUID
 	ID                  uuid.UUID
@@ -127,6 +163,7 @@ func (q *Queries) SetOrderCheckout(ctx context.Context, arg SetOrderCheckoutPara
 		arg.SuccessUrl,
 		arg.CancelUrl,
 		arg.SavedPaymentMethods,
+		arg.UiMode,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,

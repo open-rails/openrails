@@ -233,6 +233,7 @@ var errorCodes = []ErrorCode{
 	{"checkout_expired", 410, invalid, "The checkout URL expired; the merchant creates a new order."},
 	{"hosted_checkout_unavailable", 400, invalid, "This deployment serves no hosted checkout, or the order cannot take one."},
 	{"checkout_attempts_exhausted", 409, invalid, "The checkout took its most card attempts; the merchant creates a new order."},
+	{"checkout_embed_origins_required", 400, invalid, "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
 	{"customer_proof_required", 403, authz, "A saved card is charged only on a checkout session its customer pays, signed in; mint one instead."},
 	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
 	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},

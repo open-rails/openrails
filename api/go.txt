@@ -505,6 +505,8 @@ pkg openrails/billing, const CheckoutAttemptIDPrefix untyped string = "chk_"
 pkg openrails/billing, const CheckoutAttemptProcessing CheckoutAttemptStatus = "processing"
 pkg openrails/billing, const CheckoutAttemptRequiresAction CheckoutAttemptStatus = "requires_action"
 pkg openrails/billing, const CheckoutAttemptSucceeded CheckoutAttemptStatus = "succeeded"
+pkg openrails/billing, const CheckoutEmbedded CheckoutUIMode = "embedded"
+pkg openrails/billing, const CheckoutHosted CheckoutUIMode = "hosted"
 pkg openrails/billing, const CodeAlreadyOwned untyped string = "already_owned"
 pkg openrails/billing, const CodeApplicationRequired untyped string = "application_required"
 pkg openrails/billing, const CodeAuthenticationRequired untyped string = "authentication_required"
@@ -1435,6 +1437,7 @@ pkg openrails/billing, type CheckoutSessionLink struct
 pkg openrails/billing, type CheckoutSessionLink struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type CheckoutSessionLink struct, ID string `json:"id"`
 pkg openrails/billing, type CheckoutSessionLink struct, URL *string `json:"url"`
+pkg openrails/billing, type CheckoutUIMode string
 pkg openrails/billing, type CloseProviderOperationParams struct
 pkg openrails/billing, type CloseProviderOperationParams struct, AttestedBy string `json:"attested_by"`
 pkg openrails/billing, type CloseProviderOperationParams struct, CostAmount *int64 `json:"cost_amount,string"`
@@ -2039,6 +2042,8 @@ pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_
 pkg openrails/billing, type MerchantAPIHost struct
 pkg openrails/billing, type MerchantAPIHost struct, APIHost *string `json:"api_host"`
 pkg openrails/billing, type MerchantAPIHost struct, Claim *APIHostClaim `json:"claim"`
+pkg openrails/billing, type MerchantCheckoutSettings struct
+pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, APIHost string `json:"api_host"`
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
@@ -2089,6 +2094,7 @@ pkg openrails/billing, type MerchantSettings struct, ArrearsDelinquencyFloor *in
 pkg openrails/billing, type MerchantSettings struct, ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CheckoutRouting *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -2312,12 +2318,14 @@ pkg openrails/billing, type OrderCheckout struct, CancelURL *string `json:"cance
 pkg openrails/billing, type OrderCheckout struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type OrderCheckout struct, SavedPaymentMethods bool `json:"saved_payment_methods"`
 pkg openrails/billing, type OrderCheckout struct, SuccessURL string `json:"success_url"`
+pkg openrails/billing, type OrderCheckout struct, UIMode CheckoutUIMode `json:"ui_mode"`
 pkg openrails/billing, type OrderCheckout struct, URL *string `json:"url"`
 pkg openrails/billing, type OrderCheckoutParams struct
 pkg openrails/billing, type OrderCheckoutParams struct, CancelURL *string `json:"cancel_url,omitempty"`
 pkg openrails/billing, type OrderCheckoutParams struct, ExpiresAt *time.Time `json:"expires_at,omitempty"`
 pkg openrails/billing, type OrderCheckoutParams struct, SavedPaymentMethods bool `json:"saved_payment_methods,omitempty"`
 pkg openrails/billing, type OrderCheckoutParams struct, SuccessURL string `json:"success_url"`
+pkg openrails/billing, type OrderCheckoutParams struct, UIMode CheckoutUIMode `json:"ui_mode,omitempty"`
 pkg openrails/billing, type OrderHostEvent struct
 pkg openrails/billing, type OrderHostEvent struct, Currency string `json:"currency"`
 pkg openrails/billing, type OrderHostEvent struct, CustomerID CustomerID `json:"customer_id"`
@@ -2927,12 +2935,17 @@ pkg openrails/billing, type PublicConfig struct, Capabilities Capabilities `json
 pkg openrails/billing, type PublicConfig struct, Captcha *CaptchaConfig `json:"captcha"`
 pkg openrails/billing, type PublicConfig struct, Currencies []CurrencyUnits `json:"currencies"`
 pkg openrails/billing, type PublicConfig struct, Merchant *PublicMerchant `json:"merchant"`
+pkg openrails/billing, type PublicConfig struct, Network *PublicNetwork `json:"network"`
 pkg openrails/billing, type PublicConfig struct, Payment *PaymentConfig `json:"payment"`
 pkg openrails/billing, type PublicConfig struct, Rails []RailDefinition `json:"rails"`
 pkg openrails/billing, type PublicMerchant struct
 pkg openrails/billing, type PublicMerchant struct, DisplayName string `json:"display_name"`
+pkg openrails/billing, type PublicMerchant struct, EmbedOrigins []string `json:"embed_origins"`
 pkg openrails/billing, type PublicMerchant struct, LogoURL *string `json:"logo_url"`
 pkg openrails/billing, type PublicMerchant struct, SupportURL *string `json:"support_url"`
+pkg openrails/billing, type PublicNetwork struct
+pkg openrails/billing, type PublicNetwork struct, ClientID string `json:"client_id"`
+pkg openrails/billing, type PublicNetwork struct, Issuer string `json:"issuer"`
 pkg openrails/billing, type PurchaseAction string
 pkg openrails/billing, type Rail string
 pkg openrails/billing, type RailDefinition struct

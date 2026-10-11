@@ -19,6 +19,17 @@ type PublicConfig struct {
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
+	// Network is how the checkout page signs a shopper in to the customer
+	// network; null without the network or a hosted checkout.
+	Network *PublicNetwork `json:"network"`
+}
+
+// PublicNetwork is the checkout page's sign-in to the customer network: an
+// OpenID Connect authorization (code and PKCE) at Issuer for ClientID,
+// returning to the checkout host's /c/sign-in.
+type PublicNetwork struct {
+	Issuer   string `json:"issuer"`
+	ClientID string `json:"client_id"`
 }
 
 // PublicMerchant is the merchant as its customers see it: its name, and its
@@ -27,6 +38,8 @@ type PublicMerchant struct {
 	DisplayName string  `json:"display_name"`
 	LogoURL     *string `json:"logo_url"`
 	SupportURL  *string `json:"support_url"`
+	// EmbedOrigins are the origins that may frame its embedded checkouts.
+	EmbedOrigins []string `json:"embed_origins"`
 }
 
 // CaptchaConfig is how a browser solves the deployment's captcha: load

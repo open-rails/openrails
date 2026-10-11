@@ -972,6 +972,8 @@ type BillingOrder struct {
 	// When a renewal is owed: its period's start. An open order past it is overdue.
 	DueAt    *time.Time
 	VoidedAt *time.Time
+	// Where the checkout page runs: hosted, or embedded in the merchant's registered origins (settings checkout.embed_origins).
+	CheckoutUiMode *string
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.

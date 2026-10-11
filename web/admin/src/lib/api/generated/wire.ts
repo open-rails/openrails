@@ -1166,6 +1166,10 @@ export type MerchantAPIHost = {
   claim: APIHostClaim | null
 }
 
+export type MerchantCheckoutSettings = {
+  embed_origins?: string[]
+}
+
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
@@ -1193,6 +1197,7 @@ export type MerchantSettings = {
   arrears_delinquency_floor?: string
   checkout_routing?: CheckoutRoutingRule[]
   dunning_policy?: DunningPolicy
+  checkout?: MerchantCheckoutSettings
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
@@ -1462,6 +1467,7 @@ export type Order = {
 
 export type OrderCheckout = {
   url: string | null
+  ui_mode: "embedded" | "hosted"
   expires_at: string
   success_url: string
   cancel_url: string | null
@@ -1469,6 +1475,7 @@ export type OrderCheckout = {
 }
 
 export type OrderCheckoutParams = {
+  ui_mode?: "embedded" | "hosted"
   success_url?: string
   cancel_url?: string
   expires_at?: string
@@ -2100,12 +2107,19 @@ export type PublicConfig = {
   payment: PaymentConfig | null
   merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
+  network: PublicNetwork | null
 }
 
 export type PublicMerchant = {
   display_name: string
   logo_url: string | null
   support_url: string | null
+  embed_origins: string[]
+}
+
+export type PublicNetwork = {
+  issuer: string
+  client_id: string
 }
 
 export type Quantity = {

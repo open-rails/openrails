@@ -17,6 +17,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +82,9 @@ func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Reques
 // captcha.
 func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilities) billing.PublicConfig {
 	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
+	if r.State != nil {
+		doc.Network = r.State.CheckoutNetwork
+	}
 	if r.State != nil && r.State.Config != nil && config.CaptchaEnabled(r.State.Config.Captcha) {
 		cfg := r.State.Config.Captcha
 		doc.Captcha = &billing.CaptchaConfig{
@@ -178,7 +182,7 @@ func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing
 		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
 		return billing.PublicMerchant{}, false
 	}
-	who := billing.PublicMerchant{DisplayName: name}
+	who := billing.PublicMerchant{DisplayName: name, EmbedOrigins: merchantconfig.EmbedOrigins(settings)}
 	if p := settings.Profile; p != nil {
 		who.LogoURL, who.SupportURL = httpsURL(p.LogoURL), httpsURL(p.SupportURL)
 	}

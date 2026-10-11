@@ -36,6 +36,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
 | `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
 | `checkout_attempts_exhausted` | 409 | `invalid_request_error` | The checkout took its most card attempts; the merchant creates a new order. |
+| `checkout_embed_origins_required` | 400 | `invalid_request_error` | An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `checkout_expired` | 410 | `invalid_request_error` | The checkout URL expired; the merchant creates a new order. |
 | `checkout_not_found` | 404 | `invalid_request_error` | The checkout URL is unknown or no longer valid. |
 | `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |

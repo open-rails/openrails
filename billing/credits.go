@@ -216,6 +216,14 @@ type MerchantProfile struct {
 	SignupURL  string `json:"signup_url,omitempty"`
 }
 
+// MerchantCheckoutSettings are the merchant's hosted checkout settings.
+type MerchantCheckoutSettings struct {
+	// EmbedOrigins are the origins that may frame the merchant's embedded
+	// checkouts: exact https origins (http on loopback), at most 10, no
+	// wildcards.
+	EmbedOrigins []string `json:"embed_origins,omitempty"`
+}
+
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
@@ -240,6 +248,8 @@ type MerchantSettings struct {
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
+	// Checkout is the hosted checkout's settings; a patch replaces it whole.
+	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".

@@ -175,6 +175,9 @@ type Runtime struct {
 	HostedCheckoutOrigin string
 	// checkoutDomains are the (PSP, host) registrations known queued.
 	checkoutDomains sync.Map
+	// CheckoutNetwork is the checkout page's sign-in to the customer
+	// network, set by a server running both.
+	CheckoutNetwork *billing.PublicNetwork
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the

@@ -94,6 +94,11 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		}
 		cfg.DunningPolicy = in.DunningPolicy
 	}
+	if in.Checkout != nil {
+		if _, err := NormalizeEmbedOrigins(in.Checkout.EmbedOrigins); err != nil {
+			return Settings{}, err
+		}
+	}
 	if in.CheckoutRouting != nil {
 		routing, err := NormalizeCheckoutRouting(*in.CheckoutRouting)
 		if err != nil {
