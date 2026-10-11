@@ -71,13 +71,15 @@ const (
 
 // NotificationQueue is an in-app notification for a customer.
 type NotificationQueue struct {
-	ID uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
 	// CustomerID is the host's subject UUID within the merchant.
 	CustomerID uuid.UUID
 	EventType  NotificationEventType
 	// Data is the typed event payload; it is stored as JSONB and served verbatim.
 	Data      billing.NotificationData
 	Seen      bool
+	ReadAt    *time.Time
 	CreatedAt time.Time
 }
 
@@ -86,7 +88,7 @@ func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(n
 
 // View is the wire shape of the row.
 func (nq *NotificationQueue) View() billing.Notification {
-	return billing.Notification{ID: billing.NotificationID(nq.ID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
+	return billing.Notification{ID: billing.NotificationID(nq.ID), MerchantID: billing.MerchantID(nq.MerchantID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, ReadAt: nq.ReadAt, CreatedAt: nq.CreatedAt}
 }
 
 // IsSeen checks if the notification has been seen by the user

@@ -12,6 +12,86 @@ import (
 	"github.com/google/uuid"
 )
 
+const listNetworkNotificationPage = `-- name: ListNetworkNotificationPage :many
+
+SELECT l.id AS link_id, n.id, n.merchant_id, n.customer_id, n.event_type, n.data, n.read_at, n.created_at
+FROM billing.customer_links l
+CROSS JOIN LATERAL (
+    SELECT notice.id, notice.merchant_id, notice.customer_id, notice.event_type, notice.data, notice.read_at, notice.created_at
+    FROM billing.notifications notice
+    WHERE notice.merchant_id = l.merchant_id AND notice.customer_id = l.customer_id
+      AND notice.recipient_kind = 'customer'
+      AND ($1::boolean IS NULL OR (notice.read_at IS NOT NULL) = $1::boolean)
+      AND ($2::timestamptz IS NULL
+           OR (notice.created_at, notice.merchant_id, notice.id) < ($2::timestamptz, $3::uuid, $4::uuid))
+    ORDER BY notice.created_at DESC, notice.id DESC
+    LIMIT $5::int
+) n
+WHERE l.account_id = $6::uuid AND l.status = 'active'
+ORDER BY n.created_at DESC, n.merchant_id DESC, n.id DESC
+LIMIT $5::int
+`
+
+type ListNetworkNotificationPageParams struct {
+	Seen          *bool
+	AfterAt       *time.Time
+	AfterMerchant *uuid.UUID
+	AfterID       *uuid.UUID
+	RowLimit      int32
+	AccountID     uuid.UUID
+}
+
+type ListNetworkNotificationPageRow struct {
+	LinkID     uuid.UUID
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	EventType  string
+	Data       []byte
+	ReadAt     *time.Time
+	CreatedAt  time.Time
+}
+
+// The customer network's reads across merchants: one query over the
+// account's active links, each merchant's rows joined on (merchant_id,
+// customer_id) and answered with the link they came through. Keyset cursor (created_at, merchant_id, id), newest first;
+// the work scales with the account's links, not with the merchants.
+func (q *Queries) ListNetworkNotificationPage(ctx context.Context, arg ListNetworkNotificationPageParams) ([]ListNetworkNotificationPageRow, error) {
+	rows, err := q.db.Query(ctx, listNetworkNotificationPage,
+		arg.Seen,
+		arg.AfterAt,
+		arg.AfterMerchant,
+		arg.AfterID,
+		arg.RowLimit,
+		arg.AccountID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNetworkNotificationPageRow
+	for rows.Next() {
+		var i ListNetworkNotificationPageRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EventType,
+			&i.Data,
+			&i.ReadAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNetworkOrderPage = `-- name: ListNetworkOrderPage :many
 SELECT l.id AS link_id, o.merchant_id, o.customer_id, o.id, o.created_at
 FROM billing.customer_links l
@@ -77,7 +157,6 @@ func (q *Queries) ListNetworkOrderPage(ctx context.Context, arg ListNetworkOrder
 }
 
 const listNetworkSubscriptionPage = `-- name: ListNetworkSubscriptionPage :many
-
 SELECT l.id AS link_id, s.merchant_id, s.customer_id, s.id, s.created_at
 FROM billing.customer_links l
 CROSS JOIN LATERAL (
@@ -109,10 +188,6 @@ type ListNetworkSubscriptionPageRow struct {
 	CreatedAt  time.Time
 }
 
-// The customer network's reads across merchants: one query over the
-// account's active links, each merchant's rows joined on (merchant_id,
-// customer_id) and answered with the link they came through. Keyset cursor (created_at, merchant_id, id), newest first;
-// the work scales with the account's links, not with the merchants.
 func (q *Queries) ListNetworkSubscriptionPage(ctx context.Context, arg ListNetworkSubscriptionPageParams) ([]ListNetworkSubscriptionPageRow, error) {
 	rows, err := q.db.Query(ctx, listNetworkSubscriptionPage,
 		arg.AfterAt,

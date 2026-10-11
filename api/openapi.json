@@ -8350,6 +8350,95 @@
         ]
       }
     },
+    "/v1/app/customers/{customer_id}/notifications": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "seen",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Notification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:customers:read",
+          "root": "root:customers:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_customer_id"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
     "/v1/app/host-events": {
       "get": {
         "tags": [
@@ -9498,6 +9587,84 @@
         ]
       }
     },
+    "/v1/network/notifications": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "seen",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NetworkNotification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
     "/v1/network/links": {
       "get": {
         "tags": [
@@ -9749,6 +9916,146 @@
         ],
         "x-openrails-error-sets": [
           "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/notifications": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "seen",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Notification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/notifications/read": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationsReadParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerNotificationLookup"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
         ]
       }
     },
@@ -15929,6 +16236,29 @@
           "expires_at"
         ]
       },
+      "NetworkNotification": {
+        "type": "object",
+        "properties": {
+          "link_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/PublicMerchant"
+          },
+          "notification": {
+            "$ref": "#/components/schemas/Notification"
+          }
+        },
+        "required": [
+          "link_id",
+          "merchant_id",
+          "merchant",
+          "notification"
+        ]
+      },
       "NetworkOrder": {
         "type": "object",
         "properties": {
@@ -16046,6 +16376,9 @@
           "id": {
             "type": "string"
           },
+          "merchant_id": {
+            "type": "string"
+          },
           "customer_id": {
             "type": "string"
           },
@@ -16058,6 +16391,17 @@
           "seen": {
             "type": "boolean"
           },
+          "read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -16065,10 +16409,12 @@
         },
         "required": [
           "id",
+          "merchant_id",
           "customer_id",
           "event_type",
           "data",
           "seen",
+          "read_at",
           "created_at"
         ]
       },
