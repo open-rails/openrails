@@ -128,6 +128,26 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		return err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
+	if opts.Overwrite {
+		var held string
+		if err := rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			// The first-enforce arming is not asked here: the operator's --overwrite is that decision.
+			held, _ = reconcile.OverwriteHeld(ctx, rt.DB, rt.Config, merchantID.UUID())
+			return nil
+		}); err != nil {
+			return err
+		}
+		if held != "" {
+			return fmt.Errorf("pull-provider: --overwrite refused: %s", held)
+		}
+	}
+	if opts.Insert || opts.Overwrite || opts.Prune {
+		release, err := waitForMerchantPullLock(ctx, rt.DB.Pool(), merchantID)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		accountPins := map[reconcile.Provider]string{}
 		explicitBindings := map[reconcile.Provider]reconcile.PSPBinding{}

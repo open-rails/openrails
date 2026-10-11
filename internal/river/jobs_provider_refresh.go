@@ -312,7 +312,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
-	release, held, err := w.lockMerchant(ctx, mid)
+	release, held, err := reconcile.LockMerchantPull(ctx, w.DB.Pool(), mid)
 	if err != nil {
 		return err
 	}
@@ -372,8 +372,8 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		// Provider observation and positive receipt recovery continue when
 		// remote writes or destructive repairs are held. Only the latter needs
 		// the operator's destructive arming; readonly never changes its mode.
-		verdict := gate.Check(tctx, mid)
-		overwrite := verdict.Allowed && verdict.EnforceArmed && !(writeposture.View{Config: w.Config, DB: w.DB}).Posture(tctx, mid).ReadOnly()
+		held, enforceArmed := reconcile.OverwriteHeld(tctx, w.DB, w.Config, mid)
+		overwrite := held == "" && enforceArmed
 		if !overwrite {
 			stats.Gated++
 		}
@@ -828,28 +828,4 @@ type providerRefreshProviderResult struct {
 	Changed         bool
 	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs
-}
-
-func (w *ProviderRefreshWorker) lockMerchant(ctx context.Context, mid uuid.UUID) (release func(), held bool, err error) {
-	pool := w.DB.Pool()
-	if pool == nil {
-		return nil, false, fmt.Errorf("provider refresh: pool not configured")
-	}
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	q := gen.New(conn)
-	if held, err = q.TryLockProviderRefresh(ctx, mid); err != nil || !held {
-		conn.Release()
-		return nil, false, err
-	}
-	return func() {
-		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := q.UnlockProviderRefresh(unlockCtx, mid); err != nil {
-			_ = conn.Conn().Close(unlockCtx)
-		}
-		conn.Release()
-	}, true, nil
 }

@@ -514,7 +514,11 @@ change, and persists nothing; the mutation flags follow the standard contract
 pulled PSP that are absent from the provider source). `--rail` is repeatable
 (default: every configured rail); `--merchant` is required; `--manifest` arms
 mode-1 credentials from a merchant manifest. After a mutating pull the engine
-runs a one-shot `Converge(merchant)`.
+runs a one-shot `Converge(merchant)`. A mutating pull waits for the merchant's
+pull lock, so it never runs beside a scheduled refresh of the same merchant.
+`--overwrite` is refused while the destructive-action kill switch is off (for
+the instance or the merchant) or the merchant's provider writes are readonly,
+as the scheduled refresh's overwrites are.
 
 ### `--prune` is reversible, and refuses uncertainty
 
