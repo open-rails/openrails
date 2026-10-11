@@ -48,7 +48,6 @@ pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.Aler
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
-pkg openrails, method (*Client) GenerateDashboardWidget(context.Context, billing.GenerateDashboardWidgetParams, ...RequestOption) (*billing.GeneratedWidget, error)
 pkg openrails, method (*Client) GetAdminAccess(context.Context, ...RequestOption) (*billing.AdminAccess, error)
 pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.Balance, error)
 pkg openrails, method (*Client) GetCreditGrant(context.Context, billing.CreditGrantID, ...RequestOption) (*billing.CreditGrant, error)
@@ -1734,13 +1733,6 @@ pkg openrails/billing, type FleetWeeklyVolume struct, Currency string `json:"cur
 pkg openrails/billing, type FleetWeeklyVolume struct, Payments int64 `json:"payments"`
 pkg openrails/billing, type FleetWeeklyVolume struct, SettledAmount int64 `json:"settled_amount,string"`
 pkg openrails/billing, type FleetWeeklyVolume struct, WeekStart time.Time `json:"week_start"`
-pkg openrails/billing, type GenerateDashboardWidgetParams struct
-pkg openrails/billing, type GenerateDashboardWidgetParams struct, BaseQuery *MetricsQuery `json:"base_query"`
-pkg openrails/billing, type GenerateDashboardWidgetParams struct, Prompt string `json:"prompt"`
-pkg openrails/billing, type GeneratedWidget struct
-pkg openrails/billing, type GeneratedWidget struct, Query MetricsQuery `json:"query"`
-pkg openrails/billing, type GeneratedWidget struct, Title string `json:"title"`
-pkg openrails/billing, type GeneratedWidget struct, Viz string `json:"viz"`
 pkg openrails/billing, type GetPriceParams struct
 pkg openrails/billing, type GetPriceParams struct, Verify bool
 pkg openrails/billing, type GetUsageParams struct

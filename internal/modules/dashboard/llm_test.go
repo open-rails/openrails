@@ -118,8 +118,10 @@ func TestOpenAIResponseDecoding(t *testing.T) {
 	require.JSONEq(t, `{}`, string(turn.ToolCalls[1].Input), "empty arguments normalize to {}")
 
 	_, url = newProviderStub(t, openaiText("   "))
-	_, err = NewOpenAILLM("k", "m", url).CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
-	require.ErrorContains(t, err, `empty response (finish_reason "stop")`)
+	turn, err = NewOpenAILLM("k", "m", url).CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
+	require.NoError(t, err)
+	require.Empty(t, turn.Text, "the tool loop handles a turn without an answer")
+	require.Empty(t, turn.ToolCalls)
 }
 
 func TestAnthropicWireShape(t *testing.T) {

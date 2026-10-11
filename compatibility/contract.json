@@ -33,7 +33,6 @@
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID, options ...RequestOption) error",
       "func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error",
       "func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
-      "func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
       "func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
@@ -644,8 +643,6 @@
       "type FleetSnapshot struct {\n\tWindowDays int                    `json:\"window_days\"`\n\tMerchants  FleetMerchantFunnel    `json:\"merchants\"`\n\tRevenue    []FleetCurrencyRevenue `json:\"revenue\"`\n\tRails      []FleetRailHealth      `json:\"rails\"`\n\tMRR        []FleetMRR             `json:\"mrr\"`\n}",
       "type FleetWeeklyPoint struct {\n\tWeekStart             time.Time `json:\"week_start\"`\n\tNewMerchants          int64     `json:\"new_merchants\"`\n\tActiveMerchants       int64     `json:\"active_merchants\"`\n\tCanceledSubscriptions int64     `json:\"canceled_subscriptions\"`\n}",
       "type FleetWeeklyVolume struct {\n\tWeekStart     time.Time `json:\"week_start\"`\n\tCurrency      string    `json:\"currency\"`\n\tPayments      int64     `json:\"payments\"`\n\tSettledAmount int64     `json:\"settled_amount,string\"`\n}",
-      "type GenerateDashboardWidgetParams struct {\n\tPrompt    string        `json:\"prompt\"`\n\tBaseQuery *MetricsQuery `json:\"base_query\"`\n}",
-      "type GeneratedWidget struct {\n\tQuery MetricsQuery `json:\"query\"`\n\tTitle string       `json:\"title\"`\n\tViz   string       `json:\"viz\"`\n}",
       "type GetPriceParams struct {\n\tVerify bool\n}",
       "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n\tPageRequest\n}",
       "type GrantReason string",
@@ -1205,7 +1202,7 @@
       "func (q *Quantity) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMin int `json:\"min\"`\n\t\tMax int `json:\"max\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*q = Quantity(value)\n\treturn nil\n}"
     ],
     "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
@@ -1448,8 +1445,6 @@
     "internal/modules/dashboard": [
       "type anthropicBlock struct {\n\tType      string          `json:\"type\"`\n\tText      string          `json:\"text,omitempty\"`\n\tID        string          `json:\"id,omitempty\"`\n\tName      string          `json:\"name,omitempty\"`\n\tInput     json.RawMessage `json:\"input,omitempty\"`\n\tToolUseID string          `json:\"tool_use_id,omitempty\"`\n\tContent   string          `json:\"content,omitempty\"`\n\tIsError   bool            `json:\"is_error,omitempty\"`\n}",
       "type anthropicBlockMessage struct {\n\tRole    string           `json:\"role\"`\n\tContent []anthropicBlock `json:\"content\"`\n}",
-      "type anthropicMessage struct {\n\tRole    string `json:\"role\"`\n\tContent string `json:\"content\"`\n}",
-      "type anthropicRequest struct {\n\tModel     string             `json:\"model\"`\n\tMaxTokens int                `json:\"max_tokens\"`\n\tSystem    string             `json:\"system,omitempty\"`\n\tMessages  []anthropicMessage `json:\"messages\"`\n}",
       "type anthropicResponse struct {\n\tContent []struct {\n\t\tType  string          `json:\"type\"`\n\t\tText  string          `json:\"text\"`\n\t\tID    string          `json:\"id\"`\n\t\tName  string          `json:\"name\"`\n\t\tInput json.RawMessage `json:\"input\"`\n\t} `json:\"content\"`\n\tStopReason string `json:\"stop_reason\"`\n\tError      *struct {\n\t\tType    string `json:\"type\"`\n\t\tMessage string `json:\"message\"`\n\t} `json:\"error\"`\n}",
       "type anthropicToolDef struct {\n\tName        string          `json:\"name\"`\n\tDescription string          `json:\"description\"`\n\tInputSchema json.RawMessage `json:\"input_schema\"`\n}",
       "type anthropicToolsRequest struct {\n\tModel     string                  `json:\"model\"`\n\tMaxTokens int                     `json:\"max_tokens\"`\n\tSystem    string                  `json:\"system,omitempty\"`\n\tTools     []anthropicToolDef      `json:\"tools,omitempty\"`\n\tMessages  []anthropicBlockMessage `json:\"messages\"`\n}",
