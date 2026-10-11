@@ -160,8 +160,7 @@ function MetricsDashboard() {
     if (!widgets) return
     const removing = await confirm({
       title: `Remove "${widget.title}"?`,
-      description:
-        "This removes it from the merchant dashboard for everyone.",
+      description: "This removes it from the merchant dashboard for everyone.",
       confirmLabel: "Remove widget",
       tone: "destructive",
     })
@@ -256,7 +255,7 @@ function MetricsDashboard() {
                         editable={editable}
                         onEdit={() => {
                           setEditing(w)
-                              setEditorOpen(true)
+                          setEditorOpen(true)
                         }}
                         onDelete={() => void removeWidget(w)}
                       />
