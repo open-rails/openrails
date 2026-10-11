@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { Finding } from "@/lib/api/types"
 import { timeAgo } from "@/lib/format"
-import { useMetrics } from "@/lib/capabilities"
+import { useMerchantConfig, useMetrics } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
 // The bell is the findings queue: the open findings that need a person. A
@@ -26,14 +26,16 @@ export function NotificationBell() {
   const navigate = useNavigate()
   const [open, setOpen] = React.useState(false)
   const metrics = useMetrics()
+  const merchantConfig = useMerchantConfig()
   const { data: count = 0 } = useQuery({
     ...adminQueries.unreadNotifications(),
-    enabled: metrics,
+    enabled: merchantConfig && metrics,
   })
   const { data, isFetching: loading } = useQuery(
-    adminQueries.notifications(open)
+    adminQueries.notifications(merchantConfig && open)
   )
   const items = data?.data ?? []
+  if (!merchantConfig) return null
 
   const onItemClick = (f: Finding) => {
     setOpen(false)

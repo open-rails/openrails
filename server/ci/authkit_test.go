@@ -42,16 +42,16 @@ func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 	ownerKey, viewerKey := merchantKey(t, srv, mid, "owner"), merchantKey(t, srv, mid, "viewer")
 	require.True(t, strings.HasPrefix(ownerKey.Secret, "openrails_st_"))
 
-	findings := func(token, _ string) int {
-		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", nil).Code
+	customers := func(token, _ string) int {
+		return call(t, handler, token, http.MethodGet, "/v1/admin/customers", nil).Code
 	}
-	require.Equal(t, http.StatusOK, findings(viewerKey.Secret, ""), "a key names its merchant")
+	require.Equal(t, http.StatusOK, customers(viewerKey.Secret, ""), "a key names its merchant")
 	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code, "a viewer reads no merchant configuration")
 	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code)
-	w := callWith(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+other.String())
+	w := callWith(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/customers", nil, retiredMerchantHeader, "id:"+other.String())
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"), "a key acts at its own merchant, whatever a header names")
-	require.Equal(t, http.StatusOK, findings(merchantKey(t, srv, other, "viewer").Secret, ""))
+	require.Equal(t, http.StatusOK, customers(merchantKey(t, srv, other, "viewer").Secret, ""))
 	check := map[string]any{"customer_id": billing.CustomerID(uuid.New()).String(), "entitlements": []string{"content:any"}}
 	w = call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", check)
 	require.Equal(t, http.StatusForbidden, w.Code, "a viewer key holds no programmatic permission: %s", w.Body.String())
@@ -65,8 +65,8 @@ func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s is not mounted: %s", route.method, route.path, w.Body.String())
 	}
 	require.NoError(t, srv.AuthKit().RevokeAPIKey(ctx, iam.SystemIdentity(), iam.GroupByID(mid.String()), viewerKey.APIKey.ID))
-	require.Equal(t, http.StatusUnauthorized, findings(viewerKey.Secret, ""), "a revoked key authenticates nothing")
-	require.Equal(t, http.StatusOK, findings(ownerKey.Secret, ""))
+	require.Equal(t, http.StatusUnauthorized, customers(viewerKey.Secret, ""), "a revoked key authenticates nothing")
+	require.Equal(t, http.StatusOK, customers(ownerKey.Secret, ""))
 }
 
 // merchantKey is an API key of merchant mid's AuthKit group holding the

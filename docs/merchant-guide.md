@@ -217,7 +217,7 @@ All merchant-admin operations live under `/v1/admin/*` (same public port; each
 route behind its group's permission, held in the merchant's group:
 `billing.MerchantBillingRead` for reads, `billing.MerchantBillingManage` for
 actions on customers, `billing.MerchantCatalogManage` for the catalog,
-`billing.MerchantConfigManage` for the merchant's configuration,
+`billing.MerchantConfigManage` for the merchant's configuration and findings,
 `billing.MerchantMetricsRead` for business metrics); your backend's own calls
 live under `/v1/app/*`, taking its application credential holding each
 route's permission ([auth](auth.md#permissions)). Auth is a trusted issuer's access token (client credentials
@@ -241,7 +241,7 @@ reference: [api/routes.md](api/routes.md).
 | Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/{customer_id}` | Customers → profile |
 | Catalog over HTTP | `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
-| Findings: problems that need a person, catalog drift and operational alerts included | `GET /v1/admin/findings` (`?type=`), counted by `open_findings` in `POST /v1/admin/metrics/query` | Ops, header bell |
+| Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/admin/findings` (`?type=`), counted by `open_findings` in `POST /v1/admin/metrics/query` | Ops, header bell |
 
 A user session needs a recent sign-in for every write here (403
 `step_up_required` otherwise); API keys and access tokens do not. A manual

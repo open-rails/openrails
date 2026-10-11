@@ -24,7 +24,7 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	f := newFixture(t)
 	roles := authkit.NewRoles()
 	merchant := roles.Persona("merchant")
-	merchant.Permission("billing", "read")
+	merchant.Permission("config", "manage")
 	admin := roles.Root.Role("admin", merchant.All())
 	const console, callback = "openrails-console", "http://127.0.0.1/admin/callback"
 	secret := strings.Repeat("c", 48)

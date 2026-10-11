@@ -13,7 +13,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import { matchPath, type RouteObject } from "react-router-dom"
 
-import { useAdminArea, useCatalogArea, useMetrics } from "@/lib/capabilities"
+import { useAdminArea, useCatalogArea, useMerchantConfig, useMetrics } from "@/lib/capabilities"
 
 import type {
   ConsoleContext,
@@ -85,7 +85,7 @@ export const coreNav: ConsoleNavItem[] = [
       { title: "Products", path: "/catalog" },
       { title: "Prices", path: "/catalog/prices" },
       { title: "Metering", path: "/catalog/metering" },
-      { title: "Drift", path: "/catalog/drift" },
+      { title: "Drift", path: "/catalog/drift", useVisible: useMerchantConfig },
     ],
   },
   {
@@ -93,7 +93,7 @@ export const coreNav: ConsoleNavItem[] = [
     path: "/ops",
     icon: Wrench01Icon,
     order: 60,
-    useVisible: useAdminArea,
+    useVisible: useMerchantConfig,
   },
   { title: "Settings", path: "/settings", icon: Settings01Icon, order: 70 },
 ].map((item) => ({ ...item, scope: "merchant" as const, group: BILLING_GROUP }))

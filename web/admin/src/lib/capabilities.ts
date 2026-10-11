@@ -22,7 +22,7 @@ export function hasAnyArea(access: AdminAccess): boolean {
 }
 
 // useAdminArea reports customer support: customers, subscriptions, payments,
-// orders and findings.
+// and orders.
 export function useAdminArea(): boolean {
   return (useAccess()?.admin ?? "none") !== "none"
 }
@@ -53,7 +53,7 @@ export function useCatalogWrites(): boolean {
 }
 
 // useMerchantConfig reports the merchant's own configuration: PSPs, settings,
-// notifications.
+// findings and notifications.
 export function useMerchantConfig(): boolean {
   return useAccess()?.merchant_config ?? false
 }

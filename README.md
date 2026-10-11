@@ -235,7 +235,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 	RouteGroups: openrails.RouteGroups{
 		Admin:          true,  // customer support: customers, their subscriptions, payments, refunds and orders
 		Catalog:        true,  // the catalog: update products and prices
-		MerchantConfig: true,  // merchant config: PSPs and their credentials, settings, billing import and export
+		MerchantConfig: true,  // merchant config: PSPs and their credentials, findings, settings, billing import and export
 		Metrics:        true,  // business metrics, read-only: revenue, sales, the dashboard's charts
 		Programmatic:   false, // /v1/app: your backend's own calls over HTTP, each with its permission, and SCIM user provisioning; embedded, your Go code calls the Client instead
 	},
@@ -556,9 +556,11 @@ until `RouteGroups` turns it on:
   too, the file skips what an edit changed (below); your Go code can edit the
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
-  PSPs and their credentials, pulling the PSPs' state again
+  PSPs and their credentials, reading and resolving findings, pulling the PSPs' state again
   (`POST /v1/admin/psps/refresh`), billing import and export, the metrics
-  dashboard's layout. Callers need `root:config:manage`.
+  dashboard's layout. Callers need `root:config:manage`. Hosts upgrading must
+  enable this group to keep the findings routes available; `Admin` alone
+  no longer mounts them.
 - `RouteGroups.Metrics`: business metrics, read-only: revenue, sales, usage and
   the dashboard's charts. Callers need `root:metrics:read`.
 - `RouteGroups.Programmatic`: the routes at `/billing/v1/app`, for your own
@@ -604,8 +606,8 @@ ends after its 3 days; a canceled membership keeps access until its paid term en
 #### Admin dashboard
 
 OpenRails ships a dashboard for your staff, the admin console, with four areas:
-customer support (customers, subscriptions, payments and refunds, orders,
-findings), the catalog, merchant config (PSPs, settings) and business metrics.
+customer support (customers, subscriptions, payments and refunds, orders),
+the catalog, merchant config (PSPs, findings, settings) and business metrics.
 It is off by default; `AdminConsole: true` serves it at `/billing/admin`, over
 the routes it drives. This one has only customer support:
 

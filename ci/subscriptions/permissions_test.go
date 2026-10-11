@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
@@ -128,5 +129,52 @@ func TestMountNeedsARootAuthenticator(t *testing.T) {
 		"one of each":         {billing.MerchantBillingRead, billing.RootBillingManage},
 	} {
 		require.NoError(t, mount(openrails.Routes{Auth: knowing{w.auth, known}, RouteGroups: admin}), name)
+	}
+}
+
+// Findings are an operator inbox. Billing read/manage grants open neither
+// reads nor resolutions; either correctly scoped config grant opens all three,
+// and resolving a finding does not require a recent sign-in.
+func TestFindingsRequireMerchantConfiguration(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	mid := w.client[embedded].MerchantID()
+	for _, tc := range []struct {
+		name, role string
+		allowed    bool
+	}{
+		{"billing reader", heldIn(mid.String(), billing.MerchantBillingRead), false},
+		{"billing manager", heldIn(mid.String(), billing.MerchantBillingManage), false},
+		{"root billing manager", "only:" + string(billing.RootBillingManage), false},
+		{"other merchant config", heldIn(uuid.NewString(), billing.MerchantConfigManage), false},
+		{"merchant config", heldIn(mid.String(), billing.MerchantConfigManage), true},
+		{"root config", "only:" + string(billing.RootConfigManage), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var id string
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings
+    (merchant_id, finding_type, subject_key, severity, status)
+    VALUES ($1, 'consistency.test.authorization', $2, 'high', 'requires_review') RETURNING id::text`),
+				mid.UUID(), uuid.NewString()).Scan(&id))
+			token := w.auth.issue(t, grant{subject: uuid.NewString(), role: tc.role, signedIn: time.Now().Add(-time.Hour)})
+			for _, op := range []struct {
+				method, path string
+				body         any
+			}{
+				{http.MethodGet, "/v1/admin/findings", nil},
+				{http.MethodGet, "/v1/admin/findings/fnd_" + id, nil},
+				{http.MethodPost, "/v1/admin/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
+			} {
+				status, body := w.merchantJSON(token, op.method, op.path, op.body)
+				want := http.StatusForbidden
+				if tc.allowed {
+					want = http.StatusOK
+				}
+				require.Equal(t, want, status, "%s %s: %v", op.method, op.path, body)
+				if !tc.allowed {
+					require.Equal(t, billing.CodePermissionRequired, body["error"].(map[string]any)["code"])
+				}
+			}
+		})
 	}
 }

@@ -109,7 +109,8 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		perm, method, path, body string
 		status                   int
 	}{
-		{string(billing.MerchantBillingRead), http.MethodGet, "/v1/admin/findings", "", http.StatusOK},
+		{string(billing.MerchantBillingRead), http.MethodGet, "/v1/admin/customers", "", http.StatusOK},
+		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/admin/findings", "", http.StatusOK},
 		{string(billing.MerchantBillingManage), http.MethodPatch, "/v1/admin/customers/" + customer, `{}`, http.StatusOK},
 		{string(billing.MerchantConfigManage), http.MethodPost, "/v1/admin/psps/refresh", "", http.StatusAccepted},
 		{string(billing.MerchantCatalogManage), http.MethodGet, "/v1/admin/catalog/meters", "", http.StatusOK},
@@ -151,7 +152,8 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		w := send(handler, backend(every), route.method, route.path, route.body)
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s without programmatic: %s", route.method, route.path, w.Body.String())
 	}
-	require.Equal(t, http.StatusOK, send(handler, backend(every), http.MethodGet, "/v1/admin/findings", "").Code, "control: the admin group is on")
+	require.Equal(t, http.StatusOK, send(handler, backend(every), http.MethodGet, "/v1/admin/customers", "").Code, "control: the admin group is on")
+	require.Equal(t, http.StatusNotFound, send(handler, backend(every), http.MethodGet, "/v1/admin/findings", "").Code, "findings require the merchant-config group")
 }
 
 // A person acts at a merchant only through a token bound to it. A root

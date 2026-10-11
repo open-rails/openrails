@@ -385,11 +385,12 @@ export const adminQueries = {
         listPriceMigrations(productKey!, priceKey!, limit, signal),
       enabled: Boolean(productKey && priceKey),
     }),
-  catalogDrift: (limit = 200, cursor?: string) =>
+  catalogDrift: (merchantConfig: boolean, limit = 200, cursor?: string) =>
     queryOptions({
       queryKey: [...queryKeys.catalogDrift(), { limit, cursor }],
       queryFn: ({ signal }) =>
         listFindings({ type: "catalog.*" }, limit, signal),
+      enabled: merchantConfig,
       meta: { errorAction: "Load drift" },
     }),
   checkoutRouting: (priceId: string) =>
@@ -423,10 +424,11 @@ export const adminQueries = {
       enabled: Boolean(key),
       meta: { errorAction: "Load usage meter" },
     }),
-  findings: () =>
+  findings: (merchantConfig: boolean) =>
     queryOptions({
       queryKey: [...queryKeys.ops(), "findings", { limit: 100 }],
       queryFn: ({ signal }) => listFindings({}, 100, signal),
+      enabled: merchantConfig,
       meta: { errorAction: "Load findings" },
     }),
   findingSummary: () =>

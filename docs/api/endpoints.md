@@ -59,7 +59,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   `merchant_config_edits`, `catalog_copilot`, `metrics_ask`,
   `dashboard_generation`). Its route groups are `admin`
   (customer support), `catalog`, `merchant_config` (the merchant's own
-  configuration), `metrics` (business metrics) and `app` (the host backend's
+  configuration and findings), `metrics` (business metrics) and `app` (the host backend's
   programmatic routes); `merchant_config_edits` says that configuration can
   change here (Vault holds it) rather than being read from a file. What a
   signed-in staff member holds of them is `GET /v1/admin/access`. A route the
@@ -67,6 +67,10 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   is not registered: it answers `404 route_not_found`.
 - **Health.** `/health/live` and `/health/ready` on the standalone server; a
   failing dependency is logged, never answered.
+
+Findings reads and resolutions require the `merchant_config` route group and
+`merchant:config:manage` (or `root:config:manage` in the root scope). Billing
+read or manage permissions do not grant access to this operator inbox.
 
 ## Who may call what
 

@@ -46,9 +46,11 @@ function areaOf(
   if (under("/payments/health"))
     return { name: "payment health", allowed: access.metrics }
   if (
-    ["/customers", "/subscriptions", "/payments", "/orders", "/ops"].some(under)
+    ["/customers", "/subscriptions", "/payments", "/orders"].some(under)
   )
     return { name: "customer support", allowed: access.admin !== "none" }
+  if (under("/ops") || under("/catalog/drift"))
+    return { name: "merchant configuration", allowed: access.merchant_config }
   if (under("/catalog")) return { name: "the catalog", allowed: access.catalog }
   return null
 }

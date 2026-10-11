@@ -130,6 +130,8 @@ export function CatalogPricesPage() {
 }
 
 export function CatalogDriftPage() {
+  const merchantConfig = useMerchantConfig()
+  if (!merchantConfig) return null
   return (
     <CatalogSection title="Drift">
       <DriftTab />
@@ -958,10 +960,9 @@ function PriceDialog({ products }: { products: Product[] }) {
 
 function DriftTab() {
   const queryClient = useQueryClient()
-  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift())
-  const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
-  // Re-reading the PSPs is the merchant configuration's.
   const canRefresh = useMerchantConfig()
+  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift(canRefresh))
+  const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
 
   return (
     <div className="flex flex-col gap-3">

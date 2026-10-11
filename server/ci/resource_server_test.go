@@ -175,28 +175,28 @@ func TestTrustedIssuerTokens(t *testing.T) {
 	trust(t, srv, rivalID, other.app(t, "owner", nil))
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const findings, psps = "/v1/admin/findings", "/v1/admin/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/admin/psps"
 	bearer := func(token string) string { return "Bearer " + token }
 
 	t.Run("accepted", func(t *testing.T) {
-		w := serve(handler, rsRequest{path: findings, authorization: bearer(host.mint(t, nil))})
+		w := serve(handler, rsRequest{path: customers, authorization: bearer(host.mint(t, nil))})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		all := host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })
-		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(all)}).Code)
+		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: customers, authorization: bearer(all)}).Code)
 		w = serve(handler, rsRequest{path: psps, authorization: bearer(all)})
 		require.Equal(t, http.StatusForbidden, w.Code, "its application's role, support, caps merchant:*")
 		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 
 		machine := host.mint(t, func(c jwt.MapClaims) { c["sub"], c["client_id"] = "billing-sync", "billing-sync" })
-		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(machine)}).Code, "a client acting for itself")
+		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: customers, authorization: bearer(machine)}).Code, "a client acting for itself")
 
 		admins := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-admins"} })
-		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(admins)}).Code, "a role its tokens carry maps to a merchant role")
+		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: customers, authorization: bearer(admins)}).Code, "a role its tokens carry maps to a merchant role")
 		none := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") })
-		require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: findings, authorization: bearer(none)}).Code, "no permissions, no access")
+		require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: customers, authorization: bearer(none)}).Code, "no permissions, no access")
 
-		named := serve(handler, rsRequest{path: findings, authorization: bearer(host.mint(t, nil)), header: map[string]string{retiredMerchantHeader: "id:" + rivalID.String()}})
+		named := serve(handler, rsRequest{path: customers, authorization: bearer(host.mint(t, nil)), header: map[string]string{retiredMerchantHeader: "id:" + rivalID.String()}})
 		require.Equal(t, http.StatusOK, named.Code, "a header naming another merchant changes nothing")
 		require.Equal(t, shopID.String(), named.Header().Get("OpenRails-Bound-Merchant"))
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: psps, authorization: bearer(other.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} }))}).Code, "an owner application")
@@ -214,7 +214,7 @@ func TestTrustedIssuerTokens(t *testing.T) {
 			"forged signature": {issuerKey{iss: host.iss, kid: host.kid, key: other.key}.mint(t, nil), http.StatusUnauthorized, billing.CodeAuthenticationRequired},
 			"customer scope":   {host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }), http.StatusForbidden, billing.CodePermissionRequired},
 		} {
-			w := serve(handler, rsRequest{path: findings, authorization: bearer(tc.token)})
+			w := serve(handler, rsRequest{path: customers, authorization: bearer(tc.token)})
 			require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
 			require.Equal(t, tc.code, errorCode(t, w), name)
 			if tc.status == http.StatusUnauthorized {
@@ -257,7 +257,7 @@ func TestTrustedIssuerTokens(t *testing.T) {
 	})
 
 	t.Run("cors", func(t *testing.T) {
-		for _, path := range []string{findings, "/v1/me/entitlements"} {
+		for _, path := range []string{customers, "/v1/me/entitlements"} {
 			w := serve(handler, rsRequest{method: http.MethodOptions, path: path, origin: "https://admin.host.e2e.test"})
 			require.Equal(t, http.StatusNoContent, w.Code)
 			require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
@@ -374,7 +374,7 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 	trust(t, srv, shopID, iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const findings, psps = "/v1/admin/findings", "/v1/admin/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/admin/psps"
 
 	user := authtest.NewUser(t, as.Client)
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(user.ID), admin)
@@ -382,12 +382,12 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 	require.Equal(t, "Bearer", tokens.TokenType)
 	require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: psps, authorization: "Bearer " + tokens.AccessToken}).Code, "a user the issuer grants merchant:*")
 	nobody := as.Authorize(t, authtest.NewUser(t, as.Client), authtest.CodeFlow{ClientID: console, ClientSecret: secret, RedirectURI: callback, Resource: resourceID, Scopes: []string{billing.ScopeMerchant}})
-	w := serve(handler, rsRequest{path: findings, authorization: "Bearer " + nobody.AccessToken})
+	w := serve(handler, rsRequest{path: customers, authorization: "Bearer " + nobody.AccessToken})
 	require.Equal(t, http.StatusForbidden, w.Code, "a user the issuer grants nothing")
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 
 	machine := as.ClientCredentials(t, worker, secret, resourceID, []string{billing.ScopeMerchant}, nil)
-	require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: "Bearer " + machine.AccessToken}).Code)
+	require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: customers, authorization: "Bearer " + machine.AccessToken}).Code)
 	w = serve(handler, rsRequest{path: psps, authorization: "Bearer " + machine.AccessToken})
 	require.Equal(t, http.StatusForbidden, w.Code, "only the client's own grants")
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
