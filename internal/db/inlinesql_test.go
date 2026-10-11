@@ -17,6 +17,7 @@ import (
 // covers a directory) may still hold SQL string literals, each for the reason
 // given; an entry that no longer holds any fails as stale.
 var inlineSQLAllowed = map[string]string{
+	"examples/own-auth/":                           "an example host's own tables, separate module",
 	"internal/db/commit_guard.go":                  "transaction isolation control",
 	"internal/db/sqlaudit/":                        "auditor introspects pg_catalog",
 	"internal/merchantarchive/archive.go":          "profile-driven per-table SQL",
