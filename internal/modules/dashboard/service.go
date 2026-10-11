@@ -11,13 +11,13 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
 // Service persists per-merchant dashboards. Every read and write uses the
 // context's merchant.
 type Service struct{ db *db.DB }
 
+// NewService binds dashboard storage to database.
 func NewService(database *db.DB) *Service { return &Service{db: database} }
 
 // Get returns the merchant's saved dashboard, or the seeded default template

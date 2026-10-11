@@ -8493,112 +8493,6 @@
         ]
       }
     },
-    "/v1/metrics/ask": {
-      "post": {
-        "tags": [
-          "metrics"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AskMetricsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MetricsAnswer"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:metrics:read",
-          "root": "root:metrics:read"
-        },
-        "x-openrails-mounted-when": "metrics_ask",
-        "x-openrails-errors": [
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/metrics/dashboard/widgets/generate": {
-      "post": {
-        "tags": [
-          "metrics"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenerateDashboardWidgetParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeneratedWidget"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:metrics:read",
-          "root": "root:metrics:read"
-        },
-        "x-openrails-mounted-when": "dashboard_generation",
-        "x-openrails-errors": [
-          "dashboard_invalid",
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable",
-          "widget_generation_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/merchant/dashboard": {
       "put": {
         "tags": [
@@ -11387,14 +11281,6 @@
         }
       },
       "AskCatalogParams": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string"
-          }
-        }
-      },
-      "AskMetricsParams": {
         "type": "object",
         "properties": {
           "question": {
@@ -14516,43 +14402,6 @@
           }
         }
       },
-      "GenerateDashboardWidgetParams": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string"
-          },
-          "base_query": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/MetricsQuery"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "GeneratedWidget": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
-          },
-          "title": {
-            "type": "string"
-          },
-          "viz": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "query",
-          "title",
-          "viz"
-        ]
-      },
       "Health": {
         "type": "object",
         "properties": {
@@ -15367,24 +15216,6 @@
           }
         }
       },
-      "MetricsAnswer": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsEvidence"
-            }
-          }
-        },
-        "required": [
-          "answer",
-          "evidence"
-        ]
-      },
       "MetricsColumn": {
         "type": "object",
         "properties": {
@@ -15422,49 +15253,6 @@
         "required": [
           "name",
           "description"
-        ]
-      },
-      "MetricsEvidence": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "columns": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsColumn"
-            }
-          },
-          "rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          },
-          "compare_range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "compare_rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          }
-        },
-        "required": [
-          "query",
-          "range",
-          "columns",
-          "rows"
         ]
       },
       "MetricsExample": {
@@ -22083,11 +21871,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The outbound webhook is invalid."
-    },
-    "widget_generation_invalid": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The model could not produce a valid query for the prompt."
     }
   }
 }

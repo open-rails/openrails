@@ -196,7 +196,6 @@ function MetricsDashboard() {
     <div className="flex flex-col gap-4">
       {header}
 
-
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed">
