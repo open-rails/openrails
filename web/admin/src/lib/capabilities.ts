@@ -80,17 +80,18 @@ const adminTabs = ["customer-controls"]
 // settingsTab is the settings tab shown for the requested one: the first tab
 // when none is requested, the requested one is not shown, or the tabs are not
 // the caller's: the configuration tabs need MerchantConfig, customer controls
-// customer support. hosted are the host extensions' tabs.
+// customer support. others are the rest shown: Roles and the host
+// extensions' tabs.
 export function settingsTab(
   requested: string | null,
   config: boolean,
   admin: boolean,
-  hosted: string[] = []
+  others: string[] = []
 ) {
   const shown = [
     ...(config ? configTabs : []),
     ...(admin ? adminTabs : []),
-    ...hosted,
+    ...others,
   ]
   const first = shown[0] ?? "merchant"
   if (!requested || !shown.includes(requested)) return first

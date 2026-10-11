@@ -1,4 +1,5 @@
 import { toast } from "sonner"
+import { isAuthKitError } from "@openrails/auth-ui/client"
 
 import { ApiError } from "@/lib/api/client"
 
@@ -25,6 +26,16 @@ export function toastApiError(err: unknown, action: string) {
     }
     const label = err.code ? `${action} (${err.code})` : action
     toast.error(label, { description: err.message })
+    return
+  }
+  // AuthKit's own routes (roles, members, API keys) answer in its envelope.
+  if (isAuthKitError(err)) {
+    toast.error(
+      err.status === 403
+        ? `${action}: your role lacks permission`
+        : `${action} (${err.code})`,
+      { description: err.message }
+    )
     return
   }
   toast.error(action, {

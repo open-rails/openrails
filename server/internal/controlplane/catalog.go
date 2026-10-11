@@ -28,10 +28,11 @@ import (
 // root. A merchant IS a merchant group; a customer group is explicit hosted
 // portal membership, keyed by the customer's user id. Every permission the
 // server checks is registered here, because AuthKit refuses a check on an
-// unregistered one.
+// unregistered one. A merchant defines its own roles from its persona's
+// permissions (CustomRoles): least privilege for a program's API key.
 var (
 	Roles           = authkit.NewRoles()
-	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications)
+	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications, authkit.CustomRoles)
 	customerPersona = Roles.Persona(billing.CustomerGroupPersona)
 
 	MerchantType = merchantPersona.Persona
@@ -54,8 +55,9 @@ var (
 		declared(billing.RootMerchantsRead), declared(billing.RootMerchantsDelete), declared(billing.RootMerchantsRestore))
 )
 
-// catalogPerms registers every OpenRails permission. members:* and
-// credentials:* are AuthKit's built-ins and are not declared again.
+// catalogPerms registers every OpenRails permission. members:*,
+// credentials:*, directory:* and roles:* are AuthKit's built-ins and are not
+// declared again.
 var catalogPerms = func() map[string]iam.Perm {
 	out := map[string]iam.Perm{}
 	declare := func(p *authkit.PersonaDef, perms ...string) {
@@ -96,7 +98,9 @@ func MerchantRoles() []iam.Role {
 	return []iam.Role{MerchantViewer, MerchantSupport, MerchantOwner}
 }
 
-// MerchantRole resolves a bare merchant role name ("viewer") from the wire.
+// MerchantRole resolves a bare merchant role name from the wire: a declared
+// role ("viewer") or a merchant's custom role ("custom-storefront"), which
+// AuthKit finds in the merchant's group where it is used.
 func MerchantRole(name string) (iam.Role, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	for _, role := range MerchantRoles() {
@@ -104,7 +108,21 @@ func MerchantRole(name string) (iam.Role, bool) {
 			return role, true
 		}
 	}
-	return iam.Role{}, false
+	if !isCustomRole(name) {
+		return iam.Role{}, false
+	}
+	var role iam.Role
+	if err := role.UnmarshalText([]byte(MerchantType.String() + ":" + name)); err != nil {
+		return iam.Role{}, false
+	}
+	return role, true
+}
+
+// isCustomRole reports whether a bare role name is a custom role's: a
+// merchant's "storefront" is merchant:custom-storefront.
+func isCustomRole(name string) bool {
+	rest, ok := strings.CutPrefix(name, "custom-")
+	return ok && rest != ""
 }
 
 // RoleNames is roles' bare names, as the wire shows them.

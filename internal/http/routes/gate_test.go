@@ -760,7 +760,8 @@ func withInvoker(id billingauth.Identity, invoker billingauth.Invoker) billingau
 
 // The access read answers, for any signed-in caller, each mounted group the
 // caller holds: none, read or update for customer support, and whether the
-// catalog, merchant config and metrics are theirs.
+// catalog, merchant config and metrics are theirs; and the scope they are
+// held in.
 func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 	rt := gatedRuntime(t)
 	read := func(perms Permissions, allowed ...string) billing.AdminAccess {
@@ -774,6 +775,8 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		var access billing.AdminAccess
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &access))
+		require.Equal(t, authtest.Scope.ID, access.ScopeID)
+		access.ScopeID = ""
 		return access
 	}
 	p := staffPermissions

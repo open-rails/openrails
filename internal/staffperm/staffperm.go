@@ -18,11 +18,13 @@ const (
 	EventsRead       = "merchant:events:read"       // Events: host events
 	OrdersManage     = "merchant:orders:manage"     // Orders: merchant orders
 
-	// AuthKit's built-ins on the merchant persona: the team, and the
-	// merchant's API keys.
+	// AuthKit's built-ins on the merchant persona: the team, the merchant's
+	// API keys and the roles it defines.
 	MembersRead       = "merchant:members:read"
 	MembersManage     = "merchant:members:manage"
 	CredentialsManage = "merchant:credentials:manage"
+	RolesRead         = "merchant:roles:read"
+	RolesManage       = "merchant:roles:manage"
 
 	// All is the merchant owner's grant.
 	All = "merchant:*"

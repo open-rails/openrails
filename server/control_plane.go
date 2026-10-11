@@ -71,11 +71,22 @@ const (
 	MerchantOrdersManage     = staffperm.OrdersManage
 )
 
-// MerchantRoles are the roles a merchant's team members and API keys hold
-// in its AuthKit group, least privilege first: viewer, support, owner.
+// AuthKit's built-in permissions over the roles a merchant defines from the
+// permissions above (its persona's CustomRoles), held by the owner: reading
+// what each role grants, and creating, changing and deleting its custom roles.
+const (
+	MerchantRolesRead   = staffperm.RolesRead
+	MerchantRolesManage = staffperm.RolesManage
+)
+
+// MerchantRoles are the roles the server declares for a merchant's team
+// members and API keys, least privilege first: viewer, support, owner. A
+// merchant adds its own (MerchantRole).
 func MerchantRoles() []iam.Role { return controlplane.MerchantRoles() }
 
-// MerchantRole is the merchant role named name ("viewer").
+// MerchantRole is the merchant role named name: a declared one ("viewer"), or
+// a custom role ("custom-storefront", merchant:custom-storefront), which
+// AuthKit looks up in the merchant's group wherever it is used.
 func MerchantRole(name string) (iam.Role, bool) { return controlplane.MerchantRole(name) }
 
 // MerchantScope is where merchant id's staff and credentials hold their

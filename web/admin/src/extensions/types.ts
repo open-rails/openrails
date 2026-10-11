@@ -14,8 +14,8 @@ export interface ConsoleMerchant {
   id: string
   slug: string
   display_name?: string
-  // The member's role on this merchant (owner, support or viewer), when a
-  // host's directory says it.
+  // The member's role on this merchant (owner, support, viewer or a custom
+  // role such as custom-storefront), when a host's directory says it.
   role?: string
 }
 

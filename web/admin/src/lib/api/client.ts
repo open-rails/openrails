@@ -2,7 +2,11 @@
 // mount's config.json (served by the Go binary): standalone defaults are
 // auth=/auth/v1, api=/v1; embedded hosts point at their own bases. The
 // session is auth-ui's: it holds the bearer, refreshes it, and steps up.
-import { AuthKitError, isAuthKitError } from "@openrails/auth-ui/client"
+import {
+  AuthKitError,
+  isAuthKitError,
+  readAuthKitError,
+} from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
 import type { ConsoleMerchant } from "@/extensions/types"
@@ -303,4 +307,33 @@ export async function collectCursorPages<T>(
 export interface CursorEnvelope<T> {
   data: T[]
   next_cursor: string | null
+}
+
+// authKit calls the AuthKit JSON API staff sign in through (auth_base_url):
+// the group routes of the scope their permissions are held in. It throws
+// AuthKitError; a write refused for a stale sign-in opens the step-up dialog
+// and runs again.
+export async function authKit<T>(
+  path: string,
+  opts: Pick<RequestOptions, "method" | "body" | "query" | "signal"> = {}
+): Promise<T> {
+  const method = (opts.method ?? "GET").toUpperCase()
+  const run = async () => {
+    if (!session) throw new Error("console session not bound")
+    const res = await session.authFetch(
+      buildURL(getBootstrap().auth_base_url, path, opts.query),
+      {
+        method,
+        headers:
+          opts.body === undefined
+            ? undefined
+            : { "Content-Type": "application/json" },
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        signal: opts.signal,
+      }
+    )
+    if (!res.ok) throw await readAuthKitError(res)
+    return (res.status === 204 ? undefined : await res.json()) as T
+  }
+  return method === "GET" ? run() : stepUp(run)
 }

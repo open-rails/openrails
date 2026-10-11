@@ -10692,13 +10692,17 @@
           },
           "metrics": {
             "type": "boolean"
+          },
+          "scope_id": {
+            "type": "string"
           }
         },
         "required": [
           "admin",
           "catalog",
           "merchant_config",
-          "metrics"
+          "metrics",
+          "scope_id"
         ]
       },
       "Admission": {

@@ -59,12 +59,14 @@ const BOOTSTRAP = {
 }
 
 // FULL_ACCESS is the access a test's staff member has unless it routes
-// /admin/access itself: every area, with its changes.
+// /admin/access itself: every area, with its changes. No scope: the Roles tab
+// asks AuthKit only where a test names one.
 export const FULL_ACCESS: AdminAccess = {
   admin: "update",
   catalog: true,
   merchant_config: true,
   metrics: true,
+  scope_id: "",
 }
 
 const memoryStorage = (): Storage => {

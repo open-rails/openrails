@@ -27,6 +27,7 @@ export type AdminAccess = {
   catalog: boolean
   merchant_config: boolean
   metrics: boolean
+  scope_id: string
 }
 
 export type Admission = {

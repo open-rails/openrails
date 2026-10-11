@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
@@ -39,8 +40,8 @@ func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id billing.Me
 }
 
 // ListUserMerchants returns the live merchants userID holds a role in,
-// ordered by name, with the user's role there and the permissions AuthKit's
-// catalog gives it.
+// ordered by name, with the user's role there and what it grants: a declared
+// role's from AuthKit's catalog, a custom role's from its merchant's group.
 func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
@@ -68,8 +69,11 @@ func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]
 	out := make([]billing.UserMerchant, 0, len(refs))
 	for _, ref := range refs {
 		role := roles[ref.GroupID]
-		perms, err := c.client.RolePermissions(role)
-		if err != nil {
+		perms, err := c.roleGrants(ctx, ref.GroupID, role)
+		switch {
+		case errors.Is(err, iam.ErrRoleNotFound):
+			continue // deleted since the listing: no longer held
+		case err != nil:
 			return nil, err
 		}
 		names := make([]string, len(perms))
@@ -79,4 +83,13 @@ func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]
 		out = append(out, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: role.Name(), Permissions: names})
 	}
 	return out, nil
+}
+
+// roleGrants is what role grants in group: a custom role is its group's.
+func (c *ControlPlane) roleGrants(ctx context.Context, group string, role iam.Role) ([]iam.Perm, error) {
+	if !isCustomRole(role.Name()) {
+		return c.client.RolePermissions(role)
+	}
+	r, err := c.client.GroupRole(ctx, iam.GroupByID(group), role)
+	return r.Grants, err
 }

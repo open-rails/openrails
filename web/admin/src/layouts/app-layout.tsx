@@ -10,6 +10,7 @@ import { extensionRoute, useExtensions } from "@/extensions/registry"
 import type { AdminAccess } from "@/lib/api/generated/wire"
 import { useAuth } from "@/lib/auth"
 import { hasAnyArea, useAccess } from "@/lib/capabilities"
+import { useRolesAccess } from "@/lib/roles"
 
 // Longest path first: the catalog sub-pages have to match before the section
 // they live under. A trail of more than one entry becomes a real breadcrumb.
@@ -58,6 +59,8 @@ export function AppLayout() {
   const { ready, signedIn, merchants, merchantsFailed } = useAuth()
   const { pathname } = useLocation()
   const access = useAccess()
+  // Someone who manages roles alone still reaches Settings' Roles tab.
+  const roles = useRolesAccess()
   const { extensions } = useExtensions()
   const route = extensionRoute(extensions, pathname)
   const scope = route?.scope ?? "merchant"
@@ -108,7 +111,10 @@ export function AppLayout() {
             <div className="mx-auto w-full max-w-7xl min-w-0">
               {noMerchants && scope === "merchant" ? (
                 <NoMerchants inShell />
-              ) : scope === "merchant" && access && !hasAnyArea(access) ? (
+              ) : scope === "merchant" &&
+                access &&
+                !hasAnyArea(access) &&
+                !(roles && pathname === "/settings") ? (
                 <NoAccess />
               ) : scope === "merchant" &&
                 access &&

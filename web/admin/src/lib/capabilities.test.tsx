@@ -75,6 +75,7 @@ const none: AdminAccess = {
   catalog: false,
   merchant_config: false,
   metrics: false,
+  scope_id: "",
 }
 
 describe("the console's areas", () => {
@@ -119,5 +120,8 @@ describe("the console's areas", () => {
     )
     expect(settingsTab(null, false, false, ["team"])).toBe("team")
     expect(settingsTab("team", true, true)).toBe("merchant")
+    expect(settingsTab("roles", false, true, ["roles", "team"])).toBe("roles")
+    expect(settingsTab(null, false, false, ["roles"])).toBe("roles")
+    expect(settingsTab("roles", true, true)).toBe("merchant")
   })
 })

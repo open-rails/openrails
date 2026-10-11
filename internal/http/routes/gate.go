@@ -1011,6 +1011,7 @@ func adminAccess(e *Env) router.Handler {
 			Catalog:        holds(p.Catalog),
 			MerchantConfig: holds(p.MerchantConfig),
 			Metrics:        holds(p.Metrics),
+			ScopeID:        scope.ID,
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

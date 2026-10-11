@@ -531,7 +531,7 @@
       "type AccessNote struct {\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tCustomerID   CustomerID     `json:\"customer_id\"`\n\tNote         AccessNoteKind `json:\"note\"`\n\tSourceType   string         `json:\"source_type\"`\n\tSourceID     string         `json:\"source_id\"`\n\tEntitlements []string       `json:\"entitlements\"`\n}",
       "type AccessNoteKind string",
       "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
-      "type AdminAccess struct {\n\tAdmin          AccessLevel `json:\"admin\"`\n\tCatalog        bool        `json:\"catalog\"`\n\tMerchantConfig bool        `json:\"merchant_config\"`\n\tMetrics        bool        `json:\"metrics\"`\n}",
+      "type AdminAccess struct {\n\tAdmin          AccessLevel `json:\"admin\"`\n\tCatalog        bool        `json:\"catalog\"`\n\tMerchantConfig bool        `json:\"merchant_config\"`\n\tMetrics        bool        `json:\"metrics\"`\n\tScopeID        string      `json:\"scope_id\"`\n}",
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
       "type AdmissionBatchResult struct {\n\tItems []AdmissionResult `json:\"items\"`\n}",
       "type AdmissionBlock string",
@@ -1133,6 +1133,7 @@
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
       "const (\n\tMerchantBillingRead   = staffperm.BillingRead\n\tMerchantBillingManage = staffperm.BillingManage\n\tMerchantCatalogManage = staffperm.CatalogManage\n\tMerchantConfigManage  = staffperm.ConfigManage\n\tMerchantMetricsRead   = staffperm.MetricsRead\n\n\tMerchantEntitlementsRead = staffperm.EntitlementsRead\n\tMerchantCatalogRead      = staffperm.CatalogRead\n\tMerchantUsageManage      = staffperm.UsageManage\n\tMerchantCostsManage      = staffperm.CostsManage\n\tMerchantEventsRead       = staffperm.EventsRead\n\tMerchantOrdersManage     = staffperm.OrdersManage\n)",
+      "const (\n\tMerchantRolesRead   = staffperm.RolesRead\n\tMerchantRolesManage = staffperm.RolesManage\n)",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) ClaimMerchantAPIHost(ctx context.Context, id billing.MerchantID, host string) (*billing.MerchantAPIHost, error)",
       "func (s *Server) Client() *openrails.Client",

@@ -1080,6 +1080,7 @@ pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
 pkg openrails/billing, type AdminAccess struct, Catalog bool `json:"catalog"`
 pkg openrails/billing, type AdminAccess struct, MerchantConfig bool `json:"merchant_config"`
 pkg openrails/billing, type AdminAccess struct, Metrics bool `json:"metrics"`
+pkg openrails/billing, type AdminAccess struct, ScopeID string `json:"scope_id"`
 pkg openrails/billing, type Admission struct
 pkg openrails/billing, type Admission struct, Allowed bool `json:"allowed"`
 pkg openrails/billing, type Admission struct, BlockedBy *AdmissionBlock `json:"blocked_by"`
@@ -3461,6 +3462,8 @@ pkg openrails/server, const MerchantEntitlementsRead untyped string = "merchant:
 pkg openrails/server, const MerchantEventsRead untyped string = "merchant:events:read"
 pkg openrails/server, const MerchantMetricsRead untyped string = "merchant:metrics:read"
 pkg openrails/server, const MerchantOrdersManage untyped string = "merchant:orders:manage"
+pkg openrails/server, const MerchantRolesManage untyped string = "merchant:roles:manage"
+pkg openrails/server, const MerchantRolesRead untyped string = "merchant:roles:read"
 pkg openrails/server, const MerchantUsageManage untyped string = "merchant:usage:manage"
 pkg openrails/server, func MerchantRole(string) (iam.Role, bool)
 pkg openrails/server, func MerchantRoles() []iam.Role

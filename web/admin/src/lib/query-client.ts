@@ -1,10 +1,15 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { isAuthKitError } from "@openrails/auth-ui/client"
 
 import { ApiError } from "@/lib/api/client"
 import { toastApiError } from "@/lib/toast"
 
 export function shouldRetry(failureCount: number, error: unknown): boolean {
-  if (error instanceof ApiError && error.status < 500) return false
+  if (
+    (error instanceof ApiError || isAuthKitError(error)) &&
+    error.status < 500
+  )
+    return false
   return failureCount < 2
 }
 

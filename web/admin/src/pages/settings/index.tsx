@@ -60,6 +60,7 @@ import {
   useMerchantConfig,
   useMerchantConfigEdits,
 } from "@/lib/capabilities"
+import { useRolesAccess } from "@/lib/roles"
 import { extensionSettingsTabs, useExtensions } from "@/extensions/registry"
 import type { ConsoleSettingsTab } from "@/extensions/types"
 import { useConfigurationEdit } from "./configuration-edit"
@@ -70,6 +71,7 @@ import {
   SettingEditField,
 } from "./setting-fields"
 import { NotificationsTab } from "./notifications"
+import { RolesTab } from "./roles"
 
 const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
@@ -85,7 +87,8 @@ export function SettingsPage() {
     useExtensions().extensions,
     activeMerchant
   )
-  const values = hosted.map((h) => h.value)
+  const roles = useRolesAccess()
+  const values = [...(roles ? ["roles"] : []), ...hosted.map((h) => h.value)]
   const first = settingsTab(null, config, admin, values)
   const tab = settingsTab(params.get("tab"), config, admin, values)
 
@@ -125,6 +128,11 @@ export function SettingsPage() {
               Customer controls
             </TabsTrigger>
           )}
+          {roles && (
+            <TabsTrigger value="roles" className={LINE_TAB}>
+              Roles
+            </TabsTrigger>
+          )}
           {hosted.map((h) => (
             <TabsTrigger key={h.value} value={h.value} className={LINE_TAB}>
               {h.title}
@@ -150,6 +158,11 @@ export function SettingsPage() {
       {admin && (
         <TabsContent value="customer-controls">
           <CustomerControlsTab />
+        </TabsContent>
+      )}
+      {roles && (
+        <TabsContent value="roles">
+          <RolesTab access={roles} />
         </TabsContent>
       )}
       {hosted.map((h) => (

@@ -127,6 +127,7 @@ export const coreSettingsTabs = [
   "notifications",
   "psps",
   "customer-controls",
+  "roles",
 ]
 
 const idPattern = /^[a-z0-9][a-z0-9-]*$/
