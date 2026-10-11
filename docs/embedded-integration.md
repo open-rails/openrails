@@ -396,7 +396,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
 | `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
-| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
+| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Offers`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |

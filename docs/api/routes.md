@@ -116,7 +116,6 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/renewals` | merchant | `AdminRead` | — | 200 `ListPage<Renewal>` |  |
 | GET | `/v1/admin/renewals/{id}` | merchant | `AdminRead` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `AdminRead` | — | 200 `ListPage<PaymentMethod>` |  |
-| POST | `/v1/admin/psps/refresh` | merchant | `AdminUpdate` | — | 202 `PSPRefresh` | sensitive |
 | GET | `/v1/admin/findings` | merchant | `AdminRead` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/admin/findings/{id}` | merchant | `AdminRead` | — | 200 `Finding` |  |
 | POST | `/v1/admin/findings/{id}/resolve` | merchant | `AdminUpdate` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
@@ -163,6 +162,7 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route
 | GET | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | — | 200 `PSP` |  |
 | PATCH | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
 | POST | `/v1/admin/psps/routing-preview` | merchant | `MerchantConfig` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/admin/psps/refresh` | merchant | `MerchantConfig` | — | 202 `PSPRefresh` | sensitive |
 | GET | `/v1/admin/configuration` | merchant | `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/admin/configuration` | merchant | `MerchantConfig` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
 | GET | `/v1/admin/api-host` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |

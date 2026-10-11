@@ -122,7 +122,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/admin/psps/{id}":                                           admin,
 		"PATCH /v1/admin/psps/{id}":                                         admin,
 		"POST /v1/admin/psps/routing-preview":                               admin,
-		"POST /v1/admin/psps/refresh":                                       write,
+		"POST /v1/admin/psps/refresh":                                       admin,
 		"GET /v1/admin/catalog/products":                                    catalog,
 		"GET /v1/admin/catalog/prices/{id}/history":                         catalog,
 		"POST /v1/admin/catalog/applications":                               catalog,
@@ -172,15 +172,14 @@ func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
 }
 
 // The catalog, its reads and edits and price migrations, is Catalog's;
-// customers' credit grants and the PSP refresh are customer support's.
+// customers' credit grants are customer support's.
 func TestCatalogWritePolicy(t *testing.T) {
 	rt := &app.Runtime{Config: &config.Config{}}
 	staff, edits := &router.Table{}, &router.Table{}
 	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
 	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Catalog: "root:catalog:manage"}})
-	for _, key := range []string{"POST /admin/credit-grants", "POST /admin/psps/refresh"} {
-		require.Contains(t, routeKeys(staff), key)
-	}
+	require.Contains(t, routeKeys(staff), "POST /admin/credit-grants")
+	require.NotContains(t, routeKeys(staff), "POST /admin/psps/refresh", "the PSP pull is the merchant configuration's")
 	for _, key := range routeKeys(staff) {
 		_, path, _ := strings.Cut(key, " ")
 		route, ok := Lookup(strings.Fields(key)[0], "/v1"+path)

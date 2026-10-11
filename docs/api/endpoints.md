@@ -332,7 +332,8 @@ automatic revisions starting at zero. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/admin/findings?type=catalog.*` lists the open
 drift findings, each with the `psp_id` that was compared, and
-`POST /v1/admin/psps/refresh` reads every PSP's catalog again.
+`POST /v1/admin/psps/refresh` (merchant configuration) reads every PSP's
+catalog again.
 
 ## PSPs
 

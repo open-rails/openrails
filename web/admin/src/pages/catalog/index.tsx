@@ -61,7 +61,7 @@ import {
   priceIntervalLabel,
 } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
-import { useAdminUpdates, useCatalogWrites } from "@/lib/capabilities"
+import { useCatalogWrites, useMerchantConfig } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
 function catalogCopilotEnabled(): boolean {
@@ -956,8 +956,8 @@ function DriftTab() {
   const queryClient = useQueryClient()
   const { data, isPending: loading } = useQuery(adminQueries.catalogDrift())
   const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
-  // Re-reading the PSPs is customer support's update.
-  const canRefresh = useAdminUpdates()
+  // Re-reading the PSPs is the merchant configuration's.
+  const canRefresh = useMerchantConfig()
 
   return (
     <div className="flex flex-col gap-3">

@@ -61,7 +61,7 @@ so they are `merchant:…`, the server's constants below.
 | `AdminRead` | `root:billing:read` | `server.MerchantBillingRead` | customer support's reads |
 | `AdminUpdate` | `root:billing:manage` | `server.MerchantBillingManage` | refunds, cancellations, credits |
 | `Catalog` | `root:catalog:manage` | `server.MerchantCatalogManage` | catalog edits |
-| `MerchantConfig` | `root:config:manage` | `server.MerchantConfigManage` | PSPs, settings |
+| `MerchantConfig` | `root:config:manage` | `server.MerchantConfigManage` | PSPs and their refresh, settings |
 | `Metrics` | `root:metrics:read` | `server.MerchantMetricsRead` | metrics and their assistants |
 | `Entitlements` | `root:entitlements:read` | `server.MerchantEntitlementsRead` | `POST /v1/app/entitlements/check` |
 | `Offers` | `root:catalog:read` | `server.MerchantCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |

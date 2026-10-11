@@ -7962,7 +7962,7 @@
     "/v1/admin/psps/refresh": {
       "post": {
         "tags": [
-          "admin"
+          "merchant_config"
         ],
         "responses": {
           "202": {
@@ -7985,7 +7985,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminUpdate",
+        "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "service_unavailable"

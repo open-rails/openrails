@@ -28,8 +28,10 @@ var pspsRoutes = []Route{
 	{Method: POST, Path: "/v1/admin/psps/routing-preview", Group: MerchantConfig, Auth: AuthMerchant, Name: "PreviewPSPRouting",
 		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
 	// A refresh rewrites the subscription mirrors from provider truth and
-	// reads each PSP's catalog for drift, which it records as findings.
-	{Method: POST, Path: "/v1/admin/psps/refresh", Group: Admin, Auth: AuthMerchant, Name: "RefreshPSPs", Level: LevelUpdate, Sensitive: true,
+	// reads each PSP's catalog for drift, which it records as findings: a
+	// heavy pull that may overwrite local state, so it is the merchant
+	// configuration's.
+	{Method: POST, Path: "/v1/admin/psps/refresh", Group: MerchantConfig, Auth: AuthMerchant, Name: "RefreshPSPs", Sensitive: true,
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
 
 	// The provider callback surface. The provider's account identity resolves

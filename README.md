@@ -530,7 +530,8 @@ until `RouteGroups` turns it on:
   too, the file skips what an edit changed (below); your Go code can edit the
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
-  PSPs and their credentials, billing import and export, the metrics
+  PSPs and their credentials, pulling the PSPs' state again
+  (`POST /v1/admin/psps/refresh`), billing import and export, the metrics
   dashboard's layout. Callers need `Permissions.MerchantConfig`.
 - `RouteGroups.Metrics`: business metrics, read-only: revenue, sales, usage and
   the dashboard's charts. Callers need `Permissions.Metrics`.
