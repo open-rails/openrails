@@ -655,6 +655,8 @@ pkg openrails/billing, const GrantReasonComp GrantReason = "comp"
 pkg openrails/billing, const GrantReasonImport GrantReason = "import"
 pkg openrails/billing, const GrantReasonMigration GrantReason = "migration"
 pkg openrails/billing, const GrantReasonStaff GrantReason = "staff"
+pkg openrails/billing, const HostEventBalanceDepleted HostEventType = "balance.depleted"
+pkg openrails/billing, const HostEventBalanceLow HostEventType = "balance.low"
 pkg openrails/billing, const HostEventCustomerNetworkLinked HostEventType = "customer.network_linked"
 pkg openrails/billing, const HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
 pkg openrails/billing, const HostEventCustomerPaymentAuthorityRevoked HostEventType = "customer.payment_authority_revoked"
@@ -1186,6 +1188,14 @@ pkg openrails/billing, type Balance struct, CustomerID CustomerID `json:"custome
 pkg openrails/billing, type Balance struct, DepletesAt *time.Time `json:"depletes_at"`
 pkg openrails/billing, type Balance struct, HeldAmount int64 `json:"held_amount,string"`
 pkg openrails/billing, type Balance struct, OwedAmount int64 `json:"owed_amount,string"`
+pkg openrails/billing, type BalanceHostEvent struct
+pkg openrails/billing, type BalanceHostEvent struct, AccrualRatePerHour int64 `json:"accrual_rate_per_hour,string"`
+pkg openrails/billing, type BalanceHostEvent struct, AsOf time.Time `json:"as_of"`
+pkg openrails/billing, type BalanceHostEvent struct, AvailableAmount int64 `json:"available_amount,string"`
+pkg openrails/billing, type BalanceHostEvent struct, Currency string `json:"currency"`
+pkg openrails/billing, type BalanceHostEvent struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type BalanceHostEvent struct, DepletesAt time.Time `json:"depletes_at"`
+pkg openrails/billing, type BalanceHostEvent struct, OwedAmount int64 `json:"owed_amount,string"`
 pkg openrails/billing, type BalanceTransaction struct
 pkg openrails/billing, type BalanceTransaction struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type BalanceTransaction struct, CreatedAt time.Time `json:"created_at"`
@@ -1805,6 +1815,7 @@ pkg openrails/billing, type HeldEntitlements struct, Keys []string `json:"keys"`
 pkg openrails/billing, type HeldEntitlements struct, Truncated bool `json:"truncated"`
 pkg openrails/billing, type HostEvent struct
 pkg openrails/billing, type HostEvent struct, AcknowledgedAt *time.Time `json:"acknowledged_at"`
+pkg openrails/billing, type HostEvent struct, Balance *BalanceHostEvent `json:"balance"`
 pkg openrails/billing, type HostEvent struct, CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
 pkg openrails/billing, type HostEvent struct, Delinquency *DelinquencyHostEvent `json:"delinquency"`
 pkg openrails/billing, type HostEvent struct, ID HostEventID `json:"id"`
@@ -2922,6 +2933,7 @@ pkg openrails/billing, type RunningCharge struct, UpdatedAt time.Time `json:"upd
 pkg openrails/billing, type RunningChargeID [16]byte
 pkg openrails/billing, type RunningChargeListParams struct
 pkg openrails/billing, type RunningChargeListParams struct, CustomerID CustomerID `form:"customer_id"`
+pkg openrails/billing, type RunningChargeListParams struct, Depleted bool `form:"depleted"`
 pkg openrails/billing, type RunningChargeListParams struct, State RunningChargeState `form:"state"`
 pkg openrails/billing, type RunningChargeListParams struct, embedded PageRequest
 pkg openrails/billing, type RunningChargeState string

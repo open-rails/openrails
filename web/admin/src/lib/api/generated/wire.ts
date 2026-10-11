@@ -192,6 +192,16 @@ export type Balance = {
   depletes_at: string | null
 }
 
+export type BalanceHostEvent = {
+  customer_id: string
+  currency: string
+  available_amount: string
+  owed_amount: string
+  accrual_rate_per_hour: string
+  as_of: string
+  depletes_at: string
+}
+
 export type BalanceTransaction = {
   id: string
   customer_id: string
@@ -929,7 +939,7 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "customer.network_linked" | "customer.network_unlinked" | "customer.payment_authority_revoked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "customer.payment_authority_revoked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
@@ -938,6 +948,7 @@ export type HostEvent = {
   order: OrderHostEvent | null
   customer_network: CustomerNetworkHostEvent | null
   payment_authority: PaymentAuthorityHostEvent | null
+  balance: BalanceHostEvent | null
 }
 
 export type HostEventLookup = {

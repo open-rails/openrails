@@ -5814,6 +5814,13 @@
             }
           },
           {
+            "name": "depleted",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -11886,6 +11893,46 @@
           "depletes_at"
         ]
       },
+      "BalanceHostEvent": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "available_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "owed_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "accrual_rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "depletes_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "available_amount",
+          "owed_amount",
+          "accrual_rate_per_hour",
+          "as_of",
+          "depletes_at"
+        ]
+      },
       "BalanceTransaction": {
         "type": "object",
         "properties": {
@@ -15015,6 +15062,8 @@
           "type": {
             "type": "string",
             "enum": [
+              "balance.depleted",
+              "balance.low",
               "customer.network_linked",
               "customer.network_unlinked",
               "customer.payment_authority_revoked",
@@ -15105,6 +15154,16 @@
                 "type": "null"
               }
             ]
+          },
+          "balance": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BalanceHostEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -15118,7 +15177,8 @@
           "product_entitlements",
           "order",
           "customer_network",
-          "payment_authority"
+          "payment_authority",
+          "balance"
         ]
       },
       "HostEventLookup": {
