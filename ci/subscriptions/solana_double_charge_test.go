@@ -13,7 +13,9 @@ import (
 
 // An order whose Solana quote expired unpaid still awaits its wallet, and a
 // transfer landing within the grace credits it: the buyer is never told to
-// pay again for money that may already be on its way.
+// pay again for money that may already be on its way. The poller reads the
+// reference after the quote expired and before the transfer lands, so the
+// read that credits it is a later one.
 func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
@@ -22,8 +24,10 @@ func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 	read := buyer.order(http.MethodGet, "/orders/"+req.order.String(), "", nil)
 	require.Equal(t, "requires_action", paymentOf(read)["status"], "the quote expired but its reference still credits")
 	require.Equal(t, "requires_action", p.w.attemptStatus(req.id))
+	p.eventually(func() bool { return p.nextPoll(req).After(p.w.clock.Now()) }, "read after the quote expired")
+	require.Equal(t, "pending", p.referenceStatus(req), "the reference outlives the quote")
 	p.pay(req, req.amount)
-	p.eventually(func() bool { return p.payments(req) == 1 }, "the transfer is credited")
+	p.until(func() bool { return p.payments(req) == 1 }, "the transfer is credited")
 	p.eventually(func() bool { return p.status(req) == "succeeded" }, "the attempt succeeds")
 }
 

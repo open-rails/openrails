@@ -367,7 +367,7 @@ func TestSolanaPayLatePaymentIsFlagged(t *testing.T) {
 	p := newSolanaPay(t)
 	req := p.checkout(p.w.newCustomer())
 	p.w.clock.Advance(15*time.Minute + 30*time.Minute + time.Minute)
-	p.eventually(func() bool { return p.referenceStatus(req) == "expired" }, "reference expired")
+	p.until(func() bool { return p.referenceStatus(req) == "expired" }, "reference expired")
 
 	late := p.pay(req, req.amount)
 	p.eventually(func() bool {
@@ -481,7 +481,7 @@ func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 	}, "a transfer to someone else is ignored")
 	abandoned := p.checkout(p.w.newCustomer())
 	p.w.clock.Advance(time.Hour)
-	p.eventually(func() bool { return p.referenceStatus(abandoned) == "expired" }, "abandoned checkout expired")
+	p.until(func() bool { return p.referenceStatus(abandoned) == "expired" }, "abandoned checkout expired")
 
 	p.w.clock.Advance(8 * 24 * time.Hour)
 	fresh := p.checkout(p.w.newCustomer())
