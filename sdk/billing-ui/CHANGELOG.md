@@ -1,5 +1,12 @@
 # Changelog
 
+## Apple Pay and Google Pay
+
+- `<OrderCheckout wallets>` offers Apple Pay and Google Pay through a Stripe
+  PSP's Express Checkout Element, above the saved and new cards. Off by
+  default: the page's host must be a payment-method domain registered on that
+  Stripe account.
+
 ## Renewals are orders
 
 - `Order` gains `renewal` (a subscription renewal's period and `due_at`) and

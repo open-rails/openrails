@@ -1,6 +1,7 @@
 // Shows an order and pays it, on the host's own page: a saved card, a new card
-// in the PSP's own fields (charged and saved in one call), or a Solana wallet
-// through a Solana Pay QR. A bank challenge runs in the page, then confirm.
+// in the PSP's own fields (charged and saved in one call), Apple Pay or Google
+// Pay through a Stripe PSP (when asked), or a Solana wallet through a Solana
+// Pay QR. A bank challenge runs in the page, then confirm.
 // Driven only by the order API (GET, pay, confirm) and GET /config; never
 // cancels.
 import * as React from "react"
@@ -21,9 +22,10 @@ import {
   StripeCardEntry,
   type StripeCardHandle,
 } from "./components/stripe-card"
+import { StripeWallets } from "./components/stripe-wallets"
 import { useMessages } from "./i18n/context"
 import { billingDetailsOf } from "./lib/billing"
-import { formatAmount } from "./lib/money"
+import { amountToMinorUnits, formatAmount } from "./lib/money"
 import { loadStripeFor } from "./lib/stripe"
 import { cardSetupDriver, type PspConfig } from "./psp"
 import { useConfig, useCurrencyScales } from "./react/config"
@@ -48,6 +50,12 @@ export interface OrderCheckoutProps {
    * tokens only, so such a PSP is offered for saved cards alone.
    */
   serverCardEntry?: boolean
+  /**
+   * Offer Apple Pay and Google Pay through a Stripe PSP's Express Checkout
+   * Element. The page's host must be a payment-method domain registered on
+   * that Stripe account. Default false.
+   */
+  wallets?: boolean
   /** Once the order is complete, or processing on an asynchronous rail. */
   onSettled?: (order: Order) => void
   appearance?: CheckoutAppearance
@@ -67,6 +75,7 @@ export function OrderCheckout({
   returnUrl,
   savedPaymentMethods = true,
   serverCardEntry = true,
+  wallets = false,
   onSettled,
   appearance,
   className,
@@ -82,6 +91,7 @@ export function OrderCheckout({
   const [pspID, setPspID] = React.useState<string>()
   const [error, setError] = React.useState<string>()
   const [busy, setBusy] = React.useState(false)
+  const [walletShown, setWalletShown] = React.useState(false)
   // One key per pay attempt, minted at render: a retry of the same request
   // answers what the first did. A failed answer mints the next.
   const [key, setKey] = React.useState(() => crypto.randomUUID())
@@ -179,6 +189,13 @@ export function OrderCheckout({
       )
   )
   const tokens = solana ? (config?.payment?.solana?.tokens ?? []) : []
+  const walletPsp = wallets
+    ? cardPsps.find(
+        (item) =>
+          cardSetupDriver(item) === "stripe_elements" &&
+          !!item.config?.publishable_key
+      )
+    : undefined
 
   if (!order)
     return error ? (
@@ -192,23 +209,36 @@ export function OrderCheckout({
   const decimals = scales[order.currency.toUpperCase()] ?? 2
   const money = (amount: string) =>
     formatAmount(amount, order.currency, decimals)
+  const currency = config?.currencies?.find(
+    (item) => item.code.toUpperCase() === order.currency.toUpperCase()
+  )
+  // Stripe takes the total in minor units; a total that is not a whole
+  // number of them is offered no wallet.
+  const walletAmount =
+    walletPsp && currency?.minor_decimals != null
+      ? amountToMinorUnits(
+          order.total,
+          currency.decimals,
+          currency.minor_decimals
+        )
+      : null
 
   // answer applies an order request's answer: settle, run the bank's
   // challenge, or show why the payment failed.
-  const answer = async (result: OrderResult): Promise<void> => {
+  const answer = async (result: OrderResult): Promise<boolean> => {
     setOrder(result.order)
     if (result.error) {
       setError(
         result.order.payment.last_payment_error?.message ?? result.error.message
       )
       setKey(crypto.randomUUID())
-      return
+      return false
     }
     const next = result.order.payment.next_action
-    if (result.order.payment.status !== "requires_action" || !next) return
+    if (result.order.payment.status !== "requires_action" || !next) return true
     if (next.type === "redirect_to_url" && next.url) {
       window.location.assign(next.url)
-      return
+      return true
     }
     const secret = next.payload?.client_secret
     const challenger = config?.payment?.psps.find(
@@ -217,23 +247,27 @@ export function OrderCheckout({
     const publishable = challenger?.config?.publishable_key
     if (next.type !== "authenticate" || !secret || !publishable) {
       setError(m.t("paymentMethods.unavailable"))
-      return
+      return false
     }
-    if (stripeCard.current) await stripeCard.current.handleNextAction(secret)
+    if (stripeCard.current && next.psp_id === psp?.psp_id)
+      await stripeCard.current.handleNextAction(secret)
     else {
       const stripe = await loadStripeFor(publishable)
       const answered = await stripe.handleNextAction({ clientSecret: secret })
       if (answered.error) throw new Error(answered.error.message)
     }
-    await answer(await client.confirmOrder(order.id))
+    return answer(await client.confirmOrder(order.id))
   }
 
-  const pay = async (payment: () => Promise<OrderPaymentInput>) => {
-    if (busy) return
+  // pay answers whether the payment went through (or awaits its rail).
+  const pay = async (
+    payment: () => Promise<OrderPaymentInput>
+  ): Promise<boolean> => {
+    if (busy) return false
     setBusy(true)
     setError(undefined)
     try {
-      await answer(
+      return await answer(
         await client.payOrder(order.id, {
           payment: await payment(),
           expectedTotal: order.total,
@@ -247,6 +281,7 @@ export function OrderCheckout({
           : m.error(cause)
       )
       setKey(crypto.randomUUID())
+      return false
     } finally {
       setBusy(false)
     }
@@ -347,6 +382,22 @@ export function OrderCheckout({
         </form>
       ) : (
         <div className="grid gap-4">
+          {walletPsp && walletAmount ? (
+            <StripeWallets
+              publishableKey={walletPsp.config!.publishable_key!}
+              amount={walletAmount}
+              currency={order.currency}
+              onAvailable={setWalletShown}
+              onPaymentMethod={(method) =>
+                pay(async () => ({ token: method, psp_id: walletPsp.psp_id }))
+              }
+            />
+          ) : null}
+          {walletShown && walletPsp && walletAmount ? (
+            <p className="text-center text-[13px] text-muted-foreground">
+              or pay another way
+            </p>
+          ) : null}
           {saved.length > 0 ? (
             <SavedMethods
               methods={saved}
@@ -390,13 +441,13 @@ export function OrderCheckout({
                   submitLabel={payLabel}
                   disabled={busy || !open}
                   appearance={appearance}
-                  onTokenized={(card: TokenizedCardData) =>
-                    pay(async () => ({
+                  onTokenized={async (card: TokenizedCardData) => {
+                    await pay(async () => ({
                       token: card.payment_token,
                       psp_id: psp.psp_id,
                       billing_details: billingDetailsOf(card),
                     }))
-                  }
+                  }}
                 />
               ) : (
                 <form

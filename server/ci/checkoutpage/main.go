@@ -5,8 +5,9 @@
 // and the fake Stripe, a Turnstile captcha account, the test's clock, the API
 // on one origin and the checkout on another. Test-only: /__test/* on the API
 // origin makes merchant orders with a checkout (as a backend does through
-// POST /v1/app/orders), stands in for Stripe.js's calls to Stripe, moves the
-// clock and reads host events.
+// POST /v1/app/orders), stands in for Stripe.js's calls to Stripe, runs the
+// checkout host's payment-method domain registration, moves the clock and
+// reads host events.
 package main
 
 import (
@@ -32,6 +33,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/openrailstest/stripemock"
@@ -58,6 +62,8 @@ type harness struct {
 	stripe *stripemock.Mock
 	mid    billing.MerchantID
 	api    string
+	// domain is the checkout host's name.
+	domain string
 }
 
 func run(addr, assets, dsn string, lifetime time.Duration) error {
@@ -83,7 +89,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	}
 	defer os.RemoveAll(keys)
 
-	h := &harness{clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), api: api}
+	h := &harness{clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), api: api, domain: "127.0.0.1"}
 	h.nmi = nmimock.New(nmimock.Options{Clock: h.clock.Now})
 	defer h.nmi.Close()
 	h.stripe = stripemock.New(stripemock.Options{Clock: h.clock.Now})
@@ -136,6 +142,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	mux.HandleFunc("GET /__test/host-events", h.hostEvents)
 	mux.HandleFunc("POST /__test/stripe/payment-methods", h.stripeMethod)
 	mux.HandleFunc("POST /__test/stripe/authenticate", h.stripeAuthenticate)
+	mux.HandleFunc("GET /__test/stripe/domains", h.stripeDomains)
 	mux.HandleFunc("GET /__test/thanks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, "<!doctype html><title>Thanks</title><h1>Thanks for order %s</h1>", r.URL.Query().Get("order"))
@@ -229,6 +236,57 @@ func (h *harness) stripeAuthenticate(w http.ResponseWriter, r *http.Request) {
 	}
 	pi, _, _ := strings.Cut(in.ClientSecret, "_secret_")
 	reply(w, http.StatusOK, map[string]any{"authenticated": h.stripe.Authenticate(pi), "payment_intent": pi})
+}
+
+// stripeDomains runs the checkout host's queued registrations as the
+// workers would, then answers the payment-method domains the fake Stripe
+// holds for the merchant's account.
+func (h *harness) stripeDomains(w http.ResponseWriter, r *http.Request) {
+	ctx := merchant.WithID(r.Context(), h.mid)
+	scopes, err := h.rt.Merchants.ActivePSPScopesForRail(ctx, h.mid, string(models.RailStripe), h.rt.Merchants.Environment())
+	if err != nil {
+		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, scope := range scopes {
+		row, err := intents.NewStore(h.rt.DB).GetByIdempotencyKey(ctx, intents.StripePaymentMethodDomainKey(scope.ID, h.domain))
+		if db.IsNotFound(err) {
+			continue
+		}
+		if err == nil && row.Status != intents.StatusSucceeded {
+			_, err = h.rt.IntentRunner().ExecuteByID(ctx, row.ID)
+		}
+		if err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, h.stripe.URL()+"/v1/payment_method_domains", nil)
+	if err != nil {
+		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	req.Header.Set("Authorization", "Bearer sk_test_acct_e2e")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		reply(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer res.Body.Close()
+	var page struct {
+		Data []struct {
+			Domain string `json:"domain_name"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&page); err != nil {
+		reply(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	domains := []string{}
+	for _, d := range page.Data {
+		domains = append(domains, d.Domain)
+	}
+	reply(w, http.StatusOK, map[string]any{"domains": domains})
 }
 
 // advance moves the clock, then expires what is due.

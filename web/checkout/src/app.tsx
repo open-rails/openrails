@@ -71,6 +71,7 @@ export function App({ orderId, secret }: { orderId: string; secret: string | nul
             client={client!}
             savedPaymentMethods={order.checkout?.saved_payment_methods ?? false}
             serverCardEntry={false}
+            wallets
             onSettled={done}
           />
           <CaptchaPrompt />

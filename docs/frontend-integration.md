@@ -329,7 +329,9 @@ chain now.
 
 billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
 card, a new card in the PSP's fields, the PSP's hosted page (`returnUrl`) or a
-Solana wallet, then any `next_action` and `confirm`.
+Solana wallet, then any `next_action` and `confirm`. With `wallets` it offers
+Apple Pay and Google Pay through a Stripe PSP's Express Checkout Element; the
+page's host must be a payment-method domain registered on that Stripe account.
 It uses only the order API and `GET /v1/config`, through the provider's client
 or one passed as `client`.
 

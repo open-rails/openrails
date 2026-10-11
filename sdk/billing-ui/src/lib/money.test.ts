@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   addAmounts,
   amountToDecimal,
+  amountToMinorUnits,
   amountUnits,
   decimalToAmount,
   formatAmount,
@@ -140,5 +141,22 @@ describe("formatAmount on an engine that coerces decimal strings", () => {
     expect(legacy.formatAmount(minInt64, "USD", 6)).toBe(
       "USD amount exceeds this browser's exact display range"
     )
+  })
+})
+
+describe("amountToMinorUnits", () => {
+  it("is the amount Stripe.js is given, in minor units", () => {
+    expect(amountToMinorUnits("12500000", 6, 2)).toBe(1250)
+    expect(amountToMinorUnits("10000", 6, 2)).toBe(1)
+    expect(amountToMinorUnits("500000", 4, 0)).toBe(50)
+    expect(amountToMinorUnits("0", 6, 2)).toBe(0)
+  })
+
+  it("refuses what is not a whole number of minor units", () => {
+    expect(amountToMinorUnits("12500001", 6, 2)).toBeNull()
+    expect(amountToMinorUnits("1", 6, 2)).toBeNull()
+    expect(amountToMinorUnits("12.5", 6, 2)).toBeNull()
+    expect(amountToMinorUnits("100", 2, 6)).toBeNull()
+    expect(amountToMinorUnits(maxInt64, 6, 6)).toBeNull()
   })
 })

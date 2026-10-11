@@ -105,7 +105,7 @@ func HeadersHTTP(policy string) func(http.Handler) http.Handler {
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "no-referrer")
 			h.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
-			h.Set("Permissions-Policy", `payment=(self "https://js.stripe.com"), camera=(), microphone=(), geolocation=()`)
+			h.Set("Permissions-Policy", `payment=(self "https://js.stripe.com" "https://*.js.stripe.com"), camera=(), microphone=(), geolocation=()`)
 			h.Set("Server", "")
 			next.ServeHTTP(w, r)
 		})

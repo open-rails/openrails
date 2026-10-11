@@ -72,13 +72,31 @@ nothing else, and the API's own origin does not accept it. Past the
 checkout's expiry it answers `410 checkout_expired`.
 
 The customer pays with a new card in the PSP's own fields, charged and saved
-in one request, or with a saved card when offered. The page never takes a card
-number itself. A bank's challenge runs in the page. Reads and pays under one
+in one request, with a saved card when offered, or with Apple Pay or Google
+Pay (below). The page never takes a card number itself. A bank's challenge runs in the page. Reads and pays under one
 URL are rate limited, a pay the server challenges asks the customer to solve
 the deployment's captcha, and an order that has had ten cards declined takes
 no more (`409 checkout_attempts_exhausted`).
 
 Fulfil on `order.completed`, never on the redirect to `success_url`.
+
+## Apple Pay and Google Pay
+
+A merchant with a Stripe PSP that has a `publishable_key` is offered Apple Pay
+and Google Pay through Stripe's Express Checkout Element, where the customer's
+browser and wallet support them. The wallet's card is charged as a new card is.
+
+Stripe shows them only on a payment-method domain registered on the merchant's
+account, so declaring a Stripe PSP registers the checkout host there: a
+`stripe_payment_method_domain` provider intent, once per PSP and host. A PSP
+declared before the server served the checkout is registered when its merchant
+next creates an order with a checkout. A domain the account already holds is
+not registered again (its Apple Pay is validated when inactive), and one the
+merchant disabled in Stripe stays disabled. The checkout host serves Stripe's
+Apple Pay domain-association file at
+`/.well-known/apple-developer-merchantid-domain-association`.
+
+NMI's wallets are not offered.
 
 ## The page
 

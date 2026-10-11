@@ -83,6 +83,31 @@ export function amountToDecimal(
   return decimalFromUnits(units, decimals)
 }
 
+// amountToMinorUnits is an amount in the provider's minor units (Stripe's
+// `amount`: "12500000" USD at 6 and 2 -> 1250), or null when the amount is not
+// a whole number of them or leaves the exact range of a JS number.
+export function amountToMinorUnits(
+  amount: Amount,
+  decimals: number,
+  minorDecimals: number
+): number | null {
+  const units = amountUnits(amount)
+  if (
+    units === null ||
+    !isUnitDecimals(decimals) ||
+    !isUnitDecimals(minorDecimals) ||
+    minorDecimals > decimals
+  )
+    return null
+  const scale = 10n ** BigInt(decimals - minorDecimals)
+  if (units % scale !== 0n) return null
+  const minor = units / scale
+  return minor > BigInt(Number.MAX_SAFE_INTEGER) ||
+    minor < -BigInt(Number.MAX_SAFE_INTEGER)
+    ? null
+    : Number(minor)
+}
+
 // decimalToAmount parses a major-unit decimal exactly ("100.25" at 6 ->
 // "100250000"). Excess precision, scientific notation and int64 overflow
 // are refused; input is never rounded or converted through a JS number.

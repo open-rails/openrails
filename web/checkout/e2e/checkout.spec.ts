@@ -50,17 +50,37 @@ window.CollectJS = {
 
 // Stripe.js stands in for Stripe's Payment Element: the customer types a
 // card's last four; its calls to Stripe go to the fake Stripe through the
-// harness (3155 needs the bank's challenge).
+// harness (3155 needs the bank's challenge). Its Express Checkout Element
+// offers Apple Pay, whose card ends 4242.
 const STRIPE_JS = `
 window.Stripe = function () {
   let typed = ""
   return {
     _registerWrapper() {},
-    elements() {
+    elements(options) {
+      ;(window.__stripeElements = window.__stripeElements || []).push(options)
       return {
-        create() {
+        create(type) {
           const handlers = {}
           let input
+          if (type === "expressCheckout") {
+            let button
+            return {
+              on(event, fn) { handlers[event] = fn },
+              mount(host) {
+                button = document.createElement("button")
+                button.type = "button"
+                button.textContent = "Apple Pay"
+                button.addEventListener("click", () => {
+                  typed = "4242"
+                  handlers.confirm({ expressPaymentType: "apple_pay", paymentFailed(why) { window.__walletFailed = why } })
+                })
+                host.appendChild(button)
+                setTimeout(() => handlers.ready({ elementType: "expressCheckout", availablePaymentMethods: { applePay: true, googlePay: false, link: false, paypal: false, klarna: false, amazonPay: false } }), 0)
+              },
+              destroy() { button && button.remove() },
+            }
+          }
           return {
             on(event, fn) { handlers[event] = fn },
             mount(host) {
@@ -196,6 +216,40 @@ test("saved cards appear only where the merchant offers them", async ({ page }) 
   await page.goto(hidden.url)
   await expect(page.getByRole("button", { name: /^Pay \$12\.50/ })).toBeVisible()
   await expect(page.getByRole("radiogroup", { name: "Saved cards" })).toHaveCount(0)
+})
+
+test("pays with Apple Pay through Stripe's Express Checkout Element", async ({ page }) => {
+  const violations = await watchCSP(page)
+  const order = await newOrder()
+  await page.goto(order.url)
+  const wallet = page.getByRole("button", { name: "Apple Pay" })
+  await expect(wallet).toBeVisible()
+  await expect(page.getByText("or pay another way")).toBeVisible()
+  // The total Stripe.js is given: $12.50 in cents.
+  const options = await page.evaluate(() => (window as unknown as { __stripeElements: Record<string, unknown>[] }).__stripeElements)
+  expect(options.filter((o) => o.mode === "payment")).toEqual([
+    expect.objectContaining({ mode: "payment", amount: 1250, currency: "usd", paymentMethodCreation: "manual", paymentMethodTypes: ["card"] }),
+  ])
+  expect(await violations()).toEqual([])
+  stripeCalls.length = 0
+  await wallet.click()
+  await expect(page).toHaveURL(`${api()}/__test/thanks?order=${order.order_id}`)
+  expect(stripeCalls).toEqual(["/v1/payment_methods"])
+  await expect.poll(() => completed(order.order_id)).toBe(true)
+})
+
+test("the checkout host is registered at Stripe and serves Stripe's Apple Pay file", async ({ request }) => {
+  const order = await newOrder()
+  const domains = async () => {
+    const res = await fetch(`${api()}/__test/stripe/domains`)
+    expect(res.status, await res.clone().text()).toBe(200)
+    return ((await res.json()) as { domains: string[] }).domains
+  }
+  await expect.poll(domains).toEqual([new URL(order.url).hostname])
+  const file = await request.get(new URL("/.well-known/apple-developer-merchantid-domain-association", order.url).href)
+  expect(file.status()).toBe(200)
+  // Hex of {"pspId":", Stripe's merchant id with Apple.
+  expect((await file.text()).startsWith("7B2270737049")).toBe(true)
 })
 
 test("a challenged pay is resent with the captcha token", async ({ page }) => {
