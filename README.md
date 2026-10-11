@@ -842,7 +842,7 @@ get a token from your issuer; that token opens nothing else.
 | `POST /billing/v1/app/entitlements/check` | which entitlements a user holds now, up to 100 keys and 10 prefixes at once: gate your content with it (a read; no `Idempotency-Key`) |
 | `POST /billing/v1/app/usage-events` | record metered usage, failed work included |
 | `POST /billing/v1/app/admissions` | admit requests against a customer's budget, holding funds |
-| `POST /billing/v1/app/admissions/{request_id}/capture` | settle one at its actual cost |
+| `POST /billing/v1/app/admissions/capture` | settle them at what the work used, priced by the rate cards |
 | `POST /billing/v1/app/admissions/release`, `/extend` | free holds; move their deadlines |
 | `POST /billing/v1/app/running-charges` | charge a customer at a rate per hour until you stop it |
 | `POST /billing/v1/app/running-charges/{reference}/stop` | stop it and post what it charged |

@@ -468,7 +468,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
+| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`; embedded, in the host's transaction: `AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
 | Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
@@ -487,12 +487,14 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     Invoker:         userID,
     InvokerType:     billing.InvokerTypeDelegated,
     Currency:        "USD",
-    EstimatedAmount: 50_000,    // native units (USD: micros)
-    ExpiresAt:       &deadline, // required with a hold: the job's deadline
+    // the rate cards price the estimate into the hold
+    Usage:     &billing.UsageEstimate{EventType: "chat", Dimensions: map[string]int64{"input_tokens": prompt, "output_tokens": maxTokens}},
+    ExpiresAt: &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
-    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
-})
+receipts, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{
+    RequestID: requestID, // priced by the cards pinned at admission
+    Usage:     &billing.CaptureUsage{EventType: "chat", Dimensions: map[string]int64{"input_tokens": used.Input, "output_tokens": used.Output}},
+}})
 held, err := client.ListEntitlements(ctx, billing.EntitlementListParams{
     CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}, Entitlements: []string{"premium"},
 }) // held.Items is empty when the key is not held

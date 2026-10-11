@@ -3,9 +3,47 @@
 How admissions and their holds behave. The routes are `/v1/app/admissions`
 ([routes](api/routes.md)), your backend's own: they take an application's
 credential and an `Idempotency-Key` on each write. The Go methods are `Admit`,
-`CaptureAdmission`, `ReleaseAdmissions` and `ExtendAdmissions`. Admit,
-release and extend take up to 1,000 items and answer one result per item, each
-decided on its own; capture settles one request.
+`CaptureAdmissions`, `ReleaseAdmissions` and `ExtendAdmissions`. Each takes up
+to 1,000 items and answers one result per item, decided on its own.
+
+## Priced from the catalog
+
+An admit item states the usage it expects, `usage: {event_type, dimensions,
+metadata}` (a call: `{requests: 1}`; an LLM request: `{input_tokens: <prompt>,
+output_tokens: <max_tokens>}`). The rate cards of its event type's meters price
+it at the customer's current period quantities, without advancing them, as
+[usage pricing](usage-pricing.md) prices a recorded event; the price is the
+hold and the answer's `estimated_amount`. The cards that priced it are pinned
+with the admission: its capture pays the price it was admitted at, whatever
+the catalog says later. `usage` and a host-stated `estimated_amount` are
+exclusive; with neither the admission holds nothing. An event type no rate
+card prices, or a matrix gap, is `422 usage_not_priced`.
+
+A capture item (`POST /v1/app/admissions/capture`) names its request and the
+usage the work consumed, `{request_id, usage: {event_type, dimensions,
+metadata, resource, source, source_id}}`; its event type is the admitted one
+(`400 invalid_param` otherwise). The pinned cards price it (the cards in force
+for an admission that pinned none), advancing the customer's period
+quantities, and the usage is recorded as an event with its `charges`. The hold
+leaves the held total and the charges post in one transaction: balance first,
+the rest owed. Priced above the hold, the whole charge posts and the excess is
+owed, never clamped; bound it by the estimate (`max_tokens`). An `amount`
+instead settles at a host-stated price, recording the usage when it is named.
+
+The receipt is `request_id`, `customer_id`, `currency`, `estimated_amount`,
+`amount` (what was charged), `charges`, `usage_event_id`,
+`balance_transaction_id` (the first charge's posting; null when nothing was
+charged) and `replayed`.
+
+## In the host's transaction
+
+Embedded, `AdmitTx`, `CaptureAdmissionsTx` and `ReleaseAdmissionsTx` take a
+transaction from the host's pool on the engine's database: the host's request
+row and its hold, or its finished state and its capture, commit together. No
+outbox, no orphan hold, no ambiguous admit. OpenRails never commits or rolls
+the transaction back; after an error the host rolls back.
+
+## Behaviour
 
 Malformed request IDs (empty or over 255 UTF-8 bytes), negative estimates and negative prospective rates return structured 400 errors before account creation or money locking.
 
@@ -24,13 +62,11 @@ Request reservations and hard spend windows use PostgreSQL under the existing cu
 | Released | Zero | Zero |
 | Captured | Zero | Actual captured amount |
 
-Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. The first capture fixes its amount and usage terms (event type, resource, source/id, dimensions and metadata). Exact retries recover the original receipt; changing or adding usage terms conflicts. If a usage event is requested, its insert shares the capture transaction, so any insert failure rolls back the ledger, state and window update. A usage identity already claimed by another request conflicts; it never silently drops the new usage evidence.
+Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. The first capture fixes its terms (event type, resource, source/id, dimensions, metadata and a host-stated amount) and its charge. Exact retries recover the original receipt, even after a price change; changing or adding terms conflicts (`idempotency_key_reused`). If a usage event is requested, its insert shares the capture transaction, so any insert failure rolls back the ledger, state and window update. A usage identity already claimed by another request conflicts; it never silently drops the new usage evidence.
 
 Extension applies only to a still-open, unexpired request and moves its effective deadline later. The original requested deadline remains part of the immutable request identity. A late worker uses the original operation to record consumed work; it cannot manufacture a new authorization by replaying an expired request with different terms.
 
 Window identity includes merchant, customer, applicable scope/invoker and stable policy key. Limits and duration are not part of identity, so changing them re-evaluates the relevant history without clearing it. Store the exact applicable window keys with admission; fixed-window boundaries remain staggered per customer. Indexed SQL reads sum open estimates and captured amounts in the bounded original window and exclude released requests. There are no mutable financial counter mirrors or repair workers.
-
-Capture returns one shared `CaptureReceipt` in Go and HTTP: request ID, original customer UUID/unit, nonnegative actual amount, optional real ledger-transfer ID, and replay status. A zero-actual receipt creates no ledger transfer. HTTP monetary amounts are decimal strings; Go fields remain `int64`.
 
 All spending paths use one held total: live request estimates, pending refunds of purchased credit, and what the customer's [running charges](running-charges.md) have accrued and not yet posted to the ledger, computed as of the read. Each is counted once. Capture transitions its own request out of held state before posting the charge in the same transaction, preserving every other reservation; a running charge's posting does the same with what it posts.
 
