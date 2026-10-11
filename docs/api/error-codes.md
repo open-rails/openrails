@@ -189,4 +189,3 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |
 | `webhook_invalid` | 400 | `invalid_request_error` | The outbound webhook is invalid. |
-| `widget_generation_invalid` | 422 | `invalid_request_error` | The model could not produce a valid query for the prompt. |

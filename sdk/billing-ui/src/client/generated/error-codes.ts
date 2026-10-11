@@ -184,7 +184,6 @@ export type OpenRailsErrorCode =
   | "usage_rate_card_invalid"
   | "webhook_account_mismatch"
   | "webhook_invalid"
-  | "widget_generation_invalid"
 
 export type OpenRailsErrorType = "api_error" | "authentication_error" | "authorization_error" | "card_error" | "invalid_request_error" | "rate_limit_error"
 
@@ -376,5 +375,4 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   usage_rate_card_invalid: { status: 400, type: "invalid_request_error", meaning: "The usage rate card is invalid." },
   webhook_account_mismatch: { status: 400, type: "invalid_request_error", meaning: "The webhook's account does not match its payload." },
   webhook_invalid: { status: 400, type: "invalid_request_error", meaning: "The outbound webhook is invalid." },
-  widget_generation_invalid: { status: 422, type: "invalid_request_error", meaning: "The model could not produce a valid query for the prompt." },
 }

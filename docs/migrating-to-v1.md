@@ -578,6 +578,8 @@ The unused general-purpose cache dependency and public cache interface are remov
 Hosts no longer supply a cache to construct OpenRails. FX quote caching and the
 shared rate-limit/captcha state remain separate runtime features.
 
+AI dashboard widget authoring is removed and deferred: delete the `dashboard-generate` rate-limit override from deployment configuration. `Client.GenerateDashboardWidget`, its request/response types, the generation endpoint, the `dashboard_generation` capability and `nl_widgets_enabled` console flag no longer exist. The console cannot generate or refine widget queries or turn an Ask answer into a saved widget. Saved/default dashboards, their layout and presentation controls, read-only metrics questions and the catalog copilot remain available. No saved-dashboard data migration is required.
+
 Metrics questions and catalog questions/drafting
 use the normal configurable HTTP feature buckets described in
 [rate limiting](rate-limiting.md). The former separate per-merchant AI daily quota

@@ -51,7 +51,7 @@ export function WidgetEditor({
   onSave: (data: WidgetDraft) => void
 }) {
   const [title, setTitle] = React.useState(initial.title)
-  const [fixedRange, setFixedRange] = React.useState(initial.fixed_range)
+  const [fixedRange, setFixedRange] = React.useState(initial.fixed_range ?? false)
   const [viz, setViz] = React.useState<WidgetViz>(initial.viz)
   const { query } = initial
   const {

@@ -14,9 +14,10 @@ import {
   type Recorded,
   type Reply,
 } from "@/test/harness"
-import { browserEnvironment, mount, unmount } from "@/test/mount"
+import { browserEnvironment, click, mount, unmount } from "@/test/mount"
 
 import { DashboardPage } from "./index"
+import { WidgetEditor } from "./widget-editor"
 import {
   fitGrain,
   rangeDates,
@@ -151,4 +152,24 @@ it("reads and writes the range in the URL", () => {
     "week"
   )
   expect(widgetQuery(today, { preset: "7d" })).toBe(today.query)
+})
+
+
+it("keeps existing widget presentation editable without AI authoring", async () => {
+  routes["POST /admin/metrics/query"] = { range: today.query.range, columns: [], rows: [] }
+  const saved = vi.fn()
+  await mount(
+    <QueryClientProvider client={client()}>
+      <WidgetEditor initial={today} onOpenChange={() => {}} onSave={saved} />
+    </QueryClientProvider>
+  )
+  await vi.waitFor(() => expect(queried()).toHaveLength(1))
+  expect(queried()[0]).toEqual(today.query)
+  expect(document.body.textContent).toContain("Edit widget")
+  expect(document.body.textContent).not.toContain("Generate")
+  expect(document.body.textContent).not.toContain("Refine")
+  expect(document.querySelector("textarea")).toBeNull()
+  await click("Save changes")
+  expect(saved).toHaveBeenCalledWith({ title: today.title, viz: today.viz, fixed_range: true })
+  expect(requests.some((request) => request.path.includes("widgets/generate"))).toBe(false)
 })
