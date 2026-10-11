@@ -36,6 +36,9 @@ type purchase struct {
 	page  http.Handler
 	token string
 	order billing.Order
+	// addr is the customer's client address. Redis-backed abuse limits count
+	// per address and outlive a test, so each customer has its own.
+	addr string
 }
 
 // sell creates s's order through client and opens it as its customer on
@@ -47,7 +50,7 @@ func sell(t *testing.T, bill *openrails.Engine, client *openrails.Client, s sale
 	if err != nil {
 		return nil, err
 	}
-	return (&purchase{t: t, order: *order}).on(bill), nil
+	return (&purchase{t: t, order: *order, addr: freshAddr()}).on(bill), nil
 }
 
 // on is the purchase on bill's mount: any process of its merchant serves
@@ -57,7 +60,7 @@ func (p *purchase) on(bill *openrails.Engine) *purchase {
 	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
 	require.NoError(p.t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth}))
-	return &purchase{t: p.t, page: mux, token: auth.Person(p.order.CustomerID.String()), order: p.order}
+	return &purchase{t: p.t, page: mux, token: auth.Person(p.order.CustomerID.String()), order: p.order, addr: p.addr}
 }
 
 func (p *purchase) call(method, path, key string, body any) (int, []byte) {
@@ -69,6 +72,7 @@ func (p *purchase) call(method, path, key string, body any) (int, []byte) {
 		require.NoError(p.t, err)
 	}
 	req := httptest.NewRequest(method, "/v1/me/orders/"+p.order.ID.String()+path, bytes.NewReader(raw))
+	req.RemoteAddr = p.addr
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	if key != "" {
