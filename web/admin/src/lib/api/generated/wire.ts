@@ -167,10 +167,6 @@ export type AskCatalogParams = {
   question?: string
 }
 
-export type AskMetricsParams = {
-  question?: string
-}
-
 export type Balance = {
   customer_id: string
   currency: string
@@ -1060,11 +1056,6 @@ export type MeterRateCardParams = {
   allowance?: Allowance
 }
 
-export type MetricsAnswer = {
-  answer: string
-  evidence: MetricsEvidence[]
-}
-
 export type MetricsColumn = {
   name: string
   kind: string
@@ -1075,16 +1066,6 @@ export type MetricsDimension = {
   name: string
   description: string
   values?: string[]
-}
-
-export type MetricsEvidence = {
-  query: MetricsQuery
-  grain?: string
-  range: MetricsResultRange
-  columns: MetricsColumn[]
-  rows: unknown[][]
-  compare_range?: MetricsResultRange
-  compare_rows?: unknown[][]
 }
 
 export type MetricsExample = {
