@@ -438,6 +438,10 @@ export type CheckoutRoutingRule = {
   prefer: string[]
 }
 
+export type ConfirmOrderParams = {
+  signature?: string
+}
+
 export type CreateAlertWebhookParams = {
   name?: string
   url?: string

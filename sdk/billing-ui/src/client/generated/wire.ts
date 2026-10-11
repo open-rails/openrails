@@ -112,6 +112,10 @@ export type Cart = {
   expires_at: string | null
 }
 
+export type ConfirmOrderParams = {
+  signature?: string
+}
+
 export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
   cart?: boolean
