@@ -126,7 +126,7 @@ const (
 
 	// saleRows / mirror rows: a sale row has refunded_payment_id NULL; refund and
 	// chargeback mirrors carry refunded_payment_id + reversal_kind.
-	saleSettled = `p.status IN ('completed','refunded') AND p.refunded_payment_id IS NULL`
+	saleSettled = `p.status IN ('succeeded','refunded') AND p.refunded_payment_id IS NULL`
 )
 
 // Dimensions is the dimension registry.
@@ -540,17 +540,17 @@ var Measures = []Measure{
 	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "gross_revenue minus refunds and chargebacks (net of returns, NOT net of fees); Stripe's 'net volume'",
 		Formula:     "gross_revenue - refunds - chargebacks",
-		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('completed','refunded')), 0)::bigint`,
+		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('succeeded','refunded')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
 	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "sum of refunded amounts (native currency units, positive), from refund mirror rows",
 		Formula:     "SUM(amount) of refunds",
-		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund'), 0)::bigint`,
+		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'refund'), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "sum of chargeback amounts (native currency units, positive), net of won disputes",
 		Formula:     "SUM(amount) of chargebacks and dispute reversals",
-		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
+		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	// --- payments: additive counts -------------------------------------------
 	{Name: "payment_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
@@ -561,12 +561,12 @@ var Measures = []Measure{
 	{Name: "refund_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
 		Description: "count of refunds issued",
 		Formula:     "COUNT(refunds)",
-		Expr:        `COUNT(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund')`,
+		Expr:        `COUNT(*) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'refund')`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	{Name: "chargeback_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
 		Description: "count of chargebacks/disputes received",
 		Formula:     "COUNT(chargebacks)",
-		Expr:        `COUNT(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'chargeback')`,
+		Expr:        `COUNT(*) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'chargeback')`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	// --- payments: distinct ---------------------------------------------------
 	{Name: "unique_rebilled_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count",
