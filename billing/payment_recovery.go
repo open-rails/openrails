@@ -15,6 +15,9 @@ type PaymentRecovery struct {
 	Retryable         bool              `json:"retryable"`
 	BlockedReason     string            `json:"blocked_reason,omitempty"`
 	Operation         *PaymentOperation `json:"operation,omitempty"`
+	// OrderID is an engine-owned subscription's unpaid renewal: the order its
+	// customer pays (POST /v1/me/orders/{id}/pay) or confirms.
+	OrderID *OrderID `json:"order_id,omitempty"`
 }
 
 type PaymentOperation struct {

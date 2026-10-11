@@ -2,60 +2,26 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/decline"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-// This is a view of the existing engine operation, never authority to submit.
-// Admission repeats payer, lifecycle, released-period and instrument checks.
+// An engine-owned subscription's unpaid renewal is an order: the recovery
+// names it, and its payment says what the customer can do. A view, never
+// authority to charge: paying the order checks everything again.
 func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Subscription) (*billing.PaymentRecovery, error) {
 	out := &billing.PaymentRecovery{}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	q := s.rt.DB.Gen(ctx)
-	current, err := q.GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID})
-	if err == nil {
-		p, err := subscriptions.DecodeSubscriptionCollectionPayload(current)
-		if err != nil {
-			return nil, err
-		}
-		if p.Renewal.CustomerID != sub.CustomerID || p.Renewal.SubscriptionID != sub.ID {
-			return nil, errors.New("engine recovery operation scope mismatch")
-		}
-		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(current.ID), Status: current.Status}
-		out.BlockedReason = "payment_in_progress"
-		if intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
-			out.BlockedReason = "authentication_required"
-		}
-		return out, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
-	if !subscriptions.EngineCollectionDue(sub, s.now().UTC(), true) {
-		out.BlockedReason = "subscription_not_retryable"
-		return out, nil
-	}
-	if (writeposture.View{Config: s.rt.Config, DB: s.rt.DB}).Posture(ctx, mid.UUID()).ReadOnly() {
-		out.BlockedReason = "provider_writes_disabled"
-		return out, nil
-	}
-	if s.rt.Config.EngineAdmissionHold {
-		out.BlockedReason = "engine_payment_admission_held"
-		return out, nil
-	}
-	latest, err := q.GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID, PreviousPeriodEnd: *sub.CurrentPeriodEndsAt})
+	order, err := s.rt.DB.Gen(ctx).GetOpenRenewalOrder(ctx, gen.GetOpenRenewalOrderParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
@@ -63,41 +29,19 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	if err != nil {
 		return nil, err
 	}
-	if latest.Status != intents.StatusFailedTerminal {
+	id := billing.OrderID(order.ID)
+	out.OrderID = &id
+	switch billing.OrderPaymentStatus(order.PaymentStatus) {
+	case billing.OrderPaymentRequiresAction:
+		out.BlockedReason = "authentication_required"
+	case billing.OrderPaymentProcessing:
 		out.BlockedReason = "payment_in_progress"
-		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(latest.ID), Status: latest.Status}
-		return out, nil
-	}
-	if err := intents.ValidateSubscriptionCollectionTerminal(latest); err != nil {
-		return nil, err
-	}
-	accepted, err := subscriptions.DecodeSubscriptionCollectionPayload(latest)
-	if err != nil {
-		return nil, err
-	}
-	if accepted.Renewal.CustomerID != sub.CustomerID || !accepted.PreviousPeriodEnd.Equal(*sub.CurrentPeriodEndsAt) {
-		return nil, errors.New("engine refusal does not match current period")
-	}
-	var refusal *CustomerPaymentRefusal
-	err = customerPaymentRefusal(latest)
-	if errors.As(err, &refusal) {
-		if accepted.Instrument.PSPID == sub.PspID && latest.Rail == string(sub.Rail) {
-			out.LastFailureReason = decline.ReasonFor(latest.Rail, refusal.Code)
+	default:
+		out.Retryable = true
+		var failure billing.PaymentFailure
+		if len(order.LastPaymentError) > 0 && json.Unmarshal(order.LastPaymentError, &failure) == nil {
+			out.LastFailureReason = failure.Reason
 		}
-	} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
-		return nil, err
 	}
-	if err := s.moneyService().EngineCustomerRetryEligibility(ctx, sub); err != nil {
-		switch {
-		case errors.Is(err, intents.ErrRebillUnsupported):
-			out.BlockedReason = "customer_payment_unsupported"
-		case errors.Is(err, intents.ErrRebillNotRetryable):
-			out.BlockedReason = "subscription_not_retryable"
-		default:
-			return nil, err
-		}
-		return out, nil
-	}
-	out.Retryable = true
 	return out, nil
 }

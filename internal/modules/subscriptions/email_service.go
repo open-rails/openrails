@@ -163,6 +163,23 @@ func (s *EmailService) SendPaymentMethodUpdateRequired(ctx context.Context, user
 	return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
+// SendPaymentAuthenticationRequired asks the customer to confirm a renewal's
+// payment their bank wants authenticated, on the merchant's site.
+func (s *EmailService) SendPaymentAuthenticationRequired(ctx context.Context, notification *models.NotificationQueue) error {
+	if !s.IsEnabled() {
+		return nil
+	}
+	emailData, err := s.getEmailData(ctx, notification.CustomerID.String())
+	if err != nil {
+		if errors.Is(err, errUserEmailUnavailable) {
+			return nil
+		}
+		return fmt.Errorf("failed to get email data: %w", err)
+	}
+	rendered := RenderPaymentAuthenticationRequiredEmail(s.storeName(ctx), s.signupURL(ctx), emailData.Username, notification.Data)
+	return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
 func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
 	rendered := RenderPaymentFailedEmail(s.storeName(ctx), "", data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)

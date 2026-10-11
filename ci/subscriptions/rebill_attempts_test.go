@@ -80,27 +80,6 @@ func TestEngineRebillAttempts(t *testing.T) {
 	}
 }
 
-// The member pays a declined renewal themselves: a customer retry.
-func TestEngineRebillCustomerRetry(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	e := enroll(t, w, "nmi", embedded)
-	e.refreshBeforePeriodEnd()
-	e.setDecline(visa.Last4, "", "202")
-	e.toPeriodEnd()
-	w.runRenewals()
-	require.Equal(t, billing.SubscriptionPastDue, w.subscription(e.tp, e.sub).Status)
-	e.setDecline(visa.Last4, "", "")
-	e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/retry-now", "retry-"+uuid.NewString(), map[string]any{})
-	w.settle()
-	require.Equal(t, billing.SubscriptionActive, w.subscription(e.tp, e.sub).Status)
-	rows := w.cycleAttempts(e.sub)
-	require.Len(t, rows, 2)
-	require.Equal(t, []string{"rebill", "customer_retry"}, []string{rows[0].Kind, rows[1].Kind})
-	require.Equal(t, "approved", rows[1].Category)
-	require.Equal(t, rows[0].Cycle, rows[1].Cycle)
-}
-
 // NMI declines its own scheduled charge and OpenRails' retry collects it: the
 // NMI charge is the cycle's rebill, observed through the webhook, and the
 // retry is OpenRails' dunning.

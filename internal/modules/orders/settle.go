@@ -495,7 +495,7 @@ func (s *Service) RecordRemittance(ctx context.Context, in Remittance) (payment 
 			return ErrRecurringLine
 		case order.AwaitsCustomer() || order.Status == string(billing.OrderProcessing):
 			return ErrInProgress
-		case order.Status != string(billing.OrderOpen) || !order.ExpiresAt.After(now):
+		case !Payable(order.BillingOrder, now):
 			return ErrNotPayable
 		case in.Amount != order.Total:
 			return ErrAmountNotTotal

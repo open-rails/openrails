@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -465,6 +466,17 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+		if err := h.renewMembership(ctx, d, in, p, retained, params, sub); err != nil {
+			return err
+		}
+		return h.renewalOrderPaid(ctx, d, in, p, retained.TransactionID())
+	})
+}
+
+// renewMembership applies a paid renewal to its subscription: the next
+// period, or, when the lifecycle moved on, the payment kept for review.
+func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, retained intents.CollectedReceipt, params *subscriptions.RenewMembershipParams, sub *models.Subscription) error {
+	{
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: retained.TransactionID()}, h.now()); err != nil {
 			return err
 		}
@@ -493,7 +505,7 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 			return intents.RefundChargeAfterCancel(ctx, d, payment, h.Clock)
 		}
 		return h.lifecycle(d).RenewMembership(ctx, params)
-	})
+	}
 }
 func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
@@ -505,6 +517,15 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			return err
 		}
 		reason := decline.ReasonFor(in.Rail, code)
+		failure := billing.DeclineReason(reason).Failure()
+		if in.Rail == "stripe" && code == "canceled" {
+			failure = billing.DeclineReason("authentication_required").Failure()
+		}
+		// The order is open again before the subscription's dunning runs, so
+		// a subscription that ends voids it.
+		if err := h.renewalOrderUnpaid(ctx, d, in, p, failure); err != nil {
+			return err
+		}
 		failures := 0
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
@@ -537,7 +558,9 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 		}
 	}
 	outcome := intents.TerminalWithEvidence(reason, map[string]any{"not_executed": true, "declined": false, "not_executed_code": code})
-	return h.completion(ctx, in, p, outcome, func(context.Context, *db.DB, *models.Subscription) error { return nil })
+	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, _ *models.Subscription) error {
+		return h.renewalOrderUnpaid(ctx, d, in, p, billing.DeclineReason("try_again_later").Failure())
+	})
 }
 
 var _ intents.Handler = (*SubscriptionCollectionHandler)(nil)

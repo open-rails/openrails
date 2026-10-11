@@ -132,6 +132,8 @@ export const paymentRecoverySchema = z.object({
   retryable: z.boolean(),
   blocked_reason: z.string().nullish(),
   operation: paymentOperationSchema.nullish(),
+  /** An engine-owned subscription's unpaid renewal: the order to pay. */
+  order_id: z.string().nullish(),
 })
 export type PaymentRecovery = z.infer<typeof paymentRecoverySchema>
 
@@ -313,9 +315,10 @@ export const orderLineSchema = z.object({
 export type OrderLine = z.infer<typeof orderLineSchema>
 
 /**
- * A purchase: frozen lines and total, read and paid by its own customer.
- * `status` is the order's (`open | processing | complete | canceled |
- * expired`); `payment.status` its payment's (`requires_payment_method |
+ * A purchase, or a subscription's renewal (`origin: subscription`): frozen
+ * lines and total, read and paid by its own customer. `status` is the
+ * order's (`open | processing | complete | canceled | expired | void`);
+ * `payment.status` its payment's (`requires_payment_method |
  * requires_action | processing | succeeded`).
  */
 export const orderSchema = z.object({
@@ -348,16 +351,24 @@ export const orderSchema = z.object({
   checkout: z
     .object({
       url: z.string().nullish(),
-      expires_at: time,
-      success_url: z.string(),
+          success_url: z.string(),
       cancel_url: z.string().nullish(),
       saved_payment_methods: z.boolean(),
     })
     .nullish(),
-  expires_at: time,
+  renewal: z
+    .object({
+      subscription_id: z.string(),
+      period_starts_at: time,
+      period_ends_at: time,
+      due_at: time,
+    })
+    .nullish(),
+  expires_at: time.nullish(),
   completed_at: time.nullish(),
   canceled_at: time.nullish(),
   expired_at: time.nullish(),
+  voided_at: time.nullish(),
   created_at: time,
 })
 export type Order = z.infer<typeof orderSchema>

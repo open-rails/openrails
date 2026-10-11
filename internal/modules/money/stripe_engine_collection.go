@@ -144,6 +144,9 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 		if h.now().After(deadline) {
 			return intents.Retryable("abandoned authentication requires gated cancellation of the existing payment")
 		}
+		if err := h.renewalAwaitsCustomer(ctx, in, p); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
 		return intents.AmbiguousWithEvidence("Stripe engine payment requires customer authentication of the existing payment", map[string]any{"authentication_required": true, "stripe_payment_intent_id": result.PaymentIntentID})
 	case subscriptions.StripeEngineDeclined:
 		if result.FailureCode != "canceled" {

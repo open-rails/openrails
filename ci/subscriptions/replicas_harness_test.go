@@ -794,9 +794,41 @@ func (r *world) post(rail string, payload any) (int, error) {
 	return res.StatusCode, nil
 }
 
-// retryNow is the member's "pay now" on r, off the test goroutine.
-func (r *world) retryNow(c *customer, sub billing.SubscriptionID, key string) (int, string, error) {
-	req, err := http.NewRequest(http.MethodPost, r.server.URL+mountPrefix+"/v1/me/subscriptions/"+sub.String()+"/retry-now", strings.NewReader("{}"))
+// payRenewal is the member paying their open renewal order with method on
+// r, off the test goroutine; nothing left to pay answers 409.
+func (r *world) payRenewal(c *customer, sub billing.SubscriptionID, method, key string) (int, string, error) {
+	get := func(path string) (map[string]any, error) {
+		req, err := http.NewRequest(http.MethodGet, r.server.URL+mountPrefix+"/v1/me"+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		res, err := replicaHTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer res.Body.Close()
+		out := map[string]any{}
+		return out, json.NewDecoder(res.Body).Decode(&out)
+	}
+	view, err := get("/subscriptions/" + sub.String())
+	if err != nil {
+		return 0, "", err
+	}
+	recovery, _ := unwrap(view)["recovery"].(map[string]any)
+	id, _ := recovery["order_id"].(string)
+	if id == "" {
+		return http.StatusConflict, "no open renewal order", nil
+	}
+	order, err := get("/orders/" + id)
+	if err != nil {
+		return 0, "", err
+	}
+	body, err := json.Marshal(map[string]any{"payment": map[string]any{"payment_method_id": method}, "expected_total": order["total"]})
+	if err != nil {
+		return 0, "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, r.server.URL+mountPrefix+"/v1/me/orders/"+id+"/pay", bytes.NewReader(body))
 	if err != nil {
 		return 0, "", err
 	}

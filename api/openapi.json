@@ -873,6 +873,7 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
+          "payment_provider_rejected",
           "quantity_not_allowed",
           "resource_conflict",
           "resource_not_found",
@@ -900,6 +901,34 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscription_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -944,6 +973,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "invalid_cursor",
+          "invalid_query",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -1063,6 +1093,7 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
+          "payment_provider_rejected",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -1486,6 +1517,20 @@
             }
           },
           {
+            "name": "origin",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "price_id",
             "in": "query",
             "schema": {
@@ -1494,6 +1539,13 @@
           },
           {
             "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscription_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -8652,66 +8704,6 @@
         ]
       }
     },
-    "/v1/me/payment-methods/{id}/verify": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_not_usable",
-          "payment_method_update_unsupported",
-          "payment_provider_rejected",
-          "provider_outcome_unknown",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
     "/v1/me/payment-methods/{id}/confirm": {
       "post": {
         "tags": [
@@ -15466,6 +15458,7 @@
               "order.expired",
               "order.payment_failed",
               "order.requires_action",
+              "order.voided",
               "payment.settled",
               "product.entitlements_changed"
             ]
@@ -17339,7 +17332,8 @@
             "type": "string",
             "enum": [
               "customer",
-              "merchant"
+              "merchant",
+              "subscription"
             ]
           },
           "status": {
@@ -17349,7 +17343,8 @@
               "complete",
               "expired",
               "open",
-              "processing"
+              "processing",
+              "void"
             ]
           },
           "number": {
@@ -17394,9 +17389,26 @@
               }
             ]
           },
+          "renewal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderRenewal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expires_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "completed_at": {
             "oneOf": [
@@ -17431,6 +17443,17 @@
               }
             ]
           },
+          "voided_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -17448,10 +17471,12 @@
           "payment",
           "payment_options",
           "checkout",
+          "renewal",
           "expires_at",
           "completed_at",
           "canceled_at",
           "expired_at",
+          "voided_at",
           "created_at"
         ]
       },
@@ -17531,7 +17556,8 @@
               "complete",
               "expired",
               "open",
-              "processing"
+              "processing",
+              "void"
             ]
           },
           "payment_status": {
@@ -17947,6 +17973,32 @@
           "billing_interval_hours",
           "access_duration_hours",
           "refusal"
+        ]
+      },
+      "OrderRenewal": {
+        "type": "object",
+        "properties": {
+          "subscription_id": {
+            "type": "string"
+          },
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "subscription_id",
+          "period_starts_at",
+          "period_ends_at",
+          "due_at"
         ]
       },
       "PSP": {
@@ -19102,6 +19154,9 @@
           },
           "operation": {
             "$ref": "#/components/schemas/PaymentOperation"
+          },
+          "order_id": {
+            "type": "string"
           }
         },
         "required": [

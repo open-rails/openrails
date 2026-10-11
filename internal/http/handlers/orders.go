@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -16,6 +17,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -234,12 +236,15 @@ func ListMyOrders(r *httprequest.Request) {
 	if actor == nil {
 		return
 	}
-	page, ok := r.Page()
-	svc := orderService(r)
-	if !ok || svc == nil {
+	params, ok := orderListQuery(r, false)
+	if !ok {
 		return
 	}
-	out, err := svc.ListOrders(r.Request.Context(), *actor, billing.OrderListParams{PageRequest: page})
+	svc := orderService(r)
+	if svc == nil {
+		return
+	}
+	out, err := svc.ListOrders(r.Request.Context(), *actor, params)
 	if err != nil {
 		writeOrderError(r, err)
 		return
@@ -250,27 +255,8 @@ func ListMyOrders(r *httprequest.Request) {
 
 // ListOrders handles GET /v1/admin/orders.
 func ListOrders(r *httprequest.Request) {
-	page, ok := r.Page()
+	params, ok := orderListQuery(r, true)
 	if !ok {
-		return
-	}
-	params := billing.OrderListParams{PageRequest: page, Status: billing.OrderStatus(strings.TrimSpace(r.Query("status")))}
-	switch params.Status {
-	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired:
-	default:
-		r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
-		return
-	}
-	for name, parse := range map[string]func(string) error{
-		"customer_id": func(v string) (err error) { params.CustomerID, err = billing.ParseCustomerID(v); return },
-		"price_id":    func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },
-	} {
-		if raw := strings.TrimSpace(r.Query(name)); raw != "" && parse(raw) != nil {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
-			return
-		}
-	}
-	if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
 		return
 	}
 	svc := orderService(r)
@@ -317,9 +303,14 @@ func writeOrderError(r *httprequest.Request, err error) {
 		return
 	}
 	var blocked *checkout.CardAttemptsBlockedError
+	var refused *paymentmethods.PaymentMethodError
 	switch {
 	case errors.As(err, &blocked):
 		writeCardAttemptsBlocked(r, blocked.RetryAfter)
+	case errors.As(err, &refused):
+		writePaymentMethodError(r, refused)
+	case errors.Is(err, pgx.ErrNoRows):
+		r.ErrorCode(billing.CodeResourceNotFound, "")
 	case errors.Is(err, checkout.ErrPaymentMethodStale):
 		writePaymentMethodStale(r)
 	case errors.Is(err, billing.ErrIdempotencyKeyReused):
@@ -432,4 +423,53 @@ func checkoutPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
 		return false
 	}
 	return true
+}
+
+// orderListQuery reads an order list's filters; customer_id, price_id and
+// ids are the merchant's.
+func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListParams, bool) {
+	page, ok := r.Page()
+	if !ok {
+		return billing.OrderListParams{}, false
+	}
+	params := billing.OrderListParams{PageRequest: page, Status: billing.OrderStatus(strings.TrimSpace(r.Query("status"))), Origin: billing.OrderOrigin(strings.TrimSpace(r.Query("origin")))}
+	switch params.Status {
+	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired, billing.OrderVoid:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
+		return params, false
+	}
+	switch params.Origin {
+	case "", billing.OrderOriginCustomer, billing.OrderOriginMerchant, billing.OrderOriginSubscription:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "origin is invalid").WithParam("origin"))
+		return params, false
+	}
+	switch strings.TrimSpace(r.Query("overdue")) {
+	case "", "false":
+	case "true":
+		params.Overdue = true
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "overdue is true or false").WithParam("overdue"))
+		return params, false
+	}
+	parsers := map[string]func(string) error{
+		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
+	}
+	if merchant {
+		parsers["customer_id"] = func(v string) (err error) { params.CustomerID, err = billing.ParseCustomerID(v); return }
+		parsers["price_id"] = func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return }
+	}
+	for name, parse := range parsers {
+		if raw := strings.TrimSpace(r.Query(name)); raw != "" && parse(raw) != nil {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
+			return params, false
+		}
+	}
+	if merchant {
+		if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
+			return params, false
+		}
+	}
+	return params, true
 }

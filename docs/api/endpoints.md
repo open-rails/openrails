@@ -275,8 +275,9 @@ default not set is `400 default_payment_method_required`.
 A merchant reads a customer's cards and may delete one; it can never create or
 change one.
 
-A customer pays an open invoice (`POST /v1/me/invoices/{id}/pay-now`) or
-retries a past-due subscription (`POST /v1/me/subscriptions/{id}/retry-now`)
+A customer pays an open invoice (`POST /v1/me/invoices/{id}/pay-now`), an
+open renewal order (`POST /v1/me/orders/{id}/pay`) or retries a past-due
+subscription the PSP schedules (`POST /v1/me/subscriptions/{id}/retry-now`)
 with a saved card and an `Idempotency-Key`: `200` complete, `202` unresolved, a
 coded `402` refusal. See [customer payment recovery](../architecture/customer-payment-recovery.md).
 

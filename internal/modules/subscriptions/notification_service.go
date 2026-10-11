@@ -186,6 +186,8 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	case models.NotificationPaymentMethodUpdateRequired:
 		// Bucket 2: charging stopped, access retained, customer must act.
 		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
+	case models.NotificationPaymentAuthenticationRequired:
+		return s.emailService.SendPaymentAuthenticationRequired(ctx, notification)
 	default:
 		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")
 		return nil

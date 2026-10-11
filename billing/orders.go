@@ -8,7 +8,8 @@ import (
 
 // OrderStatus is where an order stands, as Stripe's Order: open (it takes
 // payment or awaits the customer's action), processing (the provider has its
-// payment), complete (paid and fulfilled), canceled or expired.
+// payment), complete (paid and fulfilled), canceled or expired (a purchase
+// closed unpaid), or void (a renewal its subscription's end left unowed).
 type OrderStatus string
 
 const (
@@ -17,6 +18,7 @@ const (
 	OrderComplete   OrderStatus = "complete"
 	OrderCanceled   OrderStatus = "canceled"
 	OrderExpired    OrderStatus = "expired"
+	OrderVoid       OrderStatus = "void"
 )
 
 // OrderPaymentStatus is where an order's payment stands, as a Stripe
@@ -38,6 +40,11 @@ type OrderOrigin string
 const (
 	OrderOriginCustomer OrderOrigin = "customer"
 	OrderOriginMerchant OrderOrigin = "merchant"
+	// OrderOriginSubscription is a renewal of an engine-owned subscription:
+	// one per period, due when it starts. Its automatic collection and
+	// retries are its attempts; a failed one leaves it open for the customer
+	// to pay.
+	OrderOriginSubscription OrderOrigin = "subscription"
 )
 
 // MaxOrderLines bounds one order.
@@ -147,12 +154,26 @@ type Order struct {
 	// PaymentOptions are the PSPs that can take this order while it is open.
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`
 	// Checkout is the order's hosted checkout; null without one.
-	Checkout    *OrderCheckout `json:"checkout"`
-	ExpiresAt   time.Time      `json:"expires_at"`
-	CompletedAt *time.Time     `json:"completed_at"`
-	CanceledAt  *time.Time     `json:"canceled_at"`
-	ExpiredAt   *time.Time     `json:"expired_at"`
-	CreatedAt   time.Time      `json:"created_at"`
+	Checkout *OrderCheckout `json:"checkout"`
+	// Renewal is the subscription period a renewal order (origin
+	// subscription) bills; null on a purchase.
+	Renewal *OrderRenewal `json:"renewal"`
+	// ExpiresAt is when an unpaid purchase expires; a renewal has none.
+	ExpiresAt   *time.Time `json:"expires_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CanceledAt  *time.Time `json:"canceled_at"`
+	ExpiredAt   *time.Time `json:"expired_at"`
+	VoidedAt    *time.Time `json:"voided_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// OrderRenewal is the period of a subscription a renewal order bills. It is
+// due when the period starts; open past DueAt, it is overdue.
+type OrderRenewal struct {
+	SubscriptionID SubscriptionID `json:"subscription_id"`
+	PeriodStartsAt time.Time      `json:"period_starts_at"`
+	PeriodEndsAt   time.Time      `json:"period_ends_at"`
+	DueAt          time.Time      `json:"due_at"`
 }
 
 // OrderPayment is an order's payment, as a Stripe PaymentIntent reads.
@@ -233,13 +254,17 @@ type OrderLineRefusal struct {
 }
 
 // OrderListParams selects orders, newest first; every filter is optional.
-// PriceID names orders with a line on that price. A customer's own list
-// ignores CustomerID. IDs instead reads 1 to MaxBatchItems named orders in
-// one page; unknown ones are absent.
+// PriceID names orders with a line on that price; SubscriptionID a
+// subscription's renewals; Overdue the open orders past their due date. A
+// customer's own list ignores CustomerID. IDs instead reads 1 to
+// MaxBatchItems named orders in one page; unknown ones are absent.
 type OrderListParams struct {
-	IDs        []OrderID
-	CustomerID CustomerID
-	PriceID    PriceID
-	Status     OrderStatus
+	IDs            []OrderID
+	CustomerID     CustomerID
+	PriceID        PriceID
+	SubscriptionID SubscriptionID
+	Status         OrderStatus
+	Origin         OrderOrigin
+	Overdue        bool
 	PageRequest
 }

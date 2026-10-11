@@ -355,12 +355,16 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
-	_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: checkout.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
-	replayed := attemptErr == nil
 	var charged checkout.OrderCharge
-	if !replayed && params.ExpectedTotal != order.Total {
+	var replayed bool
+	switch {
+	case params.ExpectedTotal != order.Total:
 		err = orders.ErrTotalChanged
-	} else {
+	case order.Origin == string(billing.OrderOriginSubscription):
+		charged, replayed, err = s.payRenewal(work, actor, order, pay, key)
+	default:
+		_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: checkout.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
+		replayed = attemptErr == nil
 		charged, err = s.payOrder(work, rt, actor, order, pay, "pay:"+key)
 	}
 	stop() // before settling: a renewal never races the final state
@@ -372,9 +376,14 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	return answer, err
 }
 
+// payOrder pays a purchase. A saved card awaiting the customer's consent
+// (its brand changed) is verified with them present first.
 func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, error) {
 	quote, err := s.frozenQuote(ctx, order)
 	if err != nil {
+		return checkout.OrderCharge{}, err
+	}
+	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
 		return checkout.OrderCharge{}, err
 	}
 	user := &checkout.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
@@ -504,6 +513,15 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	if params.Status != "" {
 		filter.Status = new(string(params.Status))
 	}
+	if params.Origin != "" {
+		filter.Origin = new(string(params.Origin))
+	}
+	if !params.SubscriptionID.IsZero() {
+		filter.SubscriptionID = new(params.SubscriptionID.UUID())
+	}
+	if params.Overdue {
+		filter.OverdueAt = new(s.now())
+	}
 	page, err := rt.Orders.List(ctx, filter, params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.Order]{}, err
@@ -529,18 +547,27 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 			return nil, err
 		}
 	}
-	var options []billing.OrderPaymentOption
-	if order.Status == string(billing.OrderOpen) {
-		quote, err := s.frozenQuote(ctx, order)
-		if err != nil {
-			return nil, err
-		}
-		if options, err = s.orderOptions(ctx, quote.prices, quote.products); err != nil {
-			return nil, err
-		}
+	options, err := s.openOrderOptions(ctx, order)
+	if err != nil {
+		return nil, err
 	}
 	view := order.View(next, options)
 	return &view, nil
+}
+
+// openOrderOptions are what can pay an open order; none for any other.
+func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
+	switch {
+	case order.Status != string(billing.OrderOpen):
+		return nil, nil
+	case order.Origin == string(billing.OrderOriginSubscription):
+		return s.renewalOptions(ctx, order)
+	}
+	quote, err := s.frozenQuote(ctx, order)
+	if err != nil {
+		return nil, err
+	}
+	return s.orderOptions(ctx, quote.prices, quote.products)
 }
 
 type frozenLines struct {
@@ -796,15 +823,9 @@ func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (
 // merchantOrderView is an order as the merchant reads it: what can pay it,
 // never a next action (only its customer pays).
 func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*billing.Order, error) {
-	var options []billing.OrderPaymentOption
-	if order.Status == string(billing.OrderOpen) {
-		quote, err := s.frozenQuote(ctx, order)
-		if err != nil {
-			return nil, err
-		}
-		if options, err = s.orderOptions(ctx, quote.prices, quote.products); err != nil {
-			return nil, err
-		}
+	options, err := s.openOrderOptions(ctx, order)
+	if err != nil {
+		return nil, err
 	}
 	view := order.View(nil, options)
 	return &view, nil

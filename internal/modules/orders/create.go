@@ -203,9 +203,13 @@ func (s *Service) ByIdempotencyKey(ctx context.Context, customerID uuid.UUID, ke
 
 // ListFilter narrows a page of orders; a nil field does not filter.
 type ListFilter struct {
-	CustomerID *uuid.UUID
-	PriceID    *uuid.UUID
-	Status     *string
+	CustomerID     *uuid.UUID
+	PriceID        *uuid.UUID
+	SubscriptionID *uuid.UUID
+	Status         *string
+	Origin         *string
+	// OverdueAt lists the open orders due before it.
+	OverdueAt *time.Time
 }
 
 // List pages the merchant's orders, newest first.
@@ -223,7 +227,8 @@ func (s *Service) List(ctx context.Context, filter ListFilter, page billing.Page
 		return billing.ListPage[*Order]{}, err
 	}
 	q := s.DB.Gen(ctx)
-	rows, err := q.ListOrdersPage(ctx, gen.ListOrdersPageParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, PriceID: filter.PriceID, Status: filter.Status, AfterCreatedAt: at, AfterID: after, RowLimit: pagination.Fetch(limit)})
+	rows, err := q.ListOrdersPage(ctx, gen.ListOrdersPageParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, PriceID: filter.PriceID, Status: filter.Status,
+		Origin: filter.Origin, SubscriptionID: filter.SubscriptionID, OverdueAt: filter.OverdueAt, AfterCreatedAt: at, AfterID: after, RowLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*Order]{}, err
 	}
@@ -334,6 +339,12 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		if customerID != uuid.Nil && order.CustomerID != customerID {
 			return ErrNotFound
 		}
+		if order.Origin == string(billing.OrderOriginSubscription) {
+			if status == billing.OrderExpired {
+				return nil
+			}
+			return ErrRenewalCancel
+		}
 		if order.Status != string(billing.OrderOpen) {
 			if status == billing.OrderExpired {
 				return nil
@@ -341,7 +352,7 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 			return ErrNotCancelable
 		}
 		now := s.now()
-		if status == billing.OrderExpired && order.ExpiresAt.After(now) {
+		if status == billing.OrderExpired && (order.ExpiresAt == nil || order.ExpiresAt.After(now)) {
 			return nil
 		}
 		if _, err := q.CloseOrder(ctx, gen.CloseOrderParams{MerchantID: mid.UUID(), ID: id, Status: string(status), Now: now}); err != nil {
@@ -380,6 +391,11 @@ func attemptClosed(status billing.OrderStatus) string {
 // event enqueues one host event of an order transition; order is the row as
 // the transition leaves it.
 func (s *Service) event(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, kind string, at time.Time, extra map[string]any) error {
+	return orderEvent(ctx, q, order, kind, at, extra)
+}
+
+// orderEvent records one order transition as a host event.
+func orderEvent(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, kind string, at time.Time, extra map[string]any) error {
 	data := map[string]any{"customer_id": order.CustomerID.String(), "status": order.Status, "payment_status": order.PaymentStatus}
 	for k, v := range extra {
 		data[k] = v

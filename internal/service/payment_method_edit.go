@@ -156,13 +156,13 @@ func (s *Service) pushCardEdit(ctx context.Context, method gen.BillingPaymentMet
 	return nil
 }
 
-// VerifyPaymentMethod re-establishes a card's agreements after its issuer
-// reissued it under another brand (POST /me/payment-methods/{id}/verify): one
-// customer-present verification on the card's own account per agreement
+// reconsentCard re-establishes a card's agreements after its issuer
+// reissued it under another brand, in the customer's presence (paying an
+// order with it): one verification on the card's own account per agreement
 // sequence, and each mandate waiting for consent is replaced by an active one
 // citing it. Subscriptions waiting on the card resume. A card with nothing
 // waiting is left as it is.
-func (s *Service) VerifyPaymentMethod(ctx context.Context, customerID, methodID uuid.UUID, requestKey string) error {
+func (s *Service) reconsentCard(ctx context.Context, customerID, methodID uuid.UUID, requestKey string) error {
 	rt, err := s.runtime()
 	if err != nil {
 		return err

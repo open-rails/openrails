@@ -14,7 +14,7 @@ import (
 var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
-	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "resource_conflict", "resource_not_found", "service_unavailable")
+	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
 	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "order_line_unavailable", "quantity_not_allowed")...)
 )
 
@@ -24,7 +24,7 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
 		Request: billing.CreateMyOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}}, Errors: orderCreateErrors, Handler: h(handlers.CreateMyOrder)},
 	{Method: GET, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer,
-		Query: cursorPage, Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
+		Query: params(cursorPage, text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
 	{Method: GET, Path: "/v1/me/orders/{id}", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder, IdempotencyKey: true,
@@ -48,7 +48,7 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CancelOrder", IdempotencyKey: true,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMerchantOrder)},
 	{Method: GET, Path: "/v1/admin/orders", Group: Admin, Auth: AuthMerchant, Name: "ListOrders", Level: LevelRead,
-		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
+		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
 }

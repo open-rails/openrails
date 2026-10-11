@@ -929,13 +929,14 @@ type BillingOperationAuthorizationExtension struct {
 	CreatedAt        time.Time
 }
 
-// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 	CustomerID uuid.UUID
-	Origin     string
-	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired.
+	// customer (the customer's own purchase), merchant (an unpaid order the merchant created for them) or subscription (a renewal of an engine-owned subscription: subscription_id, its period and due_at).
+	Origin string
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed).
 	Status         string
 	Currency       string
 	Total          int64
@@ -949,12 +950,13 @@ type BillingOrder struct {
 	AttemptID        *uuid.UUID
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
-	ExpiresAt        time.Time
-	CompletedAt      *time.Time
-	CanceledAt       *time.Time
-	ExpiredAt        *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// When an unpaid purchase expires; a renewal has none.
+	ExpiresAt   *time.Time
+	CompletedAt *time.Time
+	CanceledAt  *time.Time
+	ExpiredAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
 	PaymentStatus string
 	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once, on a merchant order.
@@ -964,6 +966,12 @@ type BillingOrder struct {
 	CheckoutSuccessUrl          *string
 	CheckoutCancelUrl           *string
 	CheckoutSavedPaymentMethods *bool
+	SubscriptionID              *uuid.UUID
+	PeriodStartsAt              *time.Time
+	PeriodEndsAt                *time.Time
+	// When a renewal is owed: its period's start. An open order past it is overdue.
+	DueAt    *time.Time
+	VoidedAt *time.Time
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.

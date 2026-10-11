@@ -1,7 +1,7 @@
 # Customer payment recovery
 
-A customer can pay an unpaid invoice or retry a past-due subscription from the
-existing self-service billing surface. These commands accept no customer identifier:
+A customer can pay an unpaid invoice or renewal, or retry a past-due
+subscription the PSP schedules, from the self-service billing surface. These commands accept no customer identifier:
 the admitted customer owns the addressed resource. `Idempotency-Key`
 is required, customer-scoped and bound to the accepted request. Same-key replay
 returns the existing result after settlement; a different key cannot displace
@@ -28,27 +28,38 @@ custody and recovery commits it without charging again. Future off-session
 invoice collection requires the currency's active unscheduled mandate. Rounded provider collection settles the exact invoice liability and
 credits the excess through the existing spendable credit ledger.
 
-Subscription retry uses the same immutable admission and completion as the
-scheduled worker. It freezes customer-initiated recurring reuse of the existing
-approved agreement, the subscription's current method, price/benefits and paid
-period. The NMI request remains `recurring=rebill_subscription`; preparation
-checks the supported fixed-day calendar against the actual provider record.
-The client command does not invent new calendar semantics or reset a lapsed
-period to the click time. Unsupported cadence or preparation stays refused or
-unresolved before a money write.
+Each renewal of an engine-owned subscription is an order (`origin:
+subscription`, with `renewal`: the subscription, its period and `due_at`), and
+each charge of it, scheduled or the customer's, is an attempt on that order. A
+declined renewal stays `open` with `payment.last_payment_error`; the
+subscription's `recovery.order_id` names it, and it is overdue once past its
+`due_at`. The customer pays it with `POST /v1/me/orders/{id}/pay` and a saved
+card (`payment.payment_method_id`): another card becomes the subscription's,
+and a card whose agreements wait for consent after a brand change is verified
+first. A renewal the bank asks the customer to authenticate is
+`requires_action`: the customer is told, completes `next_action` and calls
+`POST /v1/me/orders/{id}/confirm`. The customer cannot cancel a renewal;
+ending the subscription voids it (`order.voided`). The payment uses the
+scheduled worker's admission and completion: the subscription's frozen terms
+and paid period, never a period reset to the click time.
 
-Current customer-pay support is NMI with PSP-held cards. Unsupported rails or
-custody paths return `customer_payment_unsupported`; Stripe's administrative
-and scheduled off-session collection is unaffected. Invoice payment does not
-reactivate an unrelated subscription.
+Subscriptions the PSP schedules (NMI with PSP-held cards) retry with
+`POST /v1/me/subscriptions/{id}/retry-now`. Unsupported rails or custody paths
+return `customer_payment_unsupported`; an engine-owned subscription's renewal
+is paid as its order instead. Invoice payment does not reactivate an unrelated
+subscription.
 
 HTTP commands:
 
 - `POST /v1/me/invoices/{id}/pay-now` with `payment_method_id`.
+- `POST /v1/me/orders/{id}/pay` with `payment.payment_method_id` and
+  `expected_total`, for a renewal order.
 - `POST /v1/me/subscriptions/{id}/retry-now` with optional `payment_method_id`
-  (when supplied, it must be the subscription's current method).
+  (when supplied, it must be the subscription's current method), for a
+  subscription the PSP schedules.
 
-A completed result is 200; unresolved execution is 202 with the operation's
+A renewal order answers as every order does (200, or a coded 402 on a
+decline). Otherwise a completed result is 200; unresolved execution is 202 with the operation's
 identity and state. A definitive card refusal uses the existing coded 402 error
 envelope (processor failures retain the standard processor error mapping).
 Error metadata includes the operation ID. Replaying the same key returns that

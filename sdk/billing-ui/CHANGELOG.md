@@ -1,5 +1,15 @@
 # Changelog
 
+## Renewals are orders
+
+- `Order` gains `renewal` (a subscription renewal's period and `due_at`) and
+  `voided_at`; `expires_at` is null on a renewal; `status` may be `void`.
+- `PaymentRecovery` gains `order_id`: an engine-owned subscription's unpaid
+  renewal, paid through `<OrderCheckout>`.
+- `<OrderCheckout>` offers new card entry only where the order takes one (a
+  renewal takes saved cards), and lets the customer authenticate a payment
+  their bank challenged while they were away.
+
 ## Hosted checkout
 
 - `getConfig()` returns `merchant` (`PublicMerchant`: `display_name`, and

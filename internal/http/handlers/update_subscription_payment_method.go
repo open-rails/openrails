@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -14,14 +12,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/writeposture"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -92,7 +86,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	if !enforceOwnership {
 		origin, originReason = intents.OriginAdmin, "admin payment-method swap"
 	}
-	verify := recurringVerifier(r, subscription.MerchantID, origin)
+	verify := r.State.RecurringVerifier(subscription.MerchantID, origin)
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, methodID, verify); err != nil {
@@ -213,27 +207,6 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		// finishes out-of-band and a retried request maps onto the SAME intent.
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
 		r.ErrorCode(billing.CodeResourceConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
-	}
-}
-
-// recurringVerifier runs the $0 recurring verification a move needs on an
-// NMI card, customer present (or staff for them), through the account that
-// will charge it. It moves no funds; the merchant's write posture gates it.
-func recurringVerifier(r *httprequest.Request, merchantID uuid.UUID, origin intents.Origin) subscriptions.RecurringVerifier {
-	return func(ctx context.Context, psp uuid.UUID, vault, billingID, order string) (string, error) {
-		if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: r.State.Config, DB: r.State.DB}, merchantID, origin); blocked {
-			return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
-		}
-		client, ok, err := r.State.CollectionResolver.ResolveNMIClient(ctx, merchantID, &psp)
-		if err != nil || !ok {
-			return "", fmt.Errorf("resolve the card's NMI account: %w", err)
-		}
-		ref, err := client.VerifyStoredCredential(ctx, vault, billingID, order, true)
-		var refusal *nmi.CustomerVaultError
-		if errors.As(err, &refusal) && !nmi.UncertainResponseCode(refusal.ResponseCode) {
-			return "", &paymentmethods.PaymentMethodError{Err: err, LocalizationID: nmidirect.FailureCode(refusal), Rail: "nmi"}
-		}
-		return ref, err
 	}
 }
 

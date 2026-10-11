@@ -283,7 +283,7 @@ one two-step flow.
 
 An order has two statuses, as Stripe's Order and PaymentIntent do: `status` is
 `open`, `processing` (the provider has the payment), `complete` (paid and
-fulfilled), `canceled` or `expired`; `payment.status` is
+fulfilled), `canceled`, `expired` or, for a renewal, `void`; `payment.status` is
 `requires_payment_method`, `requires_action`, `processing` or `succeeded`, beside
 `payment.next_action`, `payment.last_payment_error` and `payment.payment_method_id`.
 `requires_action` carries `next_action` (`authenticate` runs the PSP's own script,
@@ -302,6 +302,17 @@ A merchant order is one your backend creates for a customer (`CreateOrder`,
 `POST /v1/app/orders` with the `Orders` permission): it is `open` for 30 days
 unless `expires_at` says otherwise, and the customer pays it on your site with
 `POST /v1/me/orders/{id}/pay`. Staff read orders and never pay them.
+
+Each renewal of a subscription OpenRails bills is an order too (`origin:
+subscription`, `renewal: {subscription_id, period_starts_at, period_ends_at,
+due_at}`, no `expires_at`), complete once its charge succeeds. A declined
+renewal stays `open` and is overdue past `due_at`; the subscription's
+`recovery.order_id` names it. The customer pays it with a saved card
+(`payment: {payment_method_id}`; another card becomes the subscription's), or,
+when the bank asks them to authenticate, completes its `next_action` and
+`confirm`s. A renewal cannot be canceled: canceling the subscription voids it
+(`status: void`, `order.voided`). `GET /v1/me/orders` filters by
+`subscription_id`, `status`, `origin` and `overdue=true`.
 
 An order of one-time lines can also be paid on the PSP's hosted page (Stripe
 Checkout, an option with `accepts: ["redirect"]`): `payment: {return_url,
@@ -352,8 +363,8 @@ four and expiry from the PSP; the browser never states them. `PATCH` edits the c
 place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for one-click
 buys). A method's `status` is `active`, `closed` (the bank closed it), `replaced` or
 `removed`; only an active one is charged. When its issuer reissues it under another brand,
-its `mandates` turn `requires_reconsent` and `POST /v1/me/payment-methods/{id}/verify`, with
-the customer present, restores them. Checkout with a fresh `payment_token` also persists a payment method
+its `mandates` turn `requires_reconsent`; paying an order with it (a renewal it bills
+included), with the customer present, verifies the card and restores them. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 

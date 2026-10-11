@@ -122,27 +122,3 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	}
 	return method, instrument, binding, nil
 }
-
-// EngineCustomerRetryEligibility performs no writes or provider calls. Its short
-// transaction uses admission's lock order and qualifies the accepted paid lineage
-// against the current instrument, rather than promising eligibility from fields.
-func (s *MoneyService) EngineCustomerRetryEligibility(ctx context.Context, observed *models.Subscription) error {
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := s.db.NewWithPgxTx(tx)
-		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
-			return err
-		}
-		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, observed.ID)
-		if err != nil {
-			return err
-		}
-		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.RailSubscriptionID != "" || !subscriptions.EngineCollectionDue(sub, s.now(), true) {
-			return intents.ErrRebillNotRetryable
-		}
-		if _, _, _, err := s.engineCollectionMethod(ctx, d, sub); err != nil {
-			return err
-		}
-		_, err = intents.PrepareEngineRenewalTerms(ctx, d, sub, s.now())
-		return err
-	})
-}

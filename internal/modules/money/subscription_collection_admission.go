@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -154,8 +155,6 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			attempt = old.Attempt + 1
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
-		} else if payer != uuid.Nil {
-			return intents.ErrRebillNotRetryable
 		}
 		if requestedMethod != nil {
 			charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
@@ -194,10 +193,21 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			origin = intents.OriginUser
 			actor = payer.String()
 		}
-		payload := subscriptions.SubscriptionCollectionPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: instrument, HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.ObligationOrderReference(sub.ID, sub.CurrentPeriodEndsAt.UTC())}
+		// The renewal is an order the customer owes; this collection is one
+		// of its attempts.
+		order, err := orders.OpenRenewal(ctx, q, mid.UUID(), RenewalOrderOf(terms), admittedAt)
+		if err != nil {
+			return err
+		}
+		payload := subscriptions.SubscriptionCollectionPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: instrument, HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.ObligationOrderReference(sub.ID, sub.CurrentPeriodEndsAt.UTC()), OrderID: order.ID}
 		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err
+		}
+		if order.AttemptID == nil || *order.AttemptID != accepted.ID {
+			if err := orders.StartRenewalAttempt(ctx, q, order, accepted.ID, instrument.PSPID, method.Rail, &method.ID, admittedAt); err != nil {
+				return err
+			}
 		}
 		if accepted.IntentType != subscriptions.TypeSubscriptionCollection {
 			return intents.ErrRebillKeyConflict
@@ -208,6 +218,48 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 	return accepted, replayed, err
 }
 
+// OpenDueRenewalOrder opens the renewal order of a due subscription whose
+// card cannot be charged: its customer pays it once the card is fixed.
+func (s *MoneyService) OpenDueRenewalOrder(ctx context.Context, subscriptionID uuid.UUID, at time.Time) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	at = at.UTC().Truncate(time.Microsecond)
+	observed, err := subscriptions.NewSubscriptionRepo(s.db).GetByID(ctx, subscriptionID)
+	if err != nil {
+		return err
+	}
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.db.NewWithPgxTx(tx)
+		q := d.Gen(ctx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: observed.CustomerID}); err != nil {
+			return err
+		}
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subscriptionID)
+		if err != nil || !subscriptions.EngineCollectionDue(sub, at, false) {
+			return err
+		}
+		terms, err := intents.PrepareEngineRenewalTerms(ctx, d, sub, at)
+		if err != nil {
+			return err
+		}
+		if terms, err = subscriptions.SelectEngineRenewalPeriod(terms, at); err != nil {
+			return err
+		}
+		_, err = orders.OpenRenewal(ctx, q, mid.UUID(), RenewalOrderOf(terms), at)
+		return err
+	})
+}
+
 func sameEngineMethodRequest(a, b *uuid.UUID) bool {
 	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+// RenewalOrderOf is the renewal order of terms' period.
+func RenewalOrderOf(terms subscriptions.RenewalTerms) orders.Renewal {
+	hours := int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)
+	return orders.Renewal{SubscriptionID: terms.SubscriptionID, CustomerID: terms.CustomerID, PriceID: terms.PriceID, ProductID: terms.ProductID,
+		Description: terms.ProductName, Quantity: terms.Quantity, Amount: terms.Amount, Currency: terms.Currency,
+		PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd, BillingIntervalHours: &hours, AccessDurationHours: terms.AccessDurationHours}
 }

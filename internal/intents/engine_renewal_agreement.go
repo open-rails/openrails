@@ -133,7 +133,7 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 		return agreement, payment, fmt.Errorf("%w: engine predecessor is not an order's customer payment", ErrRebillNotRetryable)
 	}
 	q := d.Gen(ctx)
-	line, err := q.GetOrderLineBySubscription(ctx, gen.GetOrderLineBySubscriptionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+	line, err := q.GetOrderLineBySubscription(ctx, gen.GetOrderLineBySubscriptionParams{MerchantID: sub.MerchantID, OrderID: p.OrderID, SubscriptionID: sub.ID})
 	if err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}

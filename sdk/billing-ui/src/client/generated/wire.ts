@@ -421,8 +421,8 @@ export type NotificationData = {
 export type Order = {
   id: string
   customer_id: string
-  origin: "customer" | "merchant"
-  status: "canceled" | "complete" | "expired" | "open" | "processing"
+  origin: "customer" | "merchant" | "subscription"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "void"
   number: string | null
   currency: string
   total: string
@@ -430,10 +430,12 @@ export type Order = {
   payment: OrderPayment
   payment_options: OrderPaymentOption[]
   checkout: OrderCheckout | null
-  expires_at: string
+  renewal: OrderRenewal | null
+  expires_at: string | null
   completed_at: string | null
   canceled_at: string | null
   expired_at: string | null
+  voided_at: string | null
   created_at: string
 }
 
@@ -514,6 +516,13 @@ export type OrderPreviewLine = {
   billing_interval_hours: number | null
   access_duration_hours: number | null
   refusal: OrderLineRefusal | null
+}
+
+export type OrderRenewal = {
+  subscription_id: string
+  period_starts_at: string
+  period_ends_at: string
+  due_at: string
 }
 
 export type PSPLinkState = {
@@ -637,6 +646,7 @@ export type PaymentRecovery = {
   retryable: boolean
   blocked_reason?: string
   operation?: PaymentOperation
+  order_id?: string
 }
 
 export type PendingAction = {

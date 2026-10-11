@@ -1035,7 +1035,7 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "payment.settled" | "product.entitlements_changed"
+  type: "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
@@ -1432,8 +1432,8 @@ export type OpenProviderOperationParams = {
 export type Order = {
   id: string
   customer_id: string
-  origin: "customer" | "merchant"
-  status: "canceled" | "complete" | "expired" | "open" | "processing"
+  origin: "customer" | "merchant" | "subscription"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "void"
   number: string | null
   currency: string
   total: string
@@ -1441,10 +1441,12 @@ export type Order = {
   payment: OrderPayment
   payment_options: OrderPaymentOption[]
   checkout: OrderCheckout | null
-  expires_at: string
+  renewal: OrderRenewal | null
+  expires_at: string | null
   completed_at: string | null
   canceled_at: string | null
   expired_at: string | null
+  voided_at: string | null
   created_at: string
 }
 
@@ -1466,7 +1468,7 @@ export type OrderCheckoutParams = {
 export type OrderHostEvent = {
   order_id: string
   customer_id: string
-  status: "canceled" | "complete" | "expired" | "open" | "processing"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "void"
   payment_status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
   total: string
   currency: string
@@ -1543,6 +1545,13 @@ export type OrderPreviewLine = {
   billing_interval_hours: number | null
   access_duration_hours: number | null
   refusal: OrderLineRefusal | null
+}
+
+export type OrderRenewal = {
+  subscription_id: string
+  period_starts_at: string
+  period_ends_at: string
+  due_at: string
 }
 
 export type PSP = {
@@ -1760,6 +1769,7 @@ export type PaymentRecovery = {
   retryable: boolean
   blocked_reason?: string
   operation?: PaymentOperation
+  order_id?: string
 }
 
 export type PaymentSettledEvent = {

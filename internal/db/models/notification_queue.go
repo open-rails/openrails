@@ -21,6 +21,9 @@ const (
 	NotificationPaymentMethodFailed         NotificationEventType = "payment_method_failed"
 	NotificationPaymentMethodAutoUpdated    NotificationEventType = "payment_method_auto_updated"
 	NotificationPaymentMethodUpdateRequired NotificationEventType = "payment_method_update_required"
+	// The bank asks the customer to authenticate a renewal's payment: its
+	// order (data.order_id) awaits them.
+	NotificationPaymentAuthenticationRequired NotificationEventType = "payment_authentication_required"
 
 	// One-off payment notifications
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // a one-off purchase's receipt

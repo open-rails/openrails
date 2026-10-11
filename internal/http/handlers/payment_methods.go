@@ -513,7 +513,7 @@ func SetDefaultPaymentMethod(r *httprequest.Request) {
 	}
 	change := subscriptions.DefaultPaymentMethodChange{
 		Customer: payer.UUID(), Currency: currency, PaymentMethodID: req.PaymentMethodID.UUID(),
-		Verify: recurringVerifier(r, mid.UUID(), intents.OriginUser), Swaps: r.State.PaymentSourceUpdateIntents,
+		Verify: r.State.RecurringVerifier(mid.UUID(), intents.OriginUser), Swaps: r.State.PaymentSourceUpdateIntents,
 	}
 	if err := r.State.SubscriptionLifecycleService.SetDefaultPaymentMethod(ctx, change); err != nil {
 		writeMoveRefusal(r, err, "failed to set the default payment method")

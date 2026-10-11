@@ -90,13 +90,17 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
-		// Orders before hosted checkout had none; before the payment axis
-		// they also had one status.
-		if p.Name == "orders" && (len(r.Values) == len(p.Columns)-orderCheckoutColumns || len(r.Values) == len(p.Columns)-orderCheckoutColumns-1) {
-			if len(r.Values) == len(p.Columns)-orderCheckoutColumns-1 {
+		// Orders before renewals had none of their columns; before hosted
+		// checkout none of its; before the payment axis one status.
+		if p.Name == "orders" {
+			missing := len(p.Columns) - len(r.Values)
+			if missing == orderRenewalColumns+orderCheckoutColumns+1 {
 				r.Values = splitOrderStatus(p, r.Values)
+				missing--
 			}
-			r.Values = append(r.Values, make([]*string, orderCheckoutColumns)...)
+			if missing == orderRenewalColumns || missing == orderRenewalColumns+orderCheckoutColumns {
+				r.Values = append(r.Values, make([]*string, missing)...)
+			}
 		}
 		if !legacy {
 			return emit(p, r.Values)
@@ -306,8 +310,12 @@ func renamePaymentStatus(p Profile, values []*string) {
 
 // splitOrderStatus is an order of one status as migration 49 split it: the
 // order's own status and its payment's.
-// orderCheckoutColumns are the hosted checkout's columns, last on orders.
-const orderCheckoutColumns = 5
+// orderCheckoutColumns are the hosted checkout's columns on orders, before
+// the orderRenewalColumns, which are last.
+const (
+	orderCheckoutColumns = 5
+	orderRenewalColumns  = 5
+)
 
 func splitOrderStatus(p Profile, values []*string) []*string {
 	status, payment := "", "requires_payment_method"

@@ -306,10 +306,14 @@ func SeatBounds(price *models.Price) (low, high int, ok bool) {
 // claimKey is the ownership a unique product claims: its tier group, else
 // the product itself.
 func claimKey(product *models.Product) string {
-	if product.TierGroup != nil && strings.TrimSpace(*product.TierGroup) != "" {
-		return "tier_group:" + *product.TierGroup
+	return claimKeyOf(product.ID, product.TierGroup)
+}
+
+func claimKeyOf(product uuid.UUID, tierGroup *string) string {
+	if tierGroup != nil && strings.TrimSpace(*tierGroup) != "" {
+		return "tier_group:" + *tierGroup
 	}
-	return "product:" + product.ID.String()
+	return "product:" + product.String()
 }
 
 // refuseOwned refuses the unique lines the customer already holds: a live

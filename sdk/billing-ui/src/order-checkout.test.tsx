@@ -88,6 +88,62 @@ const config = {
 }
 
 describe("OrderCheckout", () => {
+  it("has the customer authenticate a renewal their bank challenged", async () => {
+    const renewal = (payment: Record<string, unknown>, status = "open") => ({
+      ...order(payment, status),
+      origin: "subscription",
+      expires_at: null,
+      renewal: {
+        subscription_id: "sub_1",
+        period_starts_at: "2026-10-10T00:00:00Z",
+        period_ends_at: "2026-11-09T00:00:00Z",
+        due_at: "2026-10-10T00:00:00Z",
+      },
+      payment_options: [
+        { psp_id: "psp_stripe", rail: "stripe", accepts: ["saved_card"] },
+      ],
+    })
+    fakeStripe.handleNextAction.mockClear()
+    const fetch = vi.fn(async (input: string) => {
+      if (input.endsWith("/config")) return Response.json(config)
+      if (input.includes("/me/payment-methods"))
+        return Response.json({ data: [], next_cursor: null })
+      if (input.endsWith("/me/orders/ord_1"))
+        return Response.json(
+          renewal({
+            status: "requires_action",
+            next_action: {
+              type: "authenticate",
+              psp_id: "psp_stripe",
+              payload: {
+                client_secret: "pi_2_secret_x",
+                payment_intent_id: "pi_2",
+              },
+            },
+          })
+        )
+      if (input.endsWith("/me/orders/ord_1/confirm"))
+        return Response.json(renewal({ status: "succeeded" }, "complete"))
+      return Response.json({}, { status: 404 })
+    })
+    const onSettled = vi.fn()
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderCheckout orderId="ord_1" onSettled={onSettled} />
+      </BillingProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm payment" })
+    )
+    await waitFor(() => expect(onSettled).toHaveBeenCalled(), {
+      timeout: 5000,
+    })
+    expect(fakeStripe.handleNextAction).toHaveBeenCalledWith({
+      clientSecret: "pi_2_secret_x",
+    })
+    expect(onSettled.mock.calls[0][0]).toMatchObject({ status: "complete" })
+  })
+
   it("pays an order with a new card: a decline, a challenge, then complete", async () => {
     const pays: { body: unknown; key: string | null }[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {

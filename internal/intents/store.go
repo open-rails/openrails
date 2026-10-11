@@ -229,9 +229,6 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			if p.Origin == OriginUser && ordinal == 0 {
-				return ErrRebillNotRetryable
-			}
 			if payload.Attempt != ordinal {
 				return errors.New("engine admission changed its accepted attempt ordinal")
 			}

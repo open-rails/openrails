@@ -25,6 +25,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
+// RetrySubscriptionNow charges a provider-scheduled subscription's missed
+// renewal now, in the customer's presence. An engine-owned one's renewal is
+// an order the customer pays instead.
 func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request billing.RetrySubscriptionNowParams, principal billingauth.Payer) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -41,15 +44,13 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		var accepted gen.BillingProviderIntent
-		var replayed bool
 		if owned.CollectionPolicy == models.CollectionPolicyEngine {
-			accepted, replayed, err = s.moneyService().AdmitCustomerSubscriptionCollection(ctx, owned.ID, payer.UUID(), request.IdempotencyKey, method, principal)
-		} else {
-			h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
-			h.DeferDelete = rt.DeferredDeletes
-			accepted, replayed, err = h.EnqueueCustomer(ctx, request.SubscriptionID.UUID(), payer.UUID(), request.IdempotencyKey, method)
+			// Its renewal is an order: the customer pays that.
+			return fmt.Errorf("%w: an engine subscription's renewal is paid as its order (recovery.order_id)", intents.ErrRebillUnsupported)
 		}
+		h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
+		h.DeferDelete = rt.DeferredDeletes
+		accepted, replayed, err := h.EnqueueCustomer(ctx, request.SubscriptionID.UUID(), payer.UUID(), request.IdempotencyKey, method)
 		if err != nil {
 			return err
 		}

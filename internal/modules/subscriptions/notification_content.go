@@ -120,6 +120,15 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 <p>The {{.Store}} Team</p>
 {{end}}
 
+{{define "authentication_required"}}
+<h2>Confirm Your Payment</h2>
+<p>Hi {{.Username}},</p>
+<p>Your bank wants you to confirm the {{.Amount}} payment for {{.Items}} before it goes through.</p>
+<p>Your access is still active. Confirm the payment from your account to keep it that way.</p>
+{{template "button" .Button}}
+<p>The {{.Store}} Team</p>
+{{end}}
+
 {{define "non_recoverable"}}
 <h2>Your Subscription Has Ended</h2>
 <p>Hi {{.Username}},</p>
@@ -445,6 +454,42 @@ func subscriptionProductName(storeName, productName string) string {
 // RenderPaymentMethodUpdateRequiredEmail is the bucket-2 notice: the card
 // cannot be charged (expired, bad CVC, call issuer...), so charging stopped,
 // but the subscription and access are live until the customer updates it.
+// RenderPaymentAuthenticationRequiredEmail asks the customer to confirm a
+// renewal's payment their bank wants authenticated.
+func RenderPaymentAuthenticationRequiredEmail(storeName, accountURL, username string, data billing.NotificationData) EmailContent {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	amount := ""
+	if data.Amount != nil {
+		amount = moneyutil.FormatAmount(*data.Amount, data.Currency)
+	}
+	items := data.ProductName
+	linkText := ""
+	if accountURL != "" {
+		linkText = "Confirm it here: " + accountURL
+	}
+	return EmailContent{
+		Subject: fmt.Sprintf("Confirm your %s payment", items),
+		HTML: renderEmailHTML("authentication_required", emailFields{"Username": name, "Amount": amount, "Items": items,
+			"Button": emailButton{accountURL, "Confirm payment"}, "Store": storeName}),
+		Plain: fmt.Sprintf(`
+			Confirm your payment
+
+			Hi %s,
+
+			Your bank wants you to confirm the %s payment for %s before it goes through.
+
+			Your access is still active. Confirm the payment from your account to keep it that way.
+
+			%s
+
+			The %s Team
+		`, name, amount, items, linkText, storeName),
+	}
+}
+
 func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkText := ""

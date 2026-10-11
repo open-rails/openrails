@@ -31,6 +31,8 @@ type SubscriptionCollectionPayload struct {
 	FailureCount             int                       `json:"failure_count"`
 	AmountMinor              moneyutil.Cents           `json:"amount_minor,string"`
 	OrderReference           string                    `json:"order_reference"`
+	// OrderID is the renewal order this collection is an attempt on.
+	OrderID uuid.UUID `json:"order_id,omitzero"`
 }
 
 // SubscriptionCollectionDescription correlates a gateway transaction with one

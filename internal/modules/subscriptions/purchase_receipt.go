@@ -67,3 +67,39 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	return d.InsertRiverJob(ctx, NotificationEmailArgs{MerchantID: mid.UUID(), NotificationID: n.ID},
 		&river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true}})
 }
+
+// AuthenticationRequest is a renewal payment the bank wants the customer to
+// authenticate: one per attempt.
+type AuthenticationRequest struct {
+	AttemptID  uuid.UUID
+	OrderID    uuid.UUID
+	CustomerID uuid.UUID
+	Items      string
+	Amount     int64
+	Currency   string
+	At         time.Time
+}
+
+// QueuePaymentAuthenticationRequired tells the customer, in d's transaction,
+// that a renewal's payment awaits their authentication on its order; the
+// email goes out by job. One notice per attempt.
+func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r AuthenticationRequest) error {
+	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
+		return fmt.Errorf("an authentication notice needs its attempt and order")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	amount := r.Amount
+	n := &models.NotificationQueue{
+		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
+		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
+		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, OrderID: billing.OrderID(r.OrderID)},
+	}
+	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
+		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)
+	}
+	return d.InsertRiverJob(ctx, NotificationEmailArgs{MerchantID: mid.UUID(), NotificationID: n.ID},
+		&river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true}})
+}

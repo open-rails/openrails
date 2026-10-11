@@ -327,7 +327,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 		switch {
 		case current.Status == string(billing.OrderProcessing) || current.PaymentStatus == string(billing.OrderPaymentRequiresAction):
 			return orders.ErrInProgress
-		case current.Status != string(billing.OrderOpen) || !current.ExpiresAt.After(now):
+		case !orders.Payable(current, now):
 			return orders.ErrNotPayable
 		}
 		if err := s.orders.StillFree(ctx, q, order, now); err != nil {
@@ -376,8 +376,8 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			return err
 		}
 		expires := now.Add(orderAttemptTTL)
-		if current.ExpiresAt.Before(expires) {
-			expires = current.ExpiresAt
+		if current.ExpiresAt != nil && current.ExpiresAt.Before(expires) {
+			expires = *current.ExpiresAt
 		}
 		if err := q.CreateOrderAttempt(ctx, gen.CreateOrderAttemptParams{ID: attemptID, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: order.ID,
 			Rail: target.Rail, Status: string(models.CheckoutAttemptStatusCreated), Amount: current.Total, Currency: current.Currency, ExpiresAt: expires, RailState: state, PspID: chosen.PSPID, Now: now}); err != nil {

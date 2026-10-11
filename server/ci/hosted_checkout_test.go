@@ -174,7 +174,8 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	require.NotNil(t, order.Checkout.URL)
 	require.Equal(t, "https://shop.e2e.test/thanks?order="+order.ID.String(), order.Checkout.SuccessURL)
 	require.Equal(t, s.clock.Now().Add(hostedcheckout.DefaultLifetime), order.Checkout.ExpiresAt)
-	require.Equal(t, order.Checkout.ExpiresAt, order.ExpiresAt, "the order expires with its checkout")
+	require.NotNil(t, order.ExpiresAt)
+	require.Equal(t, order.Checkout.ExpiresAt, *order.ExpiresAt, "the order expires with its checkout")
 	again := decode[billing.Order](t, s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, key, body))
 	require.Equal(t, order.ID, again.ID)
 	require.Equal(t, *order.Checkout.URL, *again.Checkout.URL)
@@ -192,7 +193,8 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 		"lines": []map[string]any{{"price_id": s.price()}}, "expires_at": longer, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}})
 	require.Equal(t, http.StatusCreated, res.Code, res.Body.String())
 	kept := decode[billing.Order](t, res)
-	require.Equal(t, longer, kept.ExpiresAt)
+	require.NotNil(t, kept.ExpiresAt)
+	require.Equal(t, longer, *kept.ExpiresAt)
 	require.Equal(t, s.clock.Now().Add(hostedcheckout.DefaultLifetime), kept.Checkout.ExpiresAt)
 
 	for name, checkout := range map[string]map[string]any{

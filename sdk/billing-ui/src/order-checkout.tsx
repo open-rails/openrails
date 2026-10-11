@@ -137,10 +137,17 @@ export function OrderCheckout({
       ),
     [config, options]
   )
-  // New cards: PSPs whose own fields make a token.
+  // New cards: PSPs whose own fields make a token, where the order takes
+  // one (a renewal takes saved cards only).
   const cardPsps = psps.filter((psp) => {
     const driver = cardSetupDriver(psp)
-    return driver === "collect_js" || driver === "stripe_elements"
+    return (
+      (driver === "collect_js" || driver === "stripe_elements") &&
+      options.some(
+        (option) =>
+          option.psp_id === psp.psp_id && option.accepts.includes("new_card")
+      )
+    )
   })
   const usable = psps.filter(
     (psp) => serverCardEntry || cardSetupDriver(psp) !== "card"
@@ -245,6 +252,29 @@ export function OrderCheckout({
     }
   }
 
+  // A payment the bank asks the customer to authenticate before they came
+  // here (a renewal charged while they were away).
+  const authenticate = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await answer({ order })
+    } catch (cause) {
+      setError(
+        !isBillingError(cause) && cause instanceof Error && cause.message
+          ? cause.message
+          : m.error(cause)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+  const awaitingAuthentication =
+    order.status === "open" &&
+    order.payment.status === "requires_action" &&
+    order.payment.next_action?.type === "authenticate"
+
   const payLabel = `Pay ${money(order.total)}`
   const open =
     order.status === "open" &&
@@ -297,6 +327,24 @@ export function OrderCheckout({
         <p role="status" className="text-sm text-muted-foreground">
           This order can no longer be paid.
         </p>
+      ) : awaitingAuthentication ? (
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void authenticate()
+          }}
+        >
+          <p className="text-sm text-muted-foreground">
+            Your bank asks you to confirm this payment.
+          </p>
+          <PayButton label="Confirm payment" processing={busy} />
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </form>
       ) : (
         <div className="grid gap-4">
           {saved.length > 0 ? (

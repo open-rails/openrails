@@ -200,8 +200,9 @@ card retry. A reissue under another brand needs the customer's consent again:
 the card's mandates wait (`requires_reconsent`), OpenRails refuses to charge it
 off-session (renewals it bills, invoice collection) with failure code
 `stored_credential_required`, and asks the members it pays for to act. The
-customer's `POST /v1/me/payment-methods/{id}/verify` confirms a SetupIntent on
-the same card with them present, and new mandates cite it. A detached card is
+customer paying an order with the card (the renewal waiting on it included)
+first confirms a SetupIntent on the same card with them present, and new
+mandates cite it. A detached card is
 removed and its mandates end.
 
 ### Subscriptions Stripe bills

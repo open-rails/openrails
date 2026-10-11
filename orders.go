@@ -12,7 +12,12 @@ import (
 // complete with PriceID answers whether a customer bought a price.
 func (c *Client) ListOrders(ctx context.Context, params billing.OrderListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Order], error) {
 	q := pageValues(nil, params.PageRequest)
-	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "price_id": params.PriceID.String(), "status": string(params.Status)})
+	overdue := ""
+	if params.Overdue {
+		overdue = "true"
+	}
+	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "price_id": params.PriceID.String(), "subscription_id": params.SubscriptionID.String(),
+		"status": string(params.Status), "origin": string(params.Origin), "overdue": overdue})
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}

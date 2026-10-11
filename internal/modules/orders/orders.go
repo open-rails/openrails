@@ -44,6 +44,7 @@ var (
 	ErrNotFound        = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "Order not found.")
 	ErrNotPayable      = apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "The order takes no payment.")
 	ErrNotCancelable   = apperr.New(http.StatusConflict, billing.CodeOrderNotCancelable, "The order cannot be canceled.")
+	ErrRenewalCancel   = apperr.New(http.StatusConflict, billing.CodeOrderNotCancelable, "A renewal is not canceled; cancel its subscription.")
 	ErrInProgress      = apperr.New(http.StatusConflict, billing.CodeOrderPaymentInProgress, "A payment on this order is unresolved.")
 	ErrTotalChanged    = apperr.New(http.StatusConflict, billing.CodeOrderTotalChanged, "The order's total is not expected_total.")
 	ErrOptionMissing   = apperr.New(http.StatusUnprocessableEntity, billing.CodePaymentOptionUnavailable, "No PSP that can take these lines accepts this payment.")
@@ -114,6 +115,11 @@ type Order struct {
 	Lines []gen.BillingOrderLine
 }
 
+// Payable reports an open order not past its expiry (a renewal has none).
+func Payable(o gen.BillingOrder, now time.Time) bool {
+	return o.Status == string(billing.OrderOpen) && (o.ExpiresAt == nil || o.ExpiresAt.After(now))
+}
+
 // Live reports an order that may still take payment.
 func (o *Order) Live() bool {
 	return o.Status == string(billing.OrderOpen) || o.Status == string(billing.OrderProcessing)
@@ -167,7 +173,10 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
 		Lines: make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
 		Payment:   billing.OrderPayment{Status: billing.OrderPaymentStatus(o.PaymentStatus)},
-		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, CreatedAt: o.CreatedAt,
+		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, VoidedAt: o.VoidedAt, CreatedAt: o.CreatedAt,
+	}
+	if o.SubscriptionID != nil && o.PeriodStartsAt != nil && o.PeriodEndsAt != nil && o.DueAt != nil {
+		out.Renewal = &billing.OrderRenewal{SubscriptionID: billing.SubscriptionID(*o.SubscriptionID), PeriodStartsAt: *o.PeriodStartsAt, PeriodEndsAt: *o.PeriodEndsAt, DueAt: *o.DueAt}
 	}
 	if o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction

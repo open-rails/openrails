@@ -43,6 +43,9 @@ const (
 	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
 	HostEventOrderCanceled       HostEventType = "order.canceled"
 	HostEventOrderExpired        HostEventType = "order.expired"
+	// HostEventOrderVoided: a renewal order its subscription's end left
+	// unowed.
+	HostEventOrderVoided HostEventType = "order.voided"
 	// A customer linked to, or unlinked from, an openrails.dev account.
 	HostEventCustomerNetworkLinked   HostEventType = "customer.network_linked"
 	HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"

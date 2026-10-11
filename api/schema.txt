@@ -57,6 +57,7 @@ migration 0053_payment_method_requires_action.up.sql sha256:39c955586b5501daf527
 migration 0054_carts.up.sql sha256:e3b0fe2260a225edcb603597d6991b0316190841feb177c86893d6d48aa64dd7
 migration 0055_order_checkout.up.sql sha256:6692e2a3b11ba128515e04bdae192a33b2698ad6dc16fb0082bb2335ad96f615
 migration 0056_customer_links.up.sql sha256:a7d2c1371f1c6fd77a3067991a7c16bb32e8d926f1b0c61ef809bf31edb8d65d
+migration 0057_renewal_orders.up.sql sha256:e2ef66ff62458528d59f388aebace2f36cb863f8711059910a1de5fe947b0c59
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -798,7 +799,7 @@ table billing.host_outbox
   column dedupe_key text NOT NULL
   constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -1388,7 +1389,7 @@ table billing.orders
   column attempt_id uuid
   column payment_id uuid
   column last_payment_error jsonb
-  column expires_at timestamp with time zone NOT NULL
+  column expires_at timestamp with time zone
   column completed_at timestamp with time zone
   column canceled_at timestamp with time zone
   column expired_at timestamp with time zone
@@ -1400,6 +1401,11 @@ table billing.orders
   column checkout_success_url text
   column checkout_cancel_url text
   column checkout_saved_payment_methods boolean
+  column subscription_id uuid
+  column period_starts_at timestamp with time zone
+  column period_ends_at timestamp with time zone
+  column due_at timestamp with time zone
+  column voided_at timestamp with time zone
   constraint orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_canceled_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint orders_checkout_cancel_url_check CHECK ((checkout_cancel_url <> ''::text))
@@ -1414,26 +1420,31 @@ table billing.orders
   constraint orders_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
   constraint orders_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint orders_number_check CHECK ((number <> ''::text))
-  constraint orders_origin_check CHECK ((origin = ANY (ARRAY['customer'::text, 'merchant'::text])))
+  constraint orders_origin_check CHECK ((origin = ANY (ARRAY['customer'::text, 'merchant'::text, 'subscription'::text])))
   constraint orders_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id)
   constraint orders_payment_status_check CHECK ( CASE status WHEN 'open'::text THEN (payment_status = ANY (ARRAY['requires_payment_method'::text, 'requires_action'::text])) WHEN 'processing'::text THEN (payment_status = 'processing'::text) WHEN 'complete'::text THEN (payment_status = 'succeeded'::text) ELSE (payment_status = ANY (ARRAY['requires_payment_method'::text, 'succeeded'::text])) END)
   constraint orders_pkey PRIMARY KEY (merchant_id, id)
   constraint orders_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
+  constraint orders_renewal_check CHECK ((((origin = 'subscription'::text) = ((subscription_id IS NOT NULL) AND (period_starts_at IS NOT NULL) AND (period_ends_at IS NOT NULL) AND (due_at IS NOT NULL))) AND ((origin = 'subscription'::text) = (expires_at IS NULL)) AND ((period_ends_at IS NULL) OR (period_ends_at > period_starts_at))))
   constraint orders_request_digest_check CHECK ((((idempotency_key IS NULL) = (request_digest IS NULL)) AND ((request_digest IS NULL) OR (octet_length(request_digest) = 32))))
-  constraint orders_status_check CHECK ((status = ANY (ARRAY['open'::text, 'processing'::text, 'complete'::text, 'canceled'::text, 'expired'::text])))
+  constraint orders_status_check CHECK ((status = ANY (ARRAY['open'::text, 'processing'::text, 'complete'::text, 'canceled'::text, 'expired'::text, 'void'::text])))
+  constraint orders_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id)
   constraint orders_succeeded_check CHECK (((payment_status = 'succeeded'::text) = ((status = 'complete'::text) OR (payment_id IS NOT NULL))))
   constraint orders_total_check CHECK ((total >= 0))
+  constraint orders_void_check CHECK (((status = 'void'::text) = (voided_at IS NOT NULL)))
   index CREATE UNIQUE INDEX orders_checkout_secret_hash_key ON billing.orders USING btree (checkout_secret_hash) WHERE (checkout_secret_hash IS NOT NULL)
   index CREATE INDEX orders_closed_at_unpaid_idx ON billing.orders USING btree (merchant_id, COALESCE(canceled_at, expired_at)) WHERE ((status = ANY (ARRAY['canceled'::text, 'expired'::text])) AND (payment_id IS NULL) AND (attempt_id IS NULL))
   index CREATE INDEX orders_created_at_id_idx ON billing.orders USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE INDEX orders_customer_id_created_at_id_idx ON billing.orders USING btree (merchant_id, customer_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX orders_customer_id_id_key ON billing.orders USING btree (merchant_id, customer_id, id)
+  index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
   index CREATE UNIQUE INDEX orders_number_key ON billing.orders USING btree (merchant_id, number) WHERE (number IS NOT NULL)
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
 
 table billing.ownership_claims
   column merchant_id uuid NOT NULL
@@ -2523,6 +2534,7 @@ table billing.subscriptions
   trigger CREATE TRIGGER subscriptions_lifecycle_single_writer BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_lifecycle_single_writer()
   trigger CREATE TRIGGER subscriptions_release_ownership_claims AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
   trigger CREATE TRIGGER subscriptions_row_version BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_row_version()
+  trigger CREATE TRIGGER subscriptions_void_renewal_orders AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.void_ended_renewal_orders()
   trigger CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group()
   trigger CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status, current_period_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_status_transition()
   trigger CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_unverified()
@@ -3878,5 +3890,29 @@ function billing.subscriptions_track_unverified()
           DELETE FROM billing.subscription_verifications WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.id;
       END IF;
       RETURN NULL;
+  END;
+  $function$
+
+function billing.void_ended_renewal_orders()
+  CREATE OR REPLACE FUNCTION billing.void_ended_renewal_orders()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.status = 'canceled' OR NEW.deleted_at IS NOT NULL THEN
+          WITH voided AS (
+              UPDATE billing.orders o
+              SET status = 'void', payment_status = 'requires_payment_method', voided_at = now(), updated_at = now()
+              WHERE o.merchant_id = NEW.merchant_id AND o.subscription_id = NEW.id AND o.origin = 'subscription' AND o.status = 'open'
+              RETURNING o.id, o.customer_id, o.total, o.currency)
+          INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, amount, currency, occurred_at, data, dedupe_key)
+          SELECT NEW.merchant_id, 'order.voided', 'order', v.id, v.total, v.currency, now(),
+                 jsonb_build_object('customer_id', v.customer_id, 'status', 'void', 'payment_status', 'requires_payment_method'),
+                 'order.voided:' || v.id
+          FROM voided v
+          ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
+      END IF;
+      RETURN NEW;
   END;
   $function$

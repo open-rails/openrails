@@ -769,6 +769,12 @@ skipped WITHOUT a charge and parked `unverified` (access intact) for provider
 verification. Terminal failure = cancel + revoke entitlements + rail-side
 delete via the intent ledger's deferred-delete mechanism.
 
+An engine membership's renewal is an order (`origin: subscription`), one per
+period: every try above is an attempt on it, and between tries it is `open`
+with the decline, overdue past its `due_at` (`GET /v1/admin/orders?overdue=true`).
+The member can pay it themselves at any point, with the card they choose.
+Ending the subscription voids an unpaid renewal.
+
 This schedule governs every subscription OpenRails collects itself: engine
 memberships on Stripe and NMI, Solana pulls, and every NMI schedule
 (`nmi_schedule`). NMI

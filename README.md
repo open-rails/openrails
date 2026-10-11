@@ -761,6 +761,9 @@ Mounting gives your users these routes under `/billing`:
 | Route | What it does |
 |---|---|
 | `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
+| `POST /billing/v1/me/orders/preview`, `POST /billing/v1/me/orders` | price lines; buy them (with a `payment`, in one call) |
+| `GET /billing/v1/me/orders`, `GET /billing/v1/me/orders/{id}` | their orders, subscription renewals included (`?status=`, `?subscription_id=`, `?overdue=true`) |
+| `POST /billing/v1/me/orders/{id}/pay`, `/confirm`, `/cancel` | pay an open order (a renewal with a saved card), finish the bank's challenge, cancel a purchase |
 | `GET`, `DELETE /billing/v1/me/cart` | their cart, priced now with the ways it can be paid; empty it |
 | `PUT /billing/v1/me/cart/lines/{price_id}` | add a price or change its line (quantity 0 removes it); the cart is shared by every site of the merchant |
 | `GET /billing/v1/me/entitlements` | everything they currently have access to |
@@ -771,12 +774,11 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/subscriptions/{id}/change` | change plan or seats |
 | `POST /billing/v1/me/subscriptions/{id}/change/preview` | what that change would cost |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | pay a subscription with another saved card, or with their default again |
-| `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
+| `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal the PSP schedules (an engine-owned renewal is an order, paid with `/orders/{id}/pay`) |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
 | `POST /billing/v1/me/payment-methods` | save a card in one call (the PSP's token, never the card number) |
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
 | `PATCH /billing/v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse |
-| `POST /billing/v1/me/payment-methods/{id}/verify` | confirm a card again after its brand changed |
 | `POST /billing/v1/me/payment-methods/{id}/confirm` | finish saving a card after the bank's 3-D Secure step |
 | `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |

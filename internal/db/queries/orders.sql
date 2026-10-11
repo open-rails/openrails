@@ -11,6 +11,43 @@ INSERT INTO billing.orders (
     sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );
 
+-- name: CreateRenewalOrder :execrows
+-- A renewal's order, once per subscription and period: zero rows when it
+-- exists.
+INSERT INTO billing.orders (
+    merchant_id, id, customer_id, origin, status, payment_status, currency, total,
+    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, 'subscription',
+    'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
+    sqlc.arg(subscription_id)::uuid, sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz,
+    sqlc.arg(due_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+)
+ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' DO NOTHING;
+
+-- name: GetRenewalOrder :one
+SELECT * FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription'
+  AND subscription_id = sqlc.arg(subscription_id)::uuid AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz;
+
+-- name: VoidRenewalOrder :execrows
+-- A live renewal its subscription's end left unowed. A payment that landed
+-- anyway stays on it (refunded).
+UPDATE billing.orders
+SET status = 'void', voided_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz,
+    payment_id = sqlc.narg(payment_id)::uuid,
+    payment_status = CASE WHEN sqlc.narg(payment_id)::uuid IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND origin = 'subscription' AND status IN ('open', 'processing');
+
+-- name: GetOpenRenewalOrder :one
+-- The subscription's unpaid renewal, if any.
+SELECT * FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription'
+  AND subscription_id = sqlc.arg(subscription_id)::uuid AND status IN ('open', 'processing')
+ORDER BY period_starts_at DESC
+LIMIT 1;
+
 -- name: CreateOrderLine :exec
 INSERT INTO billing.order_lines (
     merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
@@ -44,11 +81,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 
 -- name: ListOrdersPage :many
 -- One page of orders, newest first; every filter is optional. price_id names
--- orders with a line on that price.
+-- orders with a line on that price; overdue_at the open ones due before it.
 SELECT o.* FROM billing.orders o
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR o.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR o.status = sqlc.narg(status)::text)
+  AND (sqlc.narg(origin)::text IS NULL OR o.origin = sqlc.narg(origin)::text)
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR o.subscription_id = sqlc.narg(subscription_id)::uuid)
+  AND (sqlc.narg(overdue_at)::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < sqlc.narg(overdue_at)::timestamptz))
   AND (sqlc.narg(price_id)::uuid IS NULL OR EXISTS (
         SELECT 1 FROM billing.order_lines l
         WHERE l.merchant_id = o.merchant_id AND l.order_id = o.id AND l.price_id = sqlc.narg(price_id)::uuid))
@@ -68,8 +108,11 @@ SELECT * FROM billing.order_lines
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: GetOrderLineBySubscription :one
+-- The line of order that produced a subscription; its renewal orders' lines
+-- name it too.
 SELECT * FROM billing.order_lines
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid;
 
 -- name: ListOrderLines :many
 SELECT * FROM billing.order_lines

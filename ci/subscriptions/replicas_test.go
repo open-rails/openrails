@@ -129,8 +129,8 @@ func TestReplicasSettledBeforeAdmission(t *testing.T) {
 			a.refreshProviders() // The earlier customer lock keeps every due pass behind the intended barrier.
 			passes := f.startPasses(b)
 			lock.awaitWaiters(b) // b has read both as due and waits on the first
-			paid := unwrap(late.c.must(http.MethodPost, "/subscriptions/"+late.sub.String()+"/retry-now", "retry-"+uuid.NewString(), map[string]any{}))
-			t.Logf("member retry: %v", paid)
+			paid := late.payRenewal(late.method)
+			require.Equal(t, http.StatusOK, paid.status, "%v", paid.body)
 			f.until(func() bool { return f.subscription(late).Status == "active" }, "the member's payment settles the late membership")
 			lock.release()
 			f.awaitPasses(passes)
@@ -463,7 +463,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			}
 			member := make(chan answer, 1)
 			go func() {
-				status, body, err := a.retryNow(e.c, e.sub, "retry-"+uuid.NewString())
+				status, body, err := a.payRenewal(e.c, e.sub, e.method, "retry-"+uuid.NewString())
 				member <- answer{status, body, err}
 			}()
 			lock.awaitWaiters(a, b)
@@ -471,7 +471,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			got := <-member
 			require.NoError(t, got.err)
 			t.Logf("member retry: %d %s", got.status, got.body)
-			require.Contains(t, []int{http.StatusOK, http.StatusAccepted, http.StatusConflict}, got.status, got.body)
+			require.Contains(t, []int{http.StatusOK, http.StatusConflict}, got.status, got.body)
 			f.awaitPasses(passes)
 			f.until(func() bool { return f.periodEnd(e).After(end) }, "the new card recovers the period")
 			f.passes()
@@ -579,6 +579,13 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 					}
 				}
 				require.Equal(t, want, charged, "every provider charge is a local payment")
+				renewals := e.renewalOrders()
+				require.Len(t, renewals, 1, "the raced renewal is one order")
+				if rc.charge {
+					require.Equal(t, billing.OrderComplete, renewals[0].Status)
+				} else {
+					require.Equal(t, billing.OrderVoid, renewals[0].Status, "a renewal its subscription's end left unowed is void, not open")
+				}
 				for range 2 {
 					f.advance(monthHours * time.Hour)
 					f.passes()
