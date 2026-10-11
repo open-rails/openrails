@@ -1,4 +1,4 @@
-package dashboard
+package copilot
 
 import (
 	"bytes"
@@ -49,7 +49,7 @@ type ToolTurn struct {
 	StopReason string
 }
 
-// LLM is the tool-use provider shared by metrics Q&A and the catalog copilot.
+// LLM is the tool-use provider for the catalog copilot.
 type LLM interface {
 	CompleteTools(ctx context.Context, system string, tools []ToolDef, msgs []ToolMessage, maxTokens int) (*ToolTurn, error)
 }
@@ -135,11 +135,11 @@ type anthropicResponse struct {
 func (a *AnthropicLLM) send(ctx context.Context, reqBody any) (*anthropicResponse, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: marshal request: %w", err)
+		return nil, fmt.Errorf("catalog llm: marshal request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: build request: %w", err)
+		return nil, fmt.Errorf("catalog llm: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", a.apiKey)
@@ -147,23 +147,23 @@ func (a *AnthropicLLM) send(ctx context.Context, reqBody any) (*anthropicRespons
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: request failed: %w", err)
+		return nil, fmt.Errorf("catalog llm: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: read response: %w", err)
+		return nil, fmt.Errorf("catalog llm: read response: %w", err)
 	}
 	var out anthropicResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("dashboard llm: non-JSON response (status %d)", resp.StatusCode)
+		return nil, fmt.Errorf("catalog llm: non-JSON response (status %d)", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		msg := "unknown error"
 		if out.Error != nil {
 			msg = fmt.Sprintf("%s: %s", out.Error.Type, out.Error.Message)
 		}
-		return nil, fmt.Errorf("dashboard llm: anthropic API error (status %d): %s", resp.StatusCode, msg)
+		return nil, fmt.Errorf("catalog llm: anthropic API error (status %d): %s", resp.StatusCode, msg)
 	}
 	return &out, nil
 }

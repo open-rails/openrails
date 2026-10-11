@@ -60,7 +60,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   configuration (see [below](#public-configuration)). Its `capabilities` list
   the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
-  `merchant_config_edits`, `catalog_copilot`, `metrics_ask`). Its route groups are `admin`
+  `merchant_config_edits`, `catalog_copilot`). Its route groups are `admin`
   (customer support), `catalog`, `merchant_config` (the merchant's own
   configuration and findings), `metrics` (business metrics) and `app` (the host backend's
   programmatic routes); `merchant_config_edits` says that configuration can

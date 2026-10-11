@@ -121,8 +121,6 @@ const (
 	FeatureMerchantConfigManages Feature = "merchant_config_edits"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
 	FeatureCatalogCopilot Feature = "catalog_copilot"
-	// FeatureMetricsAsk: llm.api_key and llm.ask_enabled.
-	FeatureMetricsAsk Feature = "metrics_ask"
 	// FeatureCustomerNetwork: the deployment runs the customer network
 	// (openrails.dev).
 	FeatureCustomerNetwork Feature = "customer_network"

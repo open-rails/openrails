@@ -39,7 +39,6 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, rdb.Close()) })
 			}
 			limits := config.RateLimitsConfig{
-				"metrics-ask": {RequestsPerMinute: 2},
 				"catalog-ask": {RequestsPerMinute: 2},
 				"checkout":    {RequestsPerMinute: 2},
 			}
@@ -49,7 +48,6 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			for _, path := range []string{
-				"/v1/metrics/ask",
 				"/v1/catalog/ask",
 			} {
 				before := calls
@@ -83,7 +81,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 }
 
 func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
-	limits := config.RateLimitsConfig{"metrics-ask": {RequestsPerMinute: 2}}
+	limits := config.RateLimitsConfig{"catalog-ask": {RequestsPerMinute: 2}}
 	h := ChainHTTP(okHandler(), RateLimitHTTP(&limits, nil, nil, nil, nil))
 	merchantA, merchantB := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	for _, c := range []call{
@@ -92,7 +90,7 @@ func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 		{ip: "203.0.113.10", merchant: merchantA, want: http.StatusTooManyRequests},
 		{ip: "203.0.113.11", merchant: merchantA, want: http.StatusOK},
 	} {
-		c.path = "/v1/metrics/ask"
+		c.path = "/v1/catalog/ask"
 		c.do(t, h)
 	}
 }

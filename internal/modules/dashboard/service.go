@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -15,52 +14,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// MetricsExecutor executes validated metrics plans; ask-loop tests inject
-// canned results.
-type MetricsExecutor interface {
-	Execute(ctx context.Context, plan *metrics.Plan) (*metrics.Result, error)
-}
+// Service persists per-merchant dashboards. Every read and write uses the
+// context's merchant.
+type Service struct{ db *db.DB }
 
-// Service persists per-merchant dashboards and runs metrics Q&A, every read and write scoped to the context's merchant.
-type Service struct {
-	db         *db.DB
-	metrics    MetricsExecutor
-	llm        LLM
-	askEnabled bool
-	clock      clockwork.Clock
-}
-
-// Deps are the dashboard module's collaborators. LLM may be nil (metrics questions
-// fail closed); AskEnabled is the llm.ask_enabled consent flag.
-// Clock nil = wall clock. HTTP abuse limits belong to the shared route middleware.
-type Deps struct {
-	DB         *db.DB
-	Metrics    MetricsExecutor
-	LLM        LLM
-	AskEnabled bool
-	Clock      clockwork.Clock
-}
-
-// NewService binds the dashboard module.
-func NewService(d Deps) *Service {
-	if d.Clock == nil {
-		d.Clock = clockwork.NewRealClock()
-	}
-	return &Service{
-		db:         d.DB,
-		metrics:    d.Metrics,
-		llm:        d.LLM,
-		askEnabled: d.AskEnabled,
-		clock:      d.Clock,
-	}
-}
-
-// SetLLM swaps the model backend (tests inject a deterministic stub).
-func (s *Service) SetLLM(l LLM) { s.llm = l }
-
-// AskConfigured reports whether metrics Q&A is available: an LLM AND the
-// explicit llm.ask_enabled consent (query results flow to the provider).
-func (s *Service) AskConfigured() bool { return s != nil && s.llm != nil && s.askEnabled }
+func NewService(database *db.DB) *Service { return &Service{db: database} }
 
 // Get returns the merchant's saved dashboard, or the seeded default template
 // when none exists (usage widgets only if the merchant has usage activity).

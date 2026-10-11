@@ -580,26 +580,19 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		}
 	}
 	metricsService := metrics.NewService(database)
-	// The assistants run only with an LLM key; metrics questions and catalog
-	// questions each need their own consent, as they send aggregate results to
-	// the provider.
-	var dashboardLLM dashboard.LLM
+	// The catalog copilot needs an LLM key and explicit consent to send
+	// catalog data to the provider.
+	var catalogLLM copilot.LLM
 	if config.LLMConfigured(cfg.LLM) {
 		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
 		switch config.LLMProvider(cfg.LLM) {
 		case config.LLMProviderOpenAI:
-			dashboardLLM = dashboard.NewOpenAILLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
+			catalogLLM = copilot.NewOpenAILLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
 		default: // anthropic — unknown providers refuse boot in config.Validate
-			dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
+			catalogLLM = copilot.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
 		}
 	}
-	dashboardService := dashboard.NewService(dashboard.Deps{
-		DB:         database,
-		Metrics:    metricsService,
-		LLM:        dashboardLLM,
-		AskEnabled: cfg.LLM != nil && cfg.LLM.AskEnabled,
-		Clock:      clock,
-	})
+	dashboardService := dashboard.NewService(database)
 	railCustomerService := payments.NewRailCustomerService(database)
 	// FX for Solana token quotes and policy-currency admission: live rates
 	// held in process memory. Never a flat 1.0 rate.
@@ -642,7 +635,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		Prices:   priceService,
 		Subs:     subscriptionService,
 		Reprices: priceMigrationService,
-		LLM:      dashboardLLM,
+		LLM:      catalogLLM,
 		Enabled:  cfg.LLM != nil && cfg.LLM.CatalogCopilotEnabled,
 		Drafting: cfg.LLM != nil && cfg.LLM.CatalogDraftingEnabled,
 		Clock:    clock,

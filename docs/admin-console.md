@@ -283,7 +283,7 @@ the mount's `Auth` for its permission, at the merchant or in the root scope
 
 Browse to the console path, `https://<your-host>/admin/` by default (the bare
 path redirects). The SPA bootstraps from `config.json` beneath it:
-`{auth_base_url, api_base_url, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer, merchant}`.
+`{auth_base_url, api_base_url, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer, merchant}`.
 
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers
@@ -316,7 +316,7 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 
 | Page | Route | What it does |
 |------|-------|--------------|
-| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant) + the Ask panel. A range picker (presets, or a custom start and end date) sets every widget's range and stays in the URL (`?range=7d`, `?from=2026-09-01&to=2026-09-30`); a widget with `fixed_range` keeps its own, as the default "today" row does (each tile against yesterday) |
+| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant). A range picker (presets, or a custom start and end date) sets every widget's range and stays in the URL (`?range=7d`, `?from=2026-09-01&to=2026-09-30`); a widget with `fixed_range` keeps its own, as the default "today" row does (each tile against yesterday) |
 | Reports | `/reports` | The daily subscription report (started, canceled, net change per UTC day) and the monthly renewal report (renewal payments, cancellations, churn per UTC month) over the dashboard's range, each with a CSV download |
 | Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access (1, 7, 30 or 365 days after any access the customer has, until a date, or never) |
 | Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view, and two views: Renewing soon (active, period ending within 7 days, soonest first) and Recently canceled (the last 30 days, latest first), as `?view=renewing_soon` / `?view=recently_canceled`; cancel (typed confirmation), resume, NMI payment-method change |
@@ -331,7 +331,6 @@ the UI shows a pointed empty-state instead of a broken button:
 
 | Assistant | Route group | Gate (config / env) |
 |---------|---------|--------------------|
-| Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | Metrics | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
 | Catalog copilot Q&A (read-only catalog/subscriber aggregates) | Catalog | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
 | Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | Catalog, with catalog updates | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
 

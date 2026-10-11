@@ -122,7 +122,7 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		authBase = authKitAPIBase
 	}
 	console := adminconsole.Config{AuthBaseURL: authBase, APIBaseURL: sel.Prefix + "/v1"}
-	console.Assistants(a.Config.LLM, sel.RouteGroups.Catalog, sel.RouteGroups.Metrics)
+	console.Assistants(a.Config.LLM, sel.RouteGroups.Catalog)
 	// The console acts for the merchant its sign-in binds: the one whose
 	// Issuer the engine declares. Staff of several merchants would need a
 	// token exchanged per merchant, which an embedded console cannot get.

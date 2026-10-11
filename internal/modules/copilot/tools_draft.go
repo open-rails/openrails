@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -103,8 +102,8 @@ func crossConstraintRefusal(from, to *models.Price) *billing.CatalogDraftRefusal
 
 const toolDraftPriceChange = "draft_price_change"
 
-func toolDefDraftPriceChange() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefDraftPriceChange() ToolDef {
+	return ToolDef{
 		Name:        toolDraftPriceChange,
 		Description: "Draft a #777 wizard price-change plan for an EXISTING price key: a version bump (new amount, same key) plus an optional migration. NEVER mutates anything — returns a DRAFT payload for human review/confirm in the console wizard, with the affected-subscriber count and review text already computed. migration_mode defaults per direction (increase->grandfather, decrease->migrate); effective_date defaults to the notice-window floor for an increase, or now for a decrease/grandfather. Pass migrate_to_price_key ONLY if the merchant is asking to move subscribers onto a DIFFERENT, pre-existing product/price (plan consolidation) — that request is refused with a typed reason and workaround, never drafted. Amounts are integer native units of the price currency.",
 		InputSchema: json.RawMessage(`{
@@ -247,8 +246,8 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 const toolDraftCatalogDiff = "draft_catalog_diff"
 
-func toolDefDraftCatalogDiff() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefDraftCatalogDiff() ToolDef {
+	return ToolDef{
 		Name:        toolDraftCatalogDiff,
 		Description: "Draft a NEW price (a new tier/plan variant, e.g. \"add a with-ads tier at $6\") on an EXISTING product. NEVER mutates anything — returns a create-price DRAFT for human review/confirm in the console. Only adds a price to a product that already exists; drafting a brand-new PRODUCT is out of scope for v1 (create the product first, then ask again). Amounts are integer native units of the price currency.",
 		InputSchema: json.RawMessage(`{

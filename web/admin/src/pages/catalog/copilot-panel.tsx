@@ -1,5 +1,5 @@
 // Catalog copilot: one-shot Q&A over catalog, pricing and migration data, like
-// the dashboard's Ask panel, plus drafts when drafting is enabled. The model
+// catalog tools, plus drafts when drafting is enabled. The model
 // never mutates anything: a draft opens, pre-filled, in the price-change
 // wizard or as a create-price call for a person to confirm.
 import { HugeiconsIcon } from "@hugeicons/react"

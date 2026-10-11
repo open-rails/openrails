@@ -149,8 +149,7 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// MetricsService is the #733 merchant analytics query engine.
 	MetricsService *metrics.Service
-	// DashboardService is the merchant's saved dashboard and its metrics
-	// questions (off without an LLM).
+	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
 	// CopilotService answers catalog questions and drafts price changes for a
 	// person to review (off without an LLM and its consent).

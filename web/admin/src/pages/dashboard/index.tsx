@@ -13,13 +13,11 @@ import "react-grid-layout/css/styles.css"
 
 import { useConfirm } from "@/lib/confirm"
 import { Skeleton } from "@/components/ui/skeleton"
-import { getBootstrap } from "@/lib/api/client"
 import type { Widget } from "@/lib/api/metrics"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 
-import { AskPanel } from "./ask-panel"
 import { RangePicker } from "./range-picker"
 import { useDashboardRange } from "./use-range"
 import { WidgetEditor, type WidgetDraft } from "./widget-editor"
@@ -57,14 +55,6 @@ function stackedWidgets<T extends { id: string }>(
   return [...widgets].sort(
     (a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0)
   )
-}
-
-function askEnabled(): boolean {
-  try {
-    return getBootstrap().ask_enabled
-  } catch {
-    return false
-  }
 }
 
 // DashboardPage is the console's home: the metrics dashboard for a caller
@@ -206,7 +196,6 @@ function MetricsDashboard() {
     <div className="flex flex-col gap-4">
       {header}
 
-      <AskPanel enabled={askEnabled()} />
 
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (
