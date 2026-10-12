@@ -81,7 +81,7 @@ func TestMerchantCustomRoles(t *testing.T) {
 	key := minted.Secret
 	customer := billing.CustomerID(uuid.New()).String()
 	products := func(token string) *httptest.ResponseRecorder {
-		return call(t, handler, token, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", nil)
+		return call(t, handler, token, http.MethodGet, "/v1/catalog/products?entitlement=content:any", nil)
 	}
 	entitlements := func(token string) *httptest.ResponseRecorder {
 		return call(t, handler, token, http.MethodPost, "/v1/app/entitlements/check", map[string]any{"customer_id": customer, "entitlements": []string{"content:any"}})

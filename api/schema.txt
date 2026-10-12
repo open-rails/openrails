@@ -70,7 +70,8 @@ migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
-migration 0074_operational_read_indexes.up.sql sha256:007f87252e0bafe56f8ea84140079ff1d2c4aa0116b69b7ee99aefdffd23831c
+migration 0073_public_price_identifiers.up.sql sha256:dee48359d17caa0f65aa7f25916553e972ff681ecc53096a2022523dca1d0e6c
+migration 0074_operational_read_indexes.up.sql sha256:04963a12a8503057b0cb91eb43c26aaca91491d9624fd9136d7c6920e6f69f12
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1623,6 +1624,7 @@ table billing.prices
   column customer_amount jsonb
   column billing_interval_hours integer
   column quantity jsonb
+  column public_id text NOT NULL
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
@@ -1648,12 +1650,14 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
+  index CREATE INDEX prices_public_id_idx ON billing.prices USING btree (merchant_id, sha256((public_id)::bytea))
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
   trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
+  trigger CREATE TRIGGER price_z_public_id BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_public_id()
 
 table billing.product_access
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2463,6 +2467,22 @@ function billing.assign_object_revision()
       RETURN NEW;
   END $function$
 
+function billing.assign_price_public_id()
+  CREATE OR REPLACE FUNCTION billing.assign_price_public_id()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing'
+  AS $function$
+  DECLARE product_key text;
+  BEGIN
+      SELECT key INTO STRICT product_key FROM billing.products
+      WHERE merchant_id = NEW.merchant_id AND id = NEW.product_id;
+      NEW.public_id := billing.escape_price_key(product_key) || ':'
+          || billing.escape_price_key(NEW.key) || ':v' || (NEW.revision + 1)::text;
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.assign_price_revision()
   CREATE OR REPLACE FUNCTION billing.assign_price_revision()
    RETURNS trigger
@@ -2854,6 +2874,30 @@ function billing.ensure_month_partitions(name,timestamp with time zone,timestamp
           month_start := month_start + interval '1 month';
       END LOOP;
       RETURN created;
+  END;
+  $function$
+
+function billing.escape_price_key(text)
+  CREATE OR REPLACE FUNCTION billing.escape_price_key(key text)
+   RETURNS text
+   LANGUAGE plpgsql
+   IMMUTABLE STRICT
+   SET search_path TO 'pg_catalog'
+  AS $function$
+  DECLARE
+      bytes bytea := convert_to(key, 'UTF8');
+      result text := '';
+      value integer;
+  BEGIN
+      FOR i IN 0..length(bytes)-1 LOOP
+          value := get_byte(bytes, i);
+          IF value BETWEEN 65 AND 90 OR value BETWEEN 97 AND 122 OR value BETWEEN 48 AND 57 OR value IN (45, 46, 95, 126) THEN
+              result := result || chr(value);
+          ELSE
+              result := result || '%' || upper(lpad(to_hex(value), 2, '0'));
+          END IF;
+      END LOOP;
+      RETURN result;
   END;
   $function$
 

@@ -81,7 +81,10 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	management := "/v1/catalog/products?keys=" + url.QueryEscape(key)
 	require.Equal(t, http.StatusUnauthorized, serve(handler, rsRequest{path: management}).Code)
 	viewer := merchantKey(t, srv, a, "viewer")
-	require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}).Code)
+	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}))
+	require.Equal(t, productA, id)
+	write := serve(handler, rsRequest{method: http.MethodPost, path: "/v1/catalog/products", authorization: "Bearer " + viewer.Secret})
+	require.Equal(t, http.StatusForbidden, write.Code, write.Body.String())
 	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + keyA.Secret}))
 	require.Equal(t, productA, id)
 

@@ -158,8 +158,8 @@ func (v anyGrant) Can(ctx context.Context, scope billingauth.Scope, _ string) (b
 func TestCheckAuthFillsTheRouteGroupsPermissions(t *testing.T) {
 	fake := &authtest.Fake{}
 	held := []billing.Permission{
-		billing.RootCustomerRead, billing.RootCustomerManage, billing.RootCatalogManage, billing.RootConfigManage, billing.RootMetricsRead,
-		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageManage, billing.RootEventsRead, billing.RootOrdersManage,
+		billing.RootCustomerRead, billing.RootCustomerManage, billing.RootCatalogManage, billing.RootConfigRead, billing.RootConfigManage, billing.RootMetricsRead,
+		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageRead, billing.RootUsageManage, billing.RootEventsRead, billing.RootOrdersManage,
 	}
 	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 	staff := fake.Person(staffID, held...)

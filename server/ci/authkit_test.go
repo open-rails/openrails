@@ -46,7 +46,8 @@ func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 		return call(t, handler, token, http.MethodGet, "/v1/admin/customers", nil).Code
 	}
 	require.Equal(t, http.StatusOK, customers(viewerKey.Secret, ""), "a key names its merchant")
-	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/merchant/psps", nil).Code, "a viewer reads no merchant configuration")
+	require.Equal(t, http.StatusOK, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/merchant/psps", nil).Code, "a viewer can inspect merchant configuration")
+	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/merchant/psps", map[string]any{}).Code, "a viewer cannot change merchant configuration")
 	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/merchant/psps", nil).Code)
 	w := callWith(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/customers", nil, retiredMerchantHeader, "id:"+other.String())
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

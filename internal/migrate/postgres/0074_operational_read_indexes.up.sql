@@ -1,4 +1,4 @@
--- parent: 69 sha256:cc323dbbea514efdedfbaed5cee269b802fc6705d5abca970bd44575868b870f
+-- parent: 73 sha256:b49fea37ec7615dcabeb63d197173bbc011c56d2edb3f86d89b6513e487fb6e6
 -- Repair: none-needed New indexes for bounded operational inspection.
 CREATE INDEX admission_operations_admitted_at_request_id_idx
     ON billing.admission_operations (merchant_id, admitted_at DESC, request_id COLLATE "C" DESC);

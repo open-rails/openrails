@@ -142,7 +142,6 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 			if !strings.HasPrefix(route.Path, "/v1/catalog/") || route.Method == http.MethodOptions {
 				continue
 			}
-			// Offer lookup is a read with a POST body.
 			if route.Method == http.MethodGet || route.Method == http.MethodHead {
 				reads++
 			} else {

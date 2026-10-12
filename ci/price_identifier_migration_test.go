@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -42,6 +43,17 @@ func TestPriceIdentifierMigrationPreservesForeignKeys(t *testing.T) {
 		require.NoError(t, err)
 		before[name] = &fstest.MapFile{Data: body}
 	}
+	// The read-only inspection lane can ship its independent indexes first.
+	// Applying 0073 later must not be skipped just because 0074 is recorded.
+	indexMigration := "0074_operational_read_indexes.up.sql"
+	indexes, err := fs.ReadFile(postgresmigrations.FS, indexMigration)
+	require.NoError(t, err)
+	_, indexBody, ok := strings.Cut(string(indexes), "\n")
+	require.True(t, ok)
+	parent := before["0069_subscriptions_sort_indexes.up.sql"]
+	require.NotNil(t, parent)
+	indexHeader := "-- parent: 69 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
+	before[indexMigration] = &fstest.MapFile{Data: []byte(indexHeader + indexBody)}
 	require.Less(t, len(before), len(files))
 	cfg := f.config()
 	cfg.DB = &openrails.DBConfig{URL: dsn}
