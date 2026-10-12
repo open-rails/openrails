@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,8 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
+	"destructive_actions":       "deployment command admissions; never imported, re-exported or reset by merchant restore",
+	"destructive_holds":         "deployment incident authority and clears; never imported or reset by merchant restore",
 	"notification_consumers":    "deployment delivery subscriptions; hosts register at destination",
 	"notification_event_acks":   "deployment consumer processing receipts",
 	"notification_events":       "immutable source facts, drained before archive",
@@ -60,6 +63,8 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
+	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
+	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at",
@@ -116,7 +121,8 @@ var omittedColumns = map[string]string{
 	"checkout_attempts": "destructive_run_class",
 	"product_access":    "destructive_run_class",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
-	"provider_intents":  "destructive_run_class",
+	"provider_intents":  "destructive_run_class destructive_action_id",
+	"price_migrations":  "destructive_action_id",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {
@@ -257,6 +263,9 @@ var preflightChecks = []rowCheck{
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
+	if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+		return err
+	}
 	for _, c := range preflightChecks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {
 			return err
@@ -404,4 +413,17 @@ func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 		row.PaymentRail != nil && *row.PaymentRail == p.Rail && row.PaymentTransactionID != nil && *row.PaymentTransactionID == receipt.TransactionID() &&
 		row.PaymentAmount != nil && *row.PaymentAmount == charged && row.PaymentCurrency != nil && *row.PaymentCurrency == p.Currency &&
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount
+}
+
+// Deployment admission/hold history never travels in a merchant artifact.
+// Refuse moving a book while it could discard live authority or recent budget.
+func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
+	held, err := gen.New(tx).HasDestructiveArchiveBarrier(ctx, gen.HasDestructiveArchiveBarrierParams{MerchantID: id.UUID(), Since: time.Now().UTC().Add(-24 * time.Hour)})
+	if err != nil {
+		return err
+	}
+	if held {
+		return &Error{Code: "unsupported_state", Table: "destructive_actions", Count: 1}
+	}
+	return nil
 }

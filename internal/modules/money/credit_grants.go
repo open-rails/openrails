@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -144,90 +146,108 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
+	current := creditGrantFromRow(addressed, s.now())
+	if current.State == billing.CreditGrantRevoked {
+		current.Replayed = true
+		return &current, nil
+	}
+	if addressed.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+		return nil, ErrCreditGrantUnavailable
+	}
+	command, err := destructive.CommandFromContext(ctx, destructive.RevokeCredit, grantID.String(), "credit-revoke:"+grantID.String(), struct{ Reason string }{reason})
+	if err != nil {
+		return nil, err
+	}
 	payer := addressed.CustomerID
 	var result *billing.CreditGrant
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payer}); err != nil {
+	err = destructive.RunLocal(ctx, s.db, s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+		changed := false
+		err := func() error {
+
+			q := txDB.Gen(ctx)
+			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payer}); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrCreditGrantNotFound
+				}
+				return err
+			}
+			row, err := q.GetCreditGrant(ctx, args)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrCreditGrantNotFound
 			}
-			return err
-		}
-		row, err := q.GetCreditGrant(ctx, args)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrCreditGrantNotFound
-		}
-		if err != nil {
-			return err
-		}
-		current := creditGrantFromRow(row, s.now())
-		if current.State == billing.CreditGrantRevoked {
-			current.Replayed = true
-			result = &current
-			return nil
-		}
-		if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
-			return ErrCreditGrantUnavailable
-		}
-		// What running charges accrued is spend the lots have funded: it is
-		// posted before the remainder is read.
-		if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Currency); err != nil {
-			return err
-		}
-		if row, err = q.GetCreditGrant(ctx, args); err != nil {
-			return err
-		}
-		if current = creditGrantFromRow(row, s.now()); current.RemainingAmount <= 0 {
-			return ErrCreditGrantUnavailable
-		}
-		original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
-		if err != nil {
-			return err
-		}
-		var provenance grants.Spec
-		if len(original.SpecSnapshot) > 0 {
-			if err := json.Unmarshal(original.SpecSnapshot, &provenance); err != nil {
-				return err
-			}
-		}
-		if original.PaymentID != nil && provenance.Deposit != nil && provenance.Deposit.PaidAmount != nil {
-			pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: *original.PaymentID})
 			if err != nil {
 				return err
 			}
-			if pending > 0 {
+			current := creditGrantFromRow(row, s.now())
+			if current.State == billing.CreditGrantRevoked {
+				current.Replayed = true
+				result = &current
+				return nil
+			}
+			if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+				return ErrCreditGrantUnavailable
+			}
+			// What running charges accrued is spend the lots have funded: it is
+			// posted before the remainder is read.
+			if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Currency); err != nil {
+				return err
+			}
+			if row, err = q.GetCreditGrant(ctx, args); err != nil {
+				return err
+			}
+			if current = creditGrantFromRow(row, s.now()); current.RemainingAmount <= 0 {
+				return ErrCreditGrantUnavailable
+			}
+			original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
+			if err != nil {
+				return err
+			}
+			var provenance grants.Spec
+			if len(original.SpecSnapshot) > 0 {
+				if err := json.Unmarshal(original.SpecSnapshot, &provenance); err != nil {
+					return err
+				}
+			}
+			if original.PaymentID != nil && provenance.Deposit != nil && provenance.Deposit.PaidAmount != nil {
+				pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: *original.PaymentID})
+				if err != nil {
+					return err
+				}
+				if pending > 0 {
+					return ErrCreditGrantHeld
+				}
+			}
+			bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Currency)
+			if err != nil {
+				return err
+			}
+			if current.RemainingAmount > bal.Balance {
+				return ErrCreditGrantUnavailable
+			}
+			if bal.HeldBalance < 0 {
+				return fmt.Errorf("revoke credit grant: held balance %d is negative", bal.HeldBalance)
+			}
+			if current.RemainingAmount > satSub(bal.Balance, bal.HeldBalance) {
 				return ErrCreditGrantHeld
 			}
-		}
-		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Currency)
-		if err != nil {
-			return err
-		}
-		if current.RemainingAmount > bal.Balance {
-			return ErrCreditGrantUnavailable
-		}
-		if bal.HeldBalance < 0 {
-			return fmt.Errorf("revoke credit grant: held balance %d is negative", bal.HeldBalance)
-		}
-		if current.RemainingAmount > satSub(bal.Balance, bal.HeldBalance) {
-			return ErrCreditGrantHeld
-		}
-		ledger := grants.New(q, mid.UUID())
-		ledger.SetClock(s.now)
-		if _, err := ledger.Revoke(ctx, grantID, reason); err != nil {
-			return err
-		}
-		if err := ledger.MaterializeGrant(ctx, original); err != nil {
-			return err
-		}
-		updated, err := q.GetCreditGrant(ctx, args)
-		if err != nil {
-			return err
-		}
-		revoked := creditGrantFromRow(updated, s.now())
-		result = &revoked
-		return nil
+			changed = true
+			ledger := grants.New(q, mid.UUID())
+			ledger.SetClock(s.now)
+			if _, err := ledger.Revoke(ctx, grantID, reason); err != nil {
+				return err
+			}
+			if err := ledger.MaterializeGrant(ctx, original); err != nil {
+				return err
+			}
+			updated, err := q.GetCreditGrant(ctx, args)
+			if err != nil {
+				return err
+			}
+			revoked := creditGrantFromRow(updated, s.now())
+			result = &revoked
+			return nil
+		}()
+		return changed, err
 	})
 	return result, err
 }

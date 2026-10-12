@@ -395,6 +395,29 @@ type BillingDashboardConfig struct {
 	UpdatedBy *string
 }
 
+// Admitted destructive command audit, immutable authority and admission facts with explicit outcome; not a counter or request-body store. Proven no-effect retries create another immutable attempt. Retention: permanent, never pruned.
+type BillingDestructiveAction struct {
+	MerchantID         uuid.UUID
+	ID                 uuid.UUID
+	AdmissionSequence  *int64
+	Kind               string
+	Target             string
+	ActionKey          string
+	RequestDigest      string
+	Origin             string
+	ActorIssuer        string
+	ActorID            string
+	ActorKey           string
+	Credential         *string
+	Units              int64
+	AdmittedAt         time.Time
+	State              string
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	CompletionSequence *int64
+	Result             *string
+}
+
 // Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
 type BillingDestructiveActionSwitch struct {
 	Singleton bool
@@ -402,6 +425,29 @@ type BillingDestructiveActionSwitch struct {
 	UpdatedBy *string
 	Reason    *string
 	UpdatedAt time.Time
+}
+
+// Deployment-authoritative destructive incident episodes. Merchant_id identifies only the triggering tenant; actor/deployment holds span tenants. An audited clear ends one episode, never an ordinary finding resolution. Retention: permanent, never pruned.
+type BillingDestructiveHold struct {
+	MerchantID           uuid.UUID
+	ID                   uuid.UUID
+	Scope                string
+	ScopeKey             string
+	ActorIssuer          string
+	ActorID              string
+	Credential           *string
+	ActionKind           string
+	Target               string
+	WindowName           string
+	Observed             int64
+	Requested            int64
+	Ceiling              int64
+	OpenedAt             time.Time
+	ClearedAt            *time.Time
+	ClearThroughSequence *int64
+	ClearedByIssuer      *string
+	ClearedByID          *string
+	ClearReason          *string
 }
 
 // The row as it stood immediately before a destructive run updated it, so the run can be reversed. A soft-delete stamp reverses deletes; this reverses updates. One image per (run, table, row), pinned to exactly one run. Retention: permanent, never pruned.
@@ -1150,6 +1196,8 @@ type BillingPriceMigration struct {
 	CreatedAt            time.Time
 	// When its still-scheduled changes were canceled; a canceled migration is never re-driven.
 	CanceledAt *time.Time
+	// Original admitted cohort action; unresolved scheduled or blocked changes retain its reservation.
+	DestructiveActionID *uuid.UUID
 }
 
 // A price's provider objects on one PSP. Each rail uses its own reference column.
@@ -1273,6 +1321,8 @@ type BillingProviderIntent struct {
 	Subject *string
 	// How the subject proved itself for a user/admin-origin intent, as kind:id (session:…, api_key:…). NULL for system-origin.
 	Credential *string
+	// Original admitted command; recovery and necessary consequences reuse its authority and never spend another unit.
+	DestructiveActionID *uuid.UUID
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.

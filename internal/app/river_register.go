@@ -46,6 +46,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// One registry feeds every worker that runs intents; IntentRunner builds
 	// the same set, so per-type semantics never diverge.
+	if err := addTrackedWorker(r, workers, &riverjobs.DestructiveAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
+		return fmt.Errorf("add destructive alert worker: %w", err)
+	}
 	intentRegistry := r.buildIntentRegistry(clock)
 	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
@@ -181,7 +184,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Accepted operations carry their own durable River lifecycle job.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
-		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry,
+		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry, Admissions: r.DestructiveAdmissions,
 	}); err != nil {
 		return fmt.Errorf("add provider operation worker: %w", err)
 	}
@@ -380,6 +383,7 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		// Operator kill switch: one UPDATE halts every destructive provider
 		// write on every node.
 		Destructive: destructive.New(r.DB),
+		Admissions:  r.DestructiveAdmissions,
 		Clock:       clock,
 		Config:      r.Posture(),
 	}

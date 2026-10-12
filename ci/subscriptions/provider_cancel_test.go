@@ -98,5 +98,8 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	w.wake()
 	require.Len(t, l.stripeSubWrites(), 1)
 	require.Equal(t, 1, w.providerCancels("stripe_cancel_subscription", l.sub.UUID()))
+	var admissions int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.destructive_actions WHERE kind='cancel_subscription' AND target=$1`), l.sub.UUID().String()).Scan(&admissions))
+	require.Equal(t, 1, admissions, "an already-canceled refusal spends no new unit")
 	require.Zero(t, l.engineCharges())
 }

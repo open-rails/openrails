@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/destructive"
 )
 
 // Recheck is how often an access reloads a Vault-held merchant: the bound on
@@ -36,10 +37,12 @@ type Cache struct {
 	base    context.Context
 	stop    context.CancelFunc
 
-	mu        sync.Mutex
-	reconcile SyncFunc
-	announce  func(context.Context, billing.MerchantID) error
-	entries   map[billing.MerchantID]*entry
+	mu             sync.Mutex
+	reconcile      SyncFunc
+	announce       func(context.Context, billing.MerchantID) error
+	entries        map[billing.MerchantID]*entry
+	admissions     *destructive.Admissions
+	fingerprintKey []byte
 }
 
 type entry struct {
@@ -214,17 +217,17 @@ func (c *Cache) write(ctx context.Context, id billing.MerchantID, put func() err
 
 // PutMerchant writes the merchant document at revision cas.
 func (c *Cache) PutMerchant(ctx context.Context, id billing.MerchantID, doc Merchant, cas int64) (Set, error) {
-	return c.write(ctx, id, func() error { _, err := c.source.PutMerchant(ctx, id, doc, cas); return err })
+	return c.admittedWrite(ctx, id, MerchantDoc, doc, cas, func() error { _, err := c.source.PutMerchant(ctx, id, doc, cas); return err })
 }
 
 // PutPSP writes one PSP document at revision cas.
 func (c *Cache) PutPSP(ctx context.Context, id billing.MerchantID, key string, doc PSP, cas int64) (Set, error) {
-	return c.write(ctx, id, func() error { _, err := c.source.PutPSP(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, PSPDoc(key), doc, cas, func() error { _, err := c.source.PutPSP(ctx, id, key, doc, cas); return err })
 }
 
 // PutCustodian writes one custodian document at revision cas.
 func (c *Cache) PutCustodian(ctx context.Context, id billing.MerchantID, key string, doc Custodian, cas int64) (Set, error) {
-	return c.write(ctx, id, func() error { _, err := c.source.PutCustodian(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, CustodianDoc(key), doc, cas, func() error { _, err := c.source.PutCustodian(ctx, id, key, doc, cas); return err })
 }
 
 // Delete removes every document of the merchant.

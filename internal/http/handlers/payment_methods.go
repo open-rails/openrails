@@ -426,7 +426,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 			r.ErrorCode(codePaymentMethodDeleteFailed, "Payment method could not be deleted at the payment provider")
 			return
 		}
-		r.InternalError("Failed to delete payment method", err)
+		writeRefusal(r, err, "Failed to delete payment method")
 	}
 }
 

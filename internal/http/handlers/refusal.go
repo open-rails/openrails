@@ -5,6 +5,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/destructive"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -25,6 +26,13 @@ func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
 // write held until its provider account's book has caught up is a retryable
 // refusal, never an internal failure.
 func refusalOf(err error) *api.APIError {
+	if errors.Is(err, destructive.ErrHeld) {
+		return api.Coded(billing.CodeRateLimitExceeded, "destructive actions are held until an authorized operator clears the incident")
+	}
+	if errors.Is(err, destructive.ErrConflict) {
+		return api.Coded(billing.CodeIdempotencyKeyReused, "the operation identity already names another destructive action")
+	}
+
 	if errors.Is(err, providerrecovery.ErrPending) {
 		return api.Coded(billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
 	}

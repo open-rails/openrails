@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"hash/fnv"
 	"math"
 	"net/http"
@@ -110,7 +111,7 @@ func writeAdminRefundError(r *httprequest.Request, err error) {
 		r.APIError(refusal)
 		return
 	}
-	r.InternalError("refund request failed", err)
+	writeRefusal(r, err, "refund request failed")
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, idempotencyKey string) (*models.Payment, int, error) {
@@ -119,11 +120,25 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		// the database; without one there is nothing durable to execute.
 		return nil, 0, errors.New("refund ledger unavailable: runtime has no database")
 	}
-	if err := checkAdminRefundRail(ctx, r, paymentID, idempotencyKey, req.RevokeAccess); err != nil {
+	command, err := adminRefundCommand(ctx, r, paymentID, req, idempotencyKey)
+	if err != nil {
+		return nil, 0, err
+	}
+	if r.State.DestructiveAdmissions == nil {
+		return nil, 0, errors.New("destructive refund admission is not wired")
+	}
+	if prior, found, err := preparedRefundReplay(ctx, r, paymentID, idempotencyKey); err != nil {
+		return nil, 0, err
+	} else if found {
+		return issuePreparedAdminRefund(ctx, r, prior)
+	}
+	ctx, action, err := destructive.AdmitCommand(ctx, r.State.DestructiveAdmissions, command)
+	if err != nil {
 		return nil, 0, err
 	}
 	var prepared *adminRefundPrepared
-	err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	callbackCompleted := false
+	err = r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := gen.New(tx).LockAdminRefund(ctx, adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
@@ -134,10 +149,17 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 			return err
 		}
 		prepared = result
+		callbackCompleted = true
 		return nil
 	})
 	if err != nil {
-		return nil, 0, err
+		outcome := destructive.OutcomeNoEffect
+		if callbackCompleted && !errors.Is(err, pgx.ErrTxCommitRollback) {
+			outcome = destructive.OutcomeUncertain
+		}
+		writeCtx, cancel := intents.LedgerWriteContext(ctx)
+		defer cancel()
+		return nil, 0, errors.Join(err, r.State.DestructiveAdmissions.Finish(writeCtx, action.MerchantID, action.ID, outcome, ""))
 	}
 	return issuePreparedAdminRefund(ctx, r, prepared)
 }
@@ -604,4 +626,70 @@ func writeRecordedPayment(r *httprequest.Request, status int, id uuid.UUID) {
 		refunds = []*models.Payment{}
 	}
 	r.JSON(status, PaymentToAPI(payment, refunds))
+}
+
+func adminRefundCommand(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, key string) (destructive.Command, error) {
+	if err := validateRefund(req); err != nil {
+		return destructive.Command{}, err
+	}
+	if err := checkAdminRefundRail(ctx, r, paymentID, key, req.RevokeAccess); err != nil {
+		return destructive.Command{}, err
+	}
+	svc := r.State.PaymentService
+	prior, err := svc.GetRefundByAdminIdempotencyKey(ctx, paymentID, key)
+	if err == nil {
+		if !adminRefundMatchesRequest(prior, req) {
+			return destructive.Command{}, api.Coded(billing.CodeIdempotencyKeyReused, "idempotency key was already used for another refund")
+		}
+	} else {
+		if !db.IsNotFound(err) {
+			return destructive.Command{}, err
+		}
+		payment, err := svc.GetByID(ctx, paymentID)
+		if err != nil {
+			return destructive.Command{}, err
+		}
+		amount := req.Amount
+		if req.Full {
+			refunded, err := svc.GetRefundTotalByPaymentID(ctx, paymentID)
+			if err != nil {
+				return destructive.Command{}, err
+			}
+			amount = payment.Amount - refunded
+		}
+		if err := svc.ValidateRefund(ctx, payment, amount); err != nil {
+			return destructive.Command{}, api.Coded(refundCodeNotRefundable, err.Error())
+		}
+		if _, err := refundAmountCents(payment.Currency, amount); err != nil {
+			return destructive.Command{}, api.Coded(billing.CodeInvalidParam, err.Error())
+		}
+		if payment.PspID == nil {
+			return destructive.Command{}, api.Coded(refundCodeUnsupported, "payment carries no PSP")
+		}
+	}
+	return destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+key, req)
+}
+
+// An existing reservation owns its accepted admission and provider operation,
+// including a terminal decline. Replaying it must not allocate a new receipt.
+func preparedRefundReplay(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, key string) (*adminRefundPrepared, bool, error) {
+	reservation, err := r.State.PaymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, key)
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	operation, err := r.State.DB.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: intents.RefundIdempotencyKey(paymentID, key)})
+	if err != nil {
+		return nil, false, err
+	}
+	if operation.PaymentID == nil || *operation.PaymentID != paymentID || operation.DestructiveActionID == nil {
+		return nil, false, errors.New("refund replay has no original destructive admission")
+	}
+	return &adminRefundPrepared{reservationID: reservation.ID, intentID: operation.ID}, true, nil
 }

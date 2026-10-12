@@ -76,6 +76,7 @@ sql:
       - "internal/migrate/postgres/0077_retire_checkout_creation.up.sql"
       - "internal/migrate/postgres/0078_proposals.up.sql"
       - "internal/migrate/postgres/0079_balance_notices.up.sql"
+      - "internal/migrate/postgres/0080_destructive_admissions.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

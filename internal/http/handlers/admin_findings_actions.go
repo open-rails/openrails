@@ -1,28 +1,23 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -54,6 +49,11 @@ func findingActionRefusal(err error) *api.APIError {
 	var param *findingParamError
 	if errors.As(err, &param) {
 		return api.Coded(billing.CodeInvalidParam, message)
+	}
+	if refusal := refusalOf(err); refusal != nil {
+		out := *refusal
+		out.Message = message
+		return &out
 	}
 	var refusal *api.APIError
 	if errors.As(err, &refusal) {
@@ -167,9 +167,9 @@ func executeFindingAction(r *httprequest.Request, finding reconcile.FindingRecor
 
 // executeRevokeProductAccess revokes one product-access window as of a time.
 func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, result map[string]any) error {
-	svc := r.State.EntitlementService
+	svc := r.State.ProductAccessService
 	if svc == nil {
-		return errors.New("entitlement service unavailable")
+		return errors.New("product access service unavailable")
 	}
 	ctx := r.Request.Context()
 	accessID, err := paramUUID(params, "access_id")
@@ -185,7 +185,7 @@ func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, r
 		t := parsed.UTC()
 		asOf = &t
 	}
-	access, err := svc.GetAccessByID(ctx, accessID)
+	access, err := r.State.EntitlementService.GetAccessByID(ctx, accessID)
 	if err != nil {
 		return paramErrorf("product access %s not found", accessID)
 	}
@@ -193,7 +193,7 @@ func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, r
 		result["revoke"] = "noop_already_revoked"
 		return nil
 	}
-	if err := svc.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: models.AccessRevokeAdmin, AsOf: asOf}); err != nil {
+	if _, err := svc.RevokeProductAccessAsOf(ctx, accessID, models.AccessRevokeAdmin, asOf); err != nil {
 		return fmt.Errorf("revoke product access %s: %w", accessID, err)
 	}
 	result["revoke"] = "revoked"
@@ -274,6 +274,51 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 		}
 	}
 
+	var commands []destructive.Command
+	if hasCancel {
+		sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subID)
+		if err != nil {
+			return err
+		}
+		if sub.Status != models.StatusCanceled {
+			if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail == models.RailSolana {
+				return subscriptions.ErrCustomerActionRequired
+			}
+			command, err := subscriptions.CancellationCommand(r.Request.Context(), sub, reason, true, false)
+			if err != nil {
+				return err
+			}
+			commands = append(commands, command)
+		}
+	}
+	if hasRefund {
+		request, err := findingRefundRequest(params, reason)
+		if err != nil {
+			return err
+		}
+		command, err := adminRefundCommand(r.Request.Context(), r, paymentID, request, findingRefundKey(finding.ID, paymentID))
+		if err != nil {
+			return err
+		}
+		if _, found, err := preparedRefundReplay(r.Request.Context(), r, paymentID, findingRefundKey(finding.ID, paymentID)); err != nil {
+			return err
+		} else if !found {
+			commands = append(commands, command)
+		}
+	}
+	if len(commands) > 0 {
+		if r.State.DestructiveAdmissions == nil {
+			return errors.New("destructive finding admission is not wired")
+		}
+		actions, err := r.State.DestructiveAdmissions.AdmitBatch(r.Request.Context(), commands)
+		if err != nil {
+			return err
+		}
+		original := r.Request
+		r.Request = original.WithContext(destructive.BindPreparedActions(original.Context(), actions))
+		defer func() { r.Request = original }()
+	}
+
 	if hasCancel {
 		if err := cancelSubscriptionForFinding(r, subID, reason, result); err != nil {
 			return err
@@ -289,71 +334,27 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 // lifecycle chokepoint and schedules its provider cancel in the same
 // transaction; the breaker gates the intent's execution, never its enqueue.
 func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reason string, result map[string]any) error {
-	if r.State.SubscriptionService == nil || r.State.SubscriptionLifecycleService == nil {
+	if r.State.AdminSubscriptionService == nil || r.State.SubscriptionService == nil {
 		return errors.New("subscription services unavailable")
 	}
 	ctx := r.Request.Context()
 	sub, err := r.State.SubscriptionService.GetByID(ctx, subID)
 	if err != nil {
-		if db.IsNotFound(err) {
-			return paramErrorf("subscription %s not found", subID)
-		}
 		return fmt.Errorf("load subscription %s: %w", subID, err)
 	}
 	if sub.Status == models.StatusCanceled {
 		result["cancel"] = "noop_already_canceled"
 		return nil
 	}
-	now := r.Clock.Now().UTC()
-	feedback := reason
-
-	switch {
-	case rails.IsNMI(sub.Rail), sub.Rail == models.RailCCBill, sub.Rail == models.RailStripe:
-		localResult := make(map[string]any)
-		err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			txdb := r.State.DB.NewWithPgxTx(tx)
-			locked, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
-			if err != nil {
-				return fmt.Errorf("lock subscription %s: %w", subID, err)
-			}
-			if locked.Status == models.StatusCanceled {
-				localResult["cancel"] = "noop_already_canceled"
-				return nil
-			}
-			if locked.Rail != sub.Rail {
-				return fmt.Errorf("subscription %s rail changed before cancellation; retry", subID)
-			}
-			locked.DeletionScheduledAt = nil // an operator's cancel is due now
-			if err := intents.NewProviderCancelScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
-				ScheduleProviderCancel(ctx, locked, now); err != nil {
-				return err
-			}
-			if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, locked, subscriptions.LocalCancellation{
-				EndedAt: now, CancelType: models.CancelTypeMerchant, Feedback: &feedback,
-				RevokeReason: models.AccessRevokeAdmin, RevokeAsOf: now,
-				RevokeSources: []models.AccessSourceType{models.AccessSourceSubscription, models.AccessSourceGrace},
-			}); err != nil {
-				return fmt.Errorf("cancel subscription %s: %w", subID, err)
-			}
-			if locked.RailSubscriptionID != "" {
-				localResult["provider_cancel"] = "queued"
-			}
-			localResult["cancel"] = "canceled"
-			localResult["subscription_id"] = billing.SubscriptionID(subID).String()
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		for key, value := range localResult {
-			result[key] = value
-		}
-		return nil
-	default:
-		// Solana (subscriber-signed by design) etc.: no operator-driven cancel
-		// path here.
-		return paramErrorf("cancel_and_refund is not supported for rail %q (subscription %s)", sub.Rail, subID)
+	if err := r.State.AdminSubscriptionService.CancelSubscription(ctx, subID, reason, true, false); err != nil {
+		return err
 	}
+	result["cancel"] = "canceled"
+	result["subscription_id"] = billing.SubscriptionID(subID).String()
+	if sub.RailSubscriptionID != "" {
+		result["provider_cancel"] = "queued"
+	}
+	return nil
 }
 
 // refundPaymentForFinding refunds through the admin refund producer, as POST
@@ -367,19 +368,11 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if _, err := r.State.PaymentService.GetByID(ctx, paymentID); err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
-	// Without an explicit amount the remaining refundable amount is refunded.
-	request := RefundRequest{Full: true, Reason: reason}
-	if raw, ok := params["amount"]; ok && raw != nil {
-		parsed, perr := paramAmountMicros(raw)
-		if perr != nil {
-			return perr
-		}
-		request = RefundRequest{Amount: parsed, Reason: reason}
+	request, err := findingRefundRequest(params, reason)
+	if err != nil {
+		return err
 	}
-	if revoke, ok := params["revoke_access"].(bool); ok {
-		request.RevokeAccess = revoke
-	}
-	idempotencyKey := "finding:" + finding.ID.String() + ":refund:" + paymentID.String()
+	idempotencyKey := findingRefundKey(finding.ID, paymentID)
 	refund, status, err := executeAdminRefund(ctx, r, paymentID, request, idempotencyKey)
 	if err != nil {
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
@@ -399,4 +392,23 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 		result["refund"] = "completed"
 	}
 	return nil
+}
+
+func findingRefundKey(finding, payment uuid.UUID) string {
+	return "finding:" + finding.String() + ":refund:" + payment.String()
+}
+
+func findingRefundRequest(params map[string]any, reason string) (RefundRequest, error) {
+	request := RefundRequest{Full: true, Reason: reason}
+	if raw, ok := params["amount"]; ok && raw != nil {
+		amount, err := paramAmountMicros(raw)
+		if err != nil {
+			return request, err
+		}
+		request = RefundRequest{Amount: amount, Reason: reason}
+	}
+	if revoke, ok := params["revoke_access"].(bool); ok {
+		request.RevokeAccess = revoke
+	}
+	return request, nil
 }

@@ -66,6 +66,9 @@ func (s *PriceMigrationService) RedriveBlocked(ctx context.Context, batchSize in
 			return res, err
 		}
 	}
+	if err := s.finishSettledMigrations(ctx, batchSize); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 

@@ -37,6 +37,7 @@ type ProviderOperationWorker struct {
 	Clock          clockwork.Clock
 	Registry       *intents.Registry
 	MutationLogger intents.MutationLogger
+	Admissions     *destructive.Admissions
 }
 
 func (ProviderOperationWorker) Kind() string { return intents.OperationJobKind }
@@ -65,7 +66,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	}
 	args := job.Args
 	store := intents.NewStore(w.DB)
-	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: writeposture.View{Config: w.Config, DB: w.DB}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
+	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: writeposture.View{Config: w.Config, DB: w.DB}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB), Admissions: w.Admissions}
 	runner.OnSuccessorCommitted = func(mid, id uuid.UUID) {
 		if mid == args.MerchantID && id == args.IntentID {
 			successorCommitted = true
@@ -86,6 +87,9 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			return err
 		}
 		if intents.OperationTerminal(row.Status) {
+			if err := runner.CompleteTerminalAction(ctx, row); err != nil {
+				return err
+			}
 			terminal = true
 			return nil
 		}
@@ -127,6 +131,9 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			return err
 		}
 		if intents.OperationTerminal(row.Status) {
+			if err := runner.CompleteTerminalAction(ctx, row); err != nil {
+				return err
+			}
 			terminal = true
 			return nil
 		}

@@ -52,7 +52,7 @@ func TestBackoffDoublesToCapAndDefendsInputs(t *testing.T) {
 
 // Origin x mode, and an unknown origin or mode parks.
 func TestGateExecutionFailsClosed(t *testing.T) {
-	origins := []Origin{OriginUser, OriginAdmin, OriginSystem}
+	origins := []Origin{OriginUser, OriginAdmin, OriginSystem, OriginProvider}
 	for _, tc := range []struct {
 		name    string
 		mode    ModeView
@@ -60,8 +60,8 @@ func TestGateExecutionFailsClosed(t *testing.T) {
 	}{
 		{"full", modeFull, map[Origin]bool{}},
 		{"limited", modeLimited, map[Origin]bool{OriginSystem: true}},
-		{"readonly", modeReadonly, map[Origin]bool{OriginUser: true, OriginAdmin: true, OriginSystem: true}},
-		{"nil mode", nil, map[Origin]bool{OriginUser: true, OriginAdmin: true, OriginSystem: true}},
+		{"readonly", modeReadonly, map[Origin]bool{OriginUser: true, OriginAdmin: true, OriginSystem: true, OriginProvider: true}},
+		{"nil mode", nil, map[Origin]bool{OriginUser: true, OriginAdmin: true, OriginSystem: true, OriginProvider: true}},
 	} {
 		for _, origin := range origins {
 			blocked, reason := GateExecution(context.Background(), tc.mode, uuid.New(), origin)

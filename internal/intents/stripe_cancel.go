@@ -92,7 +92,7 @@ func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	_, key, err := subscriptions.RequireStripeSecretKey(ctx, h.Rails)
 	if err != nil {
-		return Parked("stripe not configured: " + err.Error())
+		return parkedBeforeEffect("stripe not configured: " + err.Error())
 	}
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
@@ -114,12 +114,16 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if rec.Status == "active" || rec.Status == "trialing" {
 		method, form, op = http.MethodPost, url.Values{"cancel_at_period_end": {"true"}}, "cancel_at_period_end"
 	}
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	if err != nil {
+		return parkedBeforeEffect(err.Error())
+	}
 	status, msg, err := h.write(ctx, key, method, psid, form, intent.IdempotencyKey+":"+op)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return Parked("stripe provider writes blocked (mode=readonly)")
+		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
 	case errors.Is(err, providerposture.ErrDisarmed):
-		return Parked("stripe cancel held by sandbox posture gate: " + err.Error())
+		return parkedBeforeEffect("stripe cancel held by sandbox posture gate: " + err.Error())
 	case err != nil:
 		return Ambiguous("stripe cancel outcome unknown: " + err.Error())
 	case status < 300 || status == http.StatusNotFound:

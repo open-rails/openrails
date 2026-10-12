@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"slices"
 	"time"
@@ -34,8 +35,9 @@ var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, "idempo
 
 // Service owns free product grants and product access reads.
 type Service struct {
-	db    *db.DB
-	clock clockwork.Clock
+	destructiveAdmissions *destructive.Admissions
+	db                    *db.DB
+	clock                 clockwork.Clock
 }
 
 func NewService(database *db.DB, clocks ...clockwork.Clock) *Service {
@@ -127,7 +129,13 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 
 // RevokeProductAccess revokes a window; a revoked window stays as it is. Not
 // found reports found=false.
-func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason) (found bool, err error) {
+func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason) (bool, error) {
+	return s.RevokeProductAccessAsOf(ctx, accessID, reason, nil)
+}
+
+// RevokeProductAccessAsOf is the operator finding's explicit effective-time
+// revocation. Its admission time always comes from the command clock.
+func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason, asOf *time.Time) (bool, error) {
 	ents := entitlements.NewEntitlementService(s.db, s.clock)
 	window, err := ents.GetAccessByID(ctx, accessID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -139,7 +147,38 @@ func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, r
 	if window.RevokedAt != nil || window.DeletedAt != nil {
 		return true, nil
 	}
-	return true, ents.RevokeGrantedAccess(ctx, window, reason)
+	at := s.now()
+	if asOf != nil {
+		at = *asOf
+	}
+	if window.EndsAt != nil && !window.EndsAt.After(at) {
+		return true, nil
+	}
+	command, err := destructive.CommandFromContext(ctx, destructive.RevokeAccess, accessID.String(), "access-revoke:"+accessID.String(), struct {
+		Reason models.AccessRevokeReason
+		AsOf   *time.Time
+	}{reason, asOf})
+	if err != nil {
+		return true, err
+	}
+	err = destructive.RunLocal(ctx, s.db, s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+		if _, err := txDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: command.MerchantID, ID: window.CustomerID}); err != nil {
+			return false, err
+		}
+		local := entitlements.NewEntitlementService(txDB, s.clock)
+		current, err := local.GetAccessByID(ctx, accessID)
+		if err != nil {
+			return false, err
+		}
+		if current.RevokedAt != nil || current.DeletedAt != nil || current.EndsAt != nil && !current.EndsAt.After(at) {
+			return false, nil
+		}
+		if asOf != nil {
+			return true, local.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: reason, AsOf: asOf})
+		}
+		return true, local.RevokeGrantedAccess(ctx, current, reason)
+	})
+	return true, err
 }
 
 // HasPermanentAccess reports whether the customer holds the product
@@ -242,3 +281,6 @@ func (s *Service) GrantProducts(ctx context.Context, batch []Grant) ([]gen.ListP
 	})
 	return out, err
 }
+
+// SetDestructiveAdmissions wires the shared staff-command admission boundary.
+func (s *Service) SetDestructiveAdmissions(a *destructive.Admissions) { s.destructiveAdmissions = a }

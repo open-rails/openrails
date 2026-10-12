@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"math"
 	"sort"
 	"strings"
@@ -80,6 +81,7 @@ func derefInt(v *int64) int64 {
 var ErrInsufficientCredits = billing.ErrInsufficientCredits
 
 type MoneyService struct {
+	destructiveAdmissions *destructive.Admissions
 	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
 	EngineAdmissionHold   bool
 	hyperSwitchDeployment string
@@ -875,4 +877,9 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		Replayed: !applied,
 	}
 	return trx, nil
+}
+
+// SetDestructiveAdmissions wires the shared staff-command admission boundary.
+func (s *MoneyService) SetDestructiveAdmissions(a *destructive.Admissions) {
+	s.destructiveAdmissions = a
 }
