@@ -5553,6 +5553,7 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "currency_unsupported",
           "invalid_param"
         ],
         "x-openrails-error-sets": [

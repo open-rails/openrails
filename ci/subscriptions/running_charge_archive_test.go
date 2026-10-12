@@ -92,6 +92,10 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	}
 	_, err = c.AcknowledgeHostEvents(t.Context(), acks)
 	require.NoError(t, err)
+	// A customer's own low-balance line travels with the merchant.
+	lineAmount := int64(3_000_000)
+	_, err = c.UpdateCustomer(t.Context(), payer.cid(), billing.UpdateCustomerParams{LowBalanceLines: []billing.LowBalanceLine{{Currency: "USD", Amount: &lineAmount}}})
+	require.NoError(t, err)
 	// A prepaid balance with no running charge is watched as well.
 	saver := w.newCustomer()
 	_, err = c.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
@@ -129,6 +133,8 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	original := pgx.Identifier{w.schema}.Sanitize()
 	require.JSONEq(t, rows(original, "running_charges", "id"), rows(quoted, "running_charges", "id"), "every charge, exactly as it stood")
 	require.JSONEq(t, rows(original, "host_outbox", "id"), rows(quoted, "host_outbox", "id"), "the acknowledged balance event")
+	require.JSONEq(t, rows(original, "customer_low_balance_lines", "customer_id"), rows(quoted, "customer_low_balance_lines", "customer_id"), "the customer's line")
+	require.Contains(t, rows(quoted, "customer_low_balance_lines", "customer_id"), `"amount": 3000000`)
 	var watched, due int
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE next_check_at <= now()) FROM "+quoted+".balance_watches WHERE merchant_id=$1",
 		merchantID.UUID()).Scan(&watched, &due))

@@ -117,15 +117,6 @@ SET collection_revoked_at = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
   AND collection_revoked_at IS NOT NULL;
 
--- name: SetMoneyAccountLowBalanceLine :exec
--- The customer's own low-balance line; null inherits the merchant's. The
--- settings row must already exist.
-UPDATE billing.money_settings
-SET low_balance_amount = sqlc.narg(low_balance_amount)::bigint,
-    low_balance_runway_hours = sqlc.narg(low_balance_runway_hours)::int,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
-
 -- name: SetMoneyAccountTier :exec
 -- Sets the host-assigned account tier.
 UPDATE billing.money_settings
@@ -195,12 +186,11 @@ ORDER BY customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCustomerSettingsAccounts :many
--- The customers' credit limits, trust levels and low-balance lines, by
--- currency. A customer has at most one row per registered currency, which
--- bounds row_limit.
-SELECT customer_id, currency, credit_limit_amount, tier, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
+-- The customers' credit limits and trust levels, by currency. A customer has
+-- at most one row per registered currency, which bounds row_limit.
+SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
 WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-  AND (credit_limit_amount <> 0 OR tier IS NOT NULL OR low_balance_amount IS NOT NULL OR low_balance_runway_hours IS NOT NULL)
+  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
 ORDER BY customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
 

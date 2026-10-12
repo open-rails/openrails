@@ -194,7 +194,9 @@ type MarkBalanceWatchDueParams struct {
 // Something changed what the customer may spend: its watch is looked at on
 // the next pass. A row already due is not written again, so a burst of spends
 // writes it once per pass; a funding also stamps funded_at, which re-arms a
-// notice. No row for a customer that is not watched.
+// notice. No row for a customer that is not watched. Skipping a due row is
+// sound only because every marker holds the customer's LockCustomerForSpend,
+// which the look takes before it reads the balance and resets the row.
 func (q *Queries) MarkBalanceWatchDue(ctx context.Context, arg MarkBalanceWatchDueParams) error {
 	_, err := q.db.Exec(ctx, markBalanceWatchDue,
 		arg.Funded,
@@ -286,7 +288,9 @@ INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_ch
 VALUES ($1::uuid, $2::uuid, $3::text,
         $4::timestamptz, $5::timestamptz, 0, $6::timestamptz)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
-    next_check_at = EXCLUDED.next_check_at, depletes_at = EXCLUDED.depletes_at, updated_at = EXCLUDED.updated_at
+    next_check_at = CASE WHEN billing.balance_watches.next_check_at <= EXCLUDED.updated_at
+                         THEN billing.balance_watches.next_check_at ELSE EXCLUDED.next_check_at END,
+    depletes_at = EXCLUDED.depletes_at, updated_at = EXCLUDED.updated_at
 `
 
 type UpsertBalanceWatchParams struct {
@@ -301,8 +305,8 @@ type UpsertBalanceWatchParams struct {
 // billing.balance_watches: when each watched balance (every prepaid one, and
 // every one with a running charge) is next looked at, and what the last look
 // found. Every instant is the caller's clock.
-// A running charge started or stopped: when to look next. The notices of a
-// crossing and the usage rate stay.
+// A running charge started or stopped: when to look next. A watch already due
+// stays due; the notices of a crossing and the usage rate stay.
 func (q *Queries) UpsertBalanceWatch(ctx context.Context, arg UpsertBalanceWatchParams) error {
 	_, err := q.db.Exec(ctx, upsertBalanceWatch,
 		arg.MerchantID,

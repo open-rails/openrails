@@ -4,10 +4,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // Self-service money surface: the customer reads its own balance and ledger.
@@ -62,10 +60,6 @@ func SetMyLowBalanceLine(r *httprequest.Request) {
 	}
 	currency, ok := serviceRequiredCurrency(r, r.Param("currency"))
 	if !ok {
-		return
-	}
-	if err := money.RequireBillingCurrency(currency); err != nil {
-		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("currency"))
 		return
 	}
 	var params billing.SetLowBalanceLineParams

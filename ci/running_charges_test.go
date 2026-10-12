@@ -70,12 +70,14 @@ func lowAmount(amount int64) billing.BalanceNoticeSettings {
 	return billing.BalanceNoticeSettings{RunwayHours: &off, LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: amount}}}
 }
 
-// funded is a new customer holding amount of USD credit that never lapses.
+// funded is a new customer holding amount of USD credit that never lapses,
+// its watch looked at once: the funding is not left due.
 func (w *chargeWorld) funded(amount int64) billing.CustomerID {
 	w.t.Helper()
 	customer := billing.CustomerID(uuid.New())
 	if amount > 0 {
 		w.fund(customer, amount, nil)
+		w.watch()
 	}
 	return customer
 }
@@ -1053,6 +1055,8 @@ func TestDailyCheckpointPostsThroughMidnight(t *testing.T) {
 	}
 	require.EqualValues(t, -180_004_861, sum, "the postings sum to the charge")
 	require.EqualValues(t, funded-180_004_861, w.balance(customer).BalanceAmount)
+	require.False(t, w.watched(customer).NextCheckAt.After(w.now()), "the stop's posting leaves the watch due")
+	w.watch()
 	require.Nil(t, w.watched(customer).NextCheckAt, "a prepaid balance stays watched, with nothing scheduled")
 
 	t.Run("a start in the past is due the day it already crossed", func(t *testing.T) {

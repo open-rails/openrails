@@ -45,7 +45,9 @@ type lowBalanceLine struct {
 	source      billing.LowBalanceLineSource
 }
 
-func resolveLowBalanceLine(cfg models.BalanceNoticeConfiguration, settings *gen.BillingMoneySetting, currency string) lowBalanceLine {
+// resolveLowBalanceLine resolves each part: the customer's own (own, nil with
+// none), the merchant's, built in.
+func resolveLowBalanceLine(cfg models.BalanceNoticeConfiguration, own *gen.BillingCustomerLowBalanceLine, currency string) lowBalanceLine {
 	line := lowBalanceLine{runwayHours: defaultRunwayHours, source: billing.LowBalanceLineDefault}
 	if amount, ok := cfg.LowAmounts[currency]; ok {
 		line.amount, line.source = amount, billing.LowBalanceLineMerchant
@@ -53,15 +55,40 @@ func resolveLowBalanceLine(cfg models.BalanceNoticeConfiguration, settings *gen.
 	if cfg.RunwayHours != nil {
 		line.runwayHours, line.source = *cfg.RunwayHours, billing.LowBalanceLineMerchant
 	}
-	if settings != nil {
-		if settings.LowBalanceAmount != nil {
-			line.amount, line.source = *settings.LowBalanceAmount, billing.LowBalanceLineCustomer
+	if own != nil {
+		if own.Amount != nil {
+			line.amount, line.source = *own.Amount, billing.LowBalanceLineCustomer
 		}
-		if settings.LowBalanceRunwayHours != nil {
-			line.runwayHours, line.source = int(*settings.LowBalanceRunwayHours), billing.LowBalanceLineCustomer
+		if own.RunwayHours != nil {
+			line.runwayHours, line.source = int(*own.RunwayHours), billing.LowBalanceLineCustomer
 		}
 	}
 	return line
+}
+
+// customerLine is the customer's own line in a currency; nil with none.
+func customerLine(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) (*gen.BillingCustomerLowBalanceLine, error) {
+	row, err := q.GetCustomerLowBalanceLine(ctx, gen.GetCustomerLowBalanceLineParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// effectiveLine is the line a balance is judged at.
+func effectiveLine(ctx context.Context, d *db.DB, q *gen.Queries, merchantID, customer uuid.UUID, currency string) (lowBalanceLine, error) {
+	cfg, err := balanceNotices(ctx, d)
+	if err != nil {
+		return lowBalanceLine{}, err
+	}
+	own, err := customerLine(ctx, q, merchantID, customer, currency)
+	if err != nil {
+		return lowBalanceLine{}, err
+	}
+	return resolveLowBalanceLine(cfg, own, currency), nil
 }
 
 // at is the effective line at a burn rate: the larger of the amount line and
@@ -128,15 +155,18 @@ func capacityFloors(settings *gen.BillingMoneySetting, owed, overdraft int64) (f
 	return satSub(owed, overdraft), owed, false
 }
 
-func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance) (balanceView, error) {
-	v := balanceView{asOf: bal.AsOf}
-	charges, err := q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{
+// runningCharges are the customer's running charges in bal's currency.
+func runningCharges(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance) ([]gen.BillingRunningCharge, error) {
+	return q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{
 		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency,
 	})
-	if err != nil {
-		return v, err
-	}
-	v.charges = charges
+}
+
+// viewBalance reads what projecting bal needs, given the customer's running
+// charges in its currency.
+func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance, charges []gen.BillingRunningCharge) (balanceView, error) {
+	v := balanceView{asOf: bal.AsOf, charges: charges}
+	var err error
 	lines := runningLines(charges)
 	v.accrualRate = lines.ratePerHour
 	for _, c := range charges {
@@ -333,7 +363,10 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if err != nil {
 		return err
 	}
-	view, err := txSvc.viewBalance(ctx, q, bal)
+	if charges, err = runningCharges(ctx, q, bal); err != nil {
+		return err
+	}
+	view, err := txSvc.viewBalance(ctx, q, bal, charges)
 	if err != nil {
 		return err
 	}
@@ -344,11 +377,11 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if err != nil {
 		return err
 	}
-	cfg, err := balanceNotices(ctx, txDB)
+	line, err := effectiveLine(ctx, txDB, q, key.MerchantID, key.CustomerID, currency)
 	if err != nil {
 		return err
 	}
-	out := view.project(resolveLowBalanceLine(cfg, view.settings, currency), usageRate)
+	out := view.project(line, usageRate)
 
 	// Each notice is sent once per crossing. Only a funding re-arms it: a
 	// released hold or a falling rate does not, so a customer hovering at
@@ -402,7 +435,11 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	if err != nil {
 		return err
 	}
-	view, err := s.viewBalance(ctx, q, bal)
+	charges, err := runningCharges(ctx, q, bal)
+	if err != nil {
+		return err
+	}
+	view, err := s.viewBalance(ctx, q, bal, charges)
 	if err != nil {
 		return err
 	}
@@ -418,11 +455,11 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	case !errors.Is(err, pgx.ErrNoRows):
 		return err
 	}
-	cfg, err := balanceNotices(ctx, s.db)
+	line, err := effectiveLine(ctx, s.db, q, merchantID, customer, currency)
 	if err != nil {
 		return err
 	}
-	out := view.project(resolveLowBalanceLine(cfg, view.settings, currency), usageRate)
+	out := view.project(line, usageRate)
 	next := view.next(out, lowArmed, depletedArmed)
 	// A charge started in the past may already be due a day's checkpoint, and
 	// a funding may be waiting to re-arm a notice.
@@ -452,11 +489,13 @@ func (s *MoneyService) LowBalanceLines(ctx context.Context, customer identity.Cu
 	}
 	out := make([]billing.EffectiveLowBalanceLine, 0, len(currencies))
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Gen(ctx).ListMoneyAccountSettingsByCustomer(ctx, gen.ListMoneyAccountSettingsByCustomerParams{MerchantID: mid.UUID(), CustomerID: customer.UUID()})
+		rows, err := s.db.Gen(ctx).ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{
+			MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer.UUID()}, RowLimit: int32(len(billing.Currencies())), // #nosec G115 -- the currency registry
+		})
 		if err != nil {
 			return err
 		}
-		byCurrency := make(map[string]*gen.BillingMoneySetting, len(rows))
+		byCurrency := make(map[string]*gen.BillingCustomerLowBalanceLine, len(rows))
 		for i := range rows {
 			byCurrency[rows[i].Currency] = &rows[i]
 		}
@@ -470,12 +509,12 @@ func (s *MoneyService) LowBalanceLines(ctx context.Context, customer identity.Cu
 
 // SetLowBalanceLineTx writes a customer's own low-balance line in a currency
 // (nil parts inherit the merchant's) in the caller's transaction, under the
-// customer lock. The low notice is re-armed and the watch looked at on the
-// next pass.
+// customer lock. It decides no billing mode. A changed line re-arms the low
+// notice and the watch is looked at on the next pass; the same line again
+// writes nothing.
 func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, line billing.LowBalanceLine, now time.Time) error {
-	if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-		MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, BillingMode: BillingModePrepaid, Now: now,
-	}); err != nil {
+	current, err := customerLine(ctx, q, merchantID, customer, line.Currency)
+	if err != nil {
 		return err
 	}
 	var hours *int32
@@ -483,13 +522,29 @@ func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, custom
 		h := int32(*line.RunwayHours) // #nosec G115 -- validated to MaxLowBalanceRunwayHours
 		hours = &h
 	}
-	if err := q.SetMoneyAccountLowBalanceLine(ctx, gen.SetMoneyAccountLowBalanceLineParams{
-		MerchantID: merchantID, CustomerID: customer, Currency: line.Currency,
-		LowBalanceAmount: line.Amount, LowBalanceRunwayHours: hours, Now: now,
-	}); err != nil {
+	var curAmount *int64
+	var curHours *int32
+	if current != nil {
+		curAmount, curHours = current.Amount, current.RunwayHours
+	}
+	if equalPtr(curAmount, line.Amount) && equalPtr(curHours, hours) {
+		return nil
+	}
+	if line.Amount == nil && hours == nil {
+		err = q.DeleteCustomerLowBalanceLine(ctx, gen.DeleteCustomerLowBalanceLineParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency})
+	} else {
+		err = q.UpsertCustomerLowBalanceLine(ctx, gen.UpsertCustomerLowBalanceLineParams{
+			MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, Amount: line.Amount, RunwayHours: hours, Now: now,
+		})
+	}
+	if err != nil {
 		return err
 	}
 	return q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, RearmLow: true, Now: now})
+}
+
+func equalPtr[T comparable](a, b *T) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 // ValidateLowBalanceLine refuses a negative part or a runway over a year;

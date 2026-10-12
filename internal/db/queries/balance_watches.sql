@@ -3,13 +3,15 @@
 -- found. Every instant is the caller's clock.
 
 -- name: UpsertBalanceWatch :exec
--- A running charge started or stopped: when to look next. The notices of a
--- crossing and the usage rate stay.
+-- A running charge started or stopped: when to look next. A watch already due
+-- stays due; the notices of a crossing and the usage rate stay.
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, depletes_at, usage_rate_per_hour, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text,
         sqlc.narg(next_check_at)::timestamptz, sqlc.narg(depletes_at)::timestamptz, 0, sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
-    next_check_at = EXCLUDED.next_check_at, depletes_at = EXCLUDED.depletes_at, updated_at = EXCLUDED.updated_at;
+    next_check_at = CASE WHEN billing.balance_watches.next_check_at <= EXCLUDED.updated_at
+                         THEN billing.balance_watches.next_check_at ELSE EXCLUDED.next_check_at END,
+    depletes_at = EXCLUDED.depletes_at, updated_at = EXCLUDED.updated_at;
 
 -- name: InsertPrepaidBalanceWatch :exec
 -- A new balance account is watched unless the customer is billed in arrears:
@@ -74,7 +76,9 @@ ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 -- Something changed what the customer may spend: its watch is looked at on
 -- the next pass. A row already due is not written again, so a burst of spends
 -- writes it once per pass; a funding also stamps funded_at, which re-arms a
--- notice. No row for a customer that is not watched.
+-- notice. No row for a customer that is not watched. Skipping a due row is
+-- sound only because every marker holds the customer's LockCustomerForSpend,
+-- which the look takes before it reads the balance and resets the row.
 UPDATE billing.balance_watches
 SET next_check_at = to_timestamp(0),
     funded_at = CASE WHEN sqlc.arg(funded)::boolean THEN COALESCE(funded_at, now()) ELSE funded_at END

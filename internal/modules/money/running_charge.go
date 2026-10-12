@@ -473,8 +473,14 @@ func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalan
 		BalanceAmount: bal.Balance, HeldAmount: bal.HeldBalance - bal.Accrued, AccruedAmount: bal.Accrued,
 		AvailableAmount: bal.Balance - bal.HeldBalance, OwedAmount: owed, AsOf: bal.AsOf,
 	}
-	view, err := s.viewBalance(ctx, s.db.Gen(ctx), bal)
-	if err != nil || len(view.charges) == 0 {
+	q := s.db.Gen(ctx)
+	// With no running charge there is nothing to project.
+	charges, err := runningCharges(ctx, q, bal)
+	if err != nil || len(charges) == 0 {
+		return out, err
+	}
+	view, err := s.viewBalance(ctx, q, bal, charges)
+	if err != nil {
 		return out, err
 	}
 	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.project(lowBalanceLine{}, 0).depletesAt

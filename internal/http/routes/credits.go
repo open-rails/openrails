@@ -34,7 +34,7 @@ var creditsRoutes = []Route{
 		Responses: []Reply{{200, billing.CustomerAccount{}}}, Handler: h(handlers.GetMe)},
 	{Method: PUT, Path: "/v1/me/low-balance-lines/{currency}", Group: Customer, Auth: AuthCustomer,
 		Request: billing.SetLowBalanceLineParams{}, Responses: []Reply{{200, billing.EffectiveLowBalanceLine{}}},
-		Errors: codes("invalid_param"), Handler: h(handlers.SetMyLowBalanceLine)},
+		Errors: codes("currency_unsupported", "invalid_param"), Handler: h(handlers.SetMyLowBalanceLine)},
 	{Method: GET, Path: "/v1/me/balance/transactions", Group: Customer, Auth: AuthCustomer,
 		Query: params(queryOf(billing.BalanceTransactionListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.BalanceTransaction]{}}},
 		Errors: codes("currency_unsupported", "invalid_cursor"), Handler: h(handlers.ListMyBalanceTransactions)},

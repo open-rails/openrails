@@ -89,6 +89,7 @@ var Tables = map[string]Table{
 	"provisioning_tokens":               {Class: State},
 	"customers":                         {Class: State},
 	"customer_invoice_profiles":         {Class: State},
+	"customer_low_balance_lines":        {Class: State},
 	"customer_delinquency":              {Class: State},
 	"custodians":                        {Class: State},
 	"psps":                              {Class: State},

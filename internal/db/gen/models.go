@@ -375,6 +375,17 @@ type BillingCustomerLink struct {
 	RevokedBy    *string
 }
 
+// A customer's own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant's settings.balance_notices; a line with no part set has no row.
+type BillingCustomerLowBalanceLine struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	Amount      *int64
+	RunwayHours *int32
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 // Per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query, grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
@@ -686,10 +697,6 @@ type BillingMoneySetting struct {
 	DefaultPaymentMethodID *uuid.UUID
 	// When the customer revoked its collection agreement in the currency: from then admission spends only its balance, whatever billing_mode, until a new default card gives another.
 	CollectionRevokedAt *time.Time
-	// The customer's low-balance amount line in the row currency; 0 is none, null inherits the merchant's settings.balance_notices.
-	LowBalanceAmount *int64
-	// The customer's low-balance runway line in hours of spend at its burn rate; 0 is none, null inherits the merchant's settings.balance_notices, else 24.
-	LowBalanceRunwayHours *int32
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.

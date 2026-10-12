@@ -315,15 +315,21 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 		if a.Tier != nil && *a.Tier != "" {
 			doc.TrustLevels = append(doc.TrustLevels, billing.TrustLevel{Currency: a.Currency, TrustLevel: *a.Tier})
 		}
-		if a.LowBalanceAmount != nil || a.LowBalanceRunwayHours != nil {
-			line := billing.LowBalanceLine{Currency: a.Currency, Amount: a.LowBalanceAmount}
-			if a.LowBalanceRunwayHours != nil {
-				hours := int(*a.LowBalanceRunwayHours)
-				line.RunwayHours = &hours
-			}
-			doc.LowBalanceLines = append(doc.LowBalanceLines, line)
-		}
 		out[a.CustomerID] = doc
+	}
+	lines, err := q.ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range lines {
+		doc := out[l.CustomerID]
+		line := billing.LowBalanceLine{Currency: l.Currency, Amount: l.Amount}
+		if l.RunwayHours != nil {
+			hours := int(*l.RunwayHours)
+			line.RunwayHours = &hours
+		}
+		doc.LowBalanceLines = append(doc.LowBalanceLines, line)
+		out[l.CustomerID] = doc
 	}
 	policies, err := q.ListCustomerBillingPolicyAssignments(ctx, gen.ListCustomerBillingPolicyAssignmentsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit)
 	if err != nil {

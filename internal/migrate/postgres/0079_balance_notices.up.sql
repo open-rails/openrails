@@ -31,14 +31,158 @@ COMMENT ON COLUMN billing.balance_watches.funded_at IS 'When the customer was fu
 COMMENT ON COLUMN billing.balance_watches.usage_rate_per_hour IS 'Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the usage events dated since rate_sampled_at.';
 COMMENT ON COLUMN billing.balance_watches.rate_sampled_at IS 'The instant usage_rate_per_hour was sampled at; usage events dated before it are not read again.';
 
--- A customer's own low-balance line in a currency; null inherits the merchant's.
-ALTER TABLE billing.money_settings
-    ADD COLUMN low_balance_amount bigint,
-    ADD COLUMN low_balance_runway_hours integer,
-    ADD CONSTRAINT money_settings_low_balance_amount_check CHECK (low_balance_amount >= 0),
-    ADD CONSTRAINT money_settings_low_balance_runway_hours_check CHECK (low_balance_runway_hours >= 0 AND low_balance_runway_hours <= 8760);
-COMMENT ON COLUMN billing.money_settings.low_balance_amount IS 'The customer''s low-balance amount line in the row currency; 0 is none, null inherits the merchant''s settings.balance_notices.';
-COMMENT ON COLUMN billing.money_settings.low_balance_runway_hours IS 'The customer''s low-balance runway line in hours of spend at its burn rate; 0 is none, null inherits the merchant''s settings.balance_notices, else 24.';
+-- A customer's own low-balance line in a currency, apart from its money
+-- settings so that setting one decides no billing mode.
+CREATE TABLE billing.customer_low_balance_lines (
+    merchant_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    currency text NOT NULL,
+    amount bigint,
+    runway_hours integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT customer_low_balance_lines_pkey PRIMARY KEY (merchant_id, customer_id, currency),
+    CONSTRAINT customer_low_balance_lines_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT customer_low_balance_lines_currency_check CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
+    CONSTRAINT customer_low_balance_lines_amount_check CHECK (amount >= 0),
+    CONSTRAINT customer_low_balance_lines_runway_hours_check CHECK (runway_hours >= 0 AND runway_hours <= 8760),
+    CONSTRAINT customer_low_balance_lines_set_check CHECK (amount IS NOT NULL OR runway_hours IS NOT NULL)
+);
+COMMENT ON TABLE billing.customer_low_balance_lines IS 'A customer''s own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant''s settings.balance_notices; a line with no part set has no row.';
+
+-- A customer's line names one more merchant table a restore must find empty.
+CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+DECLARE item record; occupied boolean;
+BEGIN
+    IF TG_OP='DELETE' THEN
+        IF OLD.kind='billing_restore' THEN
+            RAISE EXCEPTION 'billing restore receipts are immutable' USING ERRCODE='23514';
+        END IF;
+        RETURN OLD;
+    END IF;
+    IF NEW.kind<>'billing_restore' AND (TG_OP='INSERT' OR OLD.kind<>'billing_restore') THEN RETURN NEW; END IF;
+    IF NEW.merchant_id IS DISTINCT FROM billing.current_merchant_id() THEN
+        RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
+    END IF;
+    -- The merchant row is the serialization point used by begin_billing_restore
+    -- and by FK-backed first writes. No database-owner exemption or GUC-only
+    -- permission can create a receipt for an occupied destination.
+    PERFORM 1 FROM billing.merchants WHERE id=NEW.merchant_id AND status='active' AND deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'billing restore merchant missing or inactive' USING ERRCODE='P0002'; END IF;
+    IF TG_OP='INSERT' THEN
+        IF NEW.status<>'running' OR NEW.finished_at IS NOT NULL OR NEW.summary IS NOT NULL THEN
+            RAISE EXCEPTION 'billing restore receipts must begin running and unfinished' USING ERRCODE='23514';
+        END IF;
+        FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
+            WHERE n.nspname=TG_TABLE_SCHEMA AND c.relkind IN ('r','p')
+              -- Every merchant-scoped table but the directory's own identity rows
+              -- (former names, host claims); a test keeps this list complete.
+              AND c.relname = ANY(ARRAY[
+                  'access_cutover_approvals',
+                  'account_updater_batches',
+                  'admission_denials_hourly',
+                  'admission_operations',
+                  'balance_watches',
+                  'carts',
+                  'catalog_applications',
+                  'catalog_field_owners',
+                  'catalog_meters',
+                  'catalog_rate_cards',
+                  'catalog_restore_receipts',
+                  'checkout_attempts',
+                  'custodians',
+                  'custody_migrations',
+                  'customer_delinquency',
+                  'customer_entitlement_cache',
+                  'customer_entitlement_cache_stamps',
+                  'customer_invoice_profiles',
+                  'customer_low_balance_lines',
+                  'customer_links',
+                  'customers',
+                  'dashboard_configs',
+                  'destructive_run_before_images',
+                  'document_sequences',
+                  'failed_usage_windows',
+                  'grants',
+                  'host_outbox',
+                  'idempotency_keys',
+                  'ledger_accounts',
+                  'ledger_transfers',
+                  'maintenance_runs',
+                  'mandates',
+                  'merchant_destructive_policy',
+                  'meter_period_quantities',
+                  'money_settings',
+                  'nmi_bulk_checkpoints',
+                  'nmi_history_months',
+                  'nmi_history_reads',
+                  'notification_event_acks',
+                  'notification_events',
+                  'notifications',
+                  'order_lines',
+                  'orders',
+                  'owed_items',
+                  'ownership_claims',
+                  'payment_attempts',
+                  'payment_method_versions',
+                  'payment_methods',
+                  'payments',
+                  'price_key_movements',
+                  'price_keys',
+                  'price_migrations',
+                  'price_psp_bindings',
+                  'prices',
+                  'product_access',
+                  'product_entitlements',
+                  'products',
+                  'provider_intents',
+                  'provider_mutation_logs',
+                  'psp_customers',
+                  'psp_refresh_watermarks',
+                  'psps',
+                  'rebill_cycles',
+                  'reconciliation_findings',
+                  'reconciliation_state',
+                  'running_charges',
+                  'scheduled_changes',
+                  'solana_pay_receipts',
+                  'solana_pay_references',
+                  'solana_subscriptions',
+                  'subscription_status_transitions',
+                  'subscription_verifications',
+                  'subscriptions',
+                  'usage_collection_cadence',
+                  'usage_events',
+                  'webhook_events',
+                  'webhook_health',
+                  'webhook_health_daily']::text[])
+        LOOP
+            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',TG_TABLE_SCHEMA,item.relname)
+                INTO occupied USING NEW.merchant_id;
+            IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
+        END LOOP;
+    ELSE
+        IF OLD.kind<>'billing_restore' OR NEW.kind<>'billing_restore'
+           OR OLD.status<>'running' OR NEW.status<>'completed'
+           OR NEW.finished_at IS NULL
+           OR (to_jsonb(NEW)-ARRAY['status','finished_at','summary','run_class']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','finished_at','summary','run_class'])
+           OR NOT EXISTS (SELECT 1 FROM billing.maintenance_runs r WHERE r.id=OLD.id AND r.merchant_id=OLD.merchant_id
+               AND r.xmin=pg_current_xact_id_if_assigned()::xid)
+           OR OLD.id::text IS DISTINCT FROM current_setting('openrails.billing_restore_id',true)
+           OR NEW.summary->>'digest' IS NULL OR NEW.summary->>'digest' !~ '^[0-9a-f]{64}$'
+           OR jsonb_typeof(NEW.summary->'rows') IS DISTINCT FROM 'number'
+           OR (NEW.summary->>'rows')::numeric < 0
+           OR (NEW.summary->>'rows')::numeric <> trunc((NEW.summary->>'rows')::numeric) THEN
+            RAISE EXCEPTION 'invalid billing restore receipts transition' USING ERRCODE='23514';
+        END IF;
+        PERFORM billing.check_billing_restore_ledger(NEW.merchant_id);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 
 -- The customer's line replaces the running charge's.
 ALTER TABLE billing.running_charges DROP COLUMN low_balance_amount;

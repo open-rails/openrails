@@ -32,7 +32,15 @@ func TestLowBalanceLineRoutes(t *testing.T) {
 		return me["low_balance_lines"].([]any)
 	}
 	builtIn := map[string]any{"currency": "USD", "amount": "0", "runway_hours": float64(24), "source": "default"}
-	require.Equal(t, []any{builtIn}, lines(c), "a 24-hour runway and no amount line")
+	var got []any
+	reads := w.count(func() { got = lines(c) })
+	require.Equal(t, []any{builtIn}, got, "a 24-hour runway and no amount line")
+	// A balance with no running charge projects nothing: its read costs what
+	// it did before balances were watched.
+	require.Equal(t, 1, reads["ListRunningChargesByCustomer"], "%v", reads)
+	for _, name := range []string{"GetMoneyAccountSettings", "ListSpendableCreditLots", "ListLapsedCreditLots", "GetLedgerAccount"} {
+		require.Zero(t, reads[name], "%s: %v", name, reads)
+	}
 
 	status, body := c.call(http.MethodPut, "/low-balance-lines/usd", "", map[string]any{"amount": "3000000", "runway_hours": 12})
 	require.Equal(t, http.StatusOK, status, "%v", body)
@@ -51,18 +59,36 @@ func TestLowBalanceLineRoutes(t *testing.T) {
 	require.Equal(t, map[string]any{"currency": "USD", "amount": "0", "runway_hours": float64(0), "source": "customer"}, body)
 
 	for _, bad := range []struct {
-		path  string
-		body  map[string]any
-		param string
+		path, code, param string
+		body              map[string]any
 	}{
-		{"/low-balance-lines/USD", map[string]any{"amount": "-1", "runway_hours": nil}, "amount"},
-		{"/low-balance-lines/USD", map[string]any{"amount": nil, "runway_hours": billing.MaxLowBalanceRunwayHours + 1}, "runway_hours"},
-		{"/low-balance-lines/XXX", map[string]any{"amount": nil, "runway_hours": nil}, "currency"},
+		{"/low-balance-lines/USD", billing.CodeInvalidParam, "amount", map[string]any{"amount": "-1", "runway_hours": nil}},
+		{"/low-balance-lines/USD", billing.CodeInvalidParam, "runway_hours", map[string]any{"amount": nil, "runway_hours": billing.MaxLowBalanceRunwayHours + 1}},
+		{"/low-balance-lines/XXX", "currency_unsupported", "currency", map[string]any{"amount": nil, "runway_hours": nil}},
 	} {
 		status, body := c.call(http.MethodPut, bad.path, "", bad.body)
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
 		details := body["error"].(map[string]any)
-		require.Equal(t, billing.CodeInvalidParam, details["code"], "%v", body)
+		require.Equal(t, bad.code, details["code"], "%v", body)
 		require.Equal(t, bad.param, details["param"], "%v", body)
 	}
+}
+
+// A low-balance line decides no billing mode: a customer that set one before
+// any money settings still becomes arrears when staff give it a credit line,
+// and keeps its line.
+func TestLowBalanceLineLeavesTheBillingMode(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	status, body := c.call(http.MethodPut, "/low-balance-lines/USD", "", map[string]any{"amount": "1000000", "runway_hours": nil})
+	require.Equal(t, http.StatusOK, status, "%v", body)
+	staff, err := w.client[embedded].UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 10_000_000}}})
+	require.NoError(t, err)
+	amount := int64(1_000_000)
+	require.Equal(t, []billing.LowBalanceLine{{Currency: "USD", Amount: &amount}}, staff.Settings.LowBalanceLines)
+	require.Equal(t, []billing.CreditLimit{{Currency: "USD", Amount: 10_000_000}}, staff.Settings.CreditLimits)
+	balance, err := w.client[embedded].GetBalance(t.Context(), c.cid(), "USD")
+	require.NoError(t, err)
+	require.Equal(t, billing.BillingModeArrears, balance.BillingMode)
 }

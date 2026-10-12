@@ -261,7 +261,8 @@ func TestLapsingLotCrossingIsScheduled(t *testing.T) {
 	t0 := w.now()
 	lapses := t0.Add(2 * time.Hour)
 
-	kept := w.funded(2_000_000)
+	kept := w.funded(0)
+	w.fund(kept, 2_000_000, nil)
 	w.fund(kept, 5_000_000, &lapses)
 	gone := w.funded(0)
 	w.fund(gone, 5_000_000, &lapses)
@@ -314,6 +315,13 @@ func TestCustomerLineOverridesMerchantDefault(t *testing.T) {
 	require.Len(t, low, 1)
 	require.EqualValues(t, 5_000_000, low[0].LowBalanceAmount)
 
+	// The same line again changes nothing and re-arms nothing.
+	w.clock.Advance(time.Minute)
+	update(billing.LowBalanceLine{Currency: "USD", Amount: usd(5_000_000)})
+	require.NotNil(t, w.watched(customer).LowNotifiedAt, "an unchanged line keeps the notice")
+	w.watch()
+	require.Len(t, w.events(billing.HostEventBalanceLow, customer), 1)
+
 	update(billing.LowBalanceLine{Currency: "USD", Amount: usd(3_000_000)})
 	require.Nil(t, w.watched(customer).LowNotifiedAt, "a new line re-arms the notice")
 	w.watch()
@@ -337,6 +345,63 @@ func TestCustomerLineOverridesMerchantDefault(t *testing.T) {
 	require.ErrorAs(t, err, &se)
 	require.Equal(t, billing.CodeInvalidParam, se.Code)
 	require.Equal(t, "low_balance_lines[0].runway_hours", *se.Param)
+}
+
+// An arrears customer with a running charge may spend what is available plus
+// the credit line left: its line and its run-out are judged against that.
+func TestArrearsRunningChargeLineCountsTheCreditLine(t *testing.T) {
+	w := newChargeWorld(t, lowAmount(2_500_000))
+	customer := billing.CustomerID(uuid.New())
+	_, err := w.client.UpdateCustomer(w.ctx, customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 10_000_000}}})
+	require.NoError(t, err)
+	t0 := w.now()
+	w.start(customer, 3_600_000)
+	watch := w.watched(customer)
+	require.NotNil(t, watch, "watched while a charge runs")
+	// 10 USD of credit line at 3.6 an hour: under 2.5 once 7.500001 USD has
+	// accrued, at zero once 10 USD has.
+	require.True(t, watch.NextCheckAt.Equal(t0.Add(7_500_001*time.Millisecond)), "%s", watch.NextCheckAt)
+	runsOut := t0.Add(10_000 * time.Second)
+	require.True(t, watch.DepletesAt.Equal(runsOut))
+
+	// A charge accrues by the whole second: 7,501 seconds are 7.501 USD.
+	w.clock.Advance(7501 * time.Second)
+	at := w.now()
+	w.watch()
+	require.Equal(t, []billing.BalanceHostEvent{{
+		CustomerID: customer, Currency: "USD", AvailableAmount: -7_501_000, OwedAmount: 0, AccrualRatePerHour: 3_600_000,
+		LowBalanceAmount: 2_500_000, AsOf: at, DepletesAt: &runsOut, RunwayEndsAt: &runsOut,
+	}}, w.events(billing.HostEventBalanceLow, customer))
+	require.Empty(t, w.events(billing.HostEventBalanceDepleted, customer))
+	w.clock.Advance(runsOut.Sub(at))
+	w.watch()
+	require.Len(t, w.events(billing.HostEventBalanceDepleted, customer), 1)
+}
+
+// With no line set anywhere, the built-in one is a 24-hour runway at the
+// burn rate.
+func TestDefaultRunwayIsADay(t *testing.T) {
+	w := newChargeWorld(t, billing.BalanceNoticeSettings{})
+	customer := w.funded(30_000_000)
+	t0 := w.now()
+	w.start(customer, 1_000_000)
+	lines, err := engine.Graph(w.client).Runtime.MoneyService.LowBalanceLines(w.ctx, identity.CustomerID(customer), []string{"USD"})
+	require.NoError(t, err)
+	require.Equal(t, []billing.EffectiveLowBalanceLine{{Currency: "USD", Amount: 0, RunwayHours: 24, Source: billing.LowBalanceLineDefault}}, lines)
+	// 24 USD at 1 an hour: under it once 6.000001 USD has accrued.
+	lowAt := t0.Add(21_600_003_600 * time.Microsecond)
+	require.True(t, w.watched(customer).NextCheckAt.Equal(lowAt), "%s", w.watched(customer).NextCheckAt)
+
+	// A charge accrues by the whole second: 6 USD at 21,600 seconds is at the
+	// line, 21,601 under it.
+	w.clock.Advance(21_600 * time.Second)
+	w.watch()
+	require.Empty(t, w.events(billing.HostEventBalanceLow, customer))
+	w.clock.Advance(time.Second)
+	w.watch()
+	low := w.events(billing.HostEventBalanceLow, customer)
+	require.Len(t, low, 1)
+	require.EqualValues(t, 24_000_000, low[0].LowBalanceAmount)
 }
 
 // Spends in a burst write the watch once per pass: a row already due is not
