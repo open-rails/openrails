@@ -76,9 +76,11 @@ func TestDestructiveHoldDoesNotStrandCommittedCancellation(t *testing.T) {
 	tripRecordedFinancialActor(t, w, destructive.CancelSubscription, member.sub.UUID().String())
 	w.stripe.SubscriptionWritesUnavailable(false)
 	w.until(func() bool { return w.stripe.Subscription(member.railSub)["cancel_at_period_end"] == true }, "the held actor's already-committed cancellation completes its required provider stop")
-	var state string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT state FROM billing.destructive_actions WHERE kind='cancel_subscription' AND target=$1`), member.sub.UUID().String()).Scan(&state))
-	require.Equal(t, "succeeded", state)
+	w.until(func() bool {
+		var state string
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT state FROM billing.destructive_actions WHERE kind='cancel_subscription' AND target=$1`), member.sub.UUID().String()).Scan(&state))
+		return state == "succeeded"
+	}, "the completed provider stop settles its original admission")
 	require.Len(t, member.stripeSubWrites(), 1)
 }
 
@@ -88,6 +90,13 @@ func TestDestructiveHoldAfterRefundSendPreservesFinalizationAndReplay(t *testing
 	payment := completed(w.payments(embedded, member.c.id))[0]
 	params := billing.RefundPaymentParams{Amount: 4_000_000, Reason: "requested_by_customer", IdempotencyKey: "held-refund"}
 	gate := w.refundGateServed("stripe")
+	t.Cleanup(func() {
+		select {
+		case <-gate.release:
+		default:
+			close(gate.release)
+		}
+	})
 	done := make(chan error, 1)
 	go func() {
 		_, err := w.client[embedded].RefundPayment(context.WithoutCancel(t.Context()), payment.ID, params)
