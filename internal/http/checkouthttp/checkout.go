@@ -51,6 +51,6 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes), billingauth.ExplicitCredentials,
 		hostedcheckout.ResolveHTTP(store, rt.Clock.Now), limiter,
 	)
-	rt.HostedCheckoutOrigin = origin
+	rt.SetHostedCheckoutOrigin(origin)
 	return strings.ToLower(u.Host), handler, nil
 }

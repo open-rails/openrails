@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
@@ -42,6 +43,8 @@ func TestEmbeddedEngineHostedCheckout(t *testing.T) {
 	_, _, err = publisher.HostedCheckout("https://other.e2e.test", nil)
 	require.Error(t, err)
 	serving, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+	_, _, err = serving.HostedCheckout("https://pay.e2e.test", fstest.MapFS{})
+	require.Error(t, err, "missing assets must not install an origin")
 	host, handler, err = serving.HostedCheckout("https://pay.e2e.test", checkoutPage)
 	require.NoError(t, err)
 	require.Equal(t, "pay.e2e.test", host)
@@ -79,4 +82,12 @@ func TestEmbeddedEngineHostedCheckout(t *testing.T) {
 		res = call(path, secret)
 		require.NotEqual(t, 200, res.Code, path)
 	}
+
+	late, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+	require.NoError(t, late.Start(t.Context()))
+	_, _, err = late.HostedCheckout("https://late.e2e.test", nil)
+	require.ErrorContains(t, err, "before Start")
+	require.NoError(t, late.Close(t.Context()))
+	_, _, err = late.HostedCheckout("https://late.e2e.test", nil)
+	require.ErrorContains(t, err, "closed")
 }

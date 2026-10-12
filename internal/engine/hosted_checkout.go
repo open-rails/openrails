@@ -26,7 +26,7 @@ func (e *Engine) HostedCheckout(origin string, assets fs.FS) (string, http.Handl
 	if e.stopWorkers != nil {
 		return "", nil, fmt.Errorf("openrails: configure hosted checkout before Start")
 	}
-	if e.App.Runtime.HostedCheckoutOrigin != "" {
+	if e.App.Runtime.HostedCheckoutOrigin() != "" {
 		return "", nil, fmt.Errorf("openrails: hosted checkout is already configured")
 	}
 	forbidden := []string{e.App.Config.PublicBillingBaseURL, e.App.Config.DashboardBaseURL}
@@ -39,7 +39,7 @@ func (e *Engine) HostedCheckout(origin string, assets fs.FS) (string, http.Handl
 	}
 	rt := e.App.Runtime
 	if assets == nil {
-		rt.HostedCheckoutOrigin = origin
+		rt.SetHostedCheckoutOrigin(origin)
 		u, _ := url.Parse(origin)
 		return strings.ToLower(u.Host), nil, nil
 	}
