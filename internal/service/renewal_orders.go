@@ -23,8 +23,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// A renewal order (origin subscription) is paid by its customer with a saved
-// card: a customer-present collection of the subscription's period, which is
+// An engine-owned renewal order (origin subscription) is paid by its customer
+// with a saved card: a customer-present collection of the subscription's period, which is
 // the order's next attempt. Paying with another card makes it the
 // subscription's; a card whose brand changed is verified first.
 
@@ -36,6 +36,9 @@ var (
 // payRenewal pays the open renewal order. replayed: key's collection already
 // existed.
 func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, bool, error) {
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return checkout.OrderCharge{}, false, orders.ErrNotPayable
+	}
 	if pay.method == uuid.Nil {
 		return checkout.OrderCharge{}, false, errRenewalSavedCard
 	}
@@ -122,6 +125,9 @@ func renewalRefusal(err error) error {
 // renewalOptions is how a renewal order is paid: a saved card, on its
 // subscription's account.
 func (s *Service) renewalOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return nil, nil
+	}
 	sub, err := subscriptions.NewSubscriptionRepo(s.rt.DB).GetByID(ctx, *order.SubscriptionID)
 	if err != nil {
 		return nil, err

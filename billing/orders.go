@@ -154,13 +154,28 @@ type ConfirmOrderParams struct {
 	Signature *string `json:"signature,omitempty"`
 }
 
-// Order is one purchase: frozen lines and total. It is read and paid by its
-// own customer; its id is not a credential.
+// OrderCollectionOwner names the authority allowed to collect an order.
+// Provider and NMI schedule orders cannot be paid through generic order APIs.
+type OrderCollectionOwner string
+
+const (
+	OrderCollectionEngine      OrderCollectionOwner = "engine"
+	OrderCollectionNMISchedule OrderCollectionOwner = "nmi_schedule"
+	OrderCollectionProvider    OrderCollectionOwner = "provider"
+)
+
+// Order is one bill with frozen lines and total. Its collection owner decides
+// how it is paid; its id is not a credential.
 type Order struct {
 	ID         OrderID     `json:"id"`
 	CustomerID CustomerID  `json:"customer_id"`
 	Origin     OrderOrigin `json:"origin"`
 	Status     OrderStatus `json:"status"`
+	// CollectionOwner is frozen when the bill is accepted. Only engine
+	// orders accept generic pay, confirm and remittance commands.
+	CollectionOwner OrderCollectionOwner `json:"collection_owner"`
+	// CollectionPSPID is the account responsible for collection, when known.
+	CollectionPSPID *PSPID `json:"collection_psp_id"`
 	// Number is the document number, given when the order completes.
 	Number   *string      `json:"number"`
 	Currency string       `json:"currency"`

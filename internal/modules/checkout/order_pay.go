@@ -247,6 +247,9 @@ func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput)
 	if in.Order == nil || in.User == nil || in.Key == "" || payments != 1 {
 		return OrderCharge{}, errors.New("order payment needs its order, customer, key and one payment")
 	}
+	if in.Order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return OrderCharge{}, orders.ErrNotPayable
+	}
 	switch {
 	case in.Solana != nil:
 		return s.payOrderSolana(ctx, in)
@@ -400,6 +403,8 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
 		switch {
+		case current.CollectionOwner != string(billing.OrderCollectionEngine):
+			return orders.ErrNotPayable
 		case current.Status == string(billing.OrderProcessing) || current.PaymentStatus == string(billing.OrderPaymentRequiresAction):
 			return orders.ErrInProgress
 		case !orders.Payable(current, now):
@@ -700,7 +705,7 @@ func (s *CheckoutAttemptService) OrderOperation(ctx context.Context, attemptID u
 // Stripe's in-page authentication of the attempt's payment, or the Solana
 // Pay transaction request their wallet opens.
 func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *orders.Order, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (*billing.NextAction, error) {
-	if !order.AwaitsCustomer() || order.AttemptID == nil {
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) || !order.AwaitsCustomer() || order.AttemptID == nil {
 		return nil, nil
 	}
 	attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID)
@@ -727,6 +732,9 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 // customer acted: the verifier settles it, or it stays where it is. Failed
 // reports an attempt that ended without moving money.
 func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer, signature string) (OrderCharge, error) {
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return OrderCharge{}, orders.ErrNotPayable
+	}
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
 		return OrderCharge{}, nil
 	}
