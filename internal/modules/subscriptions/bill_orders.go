@@ -27,6 +27,9 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 		return observed.Result{}, errors.New("provider enrollment payment requires verified bill evidence")
 	}
 	interval := int(t.PeriodEnd.Sub(t.PeriodStart) / time.Hour)
+	if t.RecurringIntervalHours != nil {
+		interval = *t.RecurringIntervalHours
+	}
 	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(t.CollectionPolicy), Kind: "initial", SourceKind: "accepted_initial", SourceKey: t.SubscriptionID.String(), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: t.PeriodStart, Payment: p, Settled: true, SettlementSource: "cash", Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.Amount / int64(SeatCount(t.Quantity)), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours}}}
 	if b.Lines[0].Description == "" {
 		b.Lines[0].Description = "Subscription enrollment"
@@ -38,7 +41,23 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 		}
 		b.ExistingOrderID = &id
 	}
-	return observed.Record(ctx, d, b, now)
+	recorded, err := observed.Record(ctx, d, b, now)
+	if err != nil {
+		return recorded, err
+	}
+	if t.CollectionPolicy != models.CollectionPolicyEngine {
+		if t.RecurringIntervalHours == nil {
+			return recorded, errors.New("accepted provider enrollment has no recurring cadence")
+		}
+		firstDue := t.PeriodEnd
+		if t.Pending {
+			firstDue = t.PeriodStart
+		}
+		if err := observed.SeedSchedule(ctx, d, recorded.Order.ID, sub.ID, firstDue, *t.RecurringIntervalHours, t.RecurringAmount, now); err != nil {
+			return recorded, err
+		}
+	}
+	return recorded, nil
 }
 
 func renewalBill(ctx context.Context, d *db.DB, params *RenewMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
