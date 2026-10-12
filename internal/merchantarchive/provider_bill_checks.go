@@ -9,6 +9,8 @@ import (
 
 // Provider identity is financial history. Schema foreign keys retain the rows;
 // these checks also bind their frozen JSON and payer to the same merchant book.
+// An accepted provider alias can describe its line differently from checkout;
+// match the financial fields admission compares, while preserving both texts.
 var providerBillReferenceChecks = []rowCheck{
 	{"payments", `order_id IS NULL OR NOT EXISTS (
  SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=payments.order_id
@@ -39,12 +41,7 @@ var providerBillReferenceChecks = []rowCheck{
  AND l.customer_id=provider_bills.customer_id AND l.position=x.position-1
  AND l.price_id::text IS NOT DISTINCT FROM x.line->>'PriceID' AND l.product_id::text IS NOT DISTINCT FROM x.line->>'ProductID'
  AND l.quantity::text IS NOT DISTINCT FROM x.line->>'Quantity' AND l.unit_amount::text=x.line->>'UnitAmount' AND l.amount::text=x.line->>'Amount'
- AND COALESCE(l.source,'')=x.line->>'Source'
- AND l.description=x.line->>'Description'
- AND l.billing_interval_hours::text IS NOT DISTINCT FROM x.line->>'BillingIntervalHours'
- AND l.access_duration_hours::text IS NOT DISTINCT FROM x.line->>'AccessDurationHours'
- AND (COALESCE(x.line->>'Ownership','')='' OR l.ownership=x.line->>'Ownership')
- AND (COALESCE(x.line->>'ClaimKey','')='' OR l.claim_key=x.line->>'ClaimKey')))`},
+ AND COALESCE(l.source,'')=x.line->>'Source'))`},
 	{"provider_schedules", `NOT EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1
  AND s.id=provider_schedules.subscription_id AND s.customer_id=provider_schedules.customer_id AND s.psp_id=provider_schedules.psp_id)
  OR (initial_order_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=provider_schedules.initial_order_id
