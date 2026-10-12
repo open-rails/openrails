@@ -25,6 +25,8 @@ func TestDeletingAProductNothingReferences(t *testing.T) {
 	require.NoError(t, err)
 	unsoldPrice, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: unsold.ID, Key: "buy", UnitAmount: 3_000_000, Currency: "USD"})
 	require.NoError(t, err)
+	require.Equal(t, unsold.Key+":buy:v1", unsoldPrice.ID.String())
+	require.EqualValues(t, 1, unsoldPrice.Version)
 	sold, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sold-" + n, DisplayName: "Sold"})
 	require.NoError(t, err)
 	soldPrice, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sold.ID, Key: "buy", UnitAmount: 4_000_000, Currency: "USD"})
@@ -39,6 +41,14 @@ func TestDeletingAProductNothingReferences(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrNotFound, "the listing leaves it out")
 	_, err = c.GetPrice(t.Context(), unsoldPrice.ID, billing.GetPriceParams{})
 	requireCode(t, err, http.StatusNotFound, "price_not_found")
+	namedPrices, err := c.ListPrices(t.Context(), billing.PriceListParams{IDs: []billing.PriceID{unsoldPrice.ID, soldPrice.ID}})
+	require.NoError(t, err)
+	require.Len(t, namedPrices.Items, 1, "canonical named-ID reads omit deleted prices")
+	require.Equal(t, soldPrice.ID, namedPrices.Items[0].ID)
+	namedProducts, err := c.ListProducts(t.Context(), billing.ProductListParams{IDs: []billing.ProductID{unsold.ID, sold.ID}})
+	require.NoError(t, err)
+	require.Len(t, namedProducts.Items, 1)
+	require.Equal(t, sold.ID, namedProducts.Items[0].ID)
 	listed, err := c.ListProducts(t.Context(), billing.ProductListParams{})
 	require.NoError(t, err)
 	for _, p := range listed.Items {
@@ -62,7 +72,29 @@ func TestDeletingAProductNothingReferences(t *testing.T) {
 	revived, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: again.ID, Key: "buy", UnitAmount: 3_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, unsoldPrice.ID, revived.ID, "the same terms revive the same price")
+	require.EqualValues(t, 1, revived.Version)
 	require.False(t, revived.Archived)
+	history, err := c.ListPriceHistory(t.Context(), revived.ID, billing.PageRequest{})
+	require.NoError(t, err)
+	require.NotEmpty(t, history.Items)
+	require.False(t, history.Items[0].Archived, "revival records a new activation after deletion")
+	require.Equal(t, revived.ID, history.Items[0].Price.ID)
+
+	_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: again.ID, Key: "buy", UnitAmount: 3_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	replayed, err := c.ListPriceHistory(t.Context(), revived.ID, billing.PageRequest{})
+	require.NoError(t, err)
+	require.Equal(t, history, replayed, "identical live terms remain a no-op")
+
+	require.NoError(t, c.DeleteProduct(t.Context(), again.ID))
+	again, err = c.CreateProduct(t.Context(), billing.CreateProductParams{Key: unsold.Key, DisplayName: "Different terms"})
+	require.NoError(t, err)
+	repriced, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: again.ID, Key: "buy", UnitAmount: 5_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	require.Equal(t, unsold.Key+":buy:v2", repriced.ID.String(), "deleted versions still reserve their immutable identity")
+	require.EqualValues(t, 2, repriced.Version)
+	_, err = c.GetPrice(t.Context(), unsoldPrice.ID, billing.GetPriceParams{})
+	requireCode(t, err, http.StatusNotFound, "price_not_found")
 }
 
 // A catalog file with prune: true deletes the omitted products and price keys
@@ -130,6 +162,17 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 			live, err := priceByKey(t.Context(), c, kept, "buy")
 			require.NoError(t, err)
 			require.False(t, live.Archived)
+
+			only.Products[kept] = catalog.ApplyProduct{DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000), "extra": price(2_000_000)}}
+			apply(only)
+			revived, err := priceByKey(t.Context(), c, kept, "extra")
+			require.NoError(t, err)
+			require.Equal(t, extra.ID, revived.ID)
+			require.EqualValues(t, 1, revived.Version)
+			history, err := c.ListPriceHistory(t.Context(), revived.ID, billing.PageRequest{})
+			require.NoError(t, err)
+			require.NotEmpty(t, history.Items)
+			require.False(t, history.Items[0].Archived, "redeclaring a pruned key records its activation")
 		})
 	}
 }
