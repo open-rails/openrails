@@ -207,6 +207,7 @@ BEGIN
                   'product_entitlements',
                   'products',
                   'provider_bills',
+                  'provider_charge_attributions',
                   'provider_cycle_receipts',
                   'provider_intents',
                   'provider_mutation_logs',
