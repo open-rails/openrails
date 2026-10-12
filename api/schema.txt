@@ -70,7 +70,7 @@ migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
-migration 0073_public_price_identifiers.up.sql sha256:dee48359d17caa0f65aa7f25916553e972ff681ecc53096a2022523dca1d0e6c
+migration 0073_public_price_identifiers.up.sql sha256:b04f2dc7b8062105cf7bdea4070e1fc5a780e4cfed5674bf79f231d6d843afbd
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1640,6 +1640,7 @@ table billing.prices
   constraint prices_trial_both_or_neither_check CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL)))
   constraint prices_trial_needs_billing_interval_check CHECK (((trial_unit_amount IS NULL) OR (billing_interval_hours IS NOT NULL)))
   constraint prices_trial_period_positive_check CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0)))
+  index CREATE INDEX prices_archived_created_at_id_idx ON billing.prices USING btree (merchant_id, archived, created_at DESC, id DESC)
   index CREATE INDEX prices_created_at_id_idx ON billing.prices USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX prices_id_product_id_key ON billing.prices USING btree (merchant_id, id, product_id)
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
