@@ -312,10 +312,10 @@ ORDER BY COALESCE(s.current_period_starts_at, s.started_at);
 -- window [purchased_at, expiration) unambiguous, so unlike derive.grant.missing
 -- this auto-repairs.
 -- name: ListUngrantedWalletPayments :many
-SELECT p.id, p.customer_id, p.purchased_at,
-       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, pr.product_id
+SELECT DISTINCT p.id, p.customer_id, p.purchased_at,
+       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, l.product_id
 FROM billing.payments p
-JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.order_lines l ON l.order_id = p.order_id AND l.merchant_id = p.merchant_id AND l.product_id IS NOT NULL
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL

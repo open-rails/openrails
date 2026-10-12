@@ -188,12 +188,11 @@ SELECT id FROM billing.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND deleted_at IS NULL;
 
 -- name: PricesHoldReferences :one
--- Whether a record refers to any of the prices: a purchase line or payment,
+-- Whether a record refers to any of the prices: a purchase line,
 -- a subscription, a checkout, a price migration, a scheduled change, a
 -- provider write or a PSP link.
 SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
-    OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND to_price_id = ANY(sqlc.arg(price_ids)::uuid[]))

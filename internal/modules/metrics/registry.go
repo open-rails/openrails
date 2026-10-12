@@ -181,6 +181,16 @@ var Dimensions = []Dimension{
 	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
+// A payment settles its whole order, not each line independently. Attribute
+// it to a price only when every line names the same price. Multi-price and
+// non-catalog bills remain unassigned rather than multiplying payment money.
+const paymentPriceJoin = `LEFT JOIN LATERAL (
+  SELECT min(l.price_id::text)::uuid AS price_id
+  FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id
+  HAVING count(*) = count(l.price_id) AND count(DISTINCT l.price_id)=1
+) paid_line ON true
+LEFT JOIN billing.prices pr ON pr.merchant_id=p.merchant_id AND pr.id=paid_line.price_id`
+
 // families declares each family's SQL skeleton inputs.
 var families = map[Family]familySpec{
 	FamPayments: {
@@ -188,9 +198,9 @@ var families = map[Family]familySpec{
 		From:     `billing.payments p`,
 		TimeExpr: `p.purchased_at`,
 		DimJoins: map[string]string{
-			"product_id":    `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
-			"price_id":      `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
-			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
+			"product_id":    paymentPriceJoin,
+			"price_id":      paymentPriceJoin,
+			"billing_cycle": paymentPriceJoin,
 		},
 		DimExprs: map[string]string{
 			"currency":      `p.currency`,
