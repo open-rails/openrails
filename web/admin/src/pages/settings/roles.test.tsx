@@ -193,7 +193,7 @@ const writes = (requests: Recorded[]) =>
     .filter((request) => request.method !== "GET")
     .map((request) => [`${request.method} ${request.path}`, request.body])
 
-it("an owner composes a program role from the /v1/app permissions", async () => {
+it("an owner composes a storefront role from the required permissions", async () => {
   let roles = [OWNER, VIEWER]
   const requests = await open({
     "GET /me/permissions": me("merchant:owner", CATALOG),
@@ -218,7 +218,8 @@ it("an owner composes a program role from the /v1/app permissions", async () => 
   const dialog = document.body.textContent!
   expect(dialog).toContain("Programs (/v1/app)")
   expect(dialog).toContain("POST /v1/app/entitlements/check")
-  expect(dialog).toContain("GET /v1/app/catalog/products")
+  expect(dialog).toContain("Read catalog")
+  expect(dialog).not.toContain("GET /v1/app/catalog/products")
   expect(dialog).toContain("POST /v1/app/usage-events")
   await type("#role-name", "storefront")
   await act(async () => box("merchant:entitlements:read").click())

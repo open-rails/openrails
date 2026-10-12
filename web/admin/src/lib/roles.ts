@@ -214,7 +214,7 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Check entitlements",
     section: "programs",
   },
-  "merchant:catalog:read": { label: "Read catalog", section: "programs" },
+  "merchant:catalog:read": { label: "Read catalog", section: "operator" },
   "merchant:orders:manage": {
     label: "Create and cancel orders",
     section: "programs",
@@ -296,7 +296,7 @@ export const SECTIONS: {
   {
     id: "operator",
     title: "Operator capabilities",
-    description: "Manage the catalog, payment providers, findings and merchant configuration.",
+    description: "Read or manage the catalog, payment providers, findings and merchant configuration.",
   },
   {
     id: "metrics",
