@@ -77,8 +77,6 @@ const none: AdminAccess = {
   metrics: false,
   scope_id: "",
   assistants: {
-    widgets: false,
-    ask: false,
     catalog_copilot: false,
     catalog_drafting: false,
   },

@@ -74,7 +74,7 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 	} {
 		tc.want["scope_id"] = shop
 		tc.want["assistants"] = map[string]any{
-			"widgets": false, "ask": false, "catalog_copilot": false, "catalog_drafting": false,
+			"catalog_copilot": false, "catalog_drafting": false,
 		}
 		for _, role := range []string{heldIn(shop, tc.merchant), "only:" + string(tc.root)} {
 			status, access := get(role, "/v1/admin/access")
