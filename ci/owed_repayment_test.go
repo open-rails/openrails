@@ -25,7 +25,7 @@ import (
 // that claims it, and back to owed when the funding payment is charged back.
 func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "owed-"+uuid.NewString()[:8])
+	client := f.localRuntime(t, "owed-"+uuid.NewString()[:8])
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)

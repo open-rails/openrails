@@ -26,17 +26,23 @@ func TestUsageSweepArgsMirrorEngineJob(t *testing.T) {
 	require.Equal(t, QueueBilling, UsageSweepArgs{}.InsertOpts().Queue)
 }
 
-// What only an engine's handle offers refuses a remote handle instead of
-// pretending.
-func TestRemoteHandleRefusesEmbeddedOperations(t *testing.T) {
-	c, err := NewRemoteMerchant("https://billing.example", RemoteCredential{APIKey: "k"})
-	require.NoError(t, err)
-	_, err = c.DeclarePSP(t.Context(), billing.PSPDeclaration{})
-	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.SCIMHandler()
-	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.StartRunningChargeTx(t.Context(), nil, billing.StartRunningChargeParams{})
-	require.ErrorIs(t, err, ErrRemoteClient)
+// Embedded-only operations cannot appear on a remote Client's method set.
+func TestLocalOperationsAreNotRemoteMethods(t *testing.T) {
+	common := reflect.TypeFor[*Client]()
+	local := reflect.TypeFor[*LocalClient]()
+	for name := range embeddedMethods {
+		_, remoteHas := common.MethodByName(name)
+		require.False(t, remoteHas, name)
+		_, localHas := local.MethodByName(name)
+		require.True(t, localHas, name)
+	}
+	require.Equal(t, common.NumMethod()+len(embeddedMethods), local.NumMethod())
+}
+
+func TestLocalMerchantRequiresAnEngine(t *testing.T) {
+	local, err := (&Engine{}).LocalMerchant(billing.MerchantID{})
+	require.Error(t, err)
+	require.Nil(t, local)
 }
 
 // Merchant refuses the zero ID before anything is read.

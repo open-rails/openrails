@@ -86,7 +86,7 @@ func scimErrorType(out map[string]any) string {
 // the customer read and search show what it pushed.
 func TestSCIMHandlerProvisionsCustomerContacts(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "scim-"+uuid.NewString()[:8])
+	client := f.localRuntime(t, "scim-"+uuid.NewString()[:8])
 	handler, err := client.SCIMHandler()
 	require.NoError(t, err)
 	scim := scimClient{t: t, handler: handler}
@@ -193,7 +193,7 @@ func TestSCIMHandlerProvisionsCustomerContacts(t *testing.T) {
 // that stops nothing.
 func TestSCIMBulk(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "scim-bulk-"+uuid.NewString()[:8])
+	client := f.localRuntime(t, "scim-bulk-"+uuid.NewString()[:8])
 	handler, err := client.SCIMHandler()
 	require.NoError(t, err)
 	scim := scimClient{t: t, handler: handler}
