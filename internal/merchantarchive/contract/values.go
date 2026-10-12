@@ -35,6 +35,10 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 	}
 	if p.Name == "payments" {
+		order := value(p, values, "order_id")
+		if order == nil || strings.TrimSpace(*order) == "" {
+			return fmt.Errorf("payments without order identity are incompatible with this archive contract; historical orders are not reconstructed")
+		}
 		if raw := value(p, values, "legacy_entitlement_hours"); raw != nil {
 			var hours map[string]int
 			if err := json.Unmarshal([]byte(*raw), &hours); err != nil {

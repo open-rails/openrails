@@ -75,9 +75,12 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return err
 	}
 	customer, _ := uuid.Parse(p.UserID)
-	bought := observed.PriceID != nil && *observed.PriceID == p.PriceID
-	if p.OrderID != uuid.Nil {
-		bought = observed.PriceID == nil && observed.OrderID != nil && *observed.OrderID == p.OrderID
+	bought := observed.OrderID != nil && p.OrderID != uuid.Nil && *observed.OrderID == p.OrderID
+	if p.OrderID == uuid.Nil && p.PriceID != uuid.Nil {
+		bought, err = q.PaymentMatchesOrderPrice(ctx, gen.PaymentMatchesOrderPriceParams{MerchantID: op.MerchantID, PaymentID: observed.ID, PriceID: p.PriceID})
+		if err != nil {
+			return err
+		}
 	}
 	subscribed, err := orderSubscription(ctx, q, op.MerchantID, p.OrderID, observed.SubscriptionID)
 	if err != nil {

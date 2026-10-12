@@ -94,7 +94,7 @@ func (s *PaymentService) MatchesPrice(ctx context.Context, paymentID, priceID uu
 	})
 }
 
-// AttachRelations loads each payment's price, product and subscription.
+// AttachRelations loads each payment's subscription.
 func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
 	return s.repo.AttachRelations(ctx, payments...)
 }
@@ -214,7 +214,6 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	refund := &models.Payment{
 		ID:             uuidutil.NewV7(),
 		CustomerID:     orig.CustomerID,
-		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
 		OrderID:        orig.OrderID,
 		RefundedPaymentID: func() *uuid.UUID {
@@ -289,7 +288,6 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 	refund := &models.Payment{
 		ID:             uuidutil.NewV7(),
 		CustomerID:     orig.CustomerID,
-		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
 		OrderID:        orig.OrderID,
 		RefundedPaymentID: func() *uuid.UUID {

@@ -94,9 +94,8 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	default:
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment channel %q is not a known value", channel)
 	}
-	var price *uuid.UUID
-	if p.PriceID != uuid.Nil {
-		price = &p.PriceID
+	if p.OrderID == nil || *p.OrderID == uuid.Nil {
+		return gen.CreatePaymentParams{}, fmt.Errorf("payment requires its order")
 	}
 	var quantity *int32
 	if p.Quantity != nil {
@@ -108,7 +107,6 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	}
 	return gen.CreatePaymentParams{
 		ID:                  p.ID,
-		PriceID:             price,
 		Channel:             string(channel),
 		Rail:                rail,
 		TransactionID:       p.TransactionID,
@@ -212,8 +210,7 @@ func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 	return models.PaymentFromGen(row)
 }
 
-// GetByIDWithDetails fetches a payment with its price, product and
-// subscription where it has them, and its refunds.
+// GetByIDWithDetails fetches a payment, its subscription and refunds.
 func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -248,7 +245,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	return payment, refunds, nil
 }
 
-// AttachRelations loads each payment's price, product and subscription.
+// AttachRelations loads each payment's subscription.
 func (r *PaymentRepo) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
 	return r.attachPaymentRelations(ctx, payments)
 }
@@ -605,8 +602,8 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 	return out, r.attachPaymentRelations(ctx, out.Items)
 }
 
-// attachPaymentRelations stitches Price (with its Product) and Subscription
-// onto the supplied payments in two batched lookups.
+// attachPaymentRelations attaches subscriptions in one batched lookup.
+// Purchased terms belong to order lines, not to a payment-wide price.
 func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -616,15 +613,9 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	if len(payments) == 0 {
 		return nil
 	}
-	priceIDs := make([]uuid.UUID, 0, len(payments))
 	subIDs := make([]uuid.UUID, 0, len(payments))
-	seenPrice := map[uuid.UUID]bool{}
 	seenSub := map[uuid.UUID]bool{}
 	for _, p := range payments {
-		if p.PriceID != uuid.Nil && !seenPrice[p.PriceID] {
-			seenPrice[p.PriceID] = true
-			priceIDs = append(priceIDs, p.PriceID)
-		}
 		if p.SubscriptionID != nil && !seenSub[*p.SubscriptionID] {
 			seenSub[*p.SubscriptionID] = true
 			subIDs = append(subIDs, *p.SubscriptionID)
@@ -632,32 +623,6 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	}
 
 	q := r.db.Gen(ctx)
-	prices := map[uuid.UUID]*models.Price{}
-	if len(priceIDs) > 0 {
-		rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: priceIDs})
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			price, err := models.PriceFromGen(row.BillingPrice)
-			if err != nil {
-				return err
-			}
-			product, err := r.db.ProductFromGen(ctx, row.BillingProduct)
-			if err != nil {
-				return err
-			}
-			price.Product = product
-			prices[price.ID] = price
-		}
-	}
-	bindingPrices := make([]*models.Price, 0, len(prices))
-	for _, price := range prices {
-		bindingPrices = append(bindingPrices, price)
-	}
-	if err := r.db.LoadPricePSPBindings(ctx, bindingPrices, nil); err != nil {
-		return err
-	}
 	subs := map[uuid.UUID]*models.Subscription{}
 	if len(subIDs) > 0 {
 		rows, err := q.ListSubscriptionsByIDs(ctx, gen.ListSubscriptionsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: subIDs})
@@ -673,10 +638,6 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 		}
 	}
 	for _, p := range payments {
-		p.Price = prices[p.PriceID]
-		if p.PspID != nil {
-			p.Price = p.Price.ForPSP(*p.PspID)
-		}
 		if p.SubscriptionID != nil {
 			p.Subscription = subs[*p.SubscriptionID]
 		}
