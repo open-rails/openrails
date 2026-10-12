@@ -95,11 +95,29 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	if bill.Payment != nil || bill.Settled || bill.Total <= 0 || len(bill.Lines) != 1 || bill.Lines[0].Amount != bill.Total {
 		return errors.New("declared schedule is an accepted agreement, not historical money")
 	}
+	q := d.Gen(ctx)
+	prior, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID, SourceReference: source})
+	if err != nil && !db.IsNotFound(err) {
+		return err
+	}
+	bill.Lines = append([]Line(nil), bill.Lines...)
+	line := &bill.Lines[0]
+	if err == nil && line.Ownership == "" {
+		var accepted Bill
+		if err := json.Unmarshal(prior.AcceptedBill, &accepted); err != nil {
+			return err
+		}
+		if len(accepted.Lines) == 1 && sameID(line.PriceID, accepted.Lines[0].PriceID) && sameID(line.ProductID, accepted.Lines[0].ProductID) {
+			line.Ownership, line.ClaimKey = accepted.Lines[0].Ownership, accepted.Lines[0].ClaimKey
+		}
+	}
+	if err := freezeLineOwnership(ctx, q, mid.UUID(), line, true); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(bill)
 	if err != nil {
 		return err
 	}
-	q := d.Gen(ctx)
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID,
 		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), CadenceMonths: int32(cadenceMonths), AcceptedBill: raw, Now: now})
 	if err != nil {
