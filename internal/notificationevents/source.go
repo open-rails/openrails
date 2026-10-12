@@ -96,6 +96,10 @@ func (c *Consumer) Pending(ctx context.Context, limit int) ([]billing.Notificati
 	}
 	out := make([]billing.NotificationEvent, 0, len(rows))
 	for _, row := range rows {
+		data, err := projectPriceReferences(ctx, q, row)
+		if err != nil {
+			return nil, fmt.Errorf("project notification price references: %w", err)
+		}
 		var policy struct {
 			DowngradeApplied bool `json:"downgrade_applied"`
 		}
@@ -107,7 +111,7 @@ func (c *Consumer) Pending(ctx context.Context, limit int) ([]billing.Notificati
 			}
 		}
 		out = append(out, billing.NotificationEvent{ID: billing.NotificationID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), CustomerID: billing.CustomerID(row.CustomerID),
-			EventType: row.EventType, Data: json.RawMessage(row.Data), CreatedAt: row.CreatedAt, ActionRequested: billing.CustomerNotificationActionRequested(row.EventType), Optional: billing.CustomerNotificationOptional(row.EventType, billing.NotificationData{DowngradeApplied: policy.DowngradeApplied})})
+			EventType: row.EventType, Data: json.RawMessage(data), CreatedAt: row.CreatedAt, ActionRequested: billing.CustomerNotificationActionRequested(row.EventType), Optional: billing.CustomerNotificationOptional(row.EventType, billing.NotificationData{DowngradeApplied: policy.DowngradeApplied})})
 	}
 	return out, nil
 }
