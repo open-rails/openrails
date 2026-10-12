@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -122,6 +123,54 @@ func (w *world) usagePay(id billing.OrderID, method string) map[string]any {
 
 func credentialFields(s *nmimock.Sale) []string {
 	return []string{s.InitiatedBy, s.Indicator, s.Initial}
+}
+
+// sentFields is a Direct Post sale's gateway account and credential-on-file
+// fields, as NMI received them.
+func sentFields(form url.Values) []string {
+	return []string{form.Get("security_key"), form.Get("initiated_by"), form.Get("stored_credential_indicator"), form.Get("initial_transaction_id")}
+}
+
+// A new card is a new method with agreements of its own. Named the
+// collection default, it collects under its own reference; the card it
+// replaced is never cited again.
+func TestNewDefaultCardCollectsUnderItsOwnAgreement(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	_, err := w.client[embedded].UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
+	require.NoError(t, err)
+	old := c.saveCard("nmi", visa)
+	c.setDefault(old)
+	_, oldRef := w.agreements(old)
+	require.NotEmpty(t, oldRef)
+
+	first := w.arrearsInvoice(c)
+	w.refreshProviders()
+	w.collectInvoices()
+	require.Equal(t, billing.OrderComplete, w.invoice(first).Status)
+	attempts := w.nmi.Attempts()
+	require.Equal(t, []string{"e2e-nmi-key", "merchant", "used", oldRef}, sentFields(attempts[len(attempts)-1]), "collection cites the default card's agreement")
+	require.Equal(t, w.vaultOf(old), w.nmi.LastSale().Vault)
+
+	replacement := c.saveCard("nmi", mastercard)
+	c.setDefault(replacement)
+	_, newRef := w.agreements(replacement)
+	require.NotEmpty(t, newRef)
+	require.NotEqual(t, oldRef, newRef)
+	require.Equal(t, []string{"card_on_file/active", "unscheduled/ended/replaced"}, w.mandateStates(old))
+	require.Equal(t, []string{"card_on_file/active", "unscheduled/active"}, w.mandateStates(replacement))
+
+	sent := len(w.nmi.Attempts())
+	second := w.arrearsInvoice(c)
+	w.refreshProviders()
+	w.collectInvoices()
+	require.Equal(t, billing.OrderComplete, w.invoice(second).Status)
+	attempts = w.nmi.Attempts()[sent:]
+	require.Len(t, attempts, 1)
+	require.Equal(t, []string{"e2e-nmi-key", "merchant", "used", newRef}, sentFields(attempts[0]), "the new card collects under its own agreement")
+	require.Equal(t, w.vaultOf(replacement), w.nmi.LastSale().Vault)
+	require.Empty(t, w.nmi.Unexpected())
 }
 
 // NMI's Account Updater reissues a member's card. A same-brand reissue keeps

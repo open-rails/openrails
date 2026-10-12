@@ -278,7 +278,10 @@ doesn't surprise you:
   and a usage order's collection stops with failure code
   `stored_credential_required`. Saving a card verifies it for reuse without
   `billing_method`; moving a subscription onto a card without a recurring
-  agreement verifies one first.
+  agreement verifies one first. A custody migration leaves a card's mandates
+  with the account that made them. If the card is then charged through a
+  different account, collection there stops the same way until the customer
+  pays with a card on that account and names it as their default.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference
