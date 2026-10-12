@@ -209,7 +209,7 @@ func TestCustomerOrderWithEmbeddedPayment(t *testing.T) {
 
 	// One call, no key: the customer's order and its pay URL, which returns
 	// nowhere and lasts as long as the order (24 hours).
-	first, firstSecret := withPayURL(order(aliceToken, course, map[string]any{}, nil), http.StatusCreated)
+	first, firstSecret := withPayURL(order(aliceToken, course, embedded, nil), http.StatusCreated)
 	require.True(t, first.Embedded)
 	require.Nil(t, first.SuccessURL)
 	require.Nil(t, first.CancelURL)
