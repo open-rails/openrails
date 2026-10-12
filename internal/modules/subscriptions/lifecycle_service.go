@@ -158,29 +158,10 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 	return time.Now()
 }
 
-// DispatchNotifications delivers notification rows after their surrounding
-// transaction commits. Transaction-aware lifecycle callers use this to avoid
-// sending messages for work that may still roll back.
-func (s *SubscriptionLifecycleService) DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
-	if s.NotificationService == nil {
-		return
-	}
-	for _, notification := range notifications {
-		if err := s.NotificationService.DeliverEmail(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"notification_id": notification.ID,
-				"event_type":      notification.EventType,
-				"user_id":         notification.CustomerID.String(),
-			}).Error("failed to deliver notification email")
-		}
-	}
-}
-
 // CreateMembership creates a new subscription and grants associated roles
 func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *CreateMembershipParams) (*models.Subscription, error) {
 	var (
-		subscription  *models.Subscription
-		notifications []*models.NotificationQueue
+		subscription *models.Subscription
 	)
 
 	procSubID := normalize.FromPtr(params.RailSubscriptionID)
@@ -197,21 +178,19 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		dbb := db.NewWithPgxTx(tx)
 		var err error
-		subscription, notifications, err = s.CreateMembershipTx(ctx, dbb, params)
+		subscription, _, err = s.CreateMembershipTx(ctx, dbb, params)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	s.DispatchNotifications(ctx, notifications)
-
 	return subscription, nil
 }
 
 // CreateMembershipTx executes the membership creation logic using the provided transactional DB.
-// The caller is responsible for wrapping the call in a transaction and dispatching any queued notifications.
-func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+// The caller owns the transaction; notification facts commit with it.
+func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error) {
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
@@ -301,7 +280,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	return subscription, notifications, nil
 }
 
-func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error) {
 	if dbb == nil {
 		return nil, nil, errors.New("database handle is required")
 	}
@@ -310,7 +289,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	productService := catalog.NewProductService(dbb)
 	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
 	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
-	notificationRepo := NewNotificationQueueRepo(dbb)
+	notificationRepo := NewNotificationService(dbb)
 	subService := NewSubscriptionService(dbb, priceService, productService, nil, s.Clock())
 
 	var price *models.Price
@@ -574,7 +553,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		return subscription, nil, nil
 	}
 
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	if entitlementService != nil && params.InitialPaymentReversal == "" {
 		// A membership created with an ALREADY-elapsed period (stale import /
@@ -614,20 +593,16 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	if params.InitialPaymentReversal == "" {
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
+		notification := &models.NotificationEvent{
+			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
 			Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID)},
 		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			if params.Prepared != nil {
-				return nil, nil, fmt.Errorf("accepted membership notification: %w", err)
-			}
-			log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
-		} else {
-			notifications = append(notifications, notification)
+		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+			return nil, nil, fmt.Errorf("record membership started notification: %w", err)
 		}
+		notifications = append(notifications, notification)
 
 	}
 
@@ -806,7 +781,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 // It also creates a Payment record for the renewal transaction.
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
 func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 	if params.Prepared != nil {
 		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
 	}
@@ -1048,8 +1023,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		return nil
 	}
 
-	s.DispatchNotifications(ctx, notifications)
-
 	return nil
 }
 
@@ -1260,7 +1233,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		return err
 	}
 
-	s.DispatchNotifications(ctx, result.Notifications)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id": result.SubscriptionID,
 		"user_id":         result.UserID,
@@ -1270,7 +1242,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 }
 
 // CancelMembershipTx applies cancellation using the caller's transaction. The
-// caller owns commit/rollback and must dispatch the returned notifications only
+// caller owns commit/rollback; the returned facts are already persisted and become visible only
 // after a successful commit.
 func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, txDB *db.DB, params *CancelMembershipParams) (*CancelMembershipTxResult, error) {
 	if txDB == nil {
@@ -1279,7 +1251,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	priceService := catalog.NewPriceService(txDB)
 	productService := catalog.NewProductService(txDB)
-	notificationRepo := NewNotificationQueueRepo(txDB)
+	notificationRepo := NewNotificationService(txDB)
 	subService := NewSubscriptionService(txDB, priceService, productService, nil, s.Clock())
 
 	var subscription *models.Subscription
@@ -1299,7 +1271,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	result := &CancelMembershipTxResult{
 		SubscriptionID: subscription.ID,
 		UserID:         subscription.CustomerID.String(),
-		Notifications:  make([]*models.NotificationQueue, 0, 1),
+		Notifications:  make([]*models.NotificationEvent, 0, 1),
 	}
 	// A late event must preserve the existing cancellation and its terminal reason.
 	if subscription.Status == models.StatusCanceled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
@@ -1354,6 +1326,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		revokeSources = []models.AccessSourceType{models.AccessSourceSubscription, models.AccessSourceGrace}
 	}
 
+	previousRevision := subscription.LifecycleRev
 	if err := s.ApplyLocalCancellation(ctx, txDB, subscription, LocalCancellation{
 		EndedAt:       endAt,
 		CancelType:    params.CancelType,
@@ -1364,6 +1337,9 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("Failed to apply local cancellation")
 		return nil, err
+	}
+	if subscription.LifecycleRev == previousRevision {
+		return result, nil // the locked lifecycle already reflects this cancellation
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id": subscription.ID,
@@ -1382,17 +1358,18 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	case models.CancelTypeMerchant:
 		reason = PremiumEndReasonRail
 	}
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
+	// The committed revision identifies this cancellation, including retries
+	// after rollback and a later revoke of a period-end cancellation.
+	notification := &models.NotificationEvent{
+		ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("canceled:%d", subscription.LifecycleRev))),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
 		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID)},
 	}
-	if err := notificationRepo.Create(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
-	} else {
-		result.Notifications = append(result.Notifications, notification)
+	if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+		return nil, fmt.Errorf("record membership ended notification: %w", err)
 	}
+	result.Notifications = append(result.Notifications, notification)
 
 	return result, nil
 }
@@ -1401,7 +1378,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 type CancelMembershipTxResult struct {
 	SubscriptionID uuid.UUID
 	UserID         string
-	Notifications  []*models.NotificationQueue
+	Notifications  []*models.NotificationEvent
 }
 
 // LocalCancellation describes a side-effect-free terminal cancellation of a
@@ -1685,7 +1662,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 
 // ExpireMembership expires a subscription and revokes associated roles
 func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, subscriptionID uuid.UUID) error {
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
@@ -1693,7 +1670,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationService(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := s.newLifecycleEntitlementService(db)
 
@@ -1749,17 +1726,16 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			}
 		}
 
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
+		notification := &models.NotificationEvent{
+			ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("expired:%d", subscription.LifecycleRev))),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
 			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired)},
 		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
-		} else {
-			notifications = append(notifications, notification)
+		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+			return fmt.Errorf("record membership expired notification: %w", err)
 		}
+		notifications = append(notifications, notification)
 
 		return nil
 	})
@@ -1768,7 +1744,6 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		return err
 	}
 
-	s.DispatchNotifications(ctx, notifications)
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Membership expiration flow completed")
 
 	return nil
@@ -1783,7 +1758,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		return fmt.Errorf("subscription_id is required")
 	}
 
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	// Variables to capture from transaction for the deferred-delete log
 	var subscriptionID uuid.UUID
@@ -1807,7 +1782,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationService(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := s.newLifecycleEntitlementService(db)
 
@@ -2127,7 +2102,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 		if !quietRetry && !readCard {
-			notification := &models.NotificationQueue{
+			notification := &models.NotificationEvent{
 				ID:         uuidutil.NewV7(),
 				CustomerID: subscription.CustomerID,
 				EventType:  eventType,
@@ -2160,8 +2135,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"user_id":         userID,
 		}).Info("scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)")
 	}
-
-	s.DispatchNotifications(ctx, notifications)
 
 	return nil
 }

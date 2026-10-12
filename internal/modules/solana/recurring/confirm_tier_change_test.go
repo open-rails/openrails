@@ -28,7 +28,7 @@ type tierLifecycle struct {
 	newID   uuid.UUID
 }
 
-func (l *tierLifecycle) CreateMembershipTx(_ context.Context, _ *db.DB, p *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (l *tierLifecycle) CreateMembershipTx(_ context.Context, _ *db.DB, p *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error) {
 	l.creates = append(l.creates, p)
 	return &models.Subscription{ID: l.newID, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt}, nil, nil
 }
@@ -38,7 +38,7 @@ func (l *tierLifecycle) CancelMembershipTx(_ context.Context, _ *db.DB, p *submo
 	return &submod.CancelMembershipTxResult{}, nil
 }
 
-func (*tierLifecycle) DispatchNotifications(context.Context, []*models.NotificationQueue) {}
+func (*tierLifecycle) DispatchNotifications(context.Context, []*models.NotificationEvent) {}
 
 type inlineTx struct{}
 

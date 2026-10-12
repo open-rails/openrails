@@ -73,6 +73,7 @@ migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
+migration 0073_notification_events.up.sql sha256:8e6afbe411644cfd1ebb0c27b5f4f58667fc2527917542c9782c7d304173b3dd
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1030,6 +1031,49 @@ table billing.nmi_history_reads
   constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
 
+table billing.notification_consumers
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid
+  column owner text NOT NULL
+  column name text NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint notification_consumers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id)
+  constraint notification_consumers_merchant_id_owner_name_key UNIQUE NULLS NOT DISTINCT (merchant_id, owner, name)
+  constraint notification_consumers_name_check CHECK ((name ~ '^[A-Za-z0-9_.-]{1,64}$'::text))
+  constraint notification_consumers_owner_check CHECK (((length(owner) >= 1) AND (length(owner) <= 512)))
+  constraint notification_consumers_pkey PRIMARY KEY (id)
+  index CREATE UNIQUE INDEX notification_consumers_merchant_id_owner_name_key ON billing.notification_consumers USING btree (merchant_id, owner, name) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX notification_consumers_pkey ON billing.notification_consumers USING btree (id)
+
+table billing.notification_event_acks
+  column consumer_id uuid NOT NULL
+  column merchant_id uuid NOT NULL
+  column event_id uuid NOT NULL
+  column acknowledged_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint notification_event_acks_consumer_id_fkey FOREIGN KEY (consumer_id) REFERENCES billing.notification_consumers(id) ON DELETE CASCADE
+  constraint notification_event_acks_merchant_id_event_id_fkey FOREIGN KEY (merchant_id, event_id) REFERENCES billing.notification_events(merchant_id, id) ON DELETE CASCADE
+  constraint notification_event_acks_pkey PRIMARY KEY (consumer_id, merchant_id, event_id)
+  index CREATE INDEX notification_event_acks_event_idx ON billing.notification_event_acks USING btree (merchant_id, event_id, consumer_id)
+  index CREATE UNIQUE INDEX notification_event_acks_pkey ON billing.notification_event_acks USING btree (consumer_id, merchant_id, event_id)
+  index CREATE INDEX notification_event_acks_retention_idx ON billing.notification_event_acks USING btree (acknowledged_at)
+
+table billing.notification_events
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column event_type text NOT NULL
+  column data jsonb NOT NULL DEFAULT '{}'::jsonb
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column inserted_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint notification_events_merchant_id_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint notification_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id)
+  constraint notification_events_pkey PRIMARY KEY (merchant_id, id)
+  index CREATE INDEX notification_events_customer_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at, id)
+  index CREATE INDEX notification_events_delivery_idx ON billing.notification_events USING btree (inserted_at, merchant_id, id)
+  index CREATE INDEX notification_events_ended_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at) WHERE (event_type = 'premium_ended'::text)
+  index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
+  trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
+
 table billing.notifications
   column id uuid NOT NULL DEFAULT uuidv7()
   column event_type text NOT NULL
@@ -1049,6 +1093,7 @@ table billing.notifications
   constraint notifications_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint notifications_link_check CHECK ((link <> ''::text))
   constraint notifications_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint notifications_operator_only CHECK ((recipient_kind = 'merchant'::text))
   constraint notifications_pkey PRIMARY KEY (merchant_id, id)
   constraint notifications_recipient_check CHECK ((((recipient_kind = 'customer'::text) AND (customer_id IS NOT NULL) AND (severity IS NULL) AND (title IS NULL) AND (body IS NULL) AND (link IS NULL)) OR ((recipient_kind = 'merchant'::text) AND (customer_id IS NULL) AND (event_type = 'operator.alert'::text) AND (emailed_at IS NULL) AND (severity IS NOT NULL) AND (title IS NOT NULL) AND (body IS NOT NULL))))
   constraint notifications_severity_check CHECK ((severity <> ''::text))
@@ -2969,6 +3014,8 @@ function billing.guard_billing_restore_receipt()
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',
                     'nmi_history_reads',
+                    'notification_event_acks',
+                    'notification_events',
                     'notifications',
                     'order_lines',
                     'orders',
@@ -3148,6 +3195,20 @@ function billing.guard_merchant_restore()
       ) THEN
           RAISE EXCEPTION 'retired or purged merchant cannot be restored' USING ERRCODE='23514';
           END IF;
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_notification_event()
+  CREATE OR REPLACE FUNCTION billing.guard_notification_event()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
+          RAISE EXCEPTION 'notification events are immutable' USING ERRCODE='23514';
       END IF;
       RETURN NEW;
   END;

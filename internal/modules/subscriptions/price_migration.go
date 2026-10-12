@@ -93,15 +93,14 @@ type PriceMigrationService struct {
 	db            *db.DB
 	prices        *catalog.PriceService
 	subscriptions *SubscriptionService
-	notifications *NotificationService
 	config        *merchantconfig.Store
 	stripe        StripePusher
 	nmi           NMIPusher
 	clock         clockwork.Clock
 }
 
-func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, notifications *NotificationService, config *merchantconfig.Store, stripe StripePusher, nmi NMIPusher, clock clockwork.Clock) *PriceMigrationService {
-	return &PriceMigrationService{db: d, prices: prices, subscriptions: subscriptions, notifications: notifications, config: config, stripe: stripe, nmi: nmi, clock: timeutil.FirstClock(clock)}
+func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, config *merchantconfig.Store, stripe StripePusher, nmi NMIPusher, clock clockwork.Clock) *PriceMigrationService {
+	return &PriceMigrationService{db: d, prices: prices, subscriptions: subscriptions, config: config, stripe: stripe, nmi: nmi, clock: timeutil.FirstClock(clock)}
 }
 
 func (s *PriceMigrationService) now() time.Time { return s.clock.Now() }
@@ -473,7 +472,10 @@ func (s *PriceMigrationService) move(ctx context.Context, c *classified, target 
 		}
 		change, err = ScheduleChange(ctx, d, sub, NewScheduledChange{PriceID: target.ID, EffectiveAt: effectiveAt, Source: billing.ScheduledChangeMigration, PriceMigrationID: &migration, AcknowledgedShortNotice: c.acknowledged}, s.now())
 		c.sub = sub
-		return err
+		if err != nil {
+			return err
+		}
+		return s.notify(ctx, d, change, sub, c.from, target, targetProduct, effectiveAt)
 	})
 	if errors.Is(err, errChangeNotScheduled) || errors.Is(err, ErrChangeAlreadyScheduled) || errors.Is(err, ErrRebillTermsCommitted) {
 		reason := err.Error()
@@ -494,7 +496,6 @@ func (s *PriceMigrationService) move(ctx context.Context, c *classified, target 
 	if c.capability == capabilityAutoNMI {
 		c.outcome.Disposition = billing.MigrationApplied
 	}
-	s.notify(ctx, c.sub, c.from, target, targetProduct, effectiveAt)
 	return true, nil
 }
 
@@ -603,26 +604,24 @@ func (s *PriceMigrationService) applyNow(ctx context.Context, subscriptionID uui
 	})
 }
 
-// notify sends the schedule-time notice: a plan change when the product
+// notify records the schedule transition in its transaction: a plan change when the product
 // changes (the legal content differs), else a price change.
-func (s *PriceMigrationService) notify(ctx context.Context, sub *models.Subscription, from, to *models.Price, toProduct *models.Product, effectiveAt time.Time) {
-	if s.notifications == nil {
-		return
-	}
+func (s *PriceMigrationService) notify(ctx context.Context, d *db.DB, change *models.ScheduledChange, sub *models.Subscription, from, to *models.Price, toProduct *models.Product, effectiveAt time.Time) error {
 	effective := effectiveAt.UTC()
 	data := billing.NotificationData{
 		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: billing.PriceID(from.ID), ToPriceID: billing.PriceID(to.ID),
 		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: to.Currency, EffectiveAt: &effective,
+	}
+	if change.PriceMigrationID != nil {
+		data.PriceMigrationID = billing.PriceMigrationID(*change.PriceMigrationID)
 	}
 	event := models.NotificationSubscriptionRepriceScheduled
 	if to.ProductID != from.ProductID {
 		event = models.NotificationSubscriptionPlanChangeScheduled
 		data.ToProductID, data.ToProductName = billing.ProductID(toProduct.ID), toProduct.DisplayName
 	}
-	n := &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, EventType: event, Data: data}
-	if err := s.notifications.CreateAndDeliver(ctx, n); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warnf("failed to emit %s notification", event)
-	}
+	n := &models.NotificationEvent{ID: uuid.NewSHA1(change.ID, []byte("scheduled-notification")), CustomerID: sub.CustomerID, EventType: event, Data: data, CreatedAt: s.now()}
+	return NewNotificationService(d).CreateIfAbsent(ctx, n)
 }
 
 // Get reads one migration with its moves counted.

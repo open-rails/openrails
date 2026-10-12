@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	log "github.com/sirupsen/logrus"
 )
 
 // A subscription change moves a subscription to another price of its tier
@@ -189,45 +187,7 @@ func (s *CheckoutService) changeSubscription(ctx context.Context, req *Subscript
 	if err := s.refuseTierChangeInFlight(ctx, c.sub); err != nil {
 		return nil, err
 	}
-	resp, err := s.routeChange(ctx, req, user, c)
-	// A staff change charged now is told from its completion; one scheduled
-	// or canceled here is told now.
-	if err == nil && c.staff != nil && resp.Status == "succeeded" && (resp.Effective != "now" || c.clears()) {
-		s.notifyStaffChange(ctx, c, resp)
-	}
-	return resp, err
-}
-
-// notifyStaffChange tells the customer of a change staff made at their
-// request that charged nothing. A failure is logged: the change stands.
-func (s *CheckoutService) notifyStaffChange(ctx context.Context, c *changeTarget, resp *TierChangeResponse) {
-	product := c.product.DisplayName
-	if resp.PriceID != billing.PriceID(c.price.ID) {
-		if price, err := s.PriceService.GetByID(ctx, resp.PriceID.UUID()); err == nil {
-			if p, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-				product = p.DisplayName
-			}
-		}
-	}
-	at := s.now()
-	if resp.Effective != "now" && c.sub.CurrentPeriodEndsAt != nil {
-		at = *c.sub.CurrentPeriodEndsAt
-	}
-	key := fmt.Sprintf("%s:%s:%d:%s", resp.Effective, resp.PriceID, subscriptions.SeatCount(resp.Quantity), at.UTC().Format(time.RFC3339Nano))
-	if c.clears() && c.pending != nil {
-		key = "canceled:" + c.pending.ID.String()
-	}
-	notice, err := subscriptions.QueueStaffChangeNotice(ctx, s.SubscriptionService.Database(), c.sub, subscriptions.StaffChangeNotice{
-		Key: key, PriceID: resp.PriceID.UUID(), ProductName: product, Quantity: resp.Quantity,
-		Currency: resp.Currency, NextAmount: resp.NextChargeAmount, EffectiveAt: at,
-	})
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", c.sub.ID).Error("queue staff change notice")
-		return
-	}
-	if s.Lifecycle != nil {
-		s.Lifecycle.DispatchNotifications(ctx, []*models.NotificationQueue{notice})
-	}
+	return s.routeChange(ctx, req, user, c)
 }
 
 func (s *CheckoutService) routeChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {

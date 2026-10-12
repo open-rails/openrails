@@ -59,7 +59,6 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.StripeWebhookReconcileArgs{}.Kind():    {time.Hour, false},
 		riverjobs.UsageOrderArgs{}.Kind():                {time.Hour, true}, // hourly + daily + monthly; shortest wins
 		riverjobs.DelinquencyArgs{}.Kind():               {15 * time.Minute, false},
-		riverjobs.NotificationEmailSweepArgs{}.Kind():    {10 * time.Minute, false},
 		riverjobs.RebillWatchArgs{}.Kind():               {riverjobs.RebillWatchInterval, false},
 		riverjobs.AttemptEnrichmentArgs{}.Kind():         {riverjobs.AttemptEnrichmentInterval, false},
 		riverjobs.NMIHistoryArgs{}.Kind():                {riverjobs.NMIHistoryInterval, false},

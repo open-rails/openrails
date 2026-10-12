@@ -66,13 +66,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	for name, v := range map[string]*int{"reprice_notice_window_days": in.RepriceNoticeWindowDays, "renewal_receipt_min_interval_hours": in.RenewalReceiptMinIntervalHours, "arrears_grace_days": in.ArrearsGraceDays} {
+	for name, v := range map[string]*int{"reprice_notice_window_days": in.RepriceNoticeWindowDays, "arrears_grace_days": in.ArrearsGraceDays} {
 		if v != nil && *v < 0 {
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
 	cfg.CollectionThreshold, cfg.MonthlyFloor, cfg.ArrearsDelinquencyFloor = in.CollectionThreshold, in.MonthlyFloor, in.ArrearsDelinquencyFloor
-	cfg.RepriceNoticeWindowDays, cfg.RenewalReceiptMinIntervalHours, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.RenewalReceiptMinIntervalHours, in.ArrearsGraceDays
+	cfg.RepriceNoticeWindowDays, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.ArrearsGraceDays
 	if in.BillingPeriodBoundary != "" {
 		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
 			return Settings{}, fmt.Errorf("invalid billing_period_boundary %q", in.BillingPeriodBoundary)

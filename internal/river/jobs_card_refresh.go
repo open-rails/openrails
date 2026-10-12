@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -54,26 +53,25 @@ func (w *CardRefreshWorker) Work(ctx context.Context, job *river.Job[paymentmeth
 			held = paymentmethods.HeldCard{}
 		}
 		now := w.Clock.Now().UTC()
-		var notices []*models.NotificationQueue
+
 		err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			d := w.DB.NewWithPgxTx(tx)
-			notices = nil
+
 			if held.Source != "" && !held.Gone {
-				life, queued, err := w.Lifecycle.ApplyCardLifecycle(ctx, d, paymentmethods.CardEvent{MerchantID: args.MerchantID, PaymentMethodID: method.ID,
+				life, _, err := w.Lifecycle.ApplyCardLifecycle(ctx, d, paymentmethods.CardEvent{MerchantID: args.MerchantID, PaymentMethodID: method.ID,
 					Source: held.Source, EventRef: "decline-read:" + strconv.FormatInt(job.ID, 10), Card: held.Card, At: now})
 				if err != nil || life.Replayed || life.Change != "" {
-					notices = queued
+
 					return err
 				}
 			}
 			var err error
-			notices, err = w.Lifecycle.AskForCard(ctx, d, args.MerchantID, method.ID, now)
+			_, err = w.Lifecycle.AskForCard(ctx, d, args.MerchantID, method.ID, now)
 			return err
 		})
 		if err != nil {
 			return err
 		}
-		w.Lifecycle.DispatchNotifications(ctx, notices)
 		return nil
 	})
 }

@@ -33,7 +33,7 @@ import (
 // Memberships creates a paid recurring line's subscription in the caller's
 // transaction.
 type Memberships interface {
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error)
+	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
 }
 
 // Charge is money a provider took for an order, as its qualified receipt

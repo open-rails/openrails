@@ -16,7 +16,7 @@ import (
 // noticeKinds is the event type of each of the customer's notifications.
 func (c *customer) noticeKinds() []string {
 	c.w.t.Helper()
-	items, _ := c.must(http.MethodGet, "/notifications?limit=100", "", nil)["data"].([]any)
+	items := c.notificationEvents()
 	var out []string
 	for _, item := range items {
 		out = append(out, item.(map[string]any)["event_type"].(string))

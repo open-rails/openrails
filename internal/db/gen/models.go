@@ -725,10 +725,36 @@ type BillingNotification struct {
 	CreatedAt     time.Time
 	MerchantID    uuid.UUID
 	CustomerID    *uuid.UUID
-	// When the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
+	// Unused legacy customer delivery marker; operator alerts do not set it.
 	EmailedAt *time.Time
-	// Until when one sender holds the undelivered email; another sends it only after this passes, so a sender that died is replaced.
+	// Unused legacy customer delivery lease; customer channels are application-owned.
 	EmailLeaseExpiresAt *time.Time
+}
+
+type BillingNotificationConsumer struct {
+	ID         uuid.UUID
+	MerchantID *uuid.UUID
+	Owner      string
+	Name       string
+	CreatedAt  time.Time
+}
+
+// Immutable customer billing facts, independent of application inbox state. Retention: events are deleted 30 days after every active scoped and global consumer acknowledges; pending events never expire.
+type BillingNotificationEvent struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	EventType  string
+	Data       []byte
+	CreatedAt  time.Time
+	InsertedAt time.Time
+}
+
+type BillingNotificationEventAck struct {
+	ConsumerID     uuid.UUID
+	MerchantID     uuid.UUID
+	EventID        uuid.UUID
+	AcknowledgedAt time.Time
 }
 
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.

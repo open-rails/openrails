@@ -930,6 +930,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 	now := s.now().UTC()
 	payload := StripeTierChangePayload{
+		Staff:          staffChange(req),
 		RequestedPrice: strings.TrimSpace(req.PriceID), UserID: user.ID, SubscriptionID: existingSub.ID,
 		StripeSubscriptionID: existingSub.RailSubscriptionID, StripeItemID: state.ItemID, Action: action,
 		OldPriceID: existingSub.PriceID, OldStripePriceID: currentStripePriceID,

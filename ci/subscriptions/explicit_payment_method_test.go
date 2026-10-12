@@ -81,8 +81,7 @@ func TestRenewalNeverChargesACardThatCannotPayIt(t *testing.T) {
 // hasNotification reports whether the customer has a notification of a kind.
 func (c *customer) hasNotification(kind string) bool {
 	c.w.t.Helper()
-	out := c.must(http.MethodGet, "/notifications?limit=100", "", nil)
-	items, _ := out["data"].([]any)
+	items := c.notificationEvents()
 	for _, item := range items {
 		if item.(map[string]any)["event_type"] == kind {
 			return true

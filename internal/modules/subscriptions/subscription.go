@@ -42,7 +42,7 @@ type GetSubscriptionsFilters struct {
 type SubscriptionService struct {
 	db                       *db.DB
 	subscriptionRepo         *SubscriptionRepo
-	notificationRepo         *NotificationQueueRepo
+	notificationRepo         *NotificationService
 	clock                    clockwork.Clock
 	PriceService             *catalog.PriceService
 	ProductService           *catalog.ProductService
@@ -128,7 +128,7 @@ func NewSubscriptionService(
 	return &SubscriptionService{
 		db:                   db,
 		subscriptionRepo:     NewSubscriptionRepo(db),
-		notificationRepo:     NewNotificationQueueRepo(db),
+		notificationRepo:     NewNotificationService(db),
 		clock:                timeutil.FirstClock(clocks...),
 		PriceService:         priceService,
 		ProductService:       productService,

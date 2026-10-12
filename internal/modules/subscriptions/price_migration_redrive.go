@@ -10,6 +10,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -111,15 +113,35 @@ const (
 
 // unblock takes a blocked move back to scheduled under the subscription's
 // lock; false when another actor won it or another change is scheduled.
-func (s *PriceMigrationService) unblock(ctx context.Context, change *models.ScheduledChange) bool {
+func (s *PriceMigrationService) unblock(ctx context.Context, change *models.ScheduledChange) (bool, error) {
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
-		if _, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, change.SubscriptionID); err != nil {
+		sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, change.SubscriptionID)
+		if err != nil {
 			return err
 		}
-		return changed(d.Gen(ctx).UnblockScheduledChange(ctx, gen.UnblockScheduledChangeParams{MerchantID: change.MerchantID, ID: change.ID}))
+		if err = changed(d.Gen(ctx).UnblockScheduledChange(ctx, gen.UnblockScheduledChangeParams{MerchantID: change.MerchantID, ID: change.ID})); err != nil {
+			return err
+		}
+		prices := catalog.NewPriceService(d)
+		from, err := prices.GetByID(ctx, change.FromPriceID)
+		if err != nil {
+			return err
+		}
+		to, err := prices.GetByID(ctx, change.PriceID)
+		if err != nil {
+			return err
+		}
+		product, err := catalog.NewProductService(d).GetByID(ctx, to.ProductID)
+		if err != nil {
+			return err
+		}
+		return s.notify(ctx, d, change, sub, from, to, product, change.EffectiveAt)
 	})
-	return err == nil
+	if errors.Is(err, errChangeNotScheduled) || db.IsUniqueViolation(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // redriveChange errs only for driver failures; a failed push re-blocks the
@@ -135,7 +157,9 @@ func (s *PriceMigrationService) redriveChange(ctx context.Context, change *model
 	}
 	if sub.PriceID == change.PriceID {
 		// The push landed before the database write: apply the move.
-		if !s.unblock(ctx, change) {
+		if ok, err := s.unblock(ctx, change); err != nil {
+			return redriveFailed, err
+		} else if !ok {
 			return redriveSkipped, nil
 		}
 		if err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -167,7 +191,9 @@ func (s *PriceMigrationService) redriveChange(ctx context.Context, change *model
 	if err != nil {
 		return redriveSkipped, nil //nolint:nilerr // product gone; stays blocked
 	}
-	if !s.unblock(ctx, change) {
+	if ok, err := s.unblock(ctx, change); err != nil {
+		return redriveFailed, err
+	} else if !ok {
 		return redriveSkipped, nil
 	}
 	change.Status, change.BlockedReason = models.ScheduledChangeScheduled, ""
@@ -178,8 +204,7 @@ func (s *PriceMigrationService) redriveChange(ctx context.Context, change *model
 		logger.WithError(err).Warn("redrive: push failed again")
 		return redriveFailed, nil
 	}
-	// Create never noticed a move that blocked before its push.
-	s.notify(ctx, sub, source, target, targetProduct, change.EffectiveAt)
+	// The source fact was recorded with the original schedule transition.
 	logger.WithField("effective_at", change.EffectiveAt.UTC().Format(time.RFC3339)).Info("redrive: push succeeded")
 	return redrivePushed, nil
 }

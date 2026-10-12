@@ -32,8 +32,8 @@ type EffectOptions struct {
 // ApplyEffects carries out a transition's effects in the caller's transaction,
 // on the row it holds locked. Call it after Transition and before persisting
 // the row: a provider cancel stamps the deletion marker. Notices are queued
-// idempotently and returned for DispatchNotifications after commit.
-func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationQueue, error) {
+// idempotently in the caller's transaction.
+func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationEvent, error) {
 	for _, effect := range effects {
 		switch effect.(type) {
 		case lifecycle.EndAccess, lifecycle.QueueProviderCancel:
@@ -43,7 +43,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 		}
 	}
 	ents := s.newLifecycleEntitlementService(d)
-	var out []*models.NotificationQueue
+	var out []*models.NotificationEvent
 	var granted *lifecycle.GrantPeriod
 	for _, effect := range effects {
 		switch e := effect.(type) {
@@ -146,7 +146,7 @@ func revokeReason(sub *models.Subscription, opts EffectOptions) models.AccessRev
 
 // queueNotice queues one customer notice, idempotent per subscription, kind
 // and period so a replayed transition never notifies twice.
-func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions) (*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions) (*models.NotificationEvent, error) {
 	data := opts.Notice
 	data.SubscriptionID = billing.SubscriptionID(sub.ID)
 	if data.Rail == "" {
@@ -166,15 +166,11 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 		start, end := granted.Start, granted.End
 		data.PeriodStartsAt, data.PeriodEndsAt = &start, &end
 		if kind == lifecycle.NoticeRenewed {
-			due, err := renewalReceiptDue(ctx, d, sub, start)
-			if err != nil || !due {
-				return nil, err
-			}
 			key = "renewed:" + start.UTC().Format(time.RFC3339Nano) + ":" + end.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	n := &models.NotificationQueue{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data}
-	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
+	n := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data}
+	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return nil, fmt.Errorf("queue %s notice for %s: %w", kind, sub.ID, err)
 	}
 	return n, nil

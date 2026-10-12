@@ -16,12 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/helpers/smtp/smtptest"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
@@ -31,8 +29,8 @@ import (
 
 // On a standalone server a customer's verified access token carries who it
 // is: AuthKit records its contact claims in the merchant's directory, so a
-// user who registers and buys at once gets the receipt at the token's email,
-// through the built-in SMTP sender, with no SCIM push.
+// user who registers and buys at once has current contact data and a durable
+// billing event, with no SCIM push or customer email delivery.
 func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 	f := newFixture(t)
 	vault := vaultfake.New("e2e-root")
@@ -105,12 +103,13 @@ merchants:
 	paid := me(http.MethodPost, "/orders", map[string]any{"lines": []any{map[string]any{"price_id": price.ID}}, "expected_total": "9990000", "payment": map[string]any{"payment_method_id": card}})
 	require.Equal(t, "complete", paid["status"], "%v", paid)
 
-	sweep := riverjobs.NotificationEmailSweepWorker{DB: graph.Runtime.DB, Notifications: graph.Runtime.NotificationService}
-	require.NoError(t, sweep.Work(ctx, &river.Job[riverjobs.NotificationEmailSweepArgs]{}))
-	receipt := mail.Wait(t, 1, 10*time.Second)[0]
-	require.Equal(t, []string{"new@claims.test"}, receipt.To, "the receipt goes to the token's email at once")
-	require.Equal(t, "apikey", receipt.Username)
-	require.Contains(t, receipt.Text+receipt.HTML, "9.99")
+	consumer, err := srv.NotificationEvents("contact-claims-test")
+	require.NoError(t, err)
+	require.NoError(t, consumer.Register(ctx))
+	events, err := consumer.Pending(ctx, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, events, "purchase emits source facts, not customer email")
+	require.Equal(t, user, events[0].CustomerID.String())
 
 	customers, err := members.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{billing.CustomerID(uuid.MustParse(user))}})
 	require.NoError(t, err)

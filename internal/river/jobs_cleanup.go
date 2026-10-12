@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/notificationevents"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -130,6 +131,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
+	NotificationEvents      int64
 	CheckoutAttemptsExpired int64
 	Carts                   int64
 	NotificationsSeen       int64
@@ -201,6 +203,21 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+
+	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
+		n, err := notificationevents.Prune(ctx, w.DB, now, cleanupDeleteBatch)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			break
+		}
+		result.NotificationEvents += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+		if batch == cleanupIndexedMaxBatches-1 {
+			logger.Warn("Cleanup: notification event retention reached its pass budget")
+		}
+	}
 
 	directory := w.DB.GenDirectory()
 
@@ -313,6 +330,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
 		"checkout_attempts_expired": result.CheckoutAttemptsExpired,
 		"carts":                     result.Carts,
+		"notification_events":       result.NotificationEvents,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,

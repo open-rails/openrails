@@ -8,6 +8,10 @@ import (
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
+	{Method: POST, Path: "/v1/app/notification-consumers/{name}", Group: App, Auth: AuthApplication, Permission: needEvents, NoConn: true, IdempotencyKey: true, Name: "RegisterNotificationConsumer", Responses: []Reply{{204, nil}}, Errors: codes("invalid_param"), Handler: h(handlers.RegisterNotificationConsumer)},
+	{Method: GET, Path: "/v1/app/notification-consumers/{name}/events", Group: App, Auth: AuthApplication, Permission: needEvents, NoConn: true, Name: "PendingNotificationEvents", Query: queryOf(handlers.NotificationEventsQuery{}), Responses: []Reply{{200, billing.NotificationEvents{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PendingNotificationEvents)},
+	{Method: POST, Path: "/v1/app/notification-consumers/{name}/acknowledge", Group: App, Auth: AuthApplication, Permission: needEvents, NoConn: true, IdempotencyKey: true, Name: "AcknowledgeNotificationEvents", Request: billing.AcknowledgeNotificationEventsParams{}, Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.AcknowledgeNotificationEvents)},
+	{Method: DELETE, Path: "/v1/app/notification-consumers/{name}", Group: App, Auth: AuthApplication, Permission: needEvents, NoConn: true, IdempotencyKey: true, Name: "RetireNotificationConsumer", Responses: []Reply{{204, nil}}, Errors: codes("invalid_param"), Handler: h(handlers.RetireNotificationConsumer)},
 	{Method: GET, Path: "/v1/app/host-events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListHostEvents",
 		Query: params(queryOf(handlers.HostEventsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
 	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "AcknowledgeHostEvents", IdempotencyKey: true,
@@ -28,8 +32,4 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.Finding{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminGetFinding)},
 	{Method: POST, Path: "/v1/merchant/findings/{id}/resolve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ResolveFinding",
 		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
-	{Method: GET, Path: "/v1/me/notifications", Group: Customer, Auth: AuthCustomer,
-		Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Notification]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.GetNotifications)},
-	{Method: POST, Path: "/v1/me/notifications/read", Group: Customer, Auth: AuthCustomer,
-		Request: billing.MarkNotificationsReadParams{}, Responses: []Reply{{200, billing.CustomerNotificationLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.MarkMyNotificationsRead)},
 }

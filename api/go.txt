@@ -97,6 +97,7 @@ pkg openrails, method (*Client) ListRunningCharges(context.Context, billing.Runn
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
 pkg openrails, method (*Client) MarkOrderUncollectible(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Client) MerchantID() billing.MerchantID
+pkg openrails, method (*Client) NotificationEvents(string) (*NotificationConsumer, error)
 pkg openrails, method (*Client) PreviewOrder(context.Context, billing.PreviewOrderParams, ...RequestOption) (*billing.OrderPreview, error)
 pkg openrails, method (*Client) PreviewPSPRouting(context.Context, billing.PreviewPSPRoutingParams, ...RequestOption) (*billing.PSPRoutingPreview, error)
 pkg openrails, method (*Client) PreviewPriceMigration(context.Context, billing.CreatePriceMigrationParams, ...RequestOption) (*billing.PriceMigrationPreview, error)
@@ -130,11 +131,16 @@ pkg openrails, method (*Client) VoidOrder(context.Context, billing.OrderID, ...R
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
+pkg openrails, method (*Engine) NotificationEvents(string) (*NotificationConsumer, error)
 pkg openrails, method (*Engine) Probes() []Probe
 pkg openrails, method (*Engine) Ready(context.Context) error
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
+pkg openrails, method (*NotificationConsumer) Acknowledge(context.Context, []billing.NotificationEventRef) error
+pkg openrails, method (*NotificationConsumer) Pending(context.Context, int) ([]billing.NotificationEvent, error)
+pkg openrails, method (*NotificationConsumer) Register(context.Context) error
+pkg openrails, method (*NotificationConsumer) Retire(context.Context) error
 pkg openrails, method (*Remote) Close(context.Context) error
 pkg openrails, method (*Remote) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Remote) Ready(context.Context) error
@@ -293,6 +299,7 @@ pkg openrails, type NMIPSP struct, TokenizationURL string `psp:"settings.tokeniz
 pkg openrails, type NMIPSP struct, WebhookOverlapExpiresAt time.Time `psp:"settings.webhook_overlap_expires_at"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
+pkg openrails, type NotificationConsumer struct
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -794,6 +801,8 @@ pkg openrails/billing, const UsageEventIDPrefix untyped string = "uev_"
 pkg openrails/billing, const UsageFailed UsageOutcome = "failed"
 pkg openrails/billing, const UsageSucceeded UsageOutcome = "succeeded"
 pkg openrails/billing, func Currencies() []CurrencyUnits
+pkg openrails/billing, func CustomerNotificationActionRequested(string) bool
+pkg openrails/billing, func CustomerNotificationOptional(string, NotificationData) bool
 pkg openrails/billing, func DeclineReasonFrom(error) (DeclineReason, bool)
 pkg openrails/billing, func DeclineReasons() []DeclineReason
 pkg openrails/billing, func ErrorCodes() []ErrorCode
@@ -1025,6 +1034,8 @@ pkg openrails/billing, type AccessNote struct, SourceType string `json:"source_t
 pkg openrails/billing, type AccessNoteKind string
 pkg openrails/billing, type AcknowledgeHostEventsParams struct
 pkg openrails/billing, type AcknowledgeHostEventsParams struct, HostEventIDs []HostEventID `json:"host_event_ids"`
+pkg openrails/billing, type AcknowledgeNotificationEventsParams struct
+pkg openrails/billing, type AcknowledgeNotificationEventsParams struct, NotificationIDs []NotificationID `json:"notification_ids"`
 pkg openrails/billing, type AdminAccess struct
 pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
 pkg openrails/billing, type AdminAccess struct, Assistants AdminAssistants `json:"assistants"`
@@ -1485,7 +1496,6 @@ pkg openrails/billing, type CustomerAccount struct
 pkg openrails/billing, type CustomerAccount struct, Balances []Balance `json:"balances"`
 pkg openrails/billing, type CustomerAccount struct, DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
 pkg openrails/billing, type CustomerAccount struct, ID CustomerID `json:"id"`
-pkg openrails/billing, type CustomerAccount struct, UnreadNotifications int64 `json:"unread_notifications"`
 pkg openrails/billing, type CustomerConfig struct
 pkg openrails/billing, type CustomerConfig struct, Merchant PublicMerchant `json:"merchant"`
 pkg openrails/billing, type CustomerConfig struct, Payment PaymentConfig `json:"payment"`
@@ -1527,8 +1537,6 @@ pkg openrails/billing, type CustomerNetworkHostEvent struct, AccountID NetworkAc
 pkg openrails/billing, type CustomerNetworkHostEvent struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct, Method *CustomerLinkMethod `json:"method"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct, RevokedBy *CustomerLinkRevokedBy `json:"revoked_by"`
-pkg openrails/billing, type CustomerNotificationLookup struct
-pkg openrails/billing, type CustomerNotificationLookup struct, Notifications map[NotificationID]*Notification `json:"notifications"`
 pkg openrails/billing, type CustomerSettings struct
 pkg openrails/billing, type CustomerSettings struct, BillingPolicy *string `json:"billing_policy"`
 pkg openrails/billing, type CustomerSettings struct, CreditLimits []CreditLimit `json:"credit_limits"`
@@ -1829,9 +1837,6 @@ pkg openrails/billing, type MandateHostEvent struct, SubscriptionID *Subscriptio
 pkg openrails/billing, type MandateID [16]byte
 pkg openrails/billing, type MandateKind string
 pkg openrails/billing, type MandateStatus string
-pkg openrails/billing, type MarkNotificationsReadParams struct
-pkg openrails/billing, type MarkNotificationsReadParams struct, All bool `json:"all,omitempty"`
-pkg openrails/billing, type MarkNotificationsReadParams struct, NotificationIDs []NotificationID `json:"notification_ids,omitempty"`
 pkg openrails/billing, type Merchant struct
 pkg openrails/billing, type Merchant struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Merchant struct, DeletedAt *time.Time `json:"deleted_at"`
@@ -1903,7 +1908,6 @@ pkg openrails/billing, type MerchantSettings struct, DunningPolicy *DunningPolic
 pkg openrails/billing, type MerchantSettings struct, MonthlyFloor *int64 `json:"monthly_floor,omitempty,string"`
 pkg openrails/billing, type MerchantSettings struct, Profile *MerchantProfile `json:"profile,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, ProviderRefundAccess *string `json:"provider_refund_access,omitempty"`
-pkg openrails/billing, type MerchantSettings struct, RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 pkg openrails/billing, type MerchantStatus string
 pkg openrails/billing, type Meter struct
@@ -2021,13 +2025,6 @@ pkg openrails/billing, type NextAction struct, Payload map[string]string `json:"
 pkg openrails/billing, type NextAction struct, Transactions []string `json:"transactions"`
 pkg openrails/billing, type NextAction struct, Type string `json:"type"`
 pkg openrails/billing, type NextAction struct, URL *string `json:"url"`
-pkg openrails/billing, type Notification struct
-pkg openrails/billing, type Notification struct, CreatedAt time.Time `json:"created_at"`
-pkg openrails/billing, type Notification struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type Notification struct, Data NotificationData `json:"data"`
-pkg openrails/billing, type Notification struct, EventType string `json:"event_type"`
-pkg openrails/billing, type Notification struct, ID NotificationID `json:"id"`
-pkg openrails/billing, type Notification struct, Seen bool `json:"seen"`
 pkg openrails/billing, type NotificationData struct
 pkg openrails/billing, type NotificationData struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, AmountDue *int64 `json:"amount_due,omitempty,string"`
@@ -2055,6 +2052,7 @@ pkg openrails/billing, type NotificationData struct, PaymentID PaymentID `json:"
 pkg openrails/billing, type NotificationData struct, PaymentMethod string `json:"payment_method,omitempty"`
 pkg openrails/billing, type NotificationData struct, PeriodEndsAt *time.Time `json:"period_ends_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, PeriodStartsAt *time.Time `json:"period_starts_at,omitempty"`
+pkg openrails/billing, type NotificationData struct, PriceMigrationID PriceMigrationID `json:"price_migration_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, ProductID ProductID `json:"product_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, ProductName string `json:"product_name,omitempty"`
 pkg openrails/billing, type NotificationData struct, Quantity *int `json:"quantity,omitempty"`
@@ -2068,7 +2066,20 @@ pkg openrails/billing, type NotificationData struct, ToProductID ProductID `json
 pkg openrails/billing, type NotificationData struct, ToProductName string `json:"to_product_name,omitempty"`
 pkg openrails/billing, type NotificationData struct, ToState string `json:"to_state,omitempty"`
 pkg openrails/billing, type NotificationData struct, TransactionID string `json:"transaction_id,omitempty"`
-pkg openrails/billing, type NotificationData struct, UserEmail string `json:"user_email,omitempty"`
+pkg openrails/billing, type NotificationEvent struct
+pkg openrails/billing, type NotificationEvent struct, ActionRequested bool `json:"action_requested,omitempty"`
+pkg openrails/billing, type NotificationEvent struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type NotificationEvent struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type NotificationEvent struct, Data json.RawMessage `json:"data"`
+pkg openrails/billing, type NotificationEvent struct, EventType string `json:"event_type"`
+pkg openrails/billing, type NotificationEvent struct, ID NotificationID `json:"id"`
+pkg openrails/billing, type NotificationEvent struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type NotificationEvent struct, Optional bool `json:"optional,omitempty"`
+pkg openrails/billing, type NotificationEventRef struct
+pkg openrails/billing, type NotificationEventRef struct, ID NotificationID `json:"id"`
+pkg openrails/billing, type NotificationEventRef struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type NotificationEvents struct
+pkg openrails/billing, type NotificationEvents struct, Data []NotificationEvent `json:"data"`
 pkg openrails/billing, type NotificationID [16]byte
 pkg openrails/billing, type OfferListParams struct
 pkg openrails/billing, type OfferListParams struct, Entitlements []string
@@ -3289,6 +3300,9 @@ pkg openrails/server, method (*Server) ListUserMerchants(context.Context, string
 pkg openrails/server, method (*Server) ListWorkerHealth(context.Context) ([]billing.WorkerHealth, error)
 pkg openrails/server, method (*Server) MerchantByName(context.Context, string) (billing.MerchantID, string, error)
 pkg openrails/server, method (*Server) MerchantScope(context.Context, billing.MerchantID) (auth.Scope, error)
+pkg openrails/server, method (*Server) NetworkAccountHandler(func(http.ResponseWriter, *http.Request, billing.NetworkAccountID)) http.Handler
+pkg openrails/server, method (*Server) NetworkLinks(context.Context, billing.NetworkAccountID) ([]billing.CustomerLink, error)
+pkg openrails/server, method (*Server) NotificationEvents(string) (*openrails.NotificationConsumer, error)
 pkg openrails/server, method (*Server) PrivateHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)

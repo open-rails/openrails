@@ -2,273 +2,74 @@ package subscriptions
 
 import (
 	"context"
-	"fmt"
-	"github.com/open-rails/openrails/billing"
-	"time"
-
-	log "github.com/sirupsen/logrus"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/query"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// NotificationService handles notification storage, retrieval, and delivery.
-// It combines DB operations with email delivery logic.
+// NotificationService publishes source facts in its database transaction.
+// It owns no inbox or delivery-channel state.
 type NotificationService struct {
-	repo         *NotificationQueueRepo
-	emailService *EmailService
+	db *db.DB
 }
 
-// NewNotificationService creates a new notification service.
-// emailService can be nil and set later via SetEmailService.
-func NewNotificationService(database *db.DB, emailService *EmailService) *NotificationService {
-	return &NotificationService{
-		repo:         NewNotificationQueueRepo(database),
-		emailService: emailService,
-	}
-}
+func NewNotificationService(d *db.DB) *NotificationService { return &NotificationService{db: d} }
 
-// SetEmailService sets the email service for delivery operations.
-// This allows delayed initialization to break circular dependencies.
-func (s *NotificationService) SetEmailService(emailService *EmailService) {
-	s.emailService = emailService
-}
-
-func (s *NotificationService) Create(ctx context.Context, notification *models.NotificationQueue) error {
-	return s.repo.Create(ctx, notification)
-}
-
-// CreateIfAbsent stores a notification once by its caller-supplied ID.
-func (s *NotificationService) CreateIfAbsent(ctx context.Context, notification *models.NotificationQueue) error {
-	return s.repo.CreateIfAbsent(ctx, notification)
-}
-
-func (s *NotificationService) GetByID(ctx context.Context, id uuid.UUID) (*models.NotificationQueue, error) {
-	return s.repo.GetByID(ctx, id)
-}
-
-func (s *NotificationService) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	return s.repo.GetByUserID(ctx, userID)
-}
-
-func (s *NotificationService) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	return s.repo.Update(ctx, notification)
-}
-
-func (s *NotificationService) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Delete(ctx, id)
-}
-
-func (s *NotificationService) GetNotifications(ctx context.Context, queryOpts query.QueryOptions[GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
-	repoFilters := NotificationFilters{
-		UserID:    queryOpts.Filters.UserID,
-		EventType: models.NotificationEventType(queryOpts.Filters.EventType),
-		Seen:      queryOpts.Filters.Seen,
-	}
-
-	repoOpts := query.QueryOptions[NotificationFilters]{
-		Filters:  repoFilters,
-		Limit:    queryOpts.Limit,
-		Offset:   queryOpts.Offset,
-		Page:     queryOpts.Page,
-		PageSize: queryOpts.PageSize,
-		All:      queryOpts.All,
-	}
-
-	return s.repo.GetNotifications(ctx, repoOpts)
-}
-
-// CreateAndDeliver creates a notification in the db and immediately sends external notifications.
-func (s *NotificationService) CreateAndDeliver(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := s.cleanupObsoleteNotifications(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).Error("failed to cleanup obsolete notifications")
-	}
-
-	if err := s.Create(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).Error("failed to create notification in db")
-		return fmt.Errorf("failed to create notification: %w", err)
-	}
-
-	if err := s.deliverExternalNotifications(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"notification_id": notification.ID,
-			"user_id":         notification.CustomerID.String(),
-			"event_type":      notification.EventType,
-		}).Error("failed to deliver external notifications")
-	}
-
-	return nil
-}
-
-func (s *NotificationService) deliverExternalNotifications(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := s.DeliverEmail(ctx, notification); err != nil {
-		return fmt.Errorf("failed to send email notification: %w", err)
-	}
-
-	return nil
-}
-
-// EmailEnabled reports whether an armed email service is attached.
-func (s *NotificationService) EmailEnabled() bool {
-	return s.emailService.IsEnabled()
-}
-
-// emailLease is how long one sender holds a notification's email: past the
-// send's own timeout, so only a sender that died is replaced.
-const emailLease = 5 * time.Minute
-
-// DeliverEmail sends the email for an already-created notification and stamps
-// emailed_at on success. Without an armed email service the row stays
-// undelivered for the sweep to retry; a rendered no-op (unsupported type, no
-// email address) still stamps so the sweep never rescans it. One sender holds
-// the email at a time: an email already sent, or being sent by another sender
-// (the inline dispatch, its job, any replica's sweep), is skipped.
-func (s *NotificationService) DeliverEmail(ctx context.Context, notification *models.NotificationQueue) error {
-	if !s.EmailEnabled() {
-		log.WithContext(ctx).Debug("email service not available - leaving notification undelivered")
-		return nil
-	}
-	leased, err := s.repo.LeaseEmail(ctx, notification.ID, emailLease)
-	if err != nil || !leased {
-		return err
-	}
-	if err := s.sendEmailNotification(ctx, notification); err != nil {
-		if releaseErr := s.repo.ReleaseEmail(ctx, notification.ID); releaseErr != nil {
-			log.WithContext(ctx).WithError(releaseErr).WithField("notification_id", notification.ID).
-				Warn("failed to release notification email; the next sender waits for its lease")
-		}
-		return err
-	}
-	if err := s.repo.MarkEmailed(ctx, notification.ID, time.Now().UTC()); err != nil {
-		// The email already went out; a failed stamp means at most one duplicate
-		// on the next sweep. Log, don't fail the delivery.
-		log.WithContext(ctx).WithError(err).WithField("notification_id", notification.ID).
-			Error("failed to stamp notification emailed_at")
-	}
-	return nil
-}
-
-func (s *NotificationService) sendEmailNotification(ctx context.Context, notification *models.NotificationQueue) error {
-	if s.emailService == nil {
-		log.WithContext(ctx).Debug("email service not available - skipping email notification")
-		return nil
-	}
-
-	switch notification.EventType {
-	case models.NotificationPremiumStarted:
-		return s.emailService.SendSubscriptionConfirmed(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID())
-	case models.NotificationPremiumRenewed:
-		return s.emailService.SendSubscriptionRenewed(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID())
-	case models.NotificationPremiumEnded:
-		reason := PremiumEndReasonUnknown
-		if notification.Data.Reason != "" {
-			reason = ParsePremiumEndReason(notification.Data.Reason)
-		}
-		if reason == PremiumEndReasonAccessEnded {
-			// No subscription row needed; ended_at rides in the row data.
-			endedAt := s.emailService.now().UTC()
-			if notification.Data.EndedAt != nil {
-				endedAt = notification.Data.EndedAt.UTC()
-			}
-			return s.emailService.SendAccessEnded(ctx, notification.CustomerID.String(), endedAt)
-		}
-		return s.emailService.SendPremiumEnded(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID(), reason)
-	case models.NotificationPaymentMethodFailed:
-		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
-	case models.NotificationUsageCharged:
-		return s.emailService.SendUsageCharged(ctx, notification)
-	case models.NotificationAgreementRevoked:
-		return s.emailService.SendAgreementRevoked(ctx, notification)
-	case models.NotificationOneOffPurchaseCompleted:
-		return s.emailService.SendPurchaseReceipt(ctx, notification)
-	case models.NotificationSubscriptionChanged:
-		return s.emailService.SendSubscriptionChanged(ctx, notification.CustomerID.String(), notification.Data)
-	case models.NotificationPaymentMethodAutoUpdated:
-		log.WithContext(ctx).Debug("payment method auto-updated - no email sent")
-		return nil
-	case models.NotificationPaymentMethodUpdateRequired:
-		// Bucket 2: charging stopped, access retained, customer must act.
-		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
-	case models.NotificationPaymentAuthenticationRequired:
-		return s.emailService.SendPaymentAuthenticationRequired(ctx, notification)
-	default:
-		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")
-		return nil
-	}
-}
-
-func (s *NotificationService) cleanupObsoleteNotifications(ctx context.Context, newNotification *models.NotificationQueue) error {
-	var obsoleteEventTypes []models.NotificationEventType
-
-	switch newNotification.EventType {
-	case models.NotificationPremiumStarted, models.NotificationPremiumRenewed:
-		obsoleteEventTypes = []models.NotificationEventType{models.NotificationPremiumEnded}
-	case models.NotificationPaymentMethodAutoUpdated:
-		obsoleteEventTypes = []models.NotificationEventType{
-			models.NotificationPaymentMethodFailed,
-			models.NotificationPaymentMethodUpdateRequired,
-		}
-	default:
-		return nil
-	}
-
-	if len(obsoleteEventTypes) > 0 {
-		cleanedCount, err := s.removeObsoleteNotifications(ctx, newNotification.CustomerID.String(), newNotification.Data.SubscriptionID, obsoleteEventTypes)
-		if err != nil {
-			return fmt.Errorf("failed to remove obsolete notifications: %w", err)
-		}
-
-		if cleanedCount > 0 {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id":        newNotification.CustomerID.String(),
-				"new_event_type": newNotification.EventType,
-				"cleaned_count":  cleanedCount,
-				"obsolete_types": obsoleteEventTypes,
-			}).Info("cleaned up obsolete notifications due to status improvement")
-		}
-	}
-
-	return nil
-}
-
-// removeObsoleteNotifications deletes the customer's unseen notifications of
-// eventTypes; one naming another subscription than subscription stays: a
-// cancellation's confirmation is never lost to another subscription's news.
-func (s *NotificationService) removeObsoleteNotifications(ctx context.Context, userID string, subscription billing.SubscriptionID, eventTypes []models.NotificationEventType) (int, error) {
-	falseVal := false
-	notifications, _, err := s.GetNotifications(ctx, query.QueryOptions[GetNotificationsFilters]{
-		Filters: GetNotificationsFilters{
-			UserID: userID,
-			Seen:   &falseVal,
-		},
-		Page:     1,
-		PageSize: 1000,
-	})
+func (r *NotificationService) Create(ctx context.Context, notification *models.NotificationEvent) error {
+	params, err := r.createParams(ctx, notification)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get notifications for cleanup: %w", err)
+		return err
 	}
-
-	cleanedCount := 0
-	for _, notification := range notifications {
-		if other := notification.Data.SubscriptionID; !subscription.IsZero() && !other.IsZero() && other != subscription {
-			continue
-		}
-		for _, obsoleteType := range eventTypes {
-			if notification.EventType == obsoleteType {
-				if err := s.Delete(ctx, notification.ID); err != nil {
-					log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-						"notification_id": notification.ID,
-						"event_type":      notification.EventType,
-					}).Error("failed to delete obsolete notification")
-				} else {
-					cleanedCount++
-				}
-				break
-			}
-		}
+	rows, err := r.db.Gen(ctx).CreateNotification(ctx, params)
+	if err != nil {
+		return err
 	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
 
-	return cleanedCount, nil
+// CreateIfAbsent inserts notification once by its caller-supplied ID. An
+// existing ID is success, which lets retrying fan-out jobs converge without
+// duplicating deliveries that already succeeded.
+func (r *NotificationService) CreateIfAbsent(ctx context.Context, notification *models.NotificationEvent) error {
+	params, err := r.createParams(ctx, notification)
+	if err != nil {
+		return err
+	}
+	return r.db.Gen(ctx).CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+		ID:         params.ID,
+		MerchantID: params.MerchantID,
+		CustomerID: params.CustomerID,
+		EventType:  params.EventType,
+		Data:       params.Data,
+		CreatedAt:  params.CreatedAt,
+	})
+}
+
+func (r *NotificationService) createParams(ctx context.Context, notification *models.NotificationEvent) (gen.CreateNotificationParams, error) {
+	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	data, err := notification.DataJSONB()
+	if err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
+	return gen.CreateNotificationParams{
+		ID:         notification.ID,
+		MerchantID: tid.UUID(),
+		CustomerID: notification.CustomerID,
+		EventType:  string(notification.EventType),
+		Data:       data,
+		CreatedAt:  notification.CreatedAt,
+	}, nil
 }

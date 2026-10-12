@@ -93,7 +93,7 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 }
 
 func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.InitialMembershipPayload, providerRef, transaction string, purchasedAt time.Time) error {
-	var notices []*models.NotificationQueue
+
 	ctx = db.WithPSPID(ctx, p.Terms.PSPID)
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.DB.NewWithPgxTx(tx)
@@ -118,13 +118,10 @@ func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.
 			}
 		}
 		var err error
-		_, notices, err = s.SubscriptionLifecycleService.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.RailNMI, RailSubscriptionID: &providerRef, TransactionID: transaction, PurchasedAt: &purchasedAt, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}})
+		_, _, err = s.SubscriptionLifecycleService.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.RailNMI, RailSubscriptionID: &providerRef, TransactionID: transaction, PurchasedAt: &purchasedAt, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}})
 		// A provider-observed sale does not establish customer-initiated recurring
 		// consent. Preserve any existing anchor; never infer one from this event.
 		return err
 	})
-	if err == nil {
-		s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
-	}
 	return err
 }

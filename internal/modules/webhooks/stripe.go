@@ -469,18 +469,18 @@ func (s *StripeWebhookService) foldPaymentMethod(ctx context.Context, eventID st
 	if err := json.Unmarshal(obj, &pm); err != nil {
 		return fmt.Errorf("parse payment_method: %w", err)
 	}
-	var notices []*models.NotificationQueue
+
 	err := s.withStripePaymentStateTx(ctx, pm.Customer, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
 		_, life, err := payments.MirrorAttachedStripePaymentMethod(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, s.StripePaymentState, pm.ID, source, eventID)
 		if err != nil {
 			return fmt.Errorf("mirror stripe payment method: %w", err)
 		}
-		notices = nil
+
 		if life.Change != "" {
 			if s.SubscriptionLifecycleService == nil {
 				return errors.New("stripe card change: no lifecycle service wired")
 			}
-			if notices, err = s.SubscriptionLifecycleService.FollowCardChange(ctx, txdb, life, s.now()); err != nil {
+			if _, err = s.SubscriptionLifecycleService.FollowCardChange(ctx, txdb, life, s.now()); err != nil {
 				return err
 			}
 		}
@@ -489,9 +489,6 @@ func (s *StripeWebhookService) foldPaymentMethod(ctx context.Context, eventID st
 		}
 		return MarkWebhookProcessedInTx(ctx, tx)
 	})
-	if err == nil && s.SubscriptionLifecycleService != nil {
-		s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
-	}
 	return err
 }
 

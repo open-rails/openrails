@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
@@ -111,8 +110,7 @@ func TestCadencePriceKeys(t *testing.T) {
 // renewedReceipts counts the customer's renewal receipts through /v1/me.
 func (c *customer) renewedReceipts() []map[string]any {
 	c.w.t.Helper()
-	out := c.must(http.MethodGet, "/notifications?limit=100", "", nil)
-	items, _ := out["data"].([]any)
+	items := c.notificationEvents()
 	var receipts []map[string]any
 	for _, item := range items {
 		n := item.(map[string]any)
@@ -123,15 +121,14 @@ func (c *customer) renewedReceipts() []map[string]any {
 	return receipts
 }
 
-// Renewal receipts are spaced by the merchant's policy (default: one per
-// subscription per day). Hourly and daily members get at most one per day;
-// a monthly member gets exactly one per renewal.
+// Every paid renewal emits its optional source fact; the consuming app owns
+// any throttling or delivery preference.
 func TestCadenceRenewalReceipts(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct {
 		hours, renewals, receipts int
 	}{
-		{hours: 1, renewals: 49, receipts: 2},
+		{hours: 1, renewals: 49, receipts: 49},
 		{hours: 24, renewals: 3, receipts: 3},
 		{hours: 720, renewals: 3, receipts: 3},
 	} {
@@ -141,7 +138,6 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			price := w.cadencePrice(embedded, "receipts", "content:receipts", 1_990_000, row.hours)
 			c := w.newCustomer()
 			sub := c.subscribe(embedded, "stripe", price.ID.String(), "content:receipts", c.saveCard("stripe", visa))
-			started := *w.subscription(embedded, sub).CurrentPeriodStartsAt
 			for i := 1; i <= row.renewals; i++ {
 				end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
 				w.advanceHealthyTo(end.Add(time.Second))
@@ -151,18 +147,12 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			require.Len(t, completed(w.payments(embedded, c.id)), row.renewals+1, "every renewal charged")
 			receipts := c.renewedReceipts()
 			require.Equal(t, row.receipts, len(receipts), "renewal receipts")
-			perDay := map[int]int{}
 			for _, r := range receipts {
 				data := r["data"].(map[string]any)
 				require.Equal(t, sub.String(), data["subscription_id"])
-				start, err := time.Parse(time.RFC3339Nano, data["period_starts_at"].(string))
+				_, err := time.Parse(time.RFC3339Nano, data["period_starts_at"].(string))
 				require.NoError(t, err)
-				perDay[int(start.Sub(started)/(24*time.Hour))]++
-			}
-			for day, n := range perDay {
-				if row.hours < 720 {
-					require.LessOrEqual(t, n, 1, "day %d", day)
-				}
+				require.Equal(t, true, r["optional"], "delivery policy belongs to the application")
 			}
 		})
 	}
@@ -285,17 +275,6 @@ func TestCadenceMetrics(t *testing.T) {
 // Sub-two-day periods are shown with their time and zone; longer periods by
 // date. Sub-day remaining time is in hours.
 func TestCadenceNoticeText(t *testing.T) {
-	start := time.Date(2026, 9, 23, 14, 0, 0, 0, time.UTC)
-	hourly := subscriptions.RenderSubscriptionRenewalEmail("Store", subscriptions.SubscriptionEmailData{SubscriptionID: uuid.New(), PeriodStart: start, PeriodEnd: start.Add(time.Hour)})
-	require.Contains(t, hourly.Plain, "New Period: Sep 23, 2026 14:00 UTC to Sep 23, 2026 15:00 UTC")
-	require.Contains(t, hourly.HTML, "Sep 23, 2026 14:00 UTC to Sep 23, 2026 15:00 UTC")
-	confirmed := subscriptions.RenderSubscriptionConfirmationEmail("Store", subscriptions.SubscriptionEmailData{PeriodStart: start, PeriodEnd: start.Add(time.Hour)})
-	require.Contains(t, confirmed.Plain, "Current Period: Sep 23, 2026 14:00 UTC to Sep 23, 2026 15:00 UTC")
-
-	monthly := subscriptions.RenderSubscriptionRenewalEmail("Store", subscriptions.SubscriptionEmailData{PeriodStart: start, PeriodEnd: start.Add(720 * time.Hour)})
-	require.Contains(t, monthly.Plain, "New Period: Sep 23, 2026 to Oct 23, 2026")
-	require.NotContains(t, monthly.Plain, "UTC")
-
 	require.Equal(t, "5 hours", cadence.FormatRemaining(5*time.Hour+10*time.Minute))
 	require.Equal(t, "1 hour", cadence.FormatRemaining(time.Hour))
 	require.Equal(t, "30 minutes", cadence.FormatRemaining(30*time.Minute))

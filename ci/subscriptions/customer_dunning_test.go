@@ -14,7 +14,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/delinquency"
 )
 
 type delinquencyPass struct{}
@@ -73,7 +76,7 @@ func TestCustomerRead(t *testing.T) {
 	require.Equal(t, saver.id, me["id"])
 	require.Equal(t, "5000000", me["balances"].([]any)[0].(map[string]any)["balance_amount"])
 	require.Equal(t, card, me["default_payment_methods"].([]any)[0].(map[string]any)["payment_method_id"])
-	require.EqualValues(t, 0, me["unread_notifications"])
+	require.NotContains(t, me, "unread_notifications", "the application owns inbox state")
 }
 
 // An unpaid invoice is overdue from its due date until it is paid, voided or
@@ -118,7 +121,26 @@ func TestOverdueUsageOrders(t *testing.T) {
 
 	// Past grace it is delinquent, and the customer's new usage is refused.
 	w.advanceTo(invoice.Usage.DueAt.Add(15 * day))
+	// A failed fact write must leave the previous grace state and host event
+	// unchanged, rather than permanently losing the first delinquency notice.
+	_, err = w.pool.Exec(ctx, w.q(`CREATE FUNCTION billing.reject_delinquency_notice() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN IF NEW.event_type = 'account_delinquent' THEN RAISE EXCEPTION 'delinquency notice unavailable'; END IF; RETURN NEW; END $$;
+	CREATE TRIGGER reject_delinquency_notice BEFORE INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.reject_delinquency_notice();`))
+	require.NoError(t, err)
+	scoped := merchant.WithID(ctx, w.client[embedded].MerchantID())
+	service := delinquency.NewService(engine.Graph(w.rt).Runtime.DB, w.clock)
+	_, err = service.Evaluate(scoped, w.clock.Now())
+	require.ErrorContains(t, err, "delinquency notice unavailable")
+	var state string
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT state FROM billing.customer_delinquency WHERE customer_id = $1`), debtor.cid().UUID()).Scan(&state))
+	require.Equal(t, "grace", state)
+	_, err = w.pool.Exec(ctx, w.q(`DROP TRIGGER reject_delinquency_notice ON billing.notification_events`))
+	require.NoError(t, err)
 	w.runPass(delinquencyPass{})
+	w.runPass(delinquencyPass{})
+	var facts int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.notification_events WHERE customer_id = $1 AND event_type = 'account_delinquent'`), debtor.cid().UUID()).Scan(&facts))
+	require.Equal(t, 1, facts, "retry captures one committed transition")
 	for _, tp := range []topology{embedded, remote} {
 		late = overdue(tp)
 		require.Len(t, late, 1)

@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // pendingStaleAfter is how long a `pending` subscription may sit unconfirmed
@@ -762,7 +761,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		return nil, fmt.Errorf("notify: scan recently closed access windows: %w", err)
 	}
 	var out []ConvergeFinding
-	repo := subscriptions.NewNotificationQueueRepo(p.e.DB)
+	repo := subscriptions.NewNotificationService(p.e.DB)
 	for i := range closed {
 		c := closed[i]
 		if c.ClosedAt == nil {
@@ -792,8 +791,8 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
-				return repo.Create(ctx, &models.NotificationQueue{
-					ID:         uuidutil.NewV7(),
+				return repo.CreateIfAbsent(ctx, &models.NotificationEvent{
+					ID:         uuid.NewSHA1(cust, []byte("access-ended:"+closedAt.Format(time.RFC3339Nano))),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
 					Data: billing.NotificationData{

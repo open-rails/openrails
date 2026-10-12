@@ -96,7 +96,6 @@ PATCH|DELETE /v1/me/payment-methods/{id}  edit expiry, billing details, reuse / 
 POST /v1/me/orders[/{id}/pay]             buy priced lines, or pay an open order
 POST /v1/me/stripe/billing-portal-sessions → {"url": ...} Stripe's portal (merchants with a Stripe PSP)
 GET  /v1/me/config                        the merchant's payment setup and name
-GET  /v1/me/notifications                 billing notifications
 ```
 
 `GET /v1/me/usage` is a page of the customer's usage in one currency over

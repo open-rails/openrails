@@ -69,7 +69,7 @@ func (w *world) mandateStates(method string) []string {
 
 func (c *customer) notificationCount(kind string) int {
 	c.w.t.Helper()
-	items, _ := c.must(http.MethodGet, "/notifications?limit=100", "", nil)["data"].([]any)
+	items := c.notificationEvents()
 	n := 0
 	for _, item := range items {
 		if item.(map[string]any)["event_type"] == kind {

@@ -62,7 +62,7 @@ func (s *Service) EditPaymentMethod(ctx context.Context, customerID, methodID uu
 		}
 	}
 	now := s.now().UTC()
-	var notices []*models.NotificationQueue
+
 	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := rt.DB.NewWithPgxTx(tx)
 		q := d.Gen(ctx)
@@ -73,7 +73,7 @@ func (s *Service) EditPaymentMethod(ctx context.Context, customerID, methodID uu
 		if locked.CustomerID != customerID || !paymentmethods.Chargeable(locked) {
 			return ErrPaymentMethodNotUsable
 		}
-		notices = nil
+
 		if edit.BillingDetails != nil {
 			var metadata map[string]any
 			if err := models.FromJSONB(locked.Metadata, &metadata, "payment_methods.metadata"); err != nil {
@@ -88,12 +88,12 @@ func (s *Service) EditPaymentMethod(ctx context.Context, customerID, methodID uu
 			}
 		}
 		if expMonth > 0 {
-			_, asked, err := rt.SubscriptionLifecycleService.ApplyCardLifecycle(ctx, d, paymentmethods.CardEvent{MerchantID: mid.UUID(), PaymentMethodID: methodID,
+			_, _, err := rt.SubscriptionLifecycleService.ApplyCardLifecycle(ctx, d, paymentmethods.CardEvent{MerchantID: mid.UUID(), PaymentMethodID: methodID,
 				Source: paymentmethods.SourceCustomerEdit, EventRef: "edit:" + uuidutil.NewV7().String(), Card: paymentmethods.Card{Card: models.Card{ExpMonth: expMonth, ExpYear: expYear}}, At: now})
 			if err != nil {
 				return err
 			}
-			notices = asked
+
 		}
 		if edit.Reusable != nil {
 			if !*edit.Reusable {
@@ -110,7 +110,6 @@ func (s *Service) EditPaymentMethod(ctx context.Context, customerID, methodID uu
 	if err != nil {
 		return err
 	}
-	rt.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
 	return nil
 }
 

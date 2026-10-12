@@ -9,41 +9,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/open-rails/authkit/userinfo"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest"
 )
-
-type emailSweep struct{}
-
-func (emailSweep) Kind() string { return "openrails.notification_email_sweep" }
-
-// mailTo is the first message mail delivered to address, after a sweep
-// delivers what is pending.
-func (w *world) mailTo(mail *mailbox, address string) openrails.Email {
-	t := w.t
-	t.Helper()
-	res, err := w.jobs.Insert(t.Context(), emailSweep{}, &river.InsertOpts{Queue: openrails.QueueBilling})
-	require.NoError(t, err)
-	w.waitJob(res.Job.ID)
-	var sent openrails.Email
-	require.Eventually(t, func() bool {
-		for _, e := range mail.all() {
-			if e.To == address {
-				sent = e
-				return true
-			}
-		}
-		return false
-	}, 10*time.Second, 50*time.Millisecond, "an email to %s; sent %+v", address, mail.all())
-	return sent
-}
 
 // Embedded beside the host's directory, OpenRails keeps no copy: a receipt
 // goes to the email the directory holds now, and the admin read and search
@@ -61,8 +34,8 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	directory.Put(userinfo.User{ID: c.id, Email: "member@host.test", Name: "Member One", Username: "member_one"})
 	price := w.membership("content:members", 9_990_000)
 	c.subscribe(embedded, "stripe", price.ID.String(), "content:members", c.saveCard("stripe", visa))
-	receipt := w.mailTo(mail, "member@host.test")
-	require.NotEmpty(t, receipt.Subject)
+	require.True(t, c.hasNotification("premium_started"))
+	require.Empty(t, mail.all(), "the application owns notification channels")
 
 	read, err := w.client[remote].ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{c.cid()}})
 	require.NoError(t, err)
@@ -103,7 +76,7 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 // Without the host's directory in process, the merchant's directory pushes
 // its users over SCIM, and a receipt goes to the pushed email; a change it
 // pushes later is where the next one goes.
-func TestReceiptsGoToThePushedEmail(t *testing.T) {
+func TestNotificationRecipientsUseThePushedDirectory(t *testing.T) {
 	t.Parallel()
 	mail := &mailbox{}
 	w := prepareWorld(t, 12)
@@ -139,7 +112,8 @@ func TestReceiptsGoToThePushedEmail(t *testing.T) {
 	push(http.MethodPost, "/Users", created, http.StatusCreated)
 	price := w.membership("content:members", 9_990_000)
 	c.subscribe(embedded, "stripe", price.ID.String(), "content:members", c.saveCard("stripe", visa))
-	w.mailTo(mail, "pushed@directory.test")
+	require.True(t, c.hasNotification("premium_started"))
+	require.Empty(t, mail.all())
 
 	profile, err := w.client[remote].GetCustomer(ctx, c.cid())
 	require.NoError(t, err)
@@ -153,5 +127,6 @@ func TestReceiptsGoToThePushedEmail(t *testing.T) {
 	push(http.MethodPut, "/Users/"+c.id, user("moved@directory.test"), http.StatusOK)
 	extra := w.membership("content:extra", 4_990_000)
 	c.subscribeAgain(embedded, "stripe", extra.ID.String(), "content:extra", c.saveCard("stripe", mastercard))
-	w.mailTo(mail, "moved@directory.test")
+	require.Equal(t, 2, c.notificationCount("premium_started"))
+	require.Empty(t, mail.all())
 }

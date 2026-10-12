@@ -184,7 +184,6 @@ func TestServerSetup(t *testing.T) {
 
 	// Her purchase makes her a customer, receipted to that address.
 	app.buy(t, app.customer(t, signedIn.User.ID, signedIn.TokenSet.AccessToken), "course-101", "purchase")
-	app.mailTo(t, "erin@example.com", func(m smtptest.Message) bool { return strings.Contains(m.Text, "4.99 USD") })
 
 	// AuthKit's SCIM push keeps her contact in the merchant's directory at
 	// the server: the admin customer read shows it.

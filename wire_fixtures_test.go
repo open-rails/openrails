@@ -58,9 +58,9 @@ func canonicalWireFixtures() map[string]any {
 			BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
 		},
 		"subscription.json": subscriptionFixtureValue(when, priceFixtureValue, card),
-		"notification.json": billing.Notification{
-			ID: billing.NotificationID(uuid.MustParse("77777777-7777-4777-8777-777777777777")), CustomerID: billing.CustomerID((customerFixture)), EventType: "subscription_reprice_scheduled", CreatedAt: when,
-			Data: billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: billing.PriceID((priceFixture)), ToPriceID: billing.PriceID((scheduledPriceFixture)), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
+		"notification.json": billing.NotificationEvent{
+			ID: billing.NotificationID(uuid.MustParse("77777777-7777-4777-8777-777777777777")), MerchantID: testMerchant, CustomerID: billing.CustomerID((customerFixture)), EventType: "subscription_reprice_scheduled", CreatedAt: when,
+			Data: fixtureJSON(billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: billing.PriceID((priceFixture)), ToPriceID: billing.PriceID((scheduledPriceFixture)), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when}),
 		},
 		"price.json": priceFixtureValue,
 		"usage.json": billing.Usage{CustomerID: customerFixture, Currency: "USD", From: when.AddDate(0, -1, 0), To: when, GroupBy: billing.UsageByEventType,
@@ -173,7 +173,9 @@ func TestCanonicalWireFixtures(t *testing.T) {
 				t.Fatalf("%s drifted from the Go contract; review and rerun with -update-wire-fixtures:\n%s", name, indented.Bytes())
 			}
 			decoded := reflect.New(reflect.TypeOf(value))
-			decoder := json.NewDecoder(bytes.NewReader(fixture))
+			// Decode the canonical encoding: RawMessage retains formatting, whereas
+			// the fixture above is deliberately indented for review.
+			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.UseNumber()
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(decoded.Interface()); err != nil {
@@ -246,4 +248,12 @@ func assertJavaScriptSafe(t *testing.T, raw []byte) {
 		}
 	}
 	walk("$", value)
+}
+
+func fixtureJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

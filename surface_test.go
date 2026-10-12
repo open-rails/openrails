@@ -29,23 +29,25 @@ import (
 // handleMethods say what a handle is or ask the token endpoint, which is no
 // merchant route.
 var handleMethods = map[string]string{
-	"MerchantID":        "the handle's merchant",
-	"CustomerToken":     "mints a customer's access token at the issuer's token endpoint",
-	"CustomerAssertion": "signs the assertion a frontend redeems for that token",
+	"NotificationEvents": "binds a named durable source consumer; its methods perform delivery operations",
+	"MerchantID":         "the handle's merchant",
+	"CustomerToken":      "mints a customer's access token at the issuer's token endpoint",
+	"CustomerAssertion":  "signs the assertion a frontend redeems for that token",
 }
 
 // engineMethods are everything an Engine has: its lifecycle, the HTTP surface
 // it hands its host, and its merchants' handles. No merchant's operation is
 // on it.
 var engineMethods = map[string]string{
-	"Start":          "starts the workers",
-	"Close":          "stops the engine",
-	"Ready":          "the readiness probe",
-	"Probes":         "the optional dependencies, for the host's supervisor",
-	"Routes":         "the HTTP surface the host mounts",
-	"RiverJobs":      "the jobs a host-owned River fleet runs",
-	"Merchant":       "a merchant's handle",
-	"MerchantBySlug": "the handle of a merchant Config declares",
+	"NotificationEvents": "a trusted global consumer across every merchant",
+	"Start":              "starts the workers",
+	"Close":              "stops the engine",
+	"Ready":              "the readiness probe",
+	"Probes":             "the optional dependencies, for the host's supervisor",
+	"Routes":             "the HTTP surface the host mounts",
+	"RiverJobs":          "the jobs a host-owned River fleet runs",
+	"Merchant":           "a merchant's handle",
+	"MerchantBySlug":     "the handle of a merchant Config declares",
 }
 
 // remoteMethods are everything a Remote has: nothing spans its merchants.
@@ -284,6 +286,25 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			t.Errorf("%s returns %s by value: return a pointer", m.Name, out)
 		}
 	}
+	// A named consumer is a sub-handle: its four methods each own one source route.
+	consumer, err := p.client.NotificationEvents("surface")
+	require.NoError(t, err)
+	for name, op := range map[string]func() error{
+		"RegisterNotificationConsumer": func() error { return consumer.Register(t.Context()) },
+		"PendingNotificationEvents":    func() error { _, err := consumer.Pending(t.Context(), 1); return err },
+		"AcknowledgeNotificationEvents": func() error {
+			return consumer.Acknowledge(t.Context(), []billing.NotificationEventRef{{MerchantID: testMerchant, ID: billing.NotificationID(uuid.New())}})
+		},
+		"RetireNotificationConsumer": func() error { return consumer.Retire(t.Context()) },
+	} {
+		p.seen = nil
+		require.NoError(t, op())
+		require.Len(t, p.seen, 1, name)
+		route := catalogRoutes[p.seen[0]]
+		require.Equal(t, name, route.Name)
+		methodsOf[route.Key()] = append(methodsOf[route.Key()], name)
+	}
+
 	for name := range handleMethods {
 		require.True(t, names[name], "handleMethods lists %s, which Client does not have", name)
 	}

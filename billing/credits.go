@@ -249,10 +249,6 @@ type MerchantSettings struct {
 	BillingPeriodBoundary   string           `json:"billing_period_boundary,omitempty"`
 	AlertEmail              *string          `json:"alert_email,omitempty"`
 	RepriceNoticeWindowDays *int             `json:"reprice_notice_window_days,omitempty"`
-	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription:
-	// a renewal starting sooner than this after the membership start or the
-	// last receipted renewal sends none. Nil uses 24; 0 receipts every renewal.
-	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
 	// ProviderRefundAccess decides what a refund made in the provider's own
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made

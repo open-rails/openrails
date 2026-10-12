@@ -344,24 +344,6 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 	return m, nil
 }
 
-// NotificationFromGen maps a generated notifications row onto the model.
-func NotificationFromGen(n gen.BillingNotification) (*NotificationQueue, error) {
-	if n.RecipientKind != "customer" || n.CustomerID == nil {
-		return nil, fmt.Errorf("notification %s is not a customer notification", n.ID)
-	}
-	m := &NotificationQueue{
-		ID:         n.ID,
-		CustomerID: *n.CustomerID,
-		EventType:  NotificationEventType(n.EventType),
-		Seen:       n.ReadAt != nil,
-		CreatedAt:  n.CreatedAt,
-	}
-	if err := FromJSONB(n.Data, &m.Data, "notifications.data"); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 // PriceKeyMovementFromGen maps a generated price_key_movements row.
 func PriceKeyMovementFromGen(r gen.BillingPriceKeyMovement) *PriceKeyMovement {
 	return &PriceKeyMovement{

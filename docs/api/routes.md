@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (170), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (172), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -70,8 +70,6 @@ A customer acting on its own account.
 | POST | `/v1/me/stripe/billing-portal-sessions` | customer | — | — | 200 `StripePortalSession` | when `stripe_portal` |
 | GET | `/v1/me/agreements` | customer | — | — | 200 `ListPage<Agreement>` |  |
 | POST | `/v1/me/agreements/{id}/revoke` | customer | — | — | 200 `AgreementRevocation` |  |
-| GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` |  |
-| POST | `/v1/me/notifications/read` | customer | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` |  |
 | POST | `/v1/me/network-link/challenges` | customer | — | — | 201 `NetworkLinkChallenge` | when `customer_network` |
 | POST | `/v1/me/network-link` | customer | — | `CreateNetworkLinkParams` | 200 `CustomerLink`<br>201 `CustomerLink` | when `customer_network` |
 
@@ -210,6 +208,10 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
+| POST | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — | `Idempotency-Key` |
+| GET | `/v1/app/notification-consumers/{name}/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `NotificationEvents` |  |
+| POST | `/v1/app/notification-consumers/{name}/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeNotificationEventsParams` | 204 — | `Idempotency-Key` |
+| DELETE | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — | `Idempotency-Key` |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |

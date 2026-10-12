@@ -107,13 +107,6 @@ type UpdateAlertWebhookParams struct {
 	Enabled catalog.Field[bool]               `json:"enabled,omitzero"`
 }
 
-// MarkNotificationsReadParams marks a customer's notifications read: 1 to
-// MaxBatchItems named ones, or with All every unread one.
-type MarkNotificationsReadParams struct {
-	NotificationIDs []NotificationID `json:"notification_ids,omitempty"`
-	All             bool             `json:"all,omitempty"`
-}
-
 // UnreadCount is how many notifications are unread.
 type UnreadCount struct {
 	UnreadCount int64 `json:"unread_count"`

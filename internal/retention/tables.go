@@ -28,6 +28,9 @@ const permanent = "permanent, never pruned."
 // Tables classifies every table of the baseline. A table without an entry
 // fails TestEveryTableHasARetentionClass.
 var Tables = map[string]Table{
+	"notification_consumers":  {Class: State},
+	"notification_event_acks": {Class: State},
+	"notification_events":     {Rows, "events are deleted 30 days after every active scoped and global consumer acknowledges; pending events never expire."},
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},

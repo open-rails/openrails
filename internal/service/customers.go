@@ -191,18 +191,10 @@ func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.Cust
 		return nil, err
 	}
 	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
 	money, err := s.moneyService().CustomersMoney(ctx, []uuid.UUID{customer.UUID()})
 	if err != nil {
 		return nil, err
 	}
-	unread, err := s.rt.DB.Gen(ctx).CountUnreadCustomerNotifications(ctx, gen.CountUnreadCustomerNotificationsParams{MerchantID: mid.UUID(), CustomerID: customer.UUID()})
-	if err != nil {
-		return nil, err
-	}
 	m := money[customer.UUID()]
-	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, DefaultPaymentMethods: m.Defaults, UnreadNotifications: unread}, nil
+	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, DefaultPaymentMethods: m.Defaults}, nil
 }

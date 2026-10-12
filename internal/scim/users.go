@@ -493,7 +493,10 @@ func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id stri
 		_, err = q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
 			MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(now, row.DirectoryUpdatedAt),
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		return q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID})
 	})
 }
 

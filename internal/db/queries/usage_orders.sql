@@ -242,10 +242,10 @@ LIMIT sqlc.arg(row_limit)::int;
 -- notice id is the order's, so a later pass adds none. Its seed is the one
 -- earlier releases gave an invoice's notice, which kept the order's id.
 WITH notices AS (
-    INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
+    INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
            jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
-           NULL, sqlc.arg(now)::timestamptz
+           sqlc.arg(now)::timestamptz
     FROM billing.orders
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total

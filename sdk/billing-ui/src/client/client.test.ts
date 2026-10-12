@@ -105,7 +105,6 @@ describe("createBillingClient", () => {
         },
       ],
       default_payment_methods: [{ currency: "USD", payment_method_id: "pm_1" }],
-      unread_notifications: 2,
     }
     const fetch = vi.fn(async () => json(200, account))
     const client = createBillingClient({ baseUrl: "https://shop.test/billing/v1/", fetch })

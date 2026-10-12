@@ -2,9 +2,6 @@ package subscriptions
 
 import (
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 )
 
 type PremiumEndReason string
@@ -49,20 +46,4 @@ func ParsePremiumEndReason(value string) PremiumEndReason {
 	default:
 		return PremiumEndReasonUnknown
 	}
-}
-
-type SubscriptionEmailData struct {
-	UserEmail      string
-	Username       string
-	SubscriptionID uuid.UUID
-	ProductName    string
-	Amount         int64
-	Currency       string
-	PeriodStart    time.Time
-	PeriodEnd      time.Time
-	PaymentMethod  string
-	TransactionID  string
-	// CancelURL is where the customer cancels: the merchant's billing page,
-	// else its support page; "" for neither.
-	CancelURL string
 }

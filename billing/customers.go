@@ -49,7 +49,6 @@ type CustomerAccount struct {
 	ID                    CustomerID             `json:"id"`
 	Balances              []Balance              `json:"balances"`
 	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
-	UnreadNotifications   int64                  `json:"unread_notifications"`
 }
 
 // CustomerListParams lists customers, newest first. Search instead lists the

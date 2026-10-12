@@ -25,8 +25,7 @@ import (
 // create the NEW one.
 type tierChangeLifecycle interface {
 	CancelMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error)
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error)
-	DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue)
+	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
 }
 
 type tierChangeTransactor interface {
@@ -269,7 +268,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 
 	var (
 		result        *ConfirmTierChangeResult
-		notifications []*models.NotificationQueue
+		notifications []*models.NotificationEvent
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := db.NewWithPgxTx(tx)
@@ -348,7 +347,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if err != nil {
 		return nil, err
 	}
-	s.lifecycle.DispatchNotifications(ctx, notifications)
 
 	return result, nil
 }

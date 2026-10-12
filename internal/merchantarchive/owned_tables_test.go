@@ -67,7 +67,7 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 // contact copy are not billing data: a restore destination may hold them (a
 // renamed merchant, invited staff, a destination fenced before its restore,
 // provisioning tokens) and still be empty.
-var restoreOccupancyExempt = []string{"customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens"}
+var restoreOccupancyExempt = []string{"notification_consumers", "customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens"}
 
 var (
 	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
