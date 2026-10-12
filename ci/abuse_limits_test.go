@@ -96,9 +96,10 @@ func (in *abuseInstances) pay(i int, addr string) *httptest.ResponseRecorder {
 	return in.call(in.public[i%len(in.public)], http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", addr)
 }
 
-// remove is a destructive admin operation on instance i: five a minute.
-func (in *abuseInstances) remove(i int) *httptest.ResponseRecorder {
-	return in.call(in.staff[i%len(in.staff)], http.MethodPost, "/v1/admin/orders/"+billing.OrderID(uuid.New()).String()+"/waive-balance", "198.51.100.8:4711")
+// grant is a limited admin operation on instance i: ten a minute. Destructive
+// commands are bounded by durable admission instead, not this limiter.
+func (in *abuseInstances) grant(i int) *httptest.ResponseRecorder {
+	return in.call(in.staff[i%len(in.staff)], http.MethodPatch, "/v1/admin/customers/"+billing.CustomerID(uuid.New()).String(), "198.51.100.8:4711")
 }
 
 // noPostgres asserts PostgreSQL has nowhere to keep abuse state: no
@@ -144,21 +145,21 @@ func (in *abuseInstances) limitsHold(t *testing.T, shared bool) {
 
 	t.Run("admin lockout", func(t *testing.T) {
 		oneMinute(t, 10*time.Second)
-		for i := range 5 {
+		for i := range 10 {
 			at := 0
 			if shared {
 				at = i
 			}
-			require.NotEqual(t, http.StatusTooManyRequests, in.remove(at).Code, "operation %d", i+1)
+			require.NotEqual(t, http.StatusTooManyRequests, in.grant(at).Code, "operation %d", i+1)
 		}
-		require.Equal(t, http.StatusTooManyRequests, in.remove(0).Code, "the sixth locks the admin out")
-		rec := in.remove(0)
+		require.Equal(t, http.StatusTooManyRequests, in.grant(0).Code, "the eleventh locks the admin out")
+		rec := in.grant(0)
 		require.Equal(t, http.StatusTooManyRequests, rec.Code)
 		retry, err := strconv.Atoi(rec.Header().Get("Retry-After"))
 		require.NoError(t, err)
 		require.Greater(t, retry, 60, "for the lockout's hour")
 		others(t, func(t *testing.T, i int) {
-			rec := in.remove(i)
+			rec := in.grant(i)
 			require.Equal(t, shared, rec.Code == http.StatusTooManyRequests, "instance %d holds the lockout: %t: %d %s", i, shared, rec.Code, rec.Body.String())
 		})
 	})
