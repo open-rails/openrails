@@ -7,6 +7,12 @@ content, nonempty destinations and failed references roll the transaction back.
 Callers must discard any partial export on error. These functions own their
 transactions and expect an unbound application-role database handle.
 
+Historical archives without price revisions reconstruct them in `(created_at,
+id)` order within each merchant/product/price key, matching the original
+revision migration. Version 1 price rows stage in a transaction-local PostgreSQL
+table so streaming stays bounded in Go memory. Explicit revisions survive
+unchanged, and public price IDs are derived after the revision is known.
+
 `internal/archivewire` owns bounded framing and footer verification shared with
 the Client. The engine-owned `contract` package applies table order, row widths
 and stored-value rules; the remote Client does not link these billing contracts.
