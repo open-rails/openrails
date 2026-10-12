@@ -117,6 +117,8 @@ jobs:
             web/checkout/pnpm-lock.yaml
             sdk/billing-ui/pnpm-lock.yaml
       - run: bash scripts/check.sh console
+      - run: pnpm --dir server/web/console exec playwright install --with-deps chromium
+      - run: pnpm --dir server/web/console run test:e2e
 
   chart:
     name: Helm chart

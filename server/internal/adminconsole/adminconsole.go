@@ -51,11 +51,10 @@ type Merchant struct {
 
 // Issuer is the console's OAuth 2.0 public client at a trusted issuer.
 type Issuer struct {
-	Key      string    `json:"key"`
-	Merchant *Merchant `json:"merchant,omitempty"`
-	URL      string    `json:"url"`
-	ClientID string    `json:"client_id"`
-	Name     string    `json:"name"`
+	Key      string `json:"key"`
+	URL      string `json:"url"`
+	ClientID string `json:"client_id"`
+	Name     string `json:"name"`
 	// Resource is this deployment's resource identifier, Scope what the
 	// console asks for.
 	Resource string `json:"resource"`
@@ -63,8 +62,7 @@ type Issuer struct {
 }
 
 // Present reports whether assets hold a servable console build: a non-nil
-// fs.FS with index.html at its root. The mount rule (#754) keys on this —
-// A source-only build without assets answers an explicit 503 at the console.
+// fs.FS with index.html at its root. A source-only build without assets answers an explicit 503 at the console.
 func Present(assets fs.FS) bool {
 	if assets == nil {
 		return false

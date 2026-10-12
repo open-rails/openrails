@@ -16,7 +16,8 @@
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@openrails/auth-ui": "1.24.0",
@@ -41,6 +42,7 @@
     "typescript": "~6",
     "typescript-eslint": "^8",
     "vite": "^8",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "@playwright/test": "1.60.0"
   }
 }

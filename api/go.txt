@@ -3302,15 +3302,13 @@ pkg openrails/server, method (*Server) Start(context.Context, ...openrails.Start
 pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
 pkg openrails/server, method (*Server) UnlinkCustomer(context.Context, billing.NetworkAccountID, billing.CustomerLinkID) (*billing.CustomerLink, error)
 pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, string) error
-pkg openrails/server, type AdminConsole = hostconfig.ConsoleMount
+pkg openrails/server, type AdminConsole = hostconfig.ConsoleConfig
 pkg openrails/server, type AdminConsole struct
-pkg openrails/server, type AdminConsole struct, AuthBaseURL string
-pkg openrails/server, type AdminConsole struct, Path string
+pkg openrails/server, type AdminConsole struct, Issuers map[string]hostconfig.ConsoleIssuer `koanf:"issuers"`
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string
 pkg openrails/server, type Config struct, AdminConsole *AdminConsole
 pkg openrails/server, type Config struct, Auth authkit.Config
-pkg openrails/server, type Config struct, ConsoleIssuer *ConsoleIssuer
 pkg openrails/server, type Config struct, DrainDelay time.Duration
 pkg openrails/server, type Config struct, Engine openrails.Config
 pkg openrails/server, type Config struct, HostedCheckoutURL string

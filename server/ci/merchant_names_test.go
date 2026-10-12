@@ -59,10 +59,12 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 	t.Helper()
 	// Each test's AuthKit has its own schema, as its billing tables do: its
 	// accounts, and the sign-in limits AuthKit counts per device, are its own.
+	// Most journeys seed verified accounts without delivery. Enrollment journeys
+	// restore the required-verification default and wire an actual test outbox.
 	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: authkit.Config{
 		Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1/" + f.schema},
 		Keys:         authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
-		Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+		Registration: authkit.RegistrationConfig{AllowMissingSenders: true, Verification: iam.RegistrationVerificationNone},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
 	}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}

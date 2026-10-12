@@ -47,12 +47,7 @@ func TestServerConsoleSignsInWithMerchantApp(t *testing.T) {
 	for _, key := range set.Keys {
 		pinned = append(pinned, iam.RemoteApplicationKey{KID: key.Kid, JWK: &key})
 	}
-	seed := f.newServer(t, resourced)
 	shop := uniqueName("console-app")
-	mid := provision(t, seed, shop)
-	other := provision(t, seed, uniqueName("console-other"))
-	owner, _ := server.MerchantRole("owner")
-	trust(t, seed, mid, iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
 	federated := func(resource string) func(*server.Config, *server.Deps) {
 		return func(cfg *server.Config, deps *server.Deps) {
 			cfg.LocalSignIn = false
@@ -65,6 +60,11 @@ func TestServerConsoleSignsInWithMerchantApp(t *testing.T) {
 		}
 	}
 	srv := f.newServer(t, federated(resourceID))
+	// The CLI constructs the console before it provisions the boot manifest.
+	mid := provision(t, srv, shop)
+	other := provision(t, srv, uniqueName("console-other"))
+	owner, _ := server.MerchantRole("owner")
+	trust(t, srv, mid, iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
 	var boot struct {
@@ -74,9 +74,7 @@ func TestServerConsoleSignsInWithMerchantApp(t *testing.T) {
 			ClientID string `json:"client_id"`
 			Resource string `json:"resource"`
 			Scope    string `json:"scope"`
-			Merchant struct {
-				ID string `json:"id"`
-			} `json:"merchant"`
+			Key      string `json:"key"`
 		} `json:"issuers"`
 	}
 	w := get(handler, "/admin/config.json")
@@ -85,7 +83,7 @@ func TestServerConsoleSignsInWithMerchantApp(t *testing.T) {
 	require.False(t, boot.LocalSignIn)
 	require.Len(t, boot.Issuers, 1)
 	issuer := boot.Issuers[0]
-	require.Equal(t, mid.String(), issuer.Merchant.ID)
+	require.Equal(t, shop, issuer.Key)
 	require.Equal(t, as.URL, issuer.URL)
 	require.Equal(t, console, issuer.ClientID)
 	require.Equal(t, resourceID, issuer.Resource)

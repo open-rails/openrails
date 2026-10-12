@@ -30,6 +30,7 @@ func TestServerConsoleMerchantsListFollowsRoles(t *testing.T) {
 	a, b := provision(t, srv, uniqueName("directory-a")), provision(t, srv, uniqueName("directory-b"))
 	staff, operator := newAccount(t, srv), newAccount(t, srv)
 	authtest.GrantRole(t, srv.AuthKit(), iam.GroupByID(a.String()), iam.UserSubject(staff.ID), controlplane.MerchantSupport)
+	authtest.EnrollTOTP(t, srv.AuthKit(), operator)
 	authtest.GrantRole(t, srv.AuthKit(), iam.RootGroup(), iam.UserSubject(operator.ID), controlplane.Roles.Root.Owner)
 	staffSession := authtest.SignIn(t, srv.AuthKit(), staff).AccessToken
 	operatorSession := authtest.SignIn(t, srv.AuthKit(), operator).AccessToken

@@ -72,7 +72,11 @@ admin_console:
 
 Register that public client at the app's authorization server with the callback `https://billing.example.com/admin/callback`. The app must already be trusted in the merchant's AuthKit group, and its role bounds the permissions or mapped roles in each token. AuthKit verifies resource, issuer, scope, claims and sender proof. The browser uses authorization code with PKCE.
 
-`local_sign_in` separately offers local accounts. The authority manifest seeds the first operator; `openrails push-auth-bootstrap -f …` reapplies it. Everyone else joins by invitation. AuthKit credential creation and role grants retain native recent-sign-in challenges; billing operations use their permissions directly.
+`local_sign_in` separately offers local accounts. Their literal AuthKit registration mode defaults to `invite_only`; `open` is refused, and an explicit `auth.registration.native_user_mode: closed` remains restrictive. Invite-only enrollment uses AuthKit's required contact verification, so configure a verification sender. The authority manifest still seeds the first operator; `openrails push-auth-bootstrap -f …` reapplies it.
+
+MembersAdmin's email invitation leads to `/admin/invite`, where the recipient enrolls through auth-ui. A registration invitation is a single-use bearer code: its delivery email is not an identity binding. The stored group and role are assigned only to the identity that redeems it; missing, invalid, expired and already-used codes cannot register another account. Existing-account group invitations use AuthKit's own redemption rules.
+
+Password-reset and verification links use the console's `/admin/reset` and `/admin/verify` landings. AuthKit credential creation and role grants retain native recent-sign-in challenges; billing operations use their permissions directly. Two-factor policy remains the app's AuthKit configuration.
 
 The console is always served at `/admin`. `admin_console.enabled` and `admin_console.path` are refused with migration instructions; singular `admin_console.issuer` is replaced by the keyed map. With neither app nor local sign-in configured, the page explains how to declare one and the server still boots.
 

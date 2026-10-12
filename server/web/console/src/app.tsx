@@ -14,6 +14,7 @@ import {
 import { ISSUER_REDIRECT_KEY, useIdentity } from "./lib/identity"
 import { LoginPage } from "./pages/login"
 import { CallbackPage } from "./pages/callback"
+import { AccountLinkPage, InvitationPage } from "./pages/account-links"
 import { MerchantWorkspace } from "./workspace"
 import type { BootstrapConfig } from "./config"
 
@@ -54,29 +55,48 @@ function SignInChoices({
 }
 
 export function ConsoleApp({ config }: { config: BootstrapConfig }) {
+  const location = useLocation()
+  const nativeLink = ["/invite", "/reset", "/verify", "/passwordless"].includes(
+    location.pathname
+  )
   const [method, setMethod] = useState(
     () =>
       sessionStorage.getItem(METHOD_KEY) ??
       (config.issuers.length === 0 && config.local_sign_in ? "local" : "")
   )
-  const issuer = config.issuers.find((item) => item.key === method)
+  const selectedMethod = nativeLink && config.local_sign_in ? "local" : method
+  const issuer = config.issuers.find((item) => item.key === selectedMethod)
   const session = useMemo(
     () =>
-      issuer || (method === "local" && config.local_sign_in)
+      issuer || (selectedMethod === "local" && config.local_sign_in)
         ? createConsoleSession(config, issuer)
         : null,
-    [config, issuer, method]
+    [config, issuer, selectedMethod]
   )
   const navigate = useNavigate()
-  const choose = (key: string) => {
+  const choose = (key: string, target?: string) => {
     sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
     sessionStorage.setItem(METHOD_KEY, key)
     setMethod(key)
-    void navigate("/login")
+    const login =
+      location.pathname === "/login"
+        ? "/login" + location.search
+        : `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`
+    void navigate(target ?? login)
   }
+  if (nativeLink && !config.local_sign_in)
+    return (
+      <main className="console-sign-in">
+        <h1>Local enrollment is unavailable</h1>
+        <p>
+          This server uses app sign-in. Ask the operator for access through your
+          app.
+        </p>
+      </main>
+    )
   if (!session) return <SignInChoices config={config} choose={choose} />
   return (
-    <ConsoleSession key={method} session={session}>
+    <ConsoleSession key={selectedMethod} session={session}>
       <Routes>
         <Route
           path="/login"
@@ -94,6 +114,32 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
         />
         {session.kind === "issuer" && (
           <Route path="/callback" element={<CallbackPage />} />
+        )}
+        {session.kind === "local" && (
+          <>
+            <Route
+              path="/invite"
+              element={
+                <InvitationPage
+                  auth={session.client}
+                  onDone={() => choose("local", "/")}
+                />
+              }
+            />
+            {(["reset", "verify", "passwordless"] as const).map((kind) => (
+              <Route
+                key={kind}
+                path={`/${kind}`}
+                element={
+                  <AccountLinkPage
+                    kind={kind}
+                    navigate={(to) => void navigate(to)}
+                    onDone={(to) => choose("local", to ?? "/")}
+                  />
+                }
+              />
+            ))}
+          </>
         )}
         <Route
           path="*"

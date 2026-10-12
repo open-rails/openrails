@@ -19,20 +19,17 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// Registration is AuthKit's mode, passed straight through: capabilities
-// report it, closed mounts no register route, invite-only needs an invite
-// code, open registers a verified contact. A mode outside AuthKit's three, or
-// registration without a sender, refuses to boot.
+// Local staff enrollment defaults to invitation-only. Explicit closed stays
+// restrictive, open is refused, and issuer-only servers expose no enrollment.
 func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	f := newFixture(t)
 	for _, tc := range []struct {
 		mode     iam.RegistrationMode
 		register int
 	}{
-		{"", http.StatusNotFound},
+		{"", http.StatusForbidden},
 		{iam.RegistrationModeClosed, http.StatusNotFound},
 		{iam.RegistrationModeInviteOnly, http.StatusForbidden},
-		{iam.RegistrationModeOpen, http.StatusAccepted},
 	} {
 		name := string(tc.mode)
 		if name == "" {
@@ -43,7 +40,7 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 				cfg.Auth.Token.Issuer = issuer
 				cfg.Auth.Registration.NativeUserMode = tc.mode
-				if tc.mode == iam.RegistrationModeOpen || tc.mode == iam.RegistrationModeInviteOnly {
+				if tc.mode != iam.RegistrationModeClosed {
 					deps.Engine.Email = &outbox{}
 				}
 			})
@@ -62,7 +59,7 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			require.NoError(t, json.NewDecoder(w.Body).Decode(&caps))
 			want := tc.mode
 			if want == "" {
-				want = iam.RegistrationModeClosed
+				want = iam.RegistrationModeInviteOnly
 			}
 			require.Equal(t, string(want), caps.Registration.Mode)
 
@@ -80,12 +77,13 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	t.Run("refuses", func(t *testing.T) {
 		for mode, want := range map[iam.RegistrationMode]string{
 			"sometimes":                    "not one of open, invite_only, closed",
-			iam.RegistrationModeOpen:       "no email or SMS sender is configured",
+			iam.RegistrationModeOpen:       "open self-registration",
 			iam.RegistrationModeInviteOnly: "no email or SMS sender is configured",
 		} {
 			_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
 				cfg.Auth.Token.Issuer = "http://127.0.0.1/reg-" + uuid.NewString()[:8]
 				cfg.Auth.Registration.AllowMissingSenders = false
+				cfg.Auth.Registration.Verification = iam.RegistrationVerificationRequired
 				cfg.Auth.Registration.NativeUserMode = mode
 			})
 			require.ErrorContains(t, err, want, mode)

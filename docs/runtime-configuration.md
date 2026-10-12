@@ -32,7 +32,7 @@ never declare their own trusted origin.
 | `auth.keys.path` (`AUTH_KEYS_PATH`) | The signing keys' `keys.json` and `totp.key`. `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` give an inline key instead, frozen until a restart. |
 | `auth.keys.allow_ephemeral_dev_keys` | Generate a signing key and a TOTP key when none is configured, under `auth.keys.path`. |
 | `auth.keys.verify_only` | Verify tokens, mint none. A key-loading failure never selects it. |
-| `auth.registration.native_user_mode` | `open`, `invite_only` or `closed`; unset is closed. Registration needs `local_sign_in`. |
+| `auth.registration.native_user_mode` | Local sign-in defaults to `invite_only`; explicit `closed` disables enrollment and `open` is refused. Without `local_sign_in`, registration stays closed and no native enrollment route is exposed. |
 | `auth.registration.allow_missing_senders` | Construct authentication without email or message delivery. |
 | `auth.token.allow_private_network_jwks` | Fetch a trusted issuer's keys from a private address, for local federation. |
 | `auth.resource.id`, `auth.resource.public_url` | The resource (RFC 8707) trusted issuers mint tokens for, and where clients reach it; default the id's origin. |

@@ -20,7 +20,7 @@ export function useMerchantDirectory(session: ConsoleClient, subject: string) {
       const merchants: BillingAdminMerchant[] = []
       const cursors = new Set<string>()
       let cursor: string | null = null
-      let root = false
+      let root: boolean
       do {
         const url = new URL(consoleURL("/merchants"))
         if (cursor) url.searchParams.set("cursor", cursor)

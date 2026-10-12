@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -36,7 +35,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		slices.Sort(keys)
 		for _, key := range keys {
 			declaration := s.adminConsole.Issuers[key]
-			issuer, err := s.consoleIssuer(context.Background(), key, declaration)
+			issuer, err := s.consoleIssuer(key, declaration)
 			if err != nil {
 				return err
 			}
@@ -50,13 +49,21 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if err != nil {
 		return err
 	}
-	s.handle(mux, http.MethodGet+" "+path+"/merchants", http.HandlerFunc(s.consoleMerchants))
-	s.handle(mux, http.MethodGet+" "+path, console)
-	s.handle(mux, http.MethodGet+" "+path+"/{asset...}", console)
+	// Keep the product subtree one native exposure for host router adapters.
+	// The directory authenticates here before the SPA's fallback can see it.
+	consoleTree := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == path+"/merchants" {
+			s.consoleMerchants(w, r)
+			return
+		}
+		console.ServeHTTP(w, r)
+	})
+	s.handle(mux, http.MethodGet+" "+path, consoleTree)
+	s.handle(mux, http.MethodGet+" "+path+"/{asset...}", consoleTree)
 	return nil
 }
 
-func (s *Server) consoleIssuer(ctx context.Context, key string, declaration hostconfig.ConsoleIssuer) (adminconsole.Issuer, error) {
+func (s *Server) consoleIssuer(key string, declaration hostconfig.ConsoleIssuer) (adminconsole.Issuer, error) {
 	url, name, err := hostconfig.ResolveConsoleIssuer(&declaration, s.resource)
 	if err != nil {
 		return adminconsole.Issuer{}, err
@@ -70,18 +77,14 @@ func (s *Server) consoleIssuer(ctx context.Context, key string, declaration host
 	}
 	out := adminconsole.Issuer{Key: key, URL: url, ClientID: strings.TrimSpace(declaration.ClientID), Name: name, Resource: s.resource, Scope: scope}
 	if key != "root" {
-		mid, err := billing.ParseMerchantID(key)
-		if err != nil {
-			mid, _, err = s.controlPlane.MerchantByName(ctx, key)
+		if _, err := billing.ParseMerchantID(key); err != nil {
+			if err := billing.ValidateMerchantSlug(key); err != nil {
+				return out, fmt.Errorf("admin_console.issuers[%q]: %w", key, err)
+			}
 		}
-		if err != nil {
-			return out, fmt.Errorf("admin_console.issuers[%q]: %w", key, err)
-		}
-		merchant, err := s.merchants.Get(ctx, mid)
-		if err != nil {
-			return out, fmt.Errorf("admin_console.issuers[%q]: %w", key, err)
-		}
-		out.Merchant = &adminconsole.Merchant{ID: mid.String(), Slug: merchant.Slug, DisplayName: s.merchants.DisplayName(ctx, mid)}
 	}
+	// The CLI provisions the merchant manifest after server.New. This key is
+	// a sign-in choice; the verified token and live directory bind authority.
+
 	return out, nil
 }

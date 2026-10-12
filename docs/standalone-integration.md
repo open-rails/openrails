@@ -463,7 +463,7 @@ embedded host mounts them, and each merchant's group as its scope.
 | `server.Config` | Meaning |
 |---|---|
 | `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
-| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; a closed registration and the engine's trusted proxies when unset. |
+| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; invitation-only registration and `/admin` link landings for local staff (closed without local sign-in), and the engine's trusted proxies when unset. Explicit closed enrollment stays restrictive; open self-registration is refused. |
 | `LocalSignIn` | Serve sign-in to the server's own accounts. Without it people sign in at a trusted issuer. |
 | `Naming` | The rename policy for merchant names. |
 | `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |

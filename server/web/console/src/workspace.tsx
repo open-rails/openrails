@@ -50,19 +50,6 @@ export function MerchantWorkspace({
     sessionStorage.setItem(`openrails.console.merchant.${subject}`, id)
     setSelected(id)
   }
-  if (directory.pending)
-    return (
-      <p role="status" className="console-empty">
-        Loading your merchants…
-      </p>
-    )
-  if (directory.data?.error)
-    return (
-      <div role="alert" className="console-empty">
-        {directory.data.error.message}{" "}
-        <button onClick={directory.retry}>Try again</button>
-      </div>
-    )
   const props = {
     config,
     session,
@@ -72,15 +59,32 @@ export function MerchantWorkspace({
     selectMerchant,
   }
   return (
-    <BillingCapability {...props}>
-      {(billing) =>
-        session.kind === "local" ? (
-          <LocalWorkspace {...props} session={session} billing={billing} />
-        ) : (
-          <Workspace {...props} billing={billing} />
-        )
-      }
-    </BillingCapability>
+    <>
+      {directory.data?.error && (
+        <div role="alert" className="console-empty">
+          {directory.data.error.message}{" "}
+          <button onClick={directory.retry}>Try again</button>
+        </div>
+      )}
+      <BillingCapability {...props}>
+        {(billing, pending) =>
+          session.kind === "local" ? (
+            <LocalWorkspace
+              {...props}
+              session={session}
+              billing={billing}
+              loading={directory.pending || pending}
+            />
+          ) : (
+            <Workspace
+              {...props}
+              billing={billing}
+              loading={directory.pending || pending}
+            />
+          )
+        }
+      </BillingCapability>
+    </>
   )
 }
 
@@ -92,6 +96,7 @@ interface WorkspaceProps {
   root: boolean
   selectMerchant(id: string): void
   billing: boolean
+  loading?: boolean
   access?: GroupAdminAccess
   group?: string
   setGroup?: (group: string) => void
@@ -99,10 +104,10 @@ interface WorkspaceProps {
 
 function BillingCapability(
   props: Omit<WorkspaceProps, "billing"> & {
-    children: (billing: boolean) => ReactNode
+    children: (billing: boolean, pending: boolean) => ReactNode
   }
 ) {
-  if (!props.merchant) return props.children(false)
+  if (!props.merchant) return props.children(false, false)
   return <ReadBillingCapability {...props} merchant={props.merchant} />
 }
 
@@ -113,7 +118,7 @@ function ReadBillingCapability({
   children,
 }: Omit<WorkspaceProps, "billing"> & {
   merchant: BillingAdminMerchant
-  children: (billing: boolean) => ReactNode
+  children: (billing: boolean, pending: boolean) => ReactNode
 }) {
   const access = useBillingAdminAccess({
     baseUrl: config.api_base_url,
@@ -141,7 +146,8 @@ function ReadBillingCapability({
           (data.admin !== "none" ||
             data.catalog ||
             data.merchant_config ||
-            data.metrics)
+            data.metrics),
+        access.isPending
       )}
     </>
   )
@@ -150,9 +156,11 @@ function ReadBillingCapability({
 function LocalWorkspace(
   props: WorkspaceProps & { session: Extract<ConsoleClient, { kind: "local" }> }
 ) {
-  const [rootGroup, setRootGroup] = useState(props.root)
+  const [rootGroup, setRootGroup] = useState<boolean>()
   const group =
-    rootGroup && props.root ? "root" : (props.merchant?.id ?? "root")
+    (rootGroup ?? props.root) && props.root
+      ? "root"
+      : (props.merchant?.id ?? "root")
   const access = useGroupAdminAccess({
     auth: props.session.client,
     baseUrl: props.config.auth_base_url,
@@ -178,6 +186,7 @@ function Workspace({
   root,
   selectMerchant,
   billing,
+  loading,
   access,
   group,
   setGroup,
@@ -233,7 +242,18 @@ function Workspace({
           <Link to="/account">Account</Link>
         </nav>
         <Routes>
-          <Route index element={<Navigate to={initial} replace />} />
+          <Route
+            index
+            element={
+              loading || access?.status === "loading" ? (
+                <p role="status" className="console-empty">
+                  Loading console access…
+                </p>
+              ) : (
+                <Navigate to={initial} replace />
+              )
+            }
+          />
           <Route
             path="billing/*"
             element={

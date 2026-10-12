@@ -188,6 +188,7 @@ func TestServerConsoleBootsWithoutSignIn(t *testing.T) {
 	require.Contains(t, boot.Body.String(), `"local_sign_in":false`)
 	require.Contains(t, boot.Body.String(), `"issuers":[]`)
 	require.Equal(t, http.StatusUnauthorized, get(handler, "/admin/merchants").Code)
+	require.Equal(t, http.StatusNotFound, call(t, handler, "", http.MethodPost, "/"+f.schema+"/v1/register", map[string]string{}).Code, "issuer-only mode exposes no native enrollment")
 }
 
 // An explicitly supplied build is owned by the server, validated before serving.

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { LoginForm } from "@openrails/auth-ui"
+import { SignInPanel } from "@openrails/auth-ui"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 
 import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
@@ -50,7 +50,8 @@ export function LoginPage() {
             Sign in with {issuer.name}
           </button>
         ) : (
-          <LoginForm
+          <SignInPanel
+            providers={[]}
             className="console-sign-in-action"
             onSignedIn={() => navigate(returnTo, { replace: true })}
           />

@@ -1114,8 +1114,8 @@
       "func MerchantRole(name string) (iam.Role, bool)",
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
-      "type AdminConsole = hostconfig.ConsoleMount",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tHostedCheckoutURL string\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
+      "type AdminConsole = hostconfig.ConsoleConfig",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tHostedCheckoutURL string\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
       "type ConsoleIssuer = hostconfig.ConsoleIssuer",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tCheckoutAssets fs.FS\n\n\tConsoleAssets fs.FS\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
@@ -1128,8 +1128,8 @@
       "var ErrRenamesDisabled = merchants.ErrRenamesDisabled"
     ],
     "server/internal/hostconfig": [
+      "type ConsoleConfig struct {\n\tIssuers map[string]ConsoleIssuer `koanf:\"issuers\"`\n}",
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
-      "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}"
     ],
     "server/web/console": [
@@ -1650,13 +1650,16 @@
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
     ],
     "server/internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tLocalSignIn bool     `json:\"local_sign_in\"`\n\tIssuers     []Issuer `json:\"issuers\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
-      "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
-      "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
+      "type Issuer struct {\n\tKey      string    `json:\"key\"`\n\tMerchant *Merchant `json:\"merchant,omitempty\"`\n\tURL      string    `json:\"url\"`\n\tClientID string    `json:\"client_id\"`\n\tName     string    `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
+      "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tRole        string `json:\"role,omitempty\"`\n}"
     ],
     "server/internal/hostconfig": [
       "func (p *port) UnmarshalText(text []byte) error {\n\ts := strings.TrimSpace(string(text))\n\tif s == \"\" {\n\t\t*p = 0\n\t\treturn nil\n\t}\n\tval, err := strconv.ParseInt(s, 10, 32)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"invalid port value: %w\", err)\n\t}\n\tif val \u003c 1 || val \u003e 65535 {\n\t\treturn fmt.Errorf(\"invalid port value %d: must be 1-65535\", val)\n\t}\n\t*p = port(val)\n\treturn nil\n}"
+    ],
+    "server/internal/http": [
+      "type consoleMerchantPage struct {\n\tData []adminconsole.Merchant `json:\"data\"`\n\tNext *string                 `json:\"next_cursor\"`\n\tRoot bool                    `json:\"root\"`\n}"
     ],
     "server/internal/network": [
       "type challenge struct {\n\tMerchant   billing.MerchantID         `json:\"m\"`\n\tCustomer   billing.CustomerID         `json:\"c\"`\n\tCredential customernetwork.Credential `json:\"k\"`\n\tOrder      billing.OrderID            `json:\"o\"`\n\tNonce      string                     `json:\"n\"`\n\tIssuedAt   time.Time                  `json:\"t\"`\n}"
@@ -4565,6 +4568,18 @@
     },
     "server/internal/hostconfig/server.go": {
       "fmt": "fmt",
+      "strings": "strings"
+    },
+    "server/internal/http/console_merchants.go": {
+      "adminconsole": "github.com/open-rails/openrails/server/internal/adminconsole",
+      "auth": "github.com/open-rails/authkit/auth",
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "context": "context",
+      "errors": "errors",
+      "http": "net/http",
+      "json": "encoding/json",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
       "strings": "strings"
     },
     "server/internal/network/network.go": {

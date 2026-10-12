@@ -7,7 +7,6 @@ export interface ConsoleIssuer {
   name: string
   resource: string
   scope: string
-  merchant?: BillingAdminMerchant | null
 }
 
 export interface BootstrapConfig {
