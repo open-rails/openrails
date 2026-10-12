@@ -60,6 +60,7 @@ const configuration = (
     alert_email: "ops@acme.test",
     reprice_notice_window_days: 14,
   },
+  platform_vault: { available: false },
 })
 
 const aPSP = (revision = 7): PSP => ({
