@@ -92,11 +92,11 @@ func (s *PriceService) GetByPublicID(ctx context.Context, id billing.PriceID) (*
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).GetPriceByPublicID(ctx, gen.GetPriceByPublicIDParams{MerchantID: mid.UUID(), PublicID: id.String()})
+	stored, err := s.db.Gen(ctx).LookupPriceStorageID(ctx, gen.LookupPriceStorageIDParams{MerchantID: mid.UUID(), PublicID: id.String()})
 	if err != nil {
 		return nil, err
 	}
-	return s.db.PriceFromGen(ctx, row)
+	return s.GetByID(ctx, stored)
 }
 
 func (s *PriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error) {
@@ -258,7 +258,11 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 		return billing.ListPage[*models.Price]{}, queryScopeErr
 	}
 	if filter.IDs != nil {
-		rows, err := s.db.Gen(ctx).ListPricesWithProductByPublicIDs(ctx, gen.ListPricesWithProductByPublicIDsParams{MerchantID: queryMerchant.UUID(), Ids: filter.IDs})
+		ids, err := db.ResolvePriceIDs(ctx, s.db.Gen(ctx), queryMerchant.UUID(), filter.IDs)
+		if err != nil {
+			return billing.ListPage[*models.Price]{}, err
+		}
+		rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
 		if err != nil {
 			return billing.ListPage[*models.Price]{}, err
 		}

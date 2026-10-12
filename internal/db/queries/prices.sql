@@ -151,16 +151,16 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND product_id=sqlc.arg(product_id
   AND customer_amount IS NOT DISTINCT FROM sqlc.narg(customer_amount)::jsonb
   AND quantity IS NOT DISTINCT FROM sqlc.narg(quantity)::jsonb;
 
--- name: GetPriceByPublicID :one
-SELECT * FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = sqlc.arg(public_id)::text
+-- Private identity resolution deliberately includes retained tombstones.
+-- Public catalog reads resolve first, then use the ordinary visible-row reads.
+-- name: LookupPriceStorageID :one
+SELECT id FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = sqlc.arg(public_id)::text
   AND sha256(public_id::bytea) = sha256(sqlc.arg(public_id)::text::bytea);
 
 -- name: ListPriceReferences :many
 SELECT id, public_id FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
--- name: ListPricesWithProductByPublicIDs :many
-SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.public_id = ANY(sqlc.arg(ids)::text[])
-  AND sha256(price.public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest(sqlc.arg(ids)::text[]) AS id);
+-- name: ListPriceStorageIDs :many
+SELECT id, public_id FROM billing.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = ANY(sqlc.arg(ids)::text[])
+  AND sha256(public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest(sqlc.arg(ids)::text[]) AS id);

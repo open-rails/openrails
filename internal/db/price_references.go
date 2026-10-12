@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -32,13 +33,26 @@ func PriceReferences(ctx context.Context, q *gen.Queries, ids []uuid.UUID) (map[
 
 // PriceReference resolves a private foreign key for a single response.
 func (d *DB) PriceReference(ctx context.Context, id uuid.UUID) (billing.PriceID, error) {
-	mid, err := merchant.Require(ctx)
+	refs, err := PriceReferences(ctx, d.Gen(ctx), []uuid.UUID{id})
 	if err != nil {
 		return "", err
 	}
-	row, err := d.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: id})
-	if err != nil {
-		return "", err
+	if ref, ok := refs[id]; ok {
+		return ref, nil
 	}
-	return billing.PriceID(row.PublicID), nil
+	return "", pgx.ErrNoRows
+}
+
+// ResolvePriceIDs maps canonical IDs to retained private identities. Callers
+// then use their existing row loader, which owns catalog visibility rules.
+func ResolvePriceIDs(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ids []string) ([]uuid.UUID, error) {
+	rows, err := q.ListPriceStorageIDs(ctx, gen.ListPriceStorageIDsParams{MerchantID: merchantID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ID)
+	}
+	return out, nil
 }

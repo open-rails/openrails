@@ -249,41 +249,6 @@ func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanPa
 	return i, err
 }
 
-const getPriceByPublicID = `-- name: GetPriceByPublicID :one
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, trial_unit_amount, trial_duration_hours, key, revision, customer_amount, billing_interval_hours, quantity, public_id FROM billing.prices WHERE merchant_id = $1::uuid AND public_id = $2::text
-  AND sha256(public_id::bytea) = sha256($2::text::bytea)
-`
-
-type GetPriceByPublicIDParams struct {
-	MerchantID uuid.UUID
-	PublicID   string
-}
-
-func (q *Queries) GetPriceByPublicID(ctx context.Context, arg GetPriceByPublicIDParams) (BillingPrice, error) {
-	row := q.db.QueryRow(ctx, getPriceByPublicID, arg.MerchantID, arg.PublicID)
-	var i BillingPrice
-	err := row.Scan(
-		&i.ID,
-		&i.ProductID,
-		&i.Amount,
-		&i.Currency,
-		&i.Archived,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.AccessDurationHours,
-		&i.TrialUnitAmount,
-		&i.TrialDurationHours,
-		&i.Key,
-		&i.Revision,
-		&i.CustomerAmount,
-		&i.BillingIntervalHours,
-		&i.Quantity,
-		&i.PublicID,
-	)
-	return i, err
-}
-
 const getPriceByTerms = `-- name: GetPriceByTerms :one
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, trial_unit_amount, trial_duration_hours, key, revision, customer_amount, billing_interval_hours, quantity, public_id FROM billing.prices
 WHERE merchant_id=$1::uuid AND product_id=$2::uuid AND key=$3::text
@@ -799,6 +764,42 @@ func (q *Queries) ListPriceReferences(ctx context.Context, arg ListPriceReferenc
 	return items, nil
 }
 
+const listPriceStorageIDs = `-- name: ListPriceStorageIDs :many
+SELECT id, public_id FROM billing.prices
+WHERE merchant_id = $1::uuid AND public_id = ANY($2::text[])
+  AND sha256(public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest($2::text[]) AS id)
+`
+
+type ListPriceStorageIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []string
+}
+
+type ListPriceStorageIDsRow struct {
+	ID       uuid.UUID
+	PublicID string
+}
+
+func (q *Queries) ListPriceStorageIDs(ctx context.Context, arg ListPriceStorageIDsParams) ([]ListPriceStorageIDsRow, error) {
+	rows, err := q.db.Query(ctx, listPriceStorageIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPriceStorageIDsRow
+	for rows.Next() {
+		var i ListPriceStorageIDsRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPricesByIDs = `-- name: ListPricesByIDs :many
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, trial_unit_amount, trial_duration_hours, key, revision, customer_amount, billing_interval_hours, quantity, public_id FROM billing.prices WHERE prices.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
@@ -1062,75 +1063,6 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPrices
 	return items, nil
 }
 
-const listPricesWithProductByPublicIDs = `-- name: ListPricesWithProductByPublicIDs :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, price.quantity, price.public_id, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
-WHERE price.merchant_id = $1::uuid AND price.public_id = ANY($2::text[])
-  AND sha256(price.public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest($2::text[]) AS id)
-`
-
-type ListPricesWithProductByPublicIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []string
-}
-
-type ListPricesWithProductByPublicIDsRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
-}
-
-func (q *Queries) ListPricesWithProductByPublicIDs(ctx context.Context, arg ListPricesWithProductByPublicIDsParams) ([]ListPricesWithProductByPublicIDsRow, error) {
-	rows, err := q.db.Query(ctx, listPricesWithProductByPublicIDs, arg.MerchantID, arg.Ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPricesWithProductByPublicIDsRow
-	for rows.Next() {
-		var i ListPricesWithProductByPublicIDsRow
-		if err := rows.Scan(
-			&i.BillingPrice.ID,
-			&i.BillingPrice.ProductID,
-			&i.BillingPrice.Amount,
-			&i.BillingPrice.Currency,
-			&i.BillingPrice.Archived,
-			&i.BillingPrice.CreatedAt,
-			&i.BillingPrice.UpdatedAt,
-			&i.BillingPrice.MerchantID,
-			&i.BillingPrice.AccessDurationHours,
-			&i.BillingPrice.TrialUnitAmount,
-			&i.BillingPrice.TrialDurationHours,
-			&i.BillingPrice.Key,
-			&i.BillingPrice.Revision,
-			&i.BillingPrice.CustomerAmount,
-			&i.BillingPrice.BillingIntervalHours,
-			&i.BillingPrice.Quantity,
-			&i.BillingPrice.PublicID,
-			&i.BillingProduct.ID,
-			&i.BillingProduct.Key,
-			&i.BillingProduct.DisplayName,
-			&i.BillingProduct.Description,
-			&i.BillingProduct.TierGroup,
-			&i.BillingProduct.TierRank,
-			&i.BillingProduct.Archived,
-			&i.BillingProduct.CreatedAt,
-			&i.BillingProduct.UpdatedAt,
-			&i.BillingProduct.MerchantID,
-			&i.BillingProduct.Revision,
-			&i.BillingProduct.CreditGrant,
-			&i.BillingProduct.Ownership,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPriorVersionsByKey = `-- name: ListPriorVersionsByKey :many
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, trial_unit_amount, trial_duration_hours, key, revision, customer_amount, billing_interval_hours, quantity, public_id FROM billing.prices
 WHERE merchant_id = $1::uuid AND product_id = $2::uuid AND key = $3::text AND archived
@@ -1180,6 +1112,25 @@ func (q *Queries) ListPriorVersionsByKey(ctx context.Context, arg ListPriorVersi
 		return nil, err
 	}
 	return items, nil
+}
+
+const lookupPriceStorageID = `-- name: LookupPriceStorageID :one
+SELECT id FROM billing.prices WHERE merchant_id = $1::uuid AND public_id = $2::text
+  AND sha256(public_id::bytea) = sha256($2::text::bytea)
+`
+
+type LookupPriceStorageIDParams struct {
+	MerchantID uuid.UUID
+	PublicID   string
+}
+
+// Private identity resolution deliberately includes retained tombstones.
+// Public catalog reads resolve first, then use the ordinary visible-row reads.
+func (q *Queries) LookupPriceStorageID(ctx context.Context, arg LookupPriceStorageIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lookupPriceStorageID, arg.MerchantID, arg.PublicID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updatePriceStatus = `-- name: UpdatePriceStatus :execrows

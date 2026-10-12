@@ -264,6 +264,9 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 	if err := s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.setFingerprintPrice(ctx, req); err != nil {
+		return nil, err
+	}
 	// The idempotency key is an opaque client token, but it is persisted and
 	// replayed, so a card number pasted into it would land in our storage.
 	if cardguard.ContainsPAN(req.IdempotencyKey) {
@@ -361,6 +364,29 @@ func canonicalizeCheckoutPaymentName(payment *CheckoutAttemptPaymentRequest) {
 	payment.NameOnCard = cardholdername.Canonical("", payment.FirstName, payment.LastName)
 }
 
+// setFingerprintPrice retains the old UUID-based hash identity without making
+// that spelling a public selector. An unknown price remains a normal catalog
+// refusal; an archived known price still resolves for historical replay.
+func (s *CheckoutAttemptService) setFingerprintPrice(ctx context.Context, req *CheckoutAttemptCreateRequest) error {
+	req.fingerprintPriceID = ""
+	if req.PriceID == "" || s.db == nil {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	id, err := s.db.Gen(ctx).LookupPriceStorageID(ctx, gen.LookupPriceStorageIDParams{MerchantID: mid.UUID(), PublicID: strings.TrimSpace(req.PriceID)})
+	if db.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	req.fingerprintPriceID = "price_" + id.String()
+	return nil
+}
+
 // checkoutAttemptRequestFingerprint hashes the inputs a session executes: its
 // durable replay identity.
 func checkoutAttemptRequestFingerprint(req *CheckoutAttemptCreateRequest) string {
@@ -368,6 +394,10 @@ func checkoutAttemptRequestFingerprint(req *CheckoutAttemptCreateRequest) string
 		return ""
 	}
 	payment := req.Payment
+	priceID := strings.TrimSpace(req.PriceID)
+	if req.fingerprintPriceID != "" {
+		priceID = req.fingerprintPriceID
+	}
 	payload, _ := json.Marshal(struct {
 		PriceID    string
 		PriceKey   string `json:",omitempty"`
@@ -379,7 +409,7 @@ func checkoutAttemptRequestFingerprint(req *CheckoutAttemptCreateRequest) string
 		SuccessURL string
 		CancelURL  string
 	}{
-		PriceID:  strings.TrimSpace(req.PriceID),
+		PriceID:  priceID,
 		PriceKey: req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
 		Mode:       strings.TrimSpace(req.Mode),
 		Payment:    payment,
