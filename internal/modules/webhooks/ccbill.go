@@ -827,6 +827,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			return nil
 		}
 
+		if _, terminal := subscriptions.TerminalCancelReason(subscription); terminal {
+			// Record retained money and its review finding without restoring
+			// canceled access or adopting the replacement collection agreement.
+			return nil
+		}
 		if err = subscription.ActivateWithPrice(newPrice); err != nil {
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}

@@ -13,7 +13,7 @@ import (
 )
 
 const getProviderCycleReceipt = `-- name: GetProviderCycleReceipt :one
-SELECT merchant_id, psp_id, transaction_id, subscription_id, due_at, amount, currency, occurred_at, approved FROM billing.provider_cycle_receipts WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND transaction_id = $3::text
+SELECT merchant_id, psp_id, transaction_id, subscription_id, schedule_source_reference, due_at, amount, currency, occurred_at, approved FROM billing.provider_cycle_receipts WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND transaction_id = $3::text
 `
 
 type GetProviderCycleReceiptParams struct {
@@ -30,6 +30,7 @@ func (q *Queries) GetProviderCycleReceipt(ctx context.Context, arg GetProviderCy
 		&i.PspID,
 		&i.TransactionID,
 		&i.SubscriptionID,
+		&i.ScheduleSourceReference,
 		&i.DueAt,
 		&i.Amount,
 		&i.Currency,
@@ -40,16 +41,17 @@ func (q *Queries) GetProviderCycleReceipt(ctx context.Context, arg GetProviderCy
 }
 
 const getProviderSchedule = `-- name: GetProviderSchedule :one
-SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid FOR UPDATE
+SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND source_reference = $3::text FOR UPDATE
 `
 
 type GetProviderScheduleParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
+	MerchantID      uuid.UUID
+	SubscriptionID  uuid.UUID
+	SourceReference string
 }
 
 func (q *Queries) GetProviderSchedule(ctx context.Context, arg GetProviderScheduleParams) (BillingProviderSchedule, error) {
-	row := q.db.QueryRow(ctx, getProviderSchedule, arg.MerchantID, arg.SubscriptionID)
+	row := q.db.QueryRow(ctx, getProviderSchedule, arg.MerchantID, arg.SubscriptionID, arg.SourceReference)
 	var i BillingProviderSchedule
 	err := row.Scan(
 		&i.MerchantID,
@@ -58,6 +60,7 @@ func (q *Queries) GetProviderSchedule(ctx context.Context, arg GetProviderSchedu
 		&i.PspID,
 		&i.InitialOrderID,
 		&i.SourceReference,
+		&i.ProviderReference,
 		&i.FirstDueAt,
 		&i.CadenceHours,
 		&i.CadenceMonths,
@@ -68,22 +71,23 @@ func (q *Queries) GetProviderSchedule(ctx context.Context, arg GetProviderSchedu
 }
 
 const insertProviderCycleReceipt = `-- name: InsertProviderCycleReceipt :exec
-INSERT INTO billing.provider_cycle_receipts (merchant_id, psp_id, transaction_id, subscription_id, due_at, amount, currency, occurred_at, approved)
-VALUES ($1::uuid, $2::uuid, $3::text, $4::uuid,
-        $5::timestamptz, $6::bigint, $7::text, $8::timestamptz,
-        $9::boolean)
+INSERT INTO billing.provider_cycle_receipts (merchant_id, psp_id, transaction_id, subscription_id, schedule_source_reference, due_at, amount, currency, occurred_at, approved)
+VALUES ($1::uuid, $2::uuid, $3::text, $4::uuid, $5::text,
+        $6::timestamptz, $7::bigint, $8::text, $9::timestamptz,
+        $10::boolean)
 `
 
 type InsertProviderCycleReceiptParams struct {
-	MerchantID     uuid.UUID
-	PspID          uuid.UUID
-	TransactionID  string
-	SubscriptionID uuid.UUID
-	DueAt          time.Time
-	Amount         int64
-	Currency       string
-	OccurredAt     time.Time
-	Approved       bool
+	MerchantID              uuid.UUID
+	PspID                   uuid.UUID
+	TransactionID           string
+	SubscriptionID          uuid.UUID
+	ScheduleSourceReference string
+	DueAt                   time.Time
+	Amount                  int64
+	Currency                string
+	OccurredAt              time.Time
+	Approved                bool
 }
 
 func (q *Queries) InsertProviderCycleReceipt(ctx context.Context, arg InsertProviderCycleReceiptParams) error {
@@ -92,6 +96,7 @@ func (q *Queries) InsertProviderCycleReceipt(ctx context.Context, arg InsertProv
 		arg.PspID,
 		arg.TransactionID,
 		arg.SubscriptionID,
+		arg.ScheduleSourceReference,
 		arg.DueAt,
 		arg.Amount,
 		arg.Currency,
@@ -102,25 +107,26 @@ func (q *Queries) InsertProviderCycleReceipt(ctx context.Context, arg InsertProv
 }
 
 const insertProviderSchedule = `-- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-        $5::uuid, $6::text, $7::timestamptz, $8::integer, $9::integer,
-        $10::jsonb, $11::timestamptz)
-ON CONFLICT (merchant_id, subscription_id) DO NOTHING
+        $5::uuid, $6::text, $7::text, $8::timestamptz, $9::integer, $10::integer,
+        $11::jsonb, $12::timestamptz)
+ON CONFLICT (merchant_id, subscription_id, source_reference) DO NOTHING
 `
 
 type InsertProviderScheduleParams struct {
-	MerchantID      uuid.UUID
-	SubscriptionID  uuid.UUID
-	CustomerID      uuid.UUID
-	PspID           uuid.UUID
-	InitialOrderID  *uuid.UUID
-	SourceReference string
-	FirstDueAt      time.Time
-	CadenceHours    int32
-	CadenceMonths   int32
-	AcceptedBill    []byte
-	Now             time.Time
+	MerchantID        uuid.UUID
+	SubscriptionID    uuid.UUID
+	CustomerID        uuid.UUID
+	PspID             uuid.UUID
+	InitialOrderID    *uuid.UUID
+	SourceReference   string
+	ProviderReference string
+	FirstDueAt        time.Time
+	CadenceHours      int32
+	CadenceMonths     int32
+	AcceptedBill      []byte
+	Now               time.Time
 }
 
 func (q *Queries) InsertProviderSchedule(ctx context.Context, arg InsertProviderScheduleParams) (int64, error) {
@@ -131,6 +137,7 @@ func (q *Queries) InsertProviderSchedule(ctx context.Context, arg InsertProvider
 		arg.PspID,
 		arg.InitialOrderID,
 		arg.SourceReference,
+		arg.ProviderReference,
 		arg.FirstDueAt,
 		arg.CadenceHours,
 		arg.CadenceMonths,
@@ -145,18 +152,65 @@ func (q *Queries) InsertProviderSchedule(ctx context.Context, arg InsertProvider
 
 const latestSettledProviderCycle = `-- name: LatestSettledProviderCycle :one
 SELECT due_at FROM billing.provider_cycle_receipts
-WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND approved
+WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND schedule_source_reference = $3::text AND approved
 ORDER BY due_at DESC LIMIT 1
 `
 
 type LatestSettledProviderCycleParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
+	MerchantID              uuid.UUID
+	SubscriptionID          uuid.UUID
+	ScheduleSourceReference string
 }
 
 func (q *Queries) LatestSettledProviderCycle(ctx context.Context, arg LatestSettledProviderCycleParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, latestSettledProviderCycle, arg.MerchantID, arg.SubscriptionID)
+	row := q.db.QueryRow(ctx, latestSettledProviderCycle, arg.MerchantID, arg.SubscriptionID, arg.ScheduleSourceReference)
 	var due_at time.Time
 	err := row.Scan(&due_at)
 	return due_at, err
+}
+
+const listProviderSchedules = `-- name: ListProviderSchedules :many
+SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules
+WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+  AND provider_reference = $3::text
+ORDER BY first_due_at ASC, source_reference ASC FOR UPDATE
+`
+
+type ListProviderSchedulesParams struct {
+	MerchantID        uuid.UUID
+	SubscriptionID    uuid.UUID
+	ProviderReference string
+}
+
+func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSchedulesParams) ([]BillingProviderSchedule, error) {
+	rows, err := q.db.Query(ctx, listProviderSchedules, arg.MerchantID, arg.SubscriptionID, arg.ProviderReference)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderSchedule
+	for rows.Next() {
+		var i BillingProviderSchedule
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.SubscriptionID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.InitialOrderID,
+			&i.SourceReference,
+			&i.ProviderReference,
+			&i.FirstDueAt,
+			&i.CadenceHours,
+			&i.CadenceMonths,
+			&i.AcceptedBill,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
