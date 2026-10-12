@@ -60,11 +60,11 @@ func TestDuplicateChargeFindings(t *testing.T) {
 			require.Empty(t, w.openFindings(duplicateCharge), "consecutive periods and a declined-then-retried period are not duplicates")
 			require.NotContains(t, w.openFindings(duplicateCharge), stale, "the calendar-month false positive closes")
 
-			// A separate adjustment bill on the same subscription is its own obligation.
+			// A separate adjustment bill on the same subscription is its own
+			// obligation. It stays: its order holds that payment as settlement.
 			w.chargeAgain(clean.c.id, time.Minute, true)
 			w.converge()
 			require.Empty(t, w.openFindings(duplicateCharge), "a separate billed adjustment is not a duplicate")
-			w.dropLatestCharge(clean.c.id)
 
 			// A second capture of one period, a day later (across a month
 			// boundary for long cadences): one CRITICAL finding naming the
