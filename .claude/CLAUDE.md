@@ -76,6 +76,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   permission. AuthKit retains its own recent-sign-in checks for root-group,
   OAuth-client and remote-application mutations; customer and customer-network
   policies are unchanged.
+- Destructive staff, application and host commands (refunds, cancels, revokes, deletes,
+  write-offs, substantive catalog/config changes) pass one shared admission ceiling per
+  actor, merchant and deployment (`docs/destructive-actions.md`). The in-process
+  `Client` is one host actor. Constants, never config.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
@@ -175,7 +179,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
   caches (FX rates) live in Redis, or in process memory without Redis; never in Postgres.
-  Several instances need Redis.
+  Several instances need Redis. The exception is `destructive_actions` and
+  `destructive_holds`: durable records of admitted destructive commands and break-glass
+  holds. A hold ends only by an explicit authorized clear, never by time, restart or a
+  resolved finding. Never store credentials or request bodies in them.
 
 ## Layer altitude
 - A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen`
