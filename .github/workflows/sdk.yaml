@@ -4,6 +4,9 @@ name: SDK
 on:
   pull_request:
     branches: [master]
+    # As ci.yaml: a draft runs nothing, and turning a pull request back into a
+    # draft, merging or closing it cancels its run in progress.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
     paths:
       - sdk/billing-ui/**
       - web/checkout/**
@@ -13,6 +16,8 @@ on:
       - go.mod
       - go.sum
       - .github/workflows/sdk.yaml
+      - scripts/ci-services.sh
+      - scripts/ci-pull-image.sh
   workflow_dispatch:
 
 permissions:
@@ -28,6 +33,7 @@ env:
 jobs:
   billing-ui:
     name: billing-ui
+    if: ${{ github.event.action != 'closed' && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -71,6 +77,7 @@ jobs:
   # server (server/ci/checkoutpage), NMI being nmimock.
   checkout-page:
     name: checkout page
+    if: ${{ github.event.action != 'closed' && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -116,12 +123,15 @@ jobs:
   # against this commit's OpenRails and billing-ui (NMI is nmimock).
   embedded-example:
     name: embedded example
+    if: ${{ github.event.action != 'closed' && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Start PostgreSQL 18
+        run: bash scripts/ci-services.sh start postgres
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           package_json_file: examples/embedded/web/package.json
@@ -139,10 +149,6 @@ jobs:
           cache-dependency-path: |
             go.sum
             examples/go.sum
-      - name: PostgreSQL 18
-        run: |
-          docker run -d --name example-postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:18-alpine
-          timeout 60 bash -c 'until docker exec example-postgres pg_isready -h 127.0.0.1 -U postgres; do sleep 1; done'
       - name: billing-ui
         working-directory: sdk/billing-ui
         run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
@@ -152,6 +158,8 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm build
           pnpm exec playwright install --with-deps chromium
+      - name: PostgreSQL is ready
+        run: bash scripts/ci-services.sh ready
       - name: Gated content and the buy pages
         working-directory: examples
         env:

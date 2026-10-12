@@ -3,6 +3,10 @@ name: Validate
 on:
   pull_request:
     branches: [master]
+    # A draft runs nothing until it is ready for review. Turning a pull request
+    # back into a draft, merging or closing it cancels its run in progress; a
+    # merge is validated by master's own run.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
   # Master validates every merge and saves the build caches pull requests
   # restore; caches saved by one pull request are invisible to the others.
   push:
@@ -24,9 +28,45 @@ env:
 # Go caches (.github/actions/go-cache): master saves each revision built from
 # empty; pull requests restore it.
 
+# Scope, Go tests and Required Security run for every push and for every pull
+# request that is neither a draft nor closed; the other jobs follow Scope.
 jobs:
+  # Whether the change reaches beyond the documentation and billing-ui (which
+  # sdk.yaml tests). Go tests (the docs guards among them) and Required
+  # Security run either way; the jobs that need Scope run only when it does.
+  scope:
+    name: Scope
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - name: Classify the changed files
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED: ${{ github.event.pull_request.changed_files }}
+        run: |
+          code=true
+          # The files API lists at most 3000; beyond that, assume code.
+          if [[ -n "$PR" ]] && ((CHANGED <= 3000)); then
+            if files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"; then
+              grep -qvE '(\.md$|^docs/|^sdk/billing-ui/|^\.claude/|^LICENSE$|^\.github/workflows/(sdk|release|docker-publish)\.yaml$)' <<<"$files" || code=false
+              printf '%s\n' "$files"
+            else
+              echo "::warning::could not list the changed files; running everything"
+            fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   go-test:
     name: Go tests
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -48,6 +88,8 @@ jobs:
 
   lint:
     name: Lint
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -93,6 +135,8 @@ jobs:
 
   console:
     name: Admin console
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -130,6 +174,8 @@ jobs:
 
   chart:
     name: Helm chart
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -137,45 +183,41 @@ jobs:
       - run: HELM="$(scripts/ci-install-tool.sh helm)" bash scripts/check.sh chart
 
   # The required check: every part above, and the examples' end-to-end job
-  # below, must pass. A skipped, cancelled or failed part never turns into a
-  # successful aggregate.
+  # below, must pass. A cancelled or failed part never turns into a successful
+  # aggregate, nor does a skipped one unless Scope found no code to test.
   checks:
     name: Checks
-    needs: [go-test, lint, console, chart, examples-e2e]
-    if: ${{ always() }}
+    needs: [scope, go-test, lint, console, chart, examples-e2e]
+    if: ${{ always() && needs.scope.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every part to pass
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          CODE: ${{ needs.scope.outputs.code }}
         run: |
-          echo "$RESULTS"
+          echo "$RESULTS (code: $CODE)"
           test -n "$RESULTS"
-          for result in $RESULTS; do test "$result" = success; done
+          for result in $RESULTS; do test "$result" = success || { test "$result" = skipped && test "$CODE" = false; }; done
 
   sql:
     name: SQL bindings and query audit
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # Docker Hub rate-limits anonymous pulls; scripts/ci-pull-image.sh pulls
-      # from its mirrors with retries.
       - name: Start PostgreSQL
-        run: |
-          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
-          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
-            --tmpfs /var/lib/postgresql:rw,size=2g \
-            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-            "$image"
+        run: bash scripts/ci-services.sh start postgres
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
           go-version-file: go.mod
           cache: true
-      - name: Wait for PostgreSQL
-        run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+      - name: PostgreSQL is ready
+        run: bash scripts/ci-services.sh ready
       - name: Generated SQL bindings match the queries
         env:
           SQLC_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
@@ -209,14 +251,17 @@ jobs:
 
   e2e-shards:
     name: End-to-end worker ${{ matrix.worker }}
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     # scripts/e2e.sh splits the suite across the workers by recorded test
-    # durations; every worker computes the same split, so no test is skipped
-    # or duplicated.
+    # durations (ci/e2e-durations.tsv, refreshed by scripts/e2e-durations.sh);
+    # every worker computes the same split, so no test is skipped or
+    # duplicated. With twelve, a worker's share is about the longest test.
     strategy:
       fail-fast: false
       matrix:
-        worker: [0, 1, 2, 3, 4, 5, 6, 7]
+        worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     timeout-minutes: 20
     env:
       OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
@@ -232,32 +277,10 @@ jobs:
       OPENRAILS_E2E_TIMINGS: ${{ github.workspace }}/e2e-timings.tsv
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # A step rather than a service: the multi-replica fleets (#1075) need
-      # more than the default 100 connections, a server flag services cannot set.
-      - name: Start PostgreSQL
-        run: |
-          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
-          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
-            --tmpfs /var/lib/postgresql:rw,size=2g \
-            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-            "$image" -c max_connections=500 -c max_locks_per_transaction=256
-      - name: Start Redis
-        run: |
-          image="$(scripts/ci-pull-image.sh redis:7-alpine)"
-          docker run -d --pull never --name e2e-redis -p 6379:6379 "$image"
-          # One the outage test pauses and resumes.
-          docker run -d --pull never --name "$OPENRAILS_E2E_REDIS_OUTAGE_CONTAINER" -p 127.0.0.1:6381:6379 "$image"
-          # Another takes only TLS and an ACL user.
-          url="$(scripts/e2e-redis-tls.sh "$RUNNER_TEMP/redis-tls" 6380 "$image")"
-          echo "OPENRAILS_E2E_REDIS_TLS_URL=$url" >>"$GITHUB_ENV"
-          echo "OPENRAILS_E2E_REDIS_TLS_CA=$RUNNER_TEMP/redis-tls/ca.pem" >>"$GITHUB_ENV"
-      # A dev server: in memory, unsealed, OPENRAILS_E2E_VAULT_TOKEN its root
-      # token. Each test mounts its own KV v2 engine (internal/vaulttest).
-      - name: Start Vault
-        run: |
-          image="$(scripts/ci-pull-image.sh hashicorp/vault:2.1.1)"
-          docker run -d --pull never --name e2e-vault -p 8200:8200 \
-            -e VAULT_DEV_ROOT_TOKEN_ID="$OPENRAILS_E2E_VAULT_TOKEN" "$image"
+      # Steps rather than services: they start alongside Go's setup, and the
+      # multi-replica fleets (#1075) need a server flag services cannot set.
+      - name: Start PostgreSQL, Redis and Vault
+        run: bash scripts/ci-services.sh start postgres redis vault
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
@@ -266,10 +289,8 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: e2e
-      - name: Wait for PostgreSQL
-        run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
-      - name: Wait for Vault
-        run: timeout 60 bash -c 'until curl -fsS "$OPENRAILS_E2E_VAULT_ADDR/v1/sys/health" >/dev/null; do sleep 1; done'
+      - name: Services are ready
+        run: bash scripts/ci-services.sh ready
       - name: Run focused e2e contracts
         run: bash scripts/e2e.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -290,6 +311,8 @@ jobs:
   # standalone example against the server built from this revision.
   examples-e2e:
     name: Examples end-to-end
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -297,12 +320,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Start PostgreSQL
-        run: |
-          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
-          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
-            --tmpfs /var/lib/postgresql:rw,size=2g \
-            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-            "$image"
+        run: bash scripts/ci-services.sh start postgres
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
@@ -311,8 +329,8 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: examples
-      - name: Wait for PostgreSQL
-        run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+      - name: PostgreSQL is ready
+        run: bash scripts/ci-services.sh ready
       - run: bash scripts/check.sh examples-e2e
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() }}
@@ -321,25 +339,27 @@ jobs:
           save: "true"
 
   # The required check: every worker, the examples and the SQL gates must
-  # pass. A skipped, cancelled or failed child never turns into a successful
-  # aggregate.
+  # pass. A cancelled or failed child never turns into a successful aggregate,
+  # nor does a skipped one unless Scope found no code to test.
   e2e:
     name: End-to-end
-    needs: [e2e-shards, examples-e2e, sql]
-    if: ${{ always() }}
+    needs: [scope, e2e-shards, examples-e2e, sql]
+    if: ${{ always() && needs.scope.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every part to pass
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          CODE: ${{ needs.scope.outputs.code }}
         run: |
-          echo "$RESULTS"
+          echo "$RESULTS (code: $CODE)"
           test -n "$RESULTS"
-          for result in $RESULTS; do test "$result" = success; done
+          for result in $RESULTS; do test "$result" = success || { test "$result" = skipped && test "$CODE" = false; }; done
 
   security:
     name: Required Security
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

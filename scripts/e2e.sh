@@ -11,8 +11,8 @@
 # as the median). Every worker computes the same split, so each test runs on
 # exactly one worker. A worker runs OPENRAILS_E2E_JOBS tests at a time, longest
 # first. OPENRAILS_E2E_TIMINGS names a file for the measured durations, in the
-# durations file's format. To refresh it from CI:
-#   gh run download <run> -p 'e2e-timings-*' -D t && sort t/*/*.tsv > ci/e2e-durations.tsv
+# durations file's format; scripts/e2e-durations.sh refreshes the file from
+# CI's recent runs.
 set -euo pipefail
 export LC_ALL=C
 
