@@ -105,7 +105,6 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	m := &Payment{
 		ID:                p.ID,
 		CustomerID:        p.CustomerID,
-		PriceID:           DerefUUID(p.PriceID),
 		SubscriptionID:    p.SubscriptionID,
 		OrderID:           p.OrderID,
 		LedgerTransferID:  p.LedgerTransferID,
