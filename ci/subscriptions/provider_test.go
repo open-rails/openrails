@@ -198,6 +198,20 @@ func TestProviderOwnedRenewals(t *testing.T) {
 		require.Len(t, completed(w.payments(tp, l.c.id)), paid+1)
 		require.Equal(t, charges, l.engineCharges())
 		require.True(t, l.c.entitled(l.ent))
+		orders, err := w.client[tp].ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: l.sub})
+		require.NoError(t, err)
+		require.Len(t, orders.Items, 3, "the imported bill and both renewals are distinct orders")
+		orderIDs := map[billing.OrderID]bool{}
+		for _, order := range orders.Items {
+			require.Equal(t, billing.OrderStatus("complete"), order.Status)
+			require.Equal(t, int64(9_990_000), order.Total)
+			require.Equal(t, "USD", order.Currency)
+			orderIDs[order.ID] = true
+		}
+		for _, payment := range completed(w.payments(tp, l.c.id)) {
+			require.NotNil(t, payment.OrderID, "every verified charge belongs to its bill")
+			require.True(t, orderIDs[*payment.OrderID])
+		}
 	})
 }
 
