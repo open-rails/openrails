@@ -17,7 +17,7 @@ type LocalClient struct{ *Client }
 
 // LocalMerchant is a merchant handle with the engine's local-only operations.
 // Use Merchant when the consumer needs the common HTTP/embedded API. Like
-// Merchant, it performs no I/O; each operation checks the merchant is live.
+// Merchant, it performs no I/O; each operation retains its merchant and lifecycle checks.
 func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error) {
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("openrails: an initialized Engine is required")
