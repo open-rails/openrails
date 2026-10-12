@@ -453,7 +453,7 @@ fields (`400 unknown_field`), and every error code is in
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |
-| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard` behind `AdminRead`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
+| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard` behind `AdminRead`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | Metrics use `billing.MerchantMetricsRead`; catalog reads and the optional console ask use `billing.MerchantCatalogRead`, while catalog writes use `billing.MerchantCatalogManage` (or their `root:` twins). `GET /v1/admin/access` answers what the caller holds |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/console/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 
@@ -575,9 +575,8 @@ calendar ([data retention](operations.md#data-retention)):
 | `cancelSubscription`, `resumeSubscription`, `setSubscriptionPaymentMethod` resolved to nothing | Each resolves to the `Subscription` |
 | Generated list fields typed `T[] \| null` | `T[]`: the server always writes `[]` |
 
-A page that posted to `/v1/checkout` renders `<Checkout>` on a session instead.
-Stripe cards are saved with Elements and paid on the session when the PSP
-declares a `publishable_key`; without one, a one-off Stripe price redirects.
+A page that posted to `/v1/checkout` now renders `<OrderCheckout orderId>`
+for an unpaid order, or uses `<BuyButton>` to create and pay a customer order.
 
 ## 6. Reading the database
 
@@ -624,8 +623,8 @@ use the normal configurable HTTP feature buckets described in
 is removed. Standalone and embedded HTTP use the same counters (Redis, else
 the process's memory); trusted in-process Client operations retain their normal boundary.
 
-Merchant billing archives use the single current format, v1, and preserve arbitrary
-application metadata. Regenerate artifacts from discarded draft formats; see
+Merchant billing archives export format v2 and accept v1 and v2, preserving
+arbitrary application metadata. Regenerate artifacts from discarded draft formats; see
 [merchant portability](merchant-portability.md#archive-format-and-metadata).
 
 ### Catalog batches and product-local price keys
@@ -634,7 +633,7 @@ Catalog documents carry `schema_version` and their changes. Remove `application_
 `expected_revision`, and `catalog_version`: the server remembers the canonical
 content hash per merchant. Replays remain no-ops after later edits. A new hash
 applies atomically; hashes do not determine which unseen batch is newer.
-`Routes.MerchantConfig` controls HTTP catalog-write route exposure only; authorized
+`RouteGroups.Catalog` controls HTTP catalog-route exposure; authorized
 in-process client calls always work. `MerchantDeclaration.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 
@@ -644,34 +643,40 @@ reads a key's prices, and `ListPriceHistory(ctx, priceID, page)` its history
 using `price_key` also supply `product_key`; requests using immutable price IDs
 keep their current shape.
 
-A price exposes an automatically assigned `revision`, starting at zero within
-its product/key. `UpdatePrice` no longer accepts `key`: create a new price and
-archive the old one. Price terms and parent are immutable; product and price
-rows cannot be deleted. Existing UUIDs and purchase references survive the
-additive migrations. Reusing historical financial terms preserves their original
-revision, while price-key history records the new activation. A product's
-`revision` advances on actual edits without retaining full product versions.
+A price exposes a financial `version` starting at one within its product/key,
+also carried in its canonical `product-key:price-key:v1` ID. Its separate
+`revision` is the optimistic-concurrency counter for edits to that price key.
+`UpdatePrice` no longer accepts `key`: create a new price and archive the old
+one. Price terms and parent are immutable. Private database UUIDs and purchase
+references survive the additive migrations; public UUID price IDs are replaced
+as described in the [cutover](#price-id-cutover). Reusing historical financial
+terms preserves their original version, while price-key history records the
+new activation. A product's `revision` advances on actual edits without
+retaining full product versions.
 
 
 ### Catalog, merchant configuration and customer-support permissions
 
 Catalog management uses `/v1/catalog/`, including `/products`, `/prices`,
-`/meters`, `/apply`, `/ask` and `/price-migrations`. Merchant configuration
+`/meters`, `/apply` and `/price-migrations`. The optional catalog assistant uses
+`POST /v1/console/catalog/ask`, outside the merchant Go client. Merchant configuration
 uses `/v1/merchant/`, including `/psps`, `/configuration`, `/findings`,
 `/alert-webhooks`, `/billing-archive`, `/billing-import` and
-`/provisioning-tokens`. `PUT /v1/merchant/dashboard` saves the layout; its
-read and metric-generation routes use `/v1/metrics/dashboard`. Metrics query,
-schema and ask routes use `/v1/metrics/`; their former `/v1/admin/` paths are removed.
+`/provisioning-tokens` when customer provisioning is available.
+`PUT /v1/merchant/dashboard` saves the layout; its read uses
+`GET /v1/metrics/dashboard`. Metrics query and schema use `/v1/metrics/`;
+AI metrics questions and dashboard generation are removed.
 The former configuration paths under `/v1/admin/` are not mounted.
 
 Public product lookup is `GET /v1/products?merchant=<merchant id>`. Update
-storefront callers: `/v1/catalog/products` now requires catalog management
+storefront callers: `/v1/catalog/products` now requires catalog read
 permission and never serves as an alias for the public product list.
 
 Support staff use `merchant:customer:read` and `merchant:customer:manage`,
 with matching `root:` permissions. Update custom roles, API-key roles and
 trusted-issuer grants from `billing` to `customer`; old names grant no access.
-Catalog and configuration retain `merchant:catalog:manage` and
-`merchant:config:manage`; metrics retains `merchant:metrics:read`. A support
-role does not gain those operator capabilities. Hosts retain findings by
-enabling `RouteGroups.MerchantConfig` and granting configuration authority.
+Catalog and configuration have separate `merchant:catalog:read` /
+`merchant:catalog:manage` and `merchant:config:read` / `merchant:config:manage`
+permissions; metrics retains `merchant:metrics:read`. Hosts retain findings by
+enabling `RouteGroups.MerchantConfig`: reading needs configuration read,
+resolving needs configuration manage. Grant both when a caller needs both.

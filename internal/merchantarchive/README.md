@@ -129,8 +129,8 @@ The destination must be empty, including its catalog. Creating a product before
 restore produces the ordinary `not_empty` refusal; the importer never rewrites
 incoming product IDs.
 
-Archive format v1 is the only supported format and includes application metadata
-in the current positional row profiles. There are no legacy readers or converters.
-Artifacts from discarded draft formats must be exported again using the current
-library. Catalog revision and application receipts remain in the hashed snapshot,
+Exports use archive format v2; imports accept v1 and v2, including application
+metadata and supported historical positional row profiles. Unsupported draft
+formats must be exported again using the current library. Catalog revision and
+application receipts remain in the hashed snapshot,
 and replaying a completed restore cannot reset a later revision.

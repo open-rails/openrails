@@ -118,8 +118,9 @@ Use `billing.ParsePriceID("premium:buy-usd:v1")` for a stored spelling, or
 `billing.NewPriceID("premium", "buy-usd", 1)` when constructing it from keys.
 `GetPrice`, `UpdatePrice`, `ListPriceHistory`, order lines, subscription
 changes, and price filters all take the canonical ID. They do not accept a
-UUID alias. `ListPrices` can instead filter by `ProductKey` and `Key` to find
-the current version without guessing its number.
+UUID alias. `ListPrices` can instead filter by `ProductKey`, `Key` and
+`Archived: new(false)` to find the current version without guessing its number;
+omitting `Archived` includes historical versions.
 
 Database UUIDs remain private foreign keys so upgrades preserve accepted
 financial facts, provider identities, and historical references. Migration

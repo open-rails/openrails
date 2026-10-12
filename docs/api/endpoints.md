@@ -372,7 +372,8 @@ even after intervening edits.
 
 A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
-automatic revisions starting at zero. `PATCH` archives or restores a price and
+financial versions starting at one, identified as `product-key:price-key:v1`.
+The separate `revision` tracks edits to the price key. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
 drift findings, each with the `psp_id` that was compared, and

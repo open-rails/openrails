@@ -22,7 +22,7 @@ Health and capability discovery. Only the standalone server serves the root path
 
 ## Checkout (public)
 
-What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions.
+Public product lookup and an order's Solana Pay transaction requests.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
