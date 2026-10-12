@@ -330,13 +330,6 @@ var referenceChecks = []rowCheck{
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	purchaseInvalid, err := gen.New(tx).CountInvalidPurchaseCheckoutReferences(ctx, id.UUID())
-	if err != nil {
-		return err
-	}
-	if purchaseInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: purchaseInvalid}
-	}
 	if err := validateSubscriptionCollectionReferences(ctx, tx, id); err != nil {
 		return err
 	}
@@ -346,33 +339,12 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
 		return err
 	}
-	quoteInvalid, quoteErr := gen.New(tx).CountInvalidEngineCheckoutReferences(ctx, id.UUID())
-	if quoteErr != nil {
-		return quoteErr
-	}
-	if quoteInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: quoteInvalid}
-	}
-	stripeInvalid, stripeErr := gen.New(tx).CountInvalidStripeSetupReferences(ctx, id.UUID())
-	if stripeErr != nil {
-		return stripeErr
-	}
-	if stripeInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: stripeInvalid}
-	}
 	cardCaptureInvalid, err := gen.New(tx).CountInvalidPaymentMethodCaptureReferences(ctx, id.UUID())
 	if err != nil {
 		return err
 	}
 	if cardCaptureInvalid != 0 {
 		return &Error{Code: "unsupported_state", Table: "payment_methods", Count: cardCaptureInvalid}
-	}
-	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
-	if err != nil {
-		return err
-	}
-	if invalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: invalid}
 	}
 
 	for _, c := range referenceChecks {

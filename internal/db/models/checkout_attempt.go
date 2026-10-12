@@ -8,14 +8,13 @@ import (
 	"github.com/google/uuid"
 )
 
-type CheckoutAttemptMode string
+// PurchaseKind is the offer category used by processor routing policies.
+// Checkout attempts themselves are owned by orders and carry no mode.
+type PurchaseKind string
 
 const (
-	CheckoutAttemptModeOneOff        CheckoutAttemptMode = "one_off"
-	CheckoutAttemptModePaymentMethod CheckoutAttemptMode = "payment_method"
-	CheckoutAttemptModeSubscription  CheckoutAttemptMode = "subscription"
-	// CheckoutAttemptModeOrder pays an order (OrderID): its total, no price.
-	CheckoutAttemptModeOrder CheckoutAttemptMode = "order"
+	PurchaseOneOff       PurchaseKind = "one_off"
+	PurchaseSubscription PurchaseKind = "subscription"
 )
 
 type CheckoutAttemptStatus string
@@ -35,11 +34,6 @@ type CheckoutAttempt struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
 	OrderID *uuid.UUID `json:"order_id,omitempty"`
-	// AcceptedPriceID and AcceptedSubscription are restored only from the
-	// migration-frozen accepted_offer of pre-order attempts. They cannot create
-	// a new priced checkout; recovery consumes its existing provider authority.
-	AcceptedPriceID      *uuid.UUID `json:"accepted_price_id,omitempty"`
-	AcceptedSubscription bool       `json:"accepted_subscription,omitempty"`
 
 	Rail   Rail                  `json:"rail"`
 	Status CheckoutAttemptStatus `json:"status"`
@@ -147,25 +141,13 @@ type CheckoutRoutingSkip struct {
 	Reason   string `json:"reason"`
 }
 
-// ValidateTerms checks an order attempt or an existing recovery record.
+// ValidateTerms checks the order's frozen payment amount and currency.
 func (s *CheckoutAttempt) ValidateTerms() error {
-	if s == nil {
-		return fmt.Errorf("checkout attempt is required")
-	}
-	if s.RailState["capture"] != nil || s.RailState["kind"] == "stripe_engine_setup" || s.RailState["retired_setup"] == true {
-		if s.AcceptedPriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil {
-			return fmt.Errorf("retained setup cannot carry monetary terms")
-		}
-		return nil
-	}
-	if s.OrderID == nil && s.AcceptedPriceID == nil {
-		return fmt.Errorf("attempt requires its order or retained accepted offer")
-	}
-	if s.OrderID != nil && s.AcceptedPriceID != nil {
-		return fmt.Errorf("order attempt cannot have a retained offer")
+	if s == nil || s.OrderID == nil || *s.OrderID == uuid.Nil {
+		return fmt.Errorf("payment attempt requires its order")
 	}
 	if s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
-		return fmt.Errorf("attempt requires amount and currency")
+		return fmt.Errorf("payment attempt requires amount and currency")
 	}
 	return nil
 }

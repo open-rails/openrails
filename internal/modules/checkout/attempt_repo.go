@@ -57,11 +57,6 @@ func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.Checko
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
-	// Setup bindings and secret erasure have dedicated conditional writes.
-	// Generic checkout progress must not replace accepted capture authority.
-	if session.RailState["capture"] != nil || session.RailState["kind"] == "stripe_engine_setup" {
-		return fmt.Errorf("payment-method setup requires captured completion or expiry")
-	}
 	meta, fields, state, err := checkoutAttemptJSONB(session)
 	if err != nil {
 		return err
@@ -146,28 +141,6 @@ func (r *CheckoutAttemptRepo) GetByReference(ctx context.Context, reference stri
 
 	ref := strings.TrimSpace(reference)
 	row, err := r.db.Gen(ctx).GetCheckoutAttemptByReference(ctx, gen.GetCheckoutAttemptByReferenceParams{MerchantID: queryMerchant.UUID(), Reference: &ref})
-	if err != nil {
-		return nil, err
-	}
-	return models.CheckoutAttemptFromGen(row)
-}
-
-func (r *CheckoutAttemptRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutAttempt, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutAttempt(ctx, gen.GetLatestOpenCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
-		CustomerID: tsid,
-		PriceID:    priceID,
-		Rail:       string(rail),
-		Now:        now,
-	})
 	if err != nil {
 		return nil, err
 	}

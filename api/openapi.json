@@ -7119,6 +7119,15 @@
         "tags": [
           "customer"
         ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7159,6 +7168,7 @@
           "payment_method_stale",
           "payment_provider_rejected",
           "provider_outcome_unknown",
+          "resource_conflict",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -7287,6 +7297,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentMethodParams"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -7310,12 +7329,16 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "card_declined",
+          "invalid_param",
+          "payment_method_stale",
           "payment_provider_rejected",
+          "resource_conflict",
           "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "request"
         ]
       }
     },
@@ -9998,6 +10021,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -10042,6 +10072,7 @@
           "payment_method_stale",
           "payment_provider_rejected",
           "provider_outcome_unknown",
+          "resource_conflict",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -12652,6 +12683,21 @@
           }
         }
       },
+      "ConfirmPaymentMethodParams": {
+        "type": "object",
+        "properties": {
+          "capture": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustodianCaptureReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -13343,6 +13389,20 @@
           "decimals",
           "minor_decimals"
         ]
+      },
+      "CustodianCaptureReference": {
+        "type": "object",
+        "properties": {
+          "custodian_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
       },
       "Customer": {
         "type": "object",

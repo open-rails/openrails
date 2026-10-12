@@ -236,9 +236,9 @@ export type BillingDetails = z.infer<typeof billingDetailsSchema>
 
 export const paymentMethodSchema = z.object({
   id: z.string(),
-  /** `requires_action` while the bank's authentication of a new card waits. */
+  /** `requires_action` while vendor card entry or bank authentication waits. */
   status: z.string().nullish(),
-  /** The bank's authentication of a card being saved. */
+  /** Vendor card capture or the bank's authentication of a card being saved. */
   next_action: z
     .object({
       type: z.string(),
@@ -765,7 +765,11 @@ interface NewCardFields {
  * Idempotency-Key and confirm the pending method with its vendor session token.
  */
 export type NewCard = NewCardFields &
-  ({ token: string; card?: never } | { card: CardEntry; token?: never } | { token?: never; card?: never })
+  (
+    | { token: string; card?: never }
+    | { card: CardEntry; token?: never }
+    | { token?: never; card?: never }
+  )
 
 /** A token issued by the vendor session of an owned pending payment method. */
 export interface CardCaptureReference {

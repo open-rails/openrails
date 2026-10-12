@@ -442,6 +442,10 @@ export type ConfirmOrderParams = {
   signature?: string
 }
 
+export type ConfirmPaymentMethodParams = {
+  capture?: CustodianCaptureReference | null
+}
+
 export type CreateAlertWebhookParams = {
   name?: string
   url?: string
@@ -625,6 +629,12 @@ export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
+}
+
+export type CustodianCaptureReference = {
+  custodian_id?: string
+  session_id?: string
+  token?: string
 }
 
 export type Customer = {

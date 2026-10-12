@@ -51,6 +51,7 @@ export type {
   ListPage,
   NetworkLinkChallenge,
   NewCard,
+  CardCaptureReference,
   NextAction,
   Order,
   OrderLine,

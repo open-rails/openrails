@@ -18,24 +18,15 @@ UPDATE billing.checkout_attempts SET
     subscription_id = sqlc.narg(subscription_id),
     metadata = sqlc.narg(metadata),
     rail_fields = sqlc.narg(rail_fields),
-    rail_state = COALESCE(sqlc.narg(rail_state)::jsonb, '{}'::jsonb)
-      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state ? 'accepted_offer' THEN jsonb_build_object('accepted_offer', rail_state->'accepted_offer') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,
+    rail_state = sqlc.narg(rail_state),
     psp_id = sqlc.arg(psp_id)::uuid,
     updated_at = sqlc.arg(updated_at)
 WHERE checkout_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR status <> 'succeeded' OR sqlc.arg(status)::text = 'succeeded')
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR (customer_id=sqlc.arg(customer_id)::uuid AND rail=sqlc.arg(rail)::text
-           AND amount IS NOT DISTINCT FROM sqlc.narg(amount)::bigint AND currency IS NOT DISTINCT FROM sqlc.narg(currency)::text
-           AND psp_id=sqlc.arg(psp_id)::uuid))
-  AND (NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
-       OR COALESCE((sqlc.narg(rail_state)::jsonb->>'provider_closed')::boolean, false));
+  AND order_id IS NOT NULL
+  AND customer_id=sqlc.arg(customer_id)::uuid AND rail=sqlc.arg(rail)::text
+  AND amount IS NOT DISTINCT FROM sqlc.narg(amount)::bigint AND currency IS NOT DISTINCT FROM sqlc.narg(currency)::text
+  AND psp_id=sqlc.arg(psp_id)::uuid;
 
 -- name: BindSolanaCheckoutAttempt :execrows
 UPDATE billing.checkout_attempts SET
@@ -66,24 +57,9 @@ WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1;
 
--- name: GetLatestOpenCheckoutAttempt :one
-SELECT * FROM billing.checkout_attempts cs
-WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.customer_id = sqlc.arg(customer_id)::uuid
-  AND (cs.rail_state#>>'{accepted_offer,price_id}')::uuid = sqlc.arg(price_id)::uuid
-  AND cs.rail = sqlc.arg(rail)::text
-  AND cs.status IN ('created', 'requires_action')
-  AND (cs.expires_at IS NULL OR cs.expires_at > sqlc.arg(now)::timestamptz)
-  AND cs.deleted_at IS NULL
-ORDER BY cs.created_at DESC
-LIMIT 1;
-
--- Retention sweep (or#877 B4): one pass per merchant off the directory walk,
--- with the merchant predicate written out.
--- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: ExpireCheckoutAttempts :execrows
 UPDATE billing.checkout_attempts
-SET rail_state = rail_state #- '{capture,secret_ciphertext}',
-    status = 'expired', updated_at = sqlc.arg(now)
+SET status = 'expired', updated_at = sqlc.arg(now)
 WHERE deleted_at IS NULL
   AND ctid IN (
     SELECT cs.ctid FROM billing.checkout_attempts cs
@@ -108,22 +84,10 @@ ORDER BY expires_at;
 -- name: ExpireCheckoutAttemptByID :execrows
 -- Repair for life.checkout_attempt.stale: mark one stale session expired.
 UPDATE billing.checkout_attempts
-SET rail_state = rail_state #- '{capture,secret_ciphertext}',
-    status = 'expired', updated_at = sqlc.arg(now)::timestamptz
+SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('created', 'requires_action')
   AND deleted_at IS NULL;
-
--- name: CountInvalidCheckoutCaptureReferences :one
--- Terminal replay retains the original capture authority even after a later
--- legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
--- deletion leaves historical replay intact and does not recreate the method.
-SELECT count(*) FROM billing.checkout_attempts cs
-WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'capture' AND cs.rail='nmi'
-AND (
- NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
-);
 
 -- name: GetCheckoutCaptureAccountsForShare :one
 -- Recheck the PSP and custodian identities after vendor metadata readback,
@@ -132,65 +96,3 @@ SELECT sqlc.embed(p),sqlc.embed(c) FROM billing.psps p
 JOIN billing.custodians c ON c.merchant_id=p.merchant_id AND c.id=sqlc.arg(custodian_id)::uuid
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
 FOR SHARE OF p,c;
-
--- name: CountInvalidStripeSetupReferences :one
-SELECT count(*) FROM billing.checkout_attempts cs
-WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state->>'kind'='stripe_engine_setup' AND cs.rail='stripe' AND cs.status='succeeded'
-AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id);
-
--- name: CountInvalidEngineCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_attempts cs
-LEFT JOIN billing.provider_intents i ON i.merchant_id=cs.merchant_id
- AND i.payload->>'checkout_attempt_id'=cs.id::text AND i.intent_type='initial_membership'
-WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'initial_membership_quote'
-AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
- OR (i.id IS NOT NULL AND (
-   i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id::text IS DISTINCT FROM cs.rail_state#>>'{accepted_offer,price_id}' OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
-   OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
-   OR (i.status='failed_terminal' AND cs.status<>'failed'))));
--- name: CloseHostedCheckoutFromProvider :execrows
-UPDATE billing.checkout_attempts
-SET status=CASE WHEN status='succeeded' THEN status ELSE sqlc.arg(status)::text END,
-    rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
-    updated_at=sqlc.arg(now)::timestamptz
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
-  AND psp_id=sqlc.arg(psp_id)::uuid AND rail='stripe' AND deleted_at IS NULL;
-
--- Archive integrity includes tombstones and preserves accepted commercial
--- snapshots against their immutable price identity, not current product text.
--- name: CountInvalidPurchaseCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_attempts s
-LEFT JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=(s.rail_state#>>'{accepted_offer,price_id}')::uuid
-WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_purchase'
- AND (p.id IS NULL
-   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
-   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
-   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM s.amount::text
-   OR (p.customer_amount IS NULL AND s.amount IS DISTINCT FROM p.amount)
-   OR (p.customer_amount IS NOT NULL AND (s.amount IS NULL
-       OR s.amount < (p.customer_amount->>'min_amount')::bigint
-       OR s.amount > (p.customer_amount->>'max_amount')::bigint))
-   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
-   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
-   OR p.billing_interval_hours IS NOT NULL);
-
--- A local expiry or failed HTTP request does not prove a provider cannot charge.
--- Only a completed purchase or authoritative provider cancellation releases a
--- hosted session. NMI's accepted operation owns uncertainty after submission.
--- name: HasUnresolvedProductCheckout :one
-SELECT EXISTS (
- SELECT 1 FROM billing.checkout_attempts s
- JOIN billing.prices p ON p.id=(s.rail_state#>>'{accepted_offer,price_id}')::uuid AND p.merchant_id=s.merchant_id
- WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid
-   AND s.customer_id=sqlc.arg(customer_id)::uuid
-   AND p.product_id=sqlc.arg(product_id)::uuid
-   AND s.order_id IS NULL AND COALESCE(s.rail_state#>>'{accepted_offer,subscription}','false')='false'
-   AND s.status<>'succeeded'
-   AND (s.status IN ('created','requires_action')
-     OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
-   -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
-     WHERE f.merchant_id=s.merchant_id
-       AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
-       AND f.status IN ('failed_terminal','expired','superseded'))
-);

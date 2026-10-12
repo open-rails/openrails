@@ -59,29 +59,6 @@ func TestSolanaPlanTerms(t *testing.T) {
 	require.False(t, priceHasSolanaRecurring(partial), "an unpriced plan is not recurring")
 }
 
-// A poller-verified (settled) payment outlives the quote window; without that
-// proof expiry stands, and failed/canceled are never clock outcomes.
-func TestSucceedTransition(t *testing.T) {
-	for _, tc := range []struct {
-		status  models.CheckoutAttemptStatus
-		settled bool
-		proceed bool
-		err     error
-	}{
-		{models.CheckoutAttemptStatusRequiresAction, false, true, nil},
-		{models.CheckoutAttemptStatusCreated, true, true, nil},
-		{models.CheckoutAttemptStatusSucceeded, true, false, nil},
-		{models.CheckoutAttemptStatusExpired, false, false, ErrCheckoutAttemptConflict},
-		{models.CheckoutAttemptStatusExpired, true, true, nil},
-		{models.CheckoutAttemptStatusFailed, true, false, ErrCheckoutAttemptConflict},
-		{models.CheckoutAttemptStatusCanceled, true, false, ErrCheckoutAttemptConflict},
-	} {
-		proceed, err := succeedTransition(tc.status, tc.settled)
-		require.Equal(t, tc.proceed, proceed, "%s settled=%v", tc.status, tc.settled)
-		require.ErrorIs(t, err, tc.err, "%s settled=%v", tc.status, tc.settled)
-	}
-}
-
 type noopSolanaTransactions struct{}
 
 func (noopSolanaTransactions) BuildPaymentTransactionFromQuote(context.Context, *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error) {
@@ -103,7 +80,7 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 	quoted := func() *models.CheckoutAttempt {
 		ref := solanaReference
 		return &models.CheckoutAttempt{
-			ID: uuid.New(), CustomerID: uuid.New(), AcceptedPriceID: new(uuid.New()), Amount: new(int64(10_000)), Currency: new("USD"), Reference: &ref,
+			ID: uuid.New(), CustomerID: uuid.New(), OrderID: new(uuid.New()), Amount: new(int64(10_000)), Currency: new("USD"), Reference: &ref,
 			RailState: map[string]any{"token_symbol": "USDC", "token_mint": devnetUSDCMint, "token_amount": uint64(100_000_000), "recipient": recipientWallet},
 		}
 	}

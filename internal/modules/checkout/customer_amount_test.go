@@ -44,9 +44,9 @@ func TestCustomerAmountOnlyAdvertisesSupportedRails(t *testing.T) {
 	service := &CheckoutAttemptService{}
 	for _, rail := range []string{"nmi", "stripe"} {
 		cfg := &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "test"}, Stripe: &config.StripeRailConfig{SecretKey: "test"}}
-		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, cfg, models.CheckoutAttemptModeOneOff))
+		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, cfg, models.PurchaseOneOff))
 	}
 	for _, rail := range []string{"solana", "ccbill"} {
-		require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, &config.ResolvedPSP{}, models.CheckoutAttemptModeOneOff))
+		require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, &config.ResolvedPSP{}, models.PurchaseOneOff))
 	}
 }

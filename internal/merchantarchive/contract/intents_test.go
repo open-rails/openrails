@@ -17,45 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-func TestAcceptedPurchaseMustMatchCheckoutAndBeResolved(t *testing.T) {
-	var cases []rowCase
-	for _, tc := range []struct {
-		name, status, amount, rail string
-		submitted, closed, valid   bool
-	}{
-		{"paid", "succeeded", "100", "stripe", true, false, true},
-		{"stripe local expiry is unknown", "expired", "100", "stripe", true, false, false},
-		{"stripe provider closed", "expired", "100", "stripe", true, true, true},
-		{"never submitted", "failed", "100", "stripe", false, true, true},
-		{"changed amount", "succeeded", "101", "stripe", true, false, false},
-		{"negative amount", "succeeded", "-100", "stripe", true, false, false},
-	} {
-		state := fmt.Sprintf(`{"accepted_offer":{"price_id":%q,"subscription":false},"accepted_purchase":{"price_id":%q,"product_id":%q,"payment_id":%q,"product_key":"post","product_name":"Post","amount":%q,"currency":"USD","access_duration_hours":null,"entitlements":{"post:one":null},"accepted_at":"2026-09-23T00:00:00Z","entitlement_start":"2026-09-23T00:00:00Z"},"purchase_submitted":%t,"provider_closed":%t}`,
-			testMerchant, testMerchant, testMerchant, testMerchant, tc.amount, tc.submitted, tc.closed)
-		cases = append(cases, rowCase{tc.name, "checkout_attempts", map[string]string{
-			"rail": tc.rail, "status": tc.status, "amount": "100", "currency": "USD", "rail_state": state,
-		}, tc.valid})
-	}
-	checkRows(t, cases)
-}
-
 func TestCheckoutRailStateContracts(t *testing.T) {
-	// A real NMI checkout fingerprint; it contains a Luhn-valid 16-digit run.
-	const digest = "cf0b56594a544b069795b7521f553ad1ab9dbc4413daf5369343142307519d66"
-	if safeText(digest) {
-		t.Fatal("fixture must exercise the PAN-shaped substring")
-	}
-	for raw, valid := range map[string]bool{
-		`{"_openrails_request_fingerprint":"` + digest + `"}`:                              true,
-		`{"_openrails_request_fingerprint":"4111111111111111"}`:                            false,
-		`{"_openrails_request_fingerprint":"not-a-sha256"}`:                                false,
-		`{"_openrails_request_fingerprint":"` + strings.ToUpper(digest) + `"}`:             false,
-		`{"_openrails_request_fingerprint":42}`:                                            false,
-		`{"_openrails_request_fingerprint":"` + digest + `","message":"4111111111111111"}`: false,
-		`{"_openrails_request_fingerprint":"` + digest + `","unknown":"retained"}`:         false,
-	} {
-		if err := validateJSON("checkout_attempts.rail_state", raw); (err == nil) != valid {
-			t.Errorf("%s: valid=%v, error=%v", raw, valid, err)
+	for _, raw := range []string{`{"accepted_purchase":{}}`, `{"initial_membership_quote":"{}"}`, `{"capture":{}}`, `{"_openrails_request_fingerprint":"old"}`} {
+		if err := validateJSON("checkout_attempts.rail_state", raw); err == nil {
+			t.Errorf("retired checkout state accepted: %s", raw)
 		}
 	}
 	const session = `"12345678-1234-4234-8234-123456789012"`

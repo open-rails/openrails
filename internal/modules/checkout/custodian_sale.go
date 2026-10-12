@@ -532,16 +532,15 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		metadata["e2e_run_id"] = p.E2ERunID
 	}
 	result, err := h.Sale.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		CheckoutAttemptID: p.CheckoutAttemptID,
-		UserID:            p.UserID,
-		PriceID:           p.PriceID,
-		Rail:              nmiproxy.Rail,
-		TransactionID:     res.TransactionID,
-		Amount:            p.AmountMicros,
-		Currency:          p.Currency,
-		Metadata:          metadata,
-		AttemptKind:       payments.AttemptInitial,
-		TokenType:         res.TokenType,
+		UserID:        p.UserID,
+		PriceID:       p.PriceID,
+		Rail:          nmiproxy.Rail,
+		TransactionID: res.TransactionID,
+		Amount:        p.AmountMicros,
+		Currency:      p.Currency,
+		Metadata:      metadata,
+		AttemptKind:   payments.AttemptInitial,
+		TokenType:     res.TokenType,
 	})
 	if err != nil {
 		return intents.Ambiguous("sale charged, but purchase registration failed: " + err.Error())

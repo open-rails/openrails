@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -424,42 +423,15 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 	}
 }
 
-// SolanaLocalRecordResolverFromDB resolves memo local-ids against the two
-// record kinds the stamp names: checkout attempts (one-off local-id = attempt
-// id) and rail intents (pull local-id = intent id). (nil, nil) = no local
-// record; backend errors surface so the run retries instead of parking noise.
+// SolanaLocalRecordResolverFromDB resolves pull-intent memo ids. Order
+// transfers settle through their reference ledger and order attempts; the
+// retired price-checkout backfill is not reconstructed. (nil,nil) leaves an
+// unmatched wallet scan for operator review.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 	return func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error) {
 		scopeMerchantID, scopeErr := merchant.Require(ctx)
 		if scopeErr != nil {
 			return nil, scopeErr
-		}
-		row, err := d.Gen(ctx).GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
-		if err == nil {
-			session, err := models.CheckoutAttemptFromGen(row)
-			if err != nil {
-				return nil, err
-			}
-			if session.AcceptedPriceID == nil {
-				return nil, nil
-			} // setup is not a Solana payment obligation
-			rec := &SolanaLocalRecord{
-				Kind:                SolanaLocalKindCheckoutAttempt,
-				Rail:                string(session.Rail),
-				CustomerID:          session.CustomerID,
-				PriceID:             *session.AcceptedPriceID,
-				SessionStatus:       string(session.Status),
-				ExpectedRecipient:   solanaStateStr(session.RailState, "recipient"),
-				ExpectedMint:        solanaStateStr(session.RailState, "token_mint"),
-				ExpectedTokenAmount: solanaStateU64(session.RailState, "token_amount"),
-			}
-			if session.TransactionID != nil {
-				rec.SettledTransactionID = strings.TrimSpace(*session.TransactionID)
-			}
-			return rec, nil
-		}
-		if !db.IsNotFound(err) {
-			return nil, err
 		}
 		intent, err := d.Gen(ctx).GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
 		if err == nil {
@@ -478,32 +450,4 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 		}
 		return nil, nil
 	}
-}
-
-// solanaStateStr / solanaStateU64 read the checkout attempt's rail_state jsonb
-// (written by the solana checkout flow: recipient / token_mint / token_amount).
-func solanaStateStr(state map[string]any, key string) string {
-	if s, ok := state[key].(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
-}
-
-func solanaStateU64(state map[string]any, key string) uint64 {
-	// No float64 case: a base-unit amount is stored as a decimal string, and
-	// one that arrived as a JSON number has been through a float64 and cannot
-	// be trusted to equal the on-chain transfer. An unreadable amount yields 0,
-	// which parks the settlement rather than approving against a rounded
-	// expectation.
-	switch v := state[key].(type) {
-	case string:
-		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
-			return n
-		}
-	case json.Number:
-		if n, err := strconv.ParseUint(v.String(), 10, 64); err == nil {
-			return n
-		}
-	}
-	return 0
 }

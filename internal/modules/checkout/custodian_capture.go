@@ -330,7 +330,7 @@ func (s *CheckoutAttemptService) ConfirmCustodianCard(ctx context.Context, id uu
 		return s.renderCapturedCard(ctx, method)
 	}
 	if method.Status != "requires_action" || !s.now().Before(state.ExpiresAt) {
-		return SavedCard{}, ErrCheckoutAttemptExpired
+		return s.renderCapturedCard(ctx, method)
 	}
 	current, client, _, err := s.resolveCapture(ctx, state.PSPID)
 	if err != nil {

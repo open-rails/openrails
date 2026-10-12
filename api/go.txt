@@ -905,6 +905,8 @@ pkg openrails/billing, method (CreditGrantID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (CreditGrantID) String() string
 pkg openrails/billing, method (CreditGrantID) UUID() uuid.UUID
 pkg openrails/billing, method (CurrencyUnits) NativeShift() int
+pkg openrails/billing, method (CustodianCaptureReference) GoString() string
+pkg openrails/billing, method (CustodianCaptureReference) String() string
 pkg openrails/billing, method (CustomerID) IsZero() bool
 pkg openrails/billing, method (CustomerID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (CustomerID) String() string
@@ -1330,6 +1332,8 @@ pkg openrails/billing, type CheckoutRoutingRule struct, Prefer []string `json:"p
 pkg openrails/billing, type CheckoutUIMode string
 pkg openrails/billing, type ConfirmOrderParams struct
 pkg openrails/billing, type ConfirmOrderParams struct, Signature *string `json:"signature,omitempty"`
+pkg openrails/billing, type ConfirmPaymentMethodParams struct
+pkg openrails/billing, type ConfirmPaymentMethodParams struct, Capture *CustodianCaptureReference `json:"capture"`
 pkg openrails/billing, type CreateAlertWebhookParams struct
 pkg openrails/billing, type CreateAlertWebhookParams struct, Enabled *bool `json:"enabled"`
 pkg openrails/billing, type CreateAlertWebhookParams struct, Format AlertWebhookFormat `json:"format"`
@@ -1473,6 +1477,10 @@ pkg openrails/billing, type CurrencyUnits struct
 pkg openrails/billing, type CurrencyUnits struct, Code string `json:"code"`
 pkg openrails/billing, type CurrencyUnits struct, Decimals int `json:"decimals"`
 pkg openrails/billing, type CurrencyUnits struct, MinorDecimals int `json:"minor_decimals"`
+pkg openrails/billing, type CustodianCaptureReference struct
+pkg openrails/billing, type CustodianCaptureReference struct, CustodianID string `json:"custodian_id"`
+pkg openrails/billing, type CustodianCaptureReference struct, SessionID string `json:"session_id"`
+pkg openrails/billing, type CustodianCaptureReference struct, Token string `json:"token"`
 pkg openrails/billing, type Customer struct
 pkg openrails/billing, type Customer struct, Balances []Balance `json:"balances"`
 pkg openrails/billing, type Customer struct, Contact *CustomerContact `json:"contact"`

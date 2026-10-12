@@ -29,7 +29,7 @@ func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRo
 		return nil, apperr.Invalidf("price_id is required").WithParam("price_id")
 	}
 	var decision *checkout.RoutingDecision
-	var mode models.CheckoutAttemptMode
+	var mode models.PurchaseKind
 	if err := rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var runErr error
 		decision, mode, runErr = checkoutAttempts.DryRunRouting(scopedCtx, in.PriceID.String(), "", "", in.Country, in.PSP)

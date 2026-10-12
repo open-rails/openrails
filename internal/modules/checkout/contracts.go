@@ -33,7 +33,6 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 }
 
 type CheckoutRequest struct {
-	acceptedPurchase *acceptedPurchaseTerms
 	// attempt places a new card's verification in its checkout.
 	attempt         cardAttempt
 	PriceID         string `json:"price_id"`

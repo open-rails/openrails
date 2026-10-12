@@ -10,7 +10,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -23,8 +22,6 @@ type MembershipSlot struct {
 	// Changes is the membership a change replaces; it holds the slot the
 	// change takes over.
 	Changes *uuid.UUID
-	// Attempt is the Solana subscribe asking, whose row reserves the slot.
-	Attempt uuid.UUID
 }
 
 // Refuse refuses a new membership while the slot is held: by a live
@@ -71,17 +68,9 @@ func (s MembershipSlot) Refuse(ctx context.Context, q *gen.Queries) error {
 }
 
 // Pending names another purchase of the slot awaiting its first payment: a
-// Solana subscribe whose first pull may still land, or an unresolved
-// enrollment. It is "" when there is none.
+// unresolved enrollment. Solana order purchases hold ordinary order claims. It is "" when there is none.
 func (s MembershipSlot) Pending(ctx context.Context, q *gen.Queries) (string, error) {
-	_, err := q.GetConflictingSubscribeAttempt(ctx, gen.GetConflictingSubscribeAttemptParams{ProductID: s.ProductID, MerchantID: s.MerchantID, CustomerID: s.CustomerID, OpenAfter: s.At.Add(-solana.LateSettlementWindow), ExceptID: s.Attempt})
-	if err == nil {
-		return "a Solana subscription to this product or tier group awaits its first payment", nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
-	}
-	_, err = q.GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID})
+	_, err := q.GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID})
 	if err == nil {
 		return "another enrollment of this product or tier group is unresolved", nil
 	}

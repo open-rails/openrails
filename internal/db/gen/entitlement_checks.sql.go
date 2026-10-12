@@ -311,30 +311,6 @@ const permanentBenefitsCovered = `-- name: PermanentBenefitsCovered :one
 WITH wanted AS (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = $1::uuid AND pe.product_id = $4::uuid AND pe.removed_at IS NULL
-), reserved AS (
-    SELECT (s.rail_state->'accepted_purchase'->>'product_id')::uuid AS product_id
-    FROM billing.checkout_attempts s
-    WHERE $5::boolean
-      AND s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
-      AND s.order_id IS NULL AND COALESCE(s.rail_state#>>'{accepted_offer,subscription}','false')='false' AND s.status <> 'succeeded'
-      AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
-      AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
-      AND s.rail_state->'accepted_purchase'->>'product_id' IS NOT NULL
-      -- #1099: a session whose sale finally failed reserves nothing; its
-      -- operation's outcome is the session's.
-      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
-        WHERE f.merchant_id=s.merchant_id
-          AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
-          AND f.status IN ('failed_terminal','expired','superseded'))
-    UNION
-    SELECT (i.payload->>'product_id')::uuid
-    FROM billing.provider_intents i
-    WHERE $5::boolean
-      AND i.merchant_id = $1::uuid AND i.intent_type = 'nmi_sale'
-      AND i.payload->>'user_id' = $2::uuid::text
-      AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-      AND i.payload->>'access_duration_hours' IS NULL
-      AND i.payload->>'product_id' IS NOT NULL
 )
 SELECT EXISTS (SELECT 1 FROM wanted) AND NOT EXISTS (
     SELECT 1 FROM wanted w
@@ -345,33 +321,26 @@ SELECT EXISTS (SELECT 1 FROM wanted) AND NOT EXISTS (
           AND pa.customer_id = $2::uuid AND pa.ends_at IS NULL
           AND pa.starts_at <= $3::timestamptz
           AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-    ) AND NOT EXISTS (
-        SELECT 1 FROM reserved r
-        JOIN billing.product_entitlements pe ON pe.merchant_id = $1::uuid AND pe.product_id = r.product_id
-        WHERE pe.entitlement = w.entitlement AND pe.removed_at IS NULL
     )
 ) AS covered
 `
 
 type PermanentBenefitsCoveredParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	AtTime         time.Time
-	ProductID      uuid.UUID
-	IncludePending bool
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AtTime     time.Time
+	ProductID  uuid.UUID
 }
 
 // A partial bundle remains useful; refuse only when every key of the product
-// is already held indefinitely or reserved by another accepted permanent
-// purchase. Admission calls this under the customer lock used by session and
-// sale insertion. Reservations name their product, whose current keys count.
+// is already held indefinitely. Pending order purchases are excluded by
+// their ownership claims at order admission.
 func (q *Queries) PermanentBenefitsCovered(ctx context.Context, arg PermanentBenefitsCoveredParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, permanentBenefitsCovered,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.AtTime,
 		arg.ProductID,
-		arg.IncludePending,
 	)
 	var covered *bool
 	err := row.Scan(&covered)

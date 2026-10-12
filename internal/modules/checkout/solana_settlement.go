@@ -8,18 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // SettleSolanaTransfer is the only path that records a transfer on a Solana
@@ -111,11 +106,7 @@ func (s *CheckoutAttemptService) creditSolanaTransfer(ctx context.Context, d *db
 		} else if err != nil {
 			return err
 		}
-		credit := s.creditSolanaPurchase
-		if session.OrderID != nil {
-			credit = s.creditSolanaOrder
-		}
-		paymentID, err := credit(ctx, inner, session, receipt.Reference, t)
+		paymentID, err := s.creditSolanaOrder(ctx, inner, session, receipt.Reference, t)
 		// Under the reference lock, the transfer's payment or checkout
 		// transaction id already taken means it settled something else.
 		var pgErr *pgconn.PgError
@@ -132,33 +123,6 @@ func (s *CheckoutAttemptService) creditSolanaTransfer(ctx context.Context, d *db
 		receipt.PaymentID = &paymentID
 		return ledger.Record(ctx, *receipt, now)
 	})
-}
-
-// creditSolanaPurchase registers the checkout's payment from its accepted
-// terms inside the settlement transaction.
-func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db.DB, session *models.CheckoutAttempt, reference string, t solanamodule.ObservedTransfer) (uuid.UUID, error) {
-	if terms, err := purchaseTerms(session); err != nil || terms == nil {
-		return uuid.Nil, errors.Join(err, errors.New("solana checkout has no accepted purchase terms"))
-	}
-	purchase := NewCheckoutPurchaseService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
-	purchase.SubscriptionService = subscriptions.NewSubscriptionService(d, purchase.PriceService, purchase.ProductService, nil, s.clock)
-	result, err := purchase.RegisterPurchase(db.WithPSPID(ctx, session.PspID), &payments.RegisterPurchaseRequest{
-		CheckoutAttemptID: session.ID,
-		UserID:            session.CustomerID.String(),
-		PriceID:           *session.AcceptedPriceID,
-		Rail:              string(models.RailSolana),
-		TransactionID:     t.Signature,
-		Amount:            *session.Amount,
-		Currency:          *session.Currency,
-		PurchasedAt:       t.LandedAt,
-		WalletPurchase:    true,
-		Metadata:          solanaPaymentMetadata(session, reference, t),
-		AttemptKind:       payments.AttemptInitial,
-	})
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return result.PaymentID, nil
 }
 
 // transactionIDConstraints are the unique indexes a transfer's transaction id

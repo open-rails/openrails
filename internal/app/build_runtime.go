@@ -1,9 +1,10 @@
 package app
 
 import (
-	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
 	"net/http"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
 

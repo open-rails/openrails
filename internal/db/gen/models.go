@@ -181,7 +181,7 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
-// An order payment attempt, or retained provider recovery evidence accepted before order-based checkout. New creation requires an order.
+// An order payment attempt: provider execution and any customer action are tied to the order.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
 	Rail           string
@@ -208,7 +208,7 @@ type BillingCheckoutAttempt struct {
 	DestructiveRunClass *string
 	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
-	// The order this attempt pays; null only on recovery evidence accepted before order-based checkout.
+	// The order this payment attempt pays.
 	OrderID *uuid.UUID
 }
 

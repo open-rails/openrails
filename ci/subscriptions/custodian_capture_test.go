@@ -38,6 +38,10 @@ func TestCustodianCaptureUsesThePaymentMethodResource(t *testing.T) {
 	created := c.must(http.MethodPost, "/payment-methods", "capture-1", request)
 	id := created["id"].(string)
 	require.Equal(t, "requires_action", created["status"])
+	require.Nil(t, created["psp_id"], "the custodian holds the card; the PSP only routes later charges")
+	var attempts int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.checkout_attempts WHERE customer_id=$1`), c.cid().UUID()).Scan(&attempts))
+	require.Zero(t, attempts, "card capture creates no checkout or payable")
 	action := created["next_action"].(map[string]any)
 	require.Equal(t, "capture", action["type"])
 	payload := action["payload"].(map[string]any)

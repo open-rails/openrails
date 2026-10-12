@@ -29,13 +29,6 @@ var creditGrantJSON = nullable(func(v any) bool {
 	return json.Unmarshal(raw, &snapshot) == nil && snapshot.Validate() == nil
 })
 
-var acceptedPurchaseJSON = object(map[string]jsonRule{
-	"price_id": uuidValue, "product_id": uuidValue, "payment_id": uuidValue, "product_key": textValue, "product_name": textValue,
-	"amount": moneyStringValue, "currency": textValue, "access_duration_hours": nullable(integerValue), "entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)),
-	"accepted_at": textValue, "entitlement_start": textValue, "credit_grant": creditGrantJSON,
-	"psp_links": dictionary(object(map[string]jsonRule{"psp_id": uuidValue, "rail": textValue, "plan_id": textValue, "form_name": textValue, "flex_id": textValue, "price_id": textValue, "product_id": textValue, "provider": textValue, "recurring_billing_option_id": textValue})),
-})
-
 var acceptedRenewalJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
 	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
@@ -331,20 +324,13 @@ var jsonRules = map[string]jsonRule{
 	"usage_events.charges":          array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
 	"checkout_attempts.metadata":    metadataJSON,
 	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"retired_setup": booleanValue, "accepted_offer": object(map[string]jsonRule{"price_id": uuidValue, "subscription": booleanValue}), "initial_membership_quote": func(v any) bool {
-		raw, ok := v.(string)
-		if !ok {
-			return false
-		}
-		var decoded any
-		d := json.NewDecoder(strings.NewReader(raw))
-		d.UseNumber()
-		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
-	}, "accepted_purchase": acceptedPurchaseJSON, "customer_selected": booleanValue, "purchase_submitted": booleanValue, "provider_closed": booleanValue, "requested_entitlement": textValue, "requested_offer_kind": func(v any) bool { return v == "permanent" || v == "finite" || v == "recurring" }, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue,
-		// An order's attempt: its charge's operation, a hosted page or a Solana Pay quote.
+	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{
 		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
-		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue})),
+		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
+		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
+		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue,
+	})),
 	"checkout_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.

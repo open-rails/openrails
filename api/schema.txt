@@ -73,6 +73,7 @@ migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
+migration 0076_retire_checkout_creation.up.sql sha256:152f32bfeab8da6dcdd50325091941031aa8057a646e10d50505ced3994be903
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -310,8 +311,6 @@ table billing.catalog_restore_receipts
 
 table billing.checkout_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
-  column price_id uuid
-  column mode text NOT NULL
   column rail text NOT NULL
   column status text NOT NULL
   column amount bigint
@@ -340,11 +339,9 @@ table billing.checkout_attempts
   constraint checkout_attempts_customer_id_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
   constraint checkout_attempts_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint checkout_attempts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint checkout_attempts_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'payment_method'::text, 'order'::text])))
-  constraint checkout_attempts_monetary_terms_check CHECK ((((mode = 'payment_method'::text) AND (price_id IS NULL) AND (order_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (payment_id IS NULL) AND (subscription_id IS NULL)) OR ((mode = 'order'::text) AND (price_id IS NULL) AND (order_id IS NOT NULL) AND (amount IS NOT NULL) AND (currency IS NOT NULL) AND (subscription_id IS NULL)) OR ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text])) AND (price_id IS NOT NULL) AND (order_id IS NULL) AND (amount IS NOT NULL) AND (currency IS NOT NULL))))
   constraint checkout_attempts_order_id_fkey FOREIGN KEY (merchant_id, customer_id, order_id) REFERENCES billing.orders(merchant_id, customer_id, id)
+  constraint checkout_attempts_order_terms_check CHECK (((order_id IS NOT NULL) AND (amount IS NOT NULL) AND (currency IS NOT NULL))) NOT VALID
   constraint checkout_attempts_pkey PRIMARY KEY (merchant_id, id)
-  constraint checkout_attempts_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
   constraint checkout_attempts_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint checkout_attempts_status_check CHECK ((status = ANY (ARRAY['created'::text, 'requires_action'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'expired'::text, 'canceled'::text])))
   index CREATE INDEX checkout_attempts_customer_id_idx ON billing.checkout_attempts USING btree (merchant_id, customer_id)
@@ -355,7 +352,6 @@ table billing.checkout_attempts
   index CREATE UNIQUE INDEX checkout_attempts_order_id_live_key ON billing.checkout_attempts USING btree (merchant_id, order_id) WHERE ((order_id IS NOT NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text, 'processing'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX checkout_attempts_payment_id_idx ON billing.checkout_attempts USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
   index CREATE UNIQUE INDEX checkout_attempts_pkey ON billing.checkout_attempts USING btree (merchant_id, id)
-  index CREATE INDEX checkout_attempts_price_id_idx ON billing.checkout_attempts USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL)
   index CREATE INDEX checkout_attempts_psp_id_idx ON billing.checkout_attempts USING btree (merchant_id, psp_id)
   index CREATE UNIQUE INDEX checkout_attempts_psp_id_reference_key ON billing.checkout_attempts USING btree (merchant_id, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE UNIQUE INDEX checkout_attempts_psp_id_transaction_id_key ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL))
@@ -1408,6 +1404,8 @@ table billing.payment_methods
   column replaced_by_id uuid
   column contact_cardholder_at timestamp with time zone
   column setup_ref text
+  column capture jsonb
+  constraint payment_methods_capture_check CHECK (((capture IS NULL) OR ((custodian = 'hyperswitch'::text) AND (jsonb_typeof(capture) = 'object'::text) AND (octet_length((capture)::text) <= 16384))))
   constraint payment_methods_card_exp_month_check CHECK (((card_exp_month >= 1) AND (card_exp_month <= 12)))
   constraint payment_methods_card_exp_year_check CHECK (((card_exp_year >= 2000) AND (card_exp_year <= 2199)))
   constraint payment_methods_card_expiry_pair_check CHECK (((card_exp_month IS NULL) = (card_exp_year IS NULL)))
@@ -1441,7 +1439,7 @@ table billing.payment_methods
   index CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint IS NOT NULL)
   index CREATE UNIQUE INDEX payment_methods_pkey ON billing.payment_methods USING btree (merchant_id, id)
   index CREATE INDEX payment_methods_psp_id_idx ON billing.payment_methods USING btree (psp_id)
-  index CREATE UNIQUE INDEX payment_methods_psp_instrument_key ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX payment_methods_psp_instrument_key ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT WHERE ((rail_customer_ref IS NOT NULL) OR (rail_method_ref IS NOT NULL))
   index CREATE INDEX payment_methods_rail_rail_method_ref_idx ON billing.payment_methods USING btree (rail, rail_method_ref)
   index CREATE INDEX payment_methods_replaced_by_id_idx ON billing.payment_methods USING btree (merchant_id, replaced_by_id) WHERE (replaced_by_id IS NOT NULL)
   index CREATE INDEX payment_methods_requires_action_idx ON billing.payment_methods USING btree (merchant_id, created_at) WHERE (status = 'requires_action'::text)
@@ -3160,7 +3158,8 @@ function billing.guard_payment_method_status()
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
   BEGIN
-      IF OLD.status = 'requires_action' AND NEW.status IN ('requires_action', 'active', 'removed') THEN
+      IF OLD.status = 'requires_action' AND NEW.status IN ('requires_action', 'active', 'replaced', 'removed')
+          AND (NEW.status <> 'replaced' OR OLD.capture IS NOT NULL) THEN
           RETURN NEW;
       END IF;
       IF OLD.status <> 'active' AND (NEW.status, NEW.replaced_by_id) IS DISTINCT FROM (OLD.status, OLD.replaced_by_id) THEN

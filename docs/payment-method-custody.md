@@ -191,8 +191,7 @@ no holding PSP (`psp_id: null`); its orders and recurring agreements select the
 processor that can reach its custodian.
 
 Checkout creation no longer accepts a price or a mode. New payments are order
-attempts; older accepted provider operations retain their frozen terms for
-settlement and continue to prevent deletion of their referenced catalog items.
+attempts. Prelaunch checkout history is not migrated or reconstructed.
 
 ## Choosing a card
 

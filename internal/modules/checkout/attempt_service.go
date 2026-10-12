@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -27,7 +25,6 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -248,25 +245,6 @@ func (s *CheckoutAttemptService) solanaSignerAvailable(ctx context.Context) erro
 	return nil
 }
 
-func (s *CheckoutAttemptService) isTerminal(status models.CheckoutAttemptStatus) bool {
-	switch status {
-	case models.CheckoutAttemptStatusSucceeded,
-		models.CheckoutAttemptStatusFailed,
-		models.CheckoutAttemptStatusExpired,
-		models.CheckoutAttemptStatusCanceled:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *CheckoutAttemptService) isExpired(session *models.CheckoutAttempt) bool {
-	if session.ExpiresAt == nil || session.ExpiresAt.IsZero() {
-		return false
-	}
-	return session.ExpiresAt.Before(s.now())
-}
-
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
 // Uses config.PublicBillingBaseURL which should be set to the full base URL where billing routes are mounted.
 //
@@ -284,201 +262,6 @@ func (s *CheckoutAttemptService) getAPIBaseURL() string {
 	}
 	// Ensure it doesn't end with a slash (we add the version path later)
 	return strings.TrimSuffix(apiURL, "/")
-}
-
-func (s *CheckoutAttemptService) MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error {
-	session, err := s.repo.GetByID(ctx, sessionID)
-	if err != nil {
-		return ErrCheckoutAttemptNotFound
-	}
-	if s.isTerminal(session.Status) {
-		if session.Status == models.CheckoutAttemptStatusSucceeded {
-			return nil
-		}
-		if session.Status == models.CheckoutAttemptStatusExpired && session.Rail == models.RailSolana && paymentID != uuid.Nil && strings.TrimSpace(transactionID) != "" {
-			// A wallet may broadcast before expiry but the app may confirm after expiry.
-			// The caller has already verified the signature against the session-bound quote.
-		} else {
-			return ErrCheckoutAttemptConflict
-		}
-	}
-	if s.isExpired(session) && session.Rail != models.RailSolana {
-		_ = s.MarkExpired(ctx, session.ID, "checkout attempt expired")
-		return ErrCheckoutAttemptExpired
-	}
-
-	session.Status = models.CheckoutAttemptStatusSucceeded
-	session.UpdatedAt = s.now()
-	if paymentID != uuid.Nil {
-		session.PaymentID = &paymentID
-	}
-	if strings.TrimSpace(transactionID) != "" {
-		session.TransactionID = normalize.OptionalString(transactionID)
-	}
-
-	return s.repo.Update(ctx, session)
-}
-
-func (s *CheckoutAttemptService) MarkFailed(ctx context.Context, sessionID uuid.UUID, reason, code string) error {
-	session, err := s.repo.GetByID(ctx, sessionID)
-	if err != nil {
-		return ErrCheckoutAttemptNotFound
-	}
-	if s.isTerminal(session.Status) {
-		switch session.Status {
-		case models.CheckoutAttemptStatusFailed,
-			models.CheckoutAttemptStatusSucceeded,
-			models.CheckoutAttemptStatusExpired,
-			models.CheckoutAttemptStatusCanceled:
-			return nil
-		default:
-			return ErrCheckoutAttemptConflict
-		}
-	}
-
-	session.Status = models.CheckoutAttemptStatusFailed
-	session.UpdatedAt = s.now()
-	if session.RailState == nil {
-		session.RailState = map[string]any{}
-	}
-	if msg := strings.TrimSpace(reason); msg != "" {
-		session.RailState["message"] = msg
-		session.RailState["failure_reason"] = msg
-	}
-	if strings.TrimSpace(code) != "" {
-		session.RailState["failure_code"] = strings.TrimSpace(code)
-	}
-
-	return s.repo.Update(ctx, session)
-}
-
-func (s *CheckoutAttemptService) MarkExpired(ctx context.Context, sessionID uuid.UUID, message string) error {
-	session, err := s.repo.GetByID(ctx, sessionID)
-	if err != nil {
-		return ErrCheckoutAttemptNotFound
-	}
-	if s.isTerminal(session.Status) {
-		return nil
-	}
-
-	if session.RailState["capture"] != nil || session.RailState["kind"] == "stripe_engine_setup" {
-		owner, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = s.db.Gen(ctx).ExpireCheckoutAttemptByID(ctx, gen.ExpireCheckoutAttemptByIDParams{ID: sessionID, MerchantID: owner.UUID(), Now: s.now()})
-		return err
-	}
-
-	session.Status = models.CheckoutAttemptStatusExpired
-	session.UpdatedAt = s.now()
-	if msg := strings.TrimSpace(message); msg != "" {
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["message"] = msg
-	}
-
-	return s.repo.Update(ctx, session)
-}
-
-func (s *CheckoutAttemptService) MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error {
-	return s.markSucceededWithSubscription(ctx, sessionID, paymentID, transactionID, subscriptionID, false)
-}
-
-// markSucceededWithSubscription is MarkSucceededWithSubscription with the
-// settled flag. settled=true says the caller has already verified the payment
-// on-chain (a verified first payment, a mirrored cancel/tier-change): the
-// session window is quote validity, never a refusal of money that actually
-// moved (xs-007 row 35), so a session whose window elapsed while the poller was
-// not looking — or that a client poll already flipped to expired — still
-// becomes succeeded. Refusing it would leave a paid subscriber whose checkout
-// says otherwise and a reference the poller can never finalize. failed and
-// canceled are not clock outcomes and stay refused.
-func (s *CheckoutAttemptService) markSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID, settled bool) error {
-	session, err := s.repo.GetByID(ctx, sessionID)
-	if err != nil {
-		return ErrCheckoutAttemptNotFound
-	}
-	proceed, err := succeedTransition(session.Status, settled)
-	if err != nil || !proceed {
-		return err
-	}
-	if !settled && s.isExpired(session) {
-		_ = s.MarkExpired(ctx, session.ID, "checkout attempt expired")
-		return ErrCheckoutAttemptExpired
-	}
-
-	session.Status = models.CheckoutAttemptStatusSucceeded
-	session.UpdatedAt = s.now()
-	if paymentID != uuid.Nil {
-		session.PaymentID = &paymentID
-	}
-	if subscriptionID != uuid.Nil {
-		session.SubscriptionID = &subscriptionID
-	}
-	if strings.TrimSpace(transactionID) != "" {
-		session.TransactionID = normalize.OptionalString(transactionID)
-	}
-
-	return s.repo.Update(ctx, session)
-}
-
-// succeedTransition decides whether a session in status may move to succeeded.
-// (false, nil) is the idempotent no-op for an already-succeeded session.
-func succeedTransition(status models.CheckoutAttemptStatus, settled bool) (bool, error) {
-	switch status {
-	case models.CheckoutAttemptStatusSucceeded:
-		return false, nil
-	case models.CheckoutAttemptStatusExpired:
-		if settled {
-			return true, nil
-		}
-		return false, ErrCheckoutAttemptConflict
-	case models.CheckoutAttemptStatusFailed, models.CheckoutAttemptStatusCanceled:
-		return false, ErrCheckoutAttemptConflict
-	default:
-		return true, nil
-	}
-}
-
-func (s *CheckoutAttemptService) FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutAttempt, error) {
-	if s.repo == nil {
-		return nil, ErrCheckoutAttemptNotFound
-	}
-	session, err := s.repo.GetLatestOpenByUserPriceRail(ctx, userID, priceID, rail, s.now())
-	if err != nil {
-		if db.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return session, nil
-}
-
-func (s *CheckoutAttemptService) FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutAttempt, error) {
-	if s.repo == nil {
-		return nil, ErrCheckoutAttemptNotFound
-	}
-	reservationID = strings.TrimSpace(reservationID)
-	if reservationID == "" {
-		return nil, sql.ErrNoRows
-	}
-	sessionID, err := billing.ParseCheckoutAttemptID(reservationID)
-	if err != nil || sessionID.IsZero() {
-		return nil, sql.ErrNoRows
-	}
-	session, err := s.repo.GetByID(ctx, sessionID.UUID())
-	if err != nil {
-		return nil, err
-	}
-	if session.CustomerID.String() != userID || session.Rail != models.RailCCBill || session.AcceptedPriceID == nil || *session.AcceptedPriceID != priceID {
-		return nil, ErrCheckoutAttemptConflict
-	}
-	if s.isTerminal(session.Status) || s.isExpired(session) {
-		return nil, ErrCheckoutAttemptExpired
-	}
-	return session, nil
 }
 
 func getStringField(fields map[string]any, key string) string {
@@ -748,7 +531,6 @@ func solanaBuildRequestFromSession(session *models.CheckoutAttempt, account, tok
 
 	return &solanamodule.PaymentTransactionBuildRequest{
 		UserID:      session.CustomerID.String(),
-		PriceID:     uuidOrNil(session.AcceptedPriceID),
 		TokenSymbol: tokenSymbol,
 		UserWallet:  account,
 		Reference:   session.Reference,

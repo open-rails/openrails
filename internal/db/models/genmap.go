@@ -330,20 +330,6 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 	if err := FromJSONB(c.RailState, &m.RailState, "checkout_attempts.rail_state"); err != nil {
 		return nil, err
 	}
-	if raw, ok := m.RailState["accepted_offer"]; ok {
-		encoded, err := json.Marshal(raw)
-		if err != nil {
-			return nil, err
-		}
-		var accepted struct {
-			PriceID      *uuid.UUID `json:"price_id"`
-			Subscription bool       `json:"subscription"`
-		}
-		if err = json.Unmarshal(encoded, &accepted); err != nil {
-			return nil, err
-		}
-		m.AcceptedPriceID, m.AcceptedSubscription = accepted.PriceID, accepted.Subscription
-	}
 	if err := m.ValidateTerms(); err != nil {
 		return nil, err
 	}

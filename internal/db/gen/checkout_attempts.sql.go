@@ -75,118 +75,9 @@ func (q *Queries) ClaimSolanaCheckoutSignature(ctx context.Context, arg ClaimSol
 	return result.RowsAffected(), nil
 }
 
-const closeHostedCheckoutFromProvider = `-- name: CloseHostedCheckoutFromProvider :execrows
-UPDATE billing.checkout_attempts
-SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,
-    rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
-    updated_at=$2::timestamptz
-WHERE merchant_id=$3::uuid AND id=$4::uuid
-  AND psp_id=$5::uuid AND rail='stripe' AND deleted_at IS NULL
-`
-
-type CloseHostedCheckoutFromProviderParams struct {
-	Status     string
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	PspID      uuid.UUID
-}
-
-func (q *Queries) CloseHostedCheckoutFromProvider(ctx context.Context, arg CloseHostedCheckoutFromProviderParams) (int64, error) {
-	result, err := q.db.Exec(ctx, closeHostedCheckoutFromProvider,
-		arg.Status,
-		arg.Now,
-		arg.MerchantID,
-		arg.ID,
-		arg.PspID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
-SELECT count(*) FROM billing.checkout_attempts cs
-WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'capture' AND cs.rail='nmi'
-AND (
- NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
-)
-`
-
-// Terminal replay retains the original capture authority even after a later
-// legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
-// deletion leaves historical replay intact and does not recreate the method.
-func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidCheckoutCaptureReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_attempts cs
-LEFT JOIN billing.provider_intents i ON i.merchant_id=cs.merchant_id
- AND i.payload->>'checkout_attempt_id'=cs.id::text AND i.intent_type='initial_membership'
-WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
-AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
- OR (i.id IS NOT NULL AND (
-   i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id::text IS DISTINCT FROM cs.rail_state#>>'{accepted_offer,price_id}' OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
-   OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
-   OR (i.status='failed_terminal' AND cs.status<>'failed'))))
-`
-
-func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidEngineCheckoutReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidPurchaseCheckoutReferences = `-- name: CountInvalidPurchaseCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_attempts s
-LEFT JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=(s.rail_state#>>'{accepted_offer,price_id}')::uuid
-WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
- AND (p.id IS NULL
-   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
-   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
-   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM s.amount::text
-   OR (p.customer_amount IS NULL AND s.amount IS DISTINCT FROM p.amount)
-   OR (p.customer_amount IS NOT NULL AND (s.amount IS NULL
-       OR s.amount < (p.customer_amount->>'min_amount')::bigint
-       OR s.amount > (p.customer_amount->>'max_amount')::bigint))
-   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
-   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
-   OR p.billing_interval_hours IS NOT NULL)
-`
-
-// Archive integrity includes tombstones and preserves accepted commercial
-// snapshots against their immutable price identity, not current product text.
-func (q *Queries) CountInvalidPurchaseCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidPurchaseCheckoutReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
-SELECT count(*) FROM billing.checkout_attempts cs
-WHERE cs.merchant_id=$1::uuid AND cs.rail_state->>'kind'='stripe_engine_setup' AND cs.rail='stripe' AND cs.status='succeeded'
-AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id)
-`
-
-func (q *Queries) CountInvalidStripeSetupReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidStripeSetupReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const expireCheckoutAttemptByID = `-- name: ExpireCheckoutAttemptByID :execrows
 UPDATE billing.checkout_attempts
-SET rail_state = rail_state #- '{capture,secret_ciphertext}',
-    status = 'expired', updated_at = $1::timestamptz
+SET status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid
   AND status IN ('created', 'requires_action')
   AND deleted_at IS NULL
@@ -209,8 +100,7 @@ func (q *Queries) ExpireCheckoutAttemptByID(ctx context.Context, arg ExpireCheck
 
 const expireCheckoutAttempts = `-- name: ExpireCheckoutAttempts :execrows
 UPDATE billing.checkout_attempts
-SET rail_state = rail_state #- '{capture,secret_ciphertext}',
-    status = 'expired', updated_at = $1
+SET status = 'expired', updated_at = $1
 WHERE deleted_at IS NULL
   AND ctid IN (
     SELECT cs.ctid FROM billing.checkout_attempts cs
@@ -228,9 +118,6 @@ type ExpireCheckoutAttemptsParams struct {
 	RowLimit   int32
 }
 
-// Retention sweep (or#877 B4): one pass per merchant off the directory walk,
-// with the merchant predicate written out.
-// or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) ExpireCheckoutAttempts(ctx context.Context, arg ExpireCheckoutAttemptsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireCheckoutAttempts, arg.Now, arg.MerchantID, arg.RowLimit)
 	if err != nil {
@@ -375,98 +262,6 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 	return i, err
 }
 
-const getLatestOpenCheckoutAttempt = `-- name: GetLatestOpenCheckoutAttempt :one
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts cs
-WHERE cs.merchant_id = $1::uuid AND cs.customer_id = $2::uuid
-  AND (cs.rail_state#>>'{accepted_offer,price_id}')::uuid = $3::uuid
-  AND cs.rail = $4::text
-  AND cs.status IN ('created', 'requires_action')
-  AND (cs.expires_at IS NULL OR cs.expires_at > $5::timestamptz)
-  AND cs.deleted_at IS NULL
-ORDER BY cs.created_at DESC
-LIMIT 1
-`
-
-type GetLatestOpenCheckoutAttemptParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	PriceID    uuid.UUID
-	Rail       string
-	Now        time.Time
-}
-
-func (q *Queries) GetLatestOpenCheckoutAttempt(ctx context.Context, arg GetLatestOpenCheckoutAttemptParams) (BillingCheckoutAttempt, error) {
-	row := q.db.QueryRow(ctx, getLatestOpenCheckoutAttempt,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PriceID,
-		arg.Rail,
-		arg.Now,
-	)
-	var i BillingCheckoutAttempt
-	err := row.Scan(
-		&i.ID,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
-		&i.OrderID,
-	)
-	return i, err
-}
-
-const hasUnresolvedProductCheckout = `-- name: HasUnresolvedProductCheckout :one
-SELECT EXISTS (
- SELECT 1 FROM billing.checkout_attempts s
- JOIN billing.prices p ON p.id=(s.rail_state#>>'{accepted_offer,price_id}')::uuid AND p.merchant_id=s.merchant_id
- WHERE s.merchant_id=$1::uuid
-   AND s.customer_id=$2::uuid
-   AND p.product_id=$3::uuid
-   AND s.order_id IS NULL AND COALESCE(s.rail_state#>>'{accepted_offer,subscription}','false')='false'
-   AND s.status<>'succeeded'
-   AND (s.status IN ('created','requires_action')
-     OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
-   -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
-     WHERE f.merchant_id=s.merchant_id
-       AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
-       AND f.status IN ('failed_terminal','expired','superseded'))
-)
-`
-
-type HasUnresolvedProductCheckoutParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ProductID  uuid.UUID
-}
-
-// A local expiry or failed HTTP request does not prove a provider cannot charge.
-// Only a completed purchase or authoritative provider cancellation releases a
-// hosted session. NMI's accepted operation owns uncertainty after submission.
-func (q *Queries) HasUnresolvedProductCheckout(ctx context.Context, arg HasUnresolvedProductCheckoutParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasUnresolvedProductCheckout, arg.MerchantID, arg.CustomerID, arg.ProductID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const listStaleCheckoutAttempts = `-- name: ListStaleCheckoutAttempts :many
 SELECT id FROM billing.checkout_attempts
 WHERE merchant_id = $1::uuid
@@ -519,24 +314,15 @@ UPDATE billing.checkout_attempts SET
     subscription_id = $11,
     metadata = $12,
     rail_fields = $13,
-    rail_state = COALESCE($14::jsonb, '{}'::jsonb)
-      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state ? 'accepted_offer' THEN jsonb_build_object('accepted_offer', rail_state->'accepted_offer') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,
+    rail_state = $14,
     psp_id = $15::uuid,
     updated_at = $16
 WHERE checkout_attempts.merchant_id = $17::uuid AND id = $1
   AND deleted_at IS NULL
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR status <> 'succeeded' OR $4::text = 'succeeded')
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR (customer_id=$2::uuid AND rail=$3::text
-           AND amount IS NOT DISTINCT FROM $5::bigint AND currency IS NOT DISTINCT FROM $6::text
-           AND psp_id=$15::uuid))
-  AND (NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
-       OR COALESCE(($14::jsonb->>'provider_closed')::boolean, false))
+  AND order_id IS NOT NULL
+  AND customer_id=$2::uuid AND rail=$3::text
+  AND amount IS NOT DISTINCT FROM $5::bigint AND currency IS NOT DISTINCT FROM $6::text
+  AND psp_id=$15::uuid
 `
 
 type UpdateCheckoutAttemptParams struct {

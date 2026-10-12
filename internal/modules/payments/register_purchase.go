@@ -9,10 +9,8 @@ import (
 )
 
 type RegisterPurchaseRequest struct {
-	// CheckoutAttemptID binds a provider observation to locally accepted terms.
-	CheckoutAttemptID uuid.UUID
-	UserID            string
-	PriceID           uuid.UUID
+	UserID  string
+	PriceID uuid.UUID
 	// Channel defaults to rail; a manual purchase names no Rail.
 	Channel          models.Channel
 	Rail             string
