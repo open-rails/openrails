@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -323,4 +324,58 @@ func TestDestructiveAdmissionStartedRecoveryAndImmutableFacts(t *testing.T) {
 	require.Error(t, err)
 	_, err = w.pool.Exec(t.Context(), "DELETE FROM "+w.schema+".destructive_actions WHERE id=$1", a.ID)
 	require.Error(t, err)
+}
+
+func TestDestructiveAdmissionAutomationAndUnsentFence(t *testing.T) {
+	w := newAdmissionsWorld(t)
+	mid := w.merchant()
+	for range 25 {
+		c := command(mid, "ignored")
+		a, err := w.gate.AdmitAutonomous(t.Context(), c, "startup_catalog")
+		require.NoError(t, err)
+		_, err = w.gate.Start(t.Context(), mid, a.ID)
+		require.NoError(t, err)
+		require.NoError(t, w.gate.Finish(t.Context(), mid, a.ID, destructive.OutcomeSucceeded, "applied"))
+	}
+	_, err := w.gate.AdmitAutonomous(t.Context(), command(mid, "ignored"), "startup_catalog")
+	h := held(t, err)
+	require.Equal(t, "automation:"+mid.String(), h.ScopeKey)
+	staff, err := w.gate.Admit(t.Context(), command(mid, "operator"))
+	require.NoError(t, err, "automation spends no staff allowance")
+	ctx := billingauth.BindStaff(t.Context(), billingauth.Staff{Merchant: billing.MerchantID(mid)})
+	_, err = w.gate.AdmitAutonomous(ctx, command(mid, "operator"), "startup_catalog")
+	require.ErrorContains(t, err, "staff command")
+	_, err = w.gate.Start(t.Context(), mid, staff.ID)
+	require.NoError(t, err)
+	for range 4 {
+		_, err = w.gate.Admit(t.Context(), command(mid, "operator"))
+		require.NoError(t, err)
+	}
+	_, err = w.gate.Admit(t.Context(), command(mid, "operator"))
+	held(t, err)
+	_, err = w.gate.StartPending(t.Context(), mid, staff.ID)
+	require.ErrorIs(t, err, destructive.ErrHeld, "a proven unsent attempt cannot bypass a later hold")
+	_, err = w.gate.Start(t.Context(), mid, staff.ID)
+	require.NoError(t, err, "possible effects still retain recovery authority")
+}
+
+func TestDestructiveAdmissionPendingLookup(t *testing.T) {
+	w := newAdmissionsWorld(t)
+	mid := w.merchant()
+	c := command(mid, "operator")
+	c.Kind = destructive.ConfigurationChange
+	a, err := w.gate.Admit(t.Context(), c)
+	require.NoError(t, err)
+	_, err = w.gate.Start(t.Context(), mid, a.ID)
+	require.NoError(t, err)
+	require.NoError(t, w.gate.Finish(t.Context(), mid, a.ID, destructive.OutcomeUncertain, "vault response lost"))
+	previous, found, err := w.gate.FindPending(t.Context(), mid, c.Target, c.Actor, c.Digest)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, a.ID, previous.ID)
+	other := c.Actor
+	other.Issuer = "https://other.test"
+	_, found, err = w.gate.FindPending(t.Context(), mid, c.Target, other, c.Digest)
+	require.NoError(t, err)
+	require.False(t, found)
 }

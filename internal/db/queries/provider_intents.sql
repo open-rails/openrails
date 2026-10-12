@@ -350,6 +350,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- name: CountDestructiveProviderIntentsExecutedSince :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND destructive_action_id IS NULL
   AND intent_type = ANY (sqlc.arg(intent_types)::text[])
   AND (
         (executed_at IS NOT NULL AND executed_at >= sqlc.arg(since)::timestamptz)
@@ -392,6 +393,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT count(*)::bigint
 FROM billing.provider_intents
 WHERE actor = sqlc.arg(actor)::text
+  AND destructive_action_id IS NULL
   AND origin IN ('user', 'admin')
   AND intent_type = ANY(sqlc.arg(intent_types)::text[])
   AND created_at >= sqlc.arg(since)::timestamptz;
@@ -403,6 +405,7 @@ WHERE actor = sqlc.arg(actor)::text
 SELECT count(*)::bigint
 FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND destructive_action_id IS NULL
   AND origin = ANY(sqlc.arg(origins)::text[])
   AND intent_type = ANY(sqlc.arg(intent_types)::text[])
   AND created_at >= sqlc.arg(since)::timestamptz;
