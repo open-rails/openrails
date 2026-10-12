@@ -201,6 +201,56 @@ func TestLegacyNMITierChange(t *testing.T) {
 	}
 }
 
+func TestLegacyNMISameBoundaryAmendmentsKeepOrders(t *testing.T) {
+	w := newWorld(t)
+	w.armDestructive()
+	group := "g" + uuid.NewString()[:8]
+	old := w.tierPrice(group, 1, 999, monthHours, true)
+	middle := w.tierPrice(group, 2, 1999, monthHours, true)
+	latest := w.tierPrice(group, 3, 2999, monthHours, true)
+	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
+	end := l.periodEnd()
+	firstKey := "first-" + uuid.NewString()
+	for i, next := range []tier{middle, latest} {
+		key := firstKey
+		if i > 0 {
+			key = "second-" + uuid.NewString()
+		}
+		done, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: key})
+		require.NoError(t, err)
+		w.settle()
+		require.Equal(t, "succeeded", done.Status)
+		require.True(t, end.Equal(l.periodEnd()))
+	}
+	// Replaying an older accepted operation cannot make its schedule version
+	// effective again, even though both amendments have the same first due date.
+	_, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(middle.ID), IdempotencyKey: firstKey})
+	require.NoError(t, err)
+	w.settle()
+	require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 2)
+	require.Equal(t, "29.99", w.nmi.Schedule(l.railSub).Amount)
+	w.advanceTo(end.Add(time.Hour))
+	renewal := l.providerRenewal(true)
+	require.Equal(t, http.StatusOK, w.deliver("nmi", renewal))
+	require.Equal(t, http.StatusOK, w.deliver("nmi", renewal))
+	require.Equal(t, latest.ID, w.subscription(embedded, l.sub).PriceID)
+	require.True(t, l.periodEnd().After(end))
+	orders, err := w.client[embedded].ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: l.sub})
+	require.NoError(t, err)
+	require.Len(t, orders.Items, 4, "initial bill, two distinct adjustments, one renewal")
+	var renewalOrders int
+	for _, order := range orders.Items {
+		if order.Renewal != nil && order.Renewal.PeriodStartsAt.Equal(end) {
+			renewalOrders++
+			require.Equal(t, int64(29_990_000), order.Total)
+			require.Equal(t, billing.OrderStatus("complete"), order.Status)
+		}
+	}
+	require.Equal(t, 1, renewalOrders)
+	require.Equal(t, w.nmiCharges(l.railCust), w.localCharges(embedded, l.c.id))
+	require.Zero(t, w.nmi.scheduleWrites(), "amendments never replace the provider schedule")
+}
+
 // A declined upgrade changes nothing: no schedule update, same tier.
 func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 	t.Parallel()
