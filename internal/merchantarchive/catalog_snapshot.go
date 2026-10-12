@@ -239,7 +239,7 @@ func RestoreCatalog(ctx context.Context, database *db.DB, id billing.MerchantID,
 						args[i] = *v
 					}
 				}
-				if _, err := tx.Exec(ctx, insertQuery("billing."+p.Name, p), args...); err != nil {
+				if _, err := tx.Exec(ctx, insertQuery(p), args...); err != nil {
 					return err
 				}
 			}

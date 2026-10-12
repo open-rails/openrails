@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
@@ -405,115 +404,61 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	var archive bytes.Buffer
 	require.NoError(t, merchantarchive.Export(t.Context(), source, merchantID, &archive))
 
-	// Force the legacy stream to put the newest price first. UUID ordering is
-	// unrelated to financial-version ordering, and must never assign versions.
-	var newestFirst [][]*string
-	currentStorageID := w.priceStorageID(current.ID).String()
-	table := ""
-	_, err = archivewire.Read(bytes.NewReader(archive.Bytes()), nil, func(record archivewire.Record) error {
-		if record.Kind == "table" {
-			table = record.Table
-			return nil
-		}
-		if table == "prices" {
-			values := append([]*string(nil), record.Values...)
-			if *values[2] == currentStorageID {
-				newestFirst = append([][]*string{values}, newestFirst...)
-			} else {
-				newestFirst = append(newestFirst, values)
-			}
-		}
-		return nil
-	})
+	schema := "archive_catalog_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
+	name := pgx.Identifier{schema}.Sanitize()
+	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+name+" CASCADE") })
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+name+`.merchants (id, slug, status, permission_group_id) VALUES ($1, $2, 'active', $3)`, merchantID.UUID(), w.slug, uuid.New())
 	require.NoError(t, err)
-	legacyPriceIndex := 0
-
-	// The pre-revision row format omitted product and price revisions and
-	// ownership and deletion, and carried each product's keys on the product.
-	legacy := legacyArchive(t, archive.Bytes(), func(table string, values []*string) []*string {
-		switch table {
-		case "prices":
-			values = newestFirst[legacyPriceIndex]
-			legacyPriceIndex++
-			values = values[:len(values)-1] // deleted_at, the last column
-		case "products":
-			keys := "[]"
-			values = values[:len(values)-2] // ownership and deleted_at, the last columns
-			values = append(append(append([]*string{}, values[:6]...), &keys), values[6:]...)
-		}
-		if table == "prices" || table == "products" {
-			values = append(append([]*string{}, values[:1]...), values[2:]...)
-		}
-		return values
-	}, "product_entitlements")
-
-	for _, tc := range []struct {
-		name string
-		data []byte
-	}{
-		{"current", archive.Bytes()},
-		{"pre-revision", legacy},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			schema := "archive_catalog_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-			require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
-			name := pgx.Identifier{schema}.Sanitize()
-			t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+name+" CASCADE") })
-			_, err := w.pool.Exec(t.Context(), "INSERT INTO "+name+`.merchants (id, slug, status, permission_group_id) VALUES ($1, $2, 'active', $3)`, merchantID.UUID(), w.slug, uuid.New())
-			require.NoError(t, err)
-			destination, err := db.NewWithPGXPool(w.pool, schema)
-			require.NoError(t, err)
-			result, err := merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(tc.data))
-			require.NoError(t, err)
-			require.Positive(t, result.Rows)
-			var receipts int
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+name+".catalog_applications").Scan(&receipts))
-			require.Equal(t, 2, receipts)
-			var productRevision int64
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision FROM "+name+".products WHERE id=$1", product.ID.UUID()).Scan(&productRevision))
-			if tc.name == "current" {
-				require.Equal(t, product.Revision, productRevision)
-			}
-			for _, price := range versions.Items {
-				var revision int64
-				var publicID string
-				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision,public_id FROM "+name+".prices WHERE id=$1", w.priceStorageID(price.ID)).Scan(&revision, &publicID))
-				require.Equal(t, price.Version, revision+1, "explicit or reconstructed versions follow the accepted chronology")
-				require.Equal(t, price.ID.String(), publicID, "public ID must be derived after the restored revision is known")
-			}
-			boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
-				t.Helper()
-				bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-					Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps, Catalog: app}},
-				}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
-				require.NoError(t, err)
-				t.Cleanup(func() { _ = bill.Close(context.Background()) })
-				shop, err := bill.MerchantBySlug(w.slug)
-				require.NoError(t, err)
-				return bill, shop
-			}
-			staleEngine, stale := boot(declaration(4_000_000))
-			still, err := priceByKey(t.Context(), stale, "portable", "purchase")
-			require.NoError(t, err)
-			require.Equal(t, current.ID, still.ID, "an applied hash remains a replay after restore and later API edits")
-			product, err := productByKey(t.Context(), stale, "portable")
-			require.NoError(t, err)
-			require.Equal(t, "API edited", product.DisplayName)
-			balance, err := stale.GetBalance(t.Context(), buyer.cid(), "USD")
-			require.NoError(t, err)
-			require.EqualValues(t, 2_000_000, balance.BalanceAmount, "the retained money book is restored with the catalog")
-			require.NoError(t, staleEngine.Close(t.Context()))
-			// The restored owners still name the API edits: a new file skips them.
-			nextEngine, next := boot(declaration(8_000_000))
-			price, err := priceByKey(t.Context(), next, "portable", "purchase")
-			require.NoError(t, err)
-			require.Equal(t, current.ID, price.ID, "a restored edit is still the edit's")
-			_, err = next.ApplyCatalog(t.Context(), declaration(8_000_000), billing.ApplyCatalogParams{Force: true})
-			require.NoError(t, err)
-			price, err = priceByKey(t.Context(), next, "portable", "purchase")
-			require.NoError(t, err)
-			require.EqualValues(t, 4, price.Version, "new terms allocate after all restored versions")
-			require.NoError(t, nextEngine.Close(t.Context()))
-		})
+	destination, err := db.NewWithPGXPool(w.pool, schema)
+	require.NoError(t, err)
+	result, err := merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(archive.Bytes()))
+	require.NoError(t, err)
+	require.Positive(t, result.Rows)
+	var receipts int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+name+".catalog_applications").Scan(&receipts))
+	require.Equal(t, 2, receipts)
+	var productRevision int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision FROM "+name+".products WHERE id=$1", product.ID.UUID()).Scan(&productRevision))
+	require.Equal(t, product.Revision, productRevision)
+	for _, price := range versions.Items {
+		var revision int64
+		var publicID string
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision,public_id FROM "+name+".prices WHERE id=$1", w.priceStorageID(price.ID)).Scan(&revision, &publicID))
+		require.Equal(t, price.Version, revision+1, "versions follow the accepted chronology")
+		require.Equal(t, price.ID.String(), publicID, "public ID must be derived after the restored revision is known")
 	}
+	boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
+		t.Helper()
+		bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps, Catalog: app}},
+		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = bill.Close(context.Background()) })
+		shop, err := bill.MerchantBySlug(w.slug)
+		require.NoError(t, err)
+		return bill, shop
+	}
+	staleEngine, stale := boot(declaration(4_000_000))
+	still, err := priceByKey(t.Context(), stale, "portable", "purchase")
+	require.NoError(t, err)
+	require.Equal(t, current.ID, still.ID, "an applied hash remains a replay after restore and later API edits")
+	product, err = productByKey(t.Context(), stale, "portable")
+	require.NoError(t, err)
+	require.Equal(t, "API edited", product.DisplayName)
+	balance, err := stale.GetBalance(t.Context(), buyer.cid(), "USD")
+	require.NoError(t, err)
+	require.EqualValues(t, 2_000_000, balance.BalanceAmount, "the retained money book is restored with the catalog")
+	require.NoError(t, staleEngine.Close(t.Context()))
+	// The restored owners still name the API edits: a new file skips them.
+	nextEngine, next := boot(declaration(8_000_000))
+	price, err := priceByKey(t.Context(), next, "portable", "purchase")
+	require.NoError(t, err)
+	require.Equal(t, current.ID, price.ID, "a restored edit is still the edit's")
+	_, err = next.ApplyCatalog(t.Context(), declaration(8_000_000), billing.ApplyCatalogParams{Force: true})
+	require.NoError(t, err)
+	price, err = priceByKey(t.Context(), next, "portable", "purchase")
+	require.NoError(t, err)
+	require.EqualValues(t, 4, price.Version, "new terms allocate after all restored versions")
+	require.NoError(t, nextEngine.Close(t.Context()))
 }

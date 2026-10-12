@@ -44,38 +44,6 @@ func LegacyEntitlementNames(raw string) (string, map[string]int, error) {
 	return string(encoded), hours, err
 }
 
-func normalizeEntitlementRow(p Profile, values []*string, priceAccess map[string]*string) error {
-	for i, c := range p.Columns {
-		if c.Name != "entitlements" && c.Name != "entitlements_snapshot" {
-			continue
-		}
-		if p.Name == "products" && (values[i] == nil || *values[i] == "null") {
-			values[i] = new("[]")
-		}
-		if values[i] == nil {
-			continue
-		}
-		names, hours, err := LegacyEntitlementNames(*values[i])
-		if err != nil {
-			return err
-		}
-		values[i] = &names
-		if p.Name == "payments" && len(hours) > 0 && value(p, values, "subscription_id") == nil {
-			price := value(p, values, "price_id")
-			if price != nil {
-				if access, known := priceAccess[*price]; known && access == nil {
-					for j, field := range p.Columns {
-						if field.Name == "legacy_entitlement_hours" {
-							raw, err := json.Marshal(hours)
-							if err != nil {
-								return err
-							}
-							values[j] = new(string(raw))
-						}
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
+// PrehistoricKeyAddedAt is when a key that predates key history was added:
+// the start of time, so older purchases derive it.
+const PrehistoricKeyAddedAt = "0001-01-01 00:00:00+00"

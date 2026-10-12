@@ -154,9 +154,9 @@ subscription and collection currency each card has carried.
 
 **PERMANENT — the product access cutover.** `ListAccessCutoverApprovals` and the
 statements of `convert_entitlement_windows` that read its temporary conversion
-table run once per merchant, by an operator (the cutover migration, its
-preflight, and restoring a version 1 archive). The auditor cannot plan a
-statement over a table the function creates.
+table run once per merchant, by an operator (the cutover migration and its
+preflight). The auditor cannot plan a statement over a table the function
+creates.
 
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it

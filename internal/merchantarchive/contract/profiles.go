@@ -14,10 +14,6 @@ type Profile struct {
 	Columns []Column
 }
 
-// LegacyProducts is the products row of archives that preceded
-// product_entitlements: the keys were a column of the product.
-var LegacyProducts = Profile{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"revision", "bigint"}, {"id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"entitlements", "jsonb"}, {"tier_group", "text"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"credit_grant", "jsonb"}}}
-
 var Profiles = []Profile{
 	{Name: "customers", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"issuer", "text"}, {"created_at", "timestamp with time zone"}, {"last_seen_at", "timestamp with time zone"}, {"billing_policy", "text"}}},
 	{Name: "custodians", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"kind", "text"}, {"environment", "text"}, {"account_id", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
@@ -70,36 +66,4 @@ var Profiles = []Profile{
 	{Name: "provider_intents", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"rail", "text"}, {"intent_type", "text"}, {"subscription_id", "uuid"}, {"payment_id", "uuid"}, {"price_id", "uuid"}, {"payload", "jsonb"}, {"idempotency_key", "text"}, {"status", "text"}, {"attempts", "integer"}, {"next_attempt_at", "timestamp with time zone"}, {"lease_expires_at", "timestamp with time zone"}, {"origin", "text"}, {"origin_reason", "text"}, {"actor", "text"}, {"last_failure_reason", "text"}, {"expires_at", "timestamp with time zone"}, {"result_evidence", "jsonb"}, {"created_at", "timestamp with time zone"}, {"executed_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"psp_id", "uuid"}, {"destructive_run_id", "uuid"}, {"custodian_id", "uuid"}, {"subject", "text"}, {"credential", "text"}}},
 	{Name: "admission_operations", Columns: []Column{{"merchant_id", "uuid"}, {"request_id", "text"}, {"customer_id", "uuid"}, {"currency", "text"}, {"estimated_amount", "bigint"}, {"available_amount", "bigint"}, {"terms", "jsonb"}, {"requested_expires_at", "timestamptz"}, {"expires_at", "timestamptz"}, {"admitted_at", "timestamptz"}, {"window_keys", "text[]"}, {"state", "text"}, {"capture_terms", "jsonb"}, {"captured_amount", "bigint"}, {"captured_at", "timestamptz"}, {"released_at", "timestamptz"}, {"estimate_usage", "jsonb"}, {"rate_cards", "jsonb"}}},
 	{Name: "running_charges", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"reference", "text"}, {"customer_id", "uuid"}, {"currency", "text"}, {"rate_per_hour", "bigint"}, {"overdraft_amount", "bigint"}, {"resource", "text"}, {"started_at", "timestamp with time zone"}, {"stopped_at", "timestamp with time zone"}, {"posted_through_at", "timestamp with time zone"}, {"posted_amount", "bigint"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
-}
-
-// Version 1 archives preceded product access: customers held per-key
-// entitlement windows, and payments and subscriptions carried key snapshots.
-// Restore converts them as migration 16 does.
-var (
-	LegacySubscriptions = Profile{Name: "subscriptions", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"price_id", "uuid"}, {"product_id", "uuid"}, {"status", "text"}, {"rail", "text"}, {"collection_policy", "text"}, {"rail_subscription_id", "text"}, {"payment_method_id", "uuid"}, {"current_period_starts_at", "timestamp with time zone"}, {"current_period_ends_at", "timestamp with time zone"}, {"started_at", "timestamp with time zone"}, {"ended_at", "timestamp with time zone"}, {"grace_ends_at", "timestamp with time zone"}, {"scheduled_price_id", "uuid"}, {"last_retry_at", "timestamp with time zone"}, {"retry_attempts", "integer"}, {"next_retry_at", "timestamp with time zone"}, {"canceled_at", "timestamp with time zone"}, {"cancel_type", "text"}, {"cancel_feedback", "text"}, {"entitlements_snapshot", "jsonb"}, {"access_duration_hours_snapshot", "integer"}, {"gateway_response", "jsonb"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"tier_group", "text"}, {"deletion_scheduled_at", "timestamp with time zone"}, {"customer_id", "uuid"}, {"psp_id", "uuid"}, {"deleted_at", "timestamp with time zone"}, {"destructive_run_id", "uuid"}, {"transient_retries", "integer"}, {"dunning_policy", "jsonb"}}}
-	LegacyPayments      = Profile{Name: "payments", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"price_id", "uuid"}, {"channel", "text"}, {"rail", "text"}, {"transaction_id", "text"}, {"amount", "bigint"}, {"list_amount", "bigint"}, {"currency", "text"}, {"status", "text"}, {"subscription_id", "uuid"}, {"refunded_payment_id", "uuid"}, {"discount_code", "text"}, {"discount_reason", "text"}, {"entitlements_snapshot", "jsonb"}, {"metadata", "jsonb"}, {"purchased_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}, {"card_brand", "text"}, {"card_last4", "text"}, {"customer_id", "uuid"}, {"psp_id", "uuid"}, {"attempt_kind", "text"}, {"failure_code", "text"}, {"failure_reason", "text"}, {"reversal_kind", "text"}, {"token_type", "text"}, {"deleted_at", "timestamp with time zone"}, {"destructive_run_id", "uuid"}, {"money_movement", "text"}, {"discount_metadata", "jsonb"}, {"credit_grant_snapshot", "jsonb"}, {"legacy_entitlement_hours", "jsonb"}}}
-	LegacyGrants        = Profile{Name: "grants", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"customer_id", "uuid"}, {"product_id", "uuid"}, {"kind", "text"}, {"source_type", "text"}, {"source_id", "text"}, {"payment_id", "uuid"}, {"event", "text"}, {"supersedes_id", "uuid"}, {"spec_snapshot", "jsonb"}, {"starts_at", "timestamp with time zone"}, {"ends_at", "timestamp with time zone"}, {"amount", "bigint"}, {"currency", "text"}, {"reason", "text"}, {"created_at", "timestamp with time zone"}}}
-	LegacyEntitlements  = Profile{Name: "entitlements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"entitlement", "text"}, {"starts_at", "timestamp with time zone"}, {"ends_at", "timestamp with time zone"}, {"source_id", "uuid"}, {"source_type", "text"}, {"revoked_at", "timestamp with time zone"}, {"revoke_reason", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"deleted_at", "timestamp with time zone"}, {"customer_id", "uuid"}, {"grant_id", "uuid"}, {"destructive_run_id", "uuid"}}}
-)
-
-// ProfilesFor is the table sequence of an archive version.
-func ProfilesFor(version int) []Profile {
-	if version != 1 {
-		return Profiles
-	}
-	out := make([]Profile, len(Profiles))
-	for i, p := range Profiles {
-		switch p.Name {
-		case "subscriptions":
-			p = LegacySubscriptions
-		case "payments":
-			p = LegacyPayments
-		case "grants":
-			p = LegacyGrants
-		case "product_access":
-			p = LegacyEntitlements
-		}
-		out[i] = p
-	}
-	return out
 }

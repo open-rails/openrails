@@ -18,24 +18,6 @@ func profile(t *testing.T, name string) Profile {
 	return Profile{}
 }
 
-// legacyRow fills a full row of a version 1 profile; unnamed columns are SQL
-// NULL.
-func legacyRow(t *testing.T, p Profile, fields map[string]string) []*string {
-	t.Helper()
-	values := make([]*string, len(p.Columns))
-	for i, c := range p.Columns {
-		if v, ok := fields[c.Name]; ok {
-			values[i] = &v
-		}
-	}
-	for f := range fields {
-		if value(p, values, f) == nil {
-			t.Fatalf("%s has no column %s", p.Name, f)
-		}
-	}
-	return values
-}
-
 // row fills a full production profile; unnamed columns are SQL NULL.
 func row(t *testing.T, name string, fields map[string]string) (Profile, []*string) {
 	t.Helper()
@@ -109,6 +91,7 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 	checkRows(t, []rowCase{
 		{"pending payment", "payments", map[string]string{"status": "pending"}, false},
 		{"settled payment", "payments", map[string]string{"status": "succeeded", "order_id": testMerchant}, true},
+		{"orderless payment", "payments", map[string]string{"status": "succeeded"}, false},
 		{"open checkout", "checkout_attempts", map[string]string{"status": "open"}, false},
 		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired", "order_id": testMerchant, "amount": "100", "currency": "USD"}, true},
 		{"admitted admission", "admission_operations", map[string]string{"state": "admitted"}, false},
@@ -187,12 +170,11 @@ func TestJSONContracts(t *testing.T) {
 		bad   []string
 	}{
 		{"usage_events.dimensions", []string{`{"tokens":9007199254740993}`}, []string{`{"tokens":1e100}`, `{"tokens":1.5}`, `{"tokens":1} {}`}},
-		{"products.entitlements", []string{`[]`, `["premium","secret_content"]`}, []string{`null`, `{"premium":null}`, `["4111111111111111"]`}},
 		{"admission_operations.capture_terms", []string{`null`, `{"metadata":{"opaque":"replay-fact"}}`}, []string{`{"unknown_operation_field":true}`}},
 		{"catalog_meters.group_by", []string{`null`, `{"region":"$.region"}`}, []string{`{"region":1}`}},
 		{"catalog_rate_cards.filter", []string{`null`, `{"region":["us"]}`}, []string{`{"region":"us"}`}},
 		{"no.such_field", nil, []string{`null`, `{}`}},
-		{"payments.entitlements_snapshot", nil, []string{strings.Repeat("[", 40) + strings.Repeat("]", 40)}},
+		{"subscriptions.gateway_response", []string{`{"any":["shape"]}`}, []string{strings.Repeat("[", 40) + strings.Repeat("]", 40)}},
 	} {
 		for _, raw := range tc.ok {
 			if err := validateJSON(tc.field, raw); err != nil {

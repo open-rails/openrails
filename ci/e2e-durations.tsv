@@ -287,7 +287,6 @@ ci/subscriptions	TestDuplicateChargeFindings	309.7
 ci/subscriptions	TestDurationAccessExpiresBeforeNextBill	65.9
 ci/subscriptions	TestDurationAccessSurvivesCancellation	103.2
 ci/subscriptions	TestDurationDowngradePreservesLongerPaidBenefit	60.0
-ci/subscriptions	TestDurationHistoricalArchiveRetainsBillingAndPaidGrants	36.7
 ci/subscriptions	TestEmbeddedRequiresWriteMode	1.1
 ci/subscriptions	TestEngineAbandonedAuthenticationReleases	12.7
 ci/subscriptions	TestEngineAccountDeletionCancels	65.5
@@ -359,7 +358,6 @@ ci/subscriptions	TestInvoicePreflightResolvesUnsentAcceptedOperation	40.0
 ci/subscriptions	TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP	22.4
 ci/subscriptions	TestInvoiceRemittanceReplay	38.3
 ci/subscriptions	TestInvoiceReplicasFinalizeOnePeriodWithoutError	23.7
-ci/subscriptions	TestLegacyArchiveConvertsToProductAccess	63.7
 ci/subscriptions	TestLegacyImportConvergesAtCommit	10.9
 ci/subscriptions	TestLegacyImportRaisesNoFindings	21.5
 ci/subscriptions	TestLegacyNMIBookImport	16.5

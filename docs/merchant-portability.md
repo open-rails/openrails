@@ -31,10 +31,9 @@ file only after that verification succeeds.
 
 ## Archive format and metadata
 
-Exports use archive format **v2**; imports accept **v1** and **v2**. The importer
-maps supported historical row layouts to the current schema, preserving private
-identities and financial facts. Missing historical price versions follow their
-creation chronology. Unsupported draft formats must be exported again from the source.
+Exports and imports use archive format **v2**. The importer maps earlier v2 row
+layouts to the current schema, preserving private identities and financial facts.
+A v1 or draft archive is refused: restore it on an earlier release, then export it again.
 
 Application metadata is preserved as stored, including arbitrary keys, nested
 JSON values and exact numbers. Export does not sanitize or redact that metadata.

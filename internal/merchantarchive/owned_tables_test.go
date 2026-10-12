@@ -148,7 +148,7 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 func TestRestoreSkipsPartitionedRowsPastRetention(t *testing.T) {
 	bounded := map[string]string{"usage_events": "occurred_at", "admission_operations": "admitted_at"}
 	for _, p := range contract.Profiles {
-		query := insertQuery("billing."+p.Name, p)
+		query := insertQuery(p)
 		key, partitioned := bounded[p.Name]
 		if !partitioned {
 			if strings.Contains(query, " WHERE ") {

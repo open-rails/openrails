@@ -181,16 +181,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		var previousDigest *string
 		var previousRows *int64
 		var restoredCatalogRevision int64
-		var stageLegacyPrices bool
-		var stagedPrices *contract.Profile
-		flushPrices := func() error {
-			if stagedPrices == nil {
-				return nil
-			}
-			_, err := tx.Exec(ctx, restoreLegacyPricesQuery(*stagedPrices), id.UUID())
-			stagedPrices = nil
-			return err
-		}
 		info, err := contract.Read(in, func(h archivewire.Header) error {
 			if h.MerchantID != id.String() {
 				return &Error{Code: "merchant_mismatch"}
@@ -198,15 +188,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			restoredCatalogRevision = h.CatalogRevision
 			if err := q.SetCatalogBatchMerchant(ctx, id.String()); err != nil {
 				return err
-			}
-			if h.Version == 1 {
-				if _, err := tx.Exec(ctx, legacyEntitlementsDDL); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, legacyPricesDDL); err != nil {
-					return err
-				}
-				stageLegacyPrices = true
 			}
 			if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
 				return err
@@ -225,13 +206,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if previousDigest != nil {
 				return nil
 			}
-			// Prices precede every row that references them. Finish their
-			// chronological numbering before admitting the next table's rows.
-			if p.Name != "prices" {
-				if err := flushPrices(); err != nil {
-					return err
-				}
-			}
 			args := make([]any, len(values), len(values)+1)
 			for i, v := range values {
 				if v != nil {
@@ -241,15 +215,7 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if dropBefore, ok := partitionDropBefore[p.Name]; ok {
 				args = append(args, dropBefore(restoreNow))
 			}
-			target := "billing." + p.Name
-			if stageLegacyPrices && p.Name == "prices" {
-				target = legacyPricesTable
-				stagedPrices = &p
-			}
-			if p.Name == contract.LegacyEntitlements.Name {
-				target = legacyEntitlementsTable
-			}
-			_, err := tx.Exec(ctx, insertQuery(target, p), args...)
+			_, err := tx.Exec(ctx, insertQuery(p), args...)
 			return err
 		})
 		if err != nil {
@@ -259,9 +225,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				return err
 			}
 			return &Error{Code: "invalid_artifact", Err: err}
-		}
-		if err := flushPrices(); err != nil {
-			return err
 		}
 		result = Result{MerchantID: info.MerchantID, Digest: info.Digest, Rows: info.Rows, Replayed: previousDigest != nil}
 		if previousDigest != nil {
@@ -279,11 +242,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		}
 		if invalidReceipts {
 			return &Error{Code: "integrity", Table: "catalog_applications"}
-		}
-		if info.LegacyAccess {
-			if err := convertLegacyAccess(ctx, tx, id, info.LegacyDurations, restoreNow); err != nil {
-				return err
-			}
 		}
 		if err := validateReferences(ctx, tx, id); err != nil {
 			return err
@@ -321,93 +279,11 @@ func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return nil
 }
 
-// legacyEntitlementsTable holds a version 1 archive's per-key windows while
-// restore converts them to product access.
-const legacyEntitlementsTable = "pg_temp.legacy_entitlements"
-
-// A revision-less archive can stream prices in UUID order. Stage rows in
-// PostgreSQL so their missing revisions use migration 3's (created_at,id)
-// chronology without retaining the whole price catalog in Go memory. Explicit
-// revisions survive unchanged, and the normal insert trigger derives public_id.
-const legacyPricesTable = "pg_temp.legacy_prices"
-const legacyPricesDDL = `CREATE TEMP TABLE legacy_prices ON COMMIT DROP AS SELECT * FROM billing.prices WITH NO DATA`
-
-func restoreLegacyPricesQuery(p contract.Profile) string {
-	columns, values := make([]string, len(p.Columns)), make([]string, len(p.Columns))
-	for i, c := range p.Columns {
-		columns[i] = pgx.Identifier{c.Name}.Sanitize()
-		values[i] = columns[i]
-		if c.Name == "revision" {
-			values[i] = "COALESCE(revision, inferred_revision)"
-		}
-	}
-	return `WITH numbered AS (
- SELECT *, row_number() OVER (PARTITION BY merchant_id,product_id,key ORDER BY created_at,id)-1 AS inferred_revision
- FROM ` + legacyPricesTable + ` WHERE merchant_id=$1
-) INSERT INTO billing.prices (` + strings.Join(columns, ",") + `) SELECT ` + strings.Join(values, ",") + ` FROM numbered`
-}
-
-const legacyEntitlementsDDL = `CREATE TEMP TABLE legacy_entitlements (
-	merchant_id uuid NOT NULL, id uuid NOT NULL, entitlement text COLLATE "C" NOT NULL,
-	starts_at timestamptz NOT NULL, ends_at timestamptz, source_id uuid, source_type text,
-	revoked_at timestamptz, revoke_reason text, created_at timestamptz, updated_at timestamptz,
-	deleted_at timestamptz, customer_id uuid NOT NULL, grant_id uuid, destructive_run_id uuid
-) ON COMMIT DROP`
-
-// legacySubscriptionBounds bounds the open subscription windows of archives
-// preceding explicit access terms by their immutable paid grants, as
-// migration 8 did.
-const legacySubscriptionBounds = `WITH paid_bounds AS (
-	SELECT e.id, CASE WHEN bool_or(g.ends_at IS NULL) THEN NULL ELSE max(g.ends_at) END AS ends_at
-	FROM pg_temp.legacy_entitlements e
-	JOIN billing.subscriptions s ON s.merchant_id = e.merchant_id AND s.id = e.source_id
-	JOIN billing.grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id
-	  AND g.source_type = 'subscription' AND g.source_id = s.id::text
-	  AND g.kind = 'entitlement' AND g.event = 'grant'
-	  AND g.spec_snapshot->'entitlements' ? e.entitlement
-	WHERE e.merchant_id = $1 AND e.source_type = 'subscription' AND e.ends_at IS NULL
-	  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-	  AND s.access_duration_hours_snapshot IS NOT NULL
-	  AND NOT EXISTS (SELECT 1 FROM billing.grants terminal
-	      WHERE terminal.merchant_id = g.merchant_id AND terminal.supersedes_id = g.id
-	        AND terminal.event IN ('revoke', 'expire', 'supersede'))
-	GROUP BY e.id
-)
-UPDATE pg_temp.legacy_entitlements e SET ends_at = b.ends_at
-FROM paid_bounds b WHERE b.id = e.id AND b.ends_at IS NOT NULL`
-
-// convertLegacyAccess converts a version 1 archive's per-key windows to
-// product access, as migration 20 converts a database. A restore cannot take
-// the operator approval that conversion needs, so an archive whose conversion
-// changes any customer's access is refused, to be cut over where it was
-// exported.
-func convertLegacyAccess(ctx context.Context, tx pgx.Tx, id billing.MerchantID, legacyDurations bool, at time.Time) error {
-	if legacyDurations {
-		if _, err := tx.Exec(ctx, legacySubscriptionBounds, id.UUID()); err != nil {
-			return err
-		}
-	}
-	q := gen.New(tx)
-	if _, err := q.ConvertEntitlementWindows(ctx, gen.ConvertEntitlementWindowsParams{MerchantID: id.UUID(), Source: legacyEntitlementsTable, At: at}); err != nil {
-		return err
-	}
-	changes, err := q.ListProductAccessChanges(ctx, gen.ListProductAccessChangesParams{MerchantID: id.UUID(), Source: legacyEntitlementsTable, At: at})
-	if err != nil {
-		return err
-	}
-	if len(changes) > 0 {
-		c := changes[0]
-		return &Error{Code: "unsupported_state", Table: "entitlements", Count: int64(len(changes)),
-			Err: fmt.Errorf("product access conversion changes access (customer %s %s %q); cut the archive over before exporting it", c.CustomerID, c.Change, c.Entitlement)}
-	}
-	return nil
-}
-
 // insertQuery inserts one archived row. A partitioned table takes one more
 // parameter, the oldest key it still keeps: a row older than that has no
 // partition, and retention would drop it on the next pass, so it is not
 // restored.
-func insertQuery(target string, p contract.Profile) string {
+func insertQuery(p contract.Profile) string {
 	cols, params := make([]string, len(p.Columns)), make([]string, len(p.Columns))
 	keep := ""
 	for i, c := range p.Columns {
@@ -417,7 +293,7 @@ func insertQuery(target string, p contract.Profile) string {
 			keep = fmt.Sprintf(" WHERE %s >= $%d::timestamptz", params[i], len(p.Columns)+1)
 		}
 	}
-	return "INSERT INTO " + target + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
+	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
 }
 
 // partitionKeys and partitionDropBefore index retention.Partitioned by table.

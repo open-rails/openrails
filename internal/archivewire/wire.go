@@ -17,10 +17,8 @@ import (
 )
 
 const (
-	// Version is the merchant export format. Import also reads MinVersion:
-	// version 1 preceded product access.
+	// Version is the merchant export format, the only one import reads.
 	Version              = 2
-	MinVersion           = 1
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
@@ -51,7 +49,7 @@ type Record struct {
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func validHeader(h Header) bool {
-	return h.CatalogRevision >= 0 && h.Kind == "header" && h.Version >= MinVersion && h.Version <= Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
+	return h.CatalogRevision >= 0 && h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
 }
 
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
@@ -93,6 +91,9 @@ func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRecord fu
 		if lineNo == 1 {
 			var h Header
 			if err := decodeCanonical(line, &h); err != nil || !validHeader(h) {
+				if err == nil && h.Kind == "header" && h.Version > 0 && h.Version < Version {
+					return info, fmt.Errorf("archive version %d is no longer read: restore it on an earlier release, then export it again", h.Version)
+				}
 				return info, errors.New("invalid archive header or unsupported version")
 			}
 			info.MerchantID = h.MerchantID
@@ -204,13 +205,7 @@ type Writer struct {
 }
 
 func NewWriter(w io.Writer, merchantID string, catalogRevision ...int64) (*Writer, error) {
-	return NewVersionWriter(w, Version, merchantID, catalogRevision...)
-}
-
-// NewVersionWriter writes an archive of a format version import still reads,
-// such as one an older deployment exported.
-func NewVersionWriter(w io.Writer, version int, merchantID string, catalogRevision ...int64) (*Writer, error) {
-	h := Header{Kind: "header", Version: version, MerchantID: merchantID, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
+	h := Header{Kind: "header", Version: Version, MerchantID: merchantID, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
 	if len(catalogRevision) > 0 {
 		h.CatalogRevision = catalogRevision[0]
 	}

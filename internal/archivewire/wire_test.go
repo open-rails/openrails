@@ -77,6 +77,9 @@ func TestArchiveRefusesIncompleteOrAlteredStreams(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	if _, err := CopyVerified(io.Discard, bytes.NewReader(bytes.Replace(good, []byte(`"version":2`), []byte(`"version":1`), 1))); err == nil || !strings.Contains(err.Error(), "archive version 1 is no longer read") {
+		t.Fatalf("version 1 refusal: %v", err)
+	}
 	stop := io.ErrUnexpectedEOF
 	if _, err := Read(bytes.NewReader(good), nil, func(Record) error { return stop }); err != stop {
 		t.Fatalf("callback error must abort the read, got %v", err)
