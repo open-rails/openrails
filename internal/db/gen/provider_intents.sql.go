@@ -522,6 +522,7 @@ const countDestructiveIntentsByActorSince = `-- name: CountDestructiveIntentsByA
 SELECT count(*)::bigint
 FROM billing.provider_intents
 WHERE actor = $1::text
+  AND destructive_action_id IS NULL
   AND origin IN ('user', 'admin')
   AND intent_type = ANY($2::text[])
   AND created_at >= $3::timestamptz
@@ -550,6 +551,7 @@ const countDestructiveIntentsForMerchantSince = `-- name: CountDestructiveIntent
 SELECT count(*)::bigint
 FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
+  AND destructive_action_id IS NULL
   AND origin = ANY($2::text[])
   AND intent_type = ANY($3::text[])
   AND created_at >= $4::timestamptz
@@ -580,6 +582,7 @@ func (q *Queries) CountDestructiveIntentsForMerchantSince(ctx context.Context, a
 const countDestructiveProviderIntentsExecutedSince = `-- name: CountDestructiveProviderIntentsExecutedSince :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
+  AND destructive_action_id IS NULL
   AND intent_type = ANY ($2::text[])
   AND (
         (executed_at IS NOT NULL AND executed_at >= $3::timestamptz)

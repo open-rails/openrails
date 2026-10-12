@@ -1178,6 +1178,8 @@ type BillingPriceMigration struct {
 	CreatedAt            time.Time
 	// When its still-scheduled changes were canceled; a canceled migration is never re-driven.
 	CanceledAt *time.Time
+	// Original admitted cohort action; unresolved scheduled or blocked changes retain its reservation.
+	DestructiveActionID *uuid.UUID
 }
 
 // A price's provider objects on one PSP. Each rail uses its own reference column.
