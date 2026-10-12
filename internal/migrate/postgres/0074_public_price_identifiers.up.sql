@@ -1,4 +1,4 @@
--- parent: 72 sha256:de38170fa42bc1f56d0f59653635d57077ab1c71b267dcc348d554e6eaafb854
+-- parent: 73 sha256:7cc96af952a10e925a8cb19996bb4d507ba26e7a4504213a81de88ef52237d8c
 -- Repair: public IDs are derived from existing immutable product and price keys
 -- and revisions. Private UUID foreign keys and accepted financial terms remain
 -- unchanged. The internal zero-based revision is exposed as version revision+1.

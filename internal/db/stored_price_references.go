@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // StoredPriceReferences projects pre-cutover receipts and notifications using
@@ -97,15 +96,4 @@ func walkStoredPrices(value any, resolve func(uuid.UUID) string) {
 			}
 		}
 	}
-}
-
-// NotificationFromGen reads both current notifications and restored historical
-// receipts without exposing their former UUID price spelling.
-func NotificationFromGen(ctx context.Context, q *gen.Queries, row gen.BillingNotification) (*models.NotificationQueue, error) {
-	var err error
-	row.Data, err = StoredPriceReferences(ctx, q, row.MerchantID, row.Data)
-	if err != nil {
-		return nil, err
-	}
-	return models.NotificationFromGen(row)
 }
