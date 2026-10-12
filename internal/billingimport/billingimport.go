@@ -256,6 +256,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return fmt.Errorf("resolve subscription %s price: %w", s.SourceID, err)
 			}
 			f := reconcile.DeclaredSubscriptionFact{
+				AcceptedSchedule:   s.AcceptedSchedule,
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
 				PriceID:            priceID,

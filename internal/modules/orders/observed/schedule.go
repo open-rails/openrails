@@ -57,7 +57,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID,
-		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: orderID, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
+		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,43 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if err != nil {
 		return err
 	}
-	if stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+		return ErrConflict
+	}
+	return nil
+}
+
+// DeclareSchedule accepts an operator-verified forward import agreement. No
+// order, cash movement or historical settlement is invented by this declaration.
+func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, firstDue time.Time, cadenceHours int, now time.Time) error {
+	if bill.SubscriptionID == nil || firstDue.IsZero() || cadenceHours <= 0 || cadenceHours > math.MaxInt32 || strings.TrimSpace(source) == "" || len(source) > 512 {
+		return errors.New("declared provider schedule is incomplete")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	bill.Kind, bill.SourceKind = "renewal", "provider_cycle"
+	bill.SourceKey, bill.ProviderReference = "", ""
+	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = time.Time{}, time.Time{}, time.Time{}
+	if bill.Payment != nil || bill.Settled || bill.Total <= 0 || len(bill.Lines) != 1 || bill.Lines[0].Amount != bill.Total {
+		return errors.New("declared schedule is an accepted agreement, not historical money")
+	}
+	raw, err := json.Marshal(bill)
+	if err != nil {
+		return err
+	}
+	q := d.Gen(ctx)
+	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID,
+		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
+	if err != nil {
+		return err
+	}
+	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID})
+	if err != nil {
+		return err
+	}
+	if stored.SourceReference != source || stored.CustomerID != bill.CustomerID || stored.PspID != bill.PSPID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
 		return ErrConflict
 	}
 	return nil
@@ -98,6 +134,9 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 	if err := json.Unmarshal(schedule.AcceptedBill, &bill); err != nil {
 		return Bill{}, err
 	}
+	if !receipt.Approved && receipt.Amount == 0 {
+		receipt.Amount, receipt.Currency = bill.Total, bill.Currency
+	}
 	if schedule.PspID != sub.PspID || schedule.CustomerID != sub.CustomerID || bill.SubscriptionID == nil || *bill.SubscriptionID != sub.ID || bill.Owner != string(sub.CollectionPolicy) || receipt.Amount != bill.Total || !strings.EqualFold(receipt.Currency, bill.Currency) {
 		return Bill{}, ErrConflict
 	}
@@ -110,6 +149,19 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 		}
 		due = bound.DueAt
 	case db.IsNotFound(err):
+		if !receipt.Approved {
+			// A declined execution belongs to the next accepted unpaid cycle,
+			// anchored by enrollment and actual prior receipts. A changed
+			// next-retry date supplies no obligation identity.
+			prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			if err != nil && !db.IsNotFound(err) {
+				return Bill{}, err
+			}
+			receipt.NextBillingAt = schedule.FirstDueAt
+			if err == nil {
+				receipt.NextBillingAt = prior.Add(time.Duration(schedule.CadenceHours) * time.Hour)
+			}
+		}
 		due, err = scheduleReceiptCycle(schedule.FirstDueAt, int(schedule.CadenceHours), receipt)
 		if err != nil {
 			return Bill{}, err

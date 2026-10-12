@@ -129,8 +129,23 @@ type DeclaredSubscription struct {
 	Cancel        CancelEvidence    `json:"cancel,omitempty"`
 	Dunning       *DunningEvidence  `json:"dunning,omitempty"`
 	PaymentMethod *PaymentMethodRef `json:"payment_method,omitempty"`
+	// AcceptedSchedule is required for a live imported NMI/CCBill schedule.
+	// These are operator-verified accepted terms, not a request to reconstruct
+	// historical bills from the current catalog or paid-through timestamp.
+	AcceptedSchedule *DeclaredProviderSchedule `json:"accepted_schedule,omitempty"`
 	// Evidence is the host's verbatim legacy payload, stored for forensics.
 	Evidence json.RawMessage `json:"evidence,omitempty"`
+}
+
+// DeclaredProviderSchedule is the accepted recurring obligation of a provider
+// schedule. FirstDueAt anchors its first renewal; retry dates do not move it.
+type DeclaredProviderSchedule struct {
+	SourceReference string    `json:"source_reference"`
+	Amount          int64     `json:"amount,string"`
+	Currency        string    `json:"currency"`
+	Quantity        *int      `json:"quantity,omitempty"`
+	IntervalHours   int       `json:"interval_hours"`
+	FirstDueAt      time.Time `json:"first_due_at"`
 }
 
 // DeclaredAdminGrant is a comped product window with no payment behind it,

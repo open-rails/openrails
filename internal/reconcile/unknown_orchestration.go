@@ -357,7 +357,7 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			evidence, _ := json.Marshal(map[string]any{"transaction_id": t.TransactionID, "subscription_id": sub.ID, "error": err.Error()})
 			action := "Resolve the accepted provider bill or cycle evidence, then replay this observation. No collection or entitlement was inferred."
 			_, findingErr := database.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
-				PspID: &sub.PspID, FindingType: "provider_bill_unresolved", SubjectKey: "receipt:" + t.TransactionID,
+				PspID: &sub.PspID, FindingType: "pull.bill.unresolved", SubjectKey: "receipt:" + t.TransactionID,
 				Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 			if findingErr != nil {
 				return inserted, fmt.Errorf("retain unresolved provider bill: %w", findingErr)
