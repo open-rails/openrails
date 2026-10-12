@@ -709,7 +709,6 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock)
-		paymentService := payments.NewPaymentService(txdb, s.Clock)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		subscription, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), originalSubscriptionID)
@@ -776,33 +775,38 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		}
 
 		now := s.now().UTC()
-		// CCBill's own event time when present; now() as fallback.
-		purchasedAt := now
-		if t := ccbillEventPurchasedAt(data.Timestamp); t != nil {
-			purchasedAt = *t
+		purchasedAt := ccbillEventPurchasedAt(data.Timestamp)
+		periodEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
+		if err != nil || purchasedAt == nil || periodEnd == nil || !periodEnd.After(*purchasedAt) {
+			return errors.New("CCBill upgrade requires its receipt time and next billing boundary")
+		}
+		amount, err := moneyutil.RailMinorToNative(currencyValue, billedAmountCents)
+		if err != nil {
+			return err
 		}
 		payment := &models.Payment{
 			ID:             uuidutil.NewV7(),
 			CustomerID:     subscription.CustomerID,
-			PriceID:        newPrice.ID,
 			SubscriptionID: &subscription.ID,
 			Rail:           models.RailCCBill,
 			TransactionID:  transactionID,
-			Amount:         int64(moneyutil.CentsToMicros(billedAmountCents)),
+			Amount:         amount,
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
 			AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
 			Status:         payments.PaymentStatusSucceededValue,
 			MoneyMovement:  models.MoneyMovementRail, // CCBill billed the upgrade.
-			PurchasedAt:    purchasedAt,
+			PurchasedAt:    *purchasedAt,
 			CreatedAt:      now,
 		}
 
-		created, err := paymentService.CreateIfNotExists(ctx, payment)
+		bill := ccbillUpgradeBill(subscription, newPrice, &data, amount, currencyValue, *purchasedAt, *periodEnd)
+		bill.Payment = payment
+		result, err := observed.Record(ctx, txdb, bill, now)
 		if err != nil {
-			return fmt.Errorf("failed to create upgrade payment: %w", err)
+			return fmt.Errorf("record CCBill upgrade bill: %w", err)
 		}
-		if !created {
+		if !result.PaymentCreated {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"transaction_id":  transactionID,
 				"subscription_id": subscription.ID,
@@ -863,6 +867,24 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// ccbillUpgradeBill freezes the authenticated replacement enrollment's actual
+// amount and service period. Its identity is the replacement agreement, not a
+// delivery or payment ID; replaying its receipt cannot create a second order.
+func ccbillUpgradeBill(sub *models.Subscription, price *models.Price, event *CCBillUpgradeSuccessEvent, amount int64, currency string, start, end time.Time) observed.Bill {
+	description := strings.TrimSpace(event.ProductDesc)
+	if description == "" {
+		description = "CCBill subscription upgrade"
+	}
+	return observed.Bill{PSPID: sub.PspID, CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
+		Owner: string(sub.CollectionPolicy), Kind: "adjustment", SourceKind: "ccbill_upgrade",
+		SourceKey:         strings.TrimSpace(event.OriginalSubscriptionID) + ":" + strings.TrimSpace(event.SubscriptionID),
+		ProviderReference: strings.TrimSpace(event.SubscriptionID), Currency: currency, Total: amount,
+		PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "cash",
+		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &price.ProductID, Description: description,
+			UnitAmount: amount, Amount: amount, BillingIntervalHours: price.BillingIntervalHours,
+			AccessDurationHours: price.AccessDurationHours}}}
 }
 
 // updateAccessForUpgrade moves the subscription's access from the old product
