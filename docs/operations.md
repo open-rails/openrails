@@ -1318,22 +1318,18 @@ one pull anchored at the pull moment.
 
 ## The destructive-action kill switch and first-enforce gate
 
-`provider_write_mode` is a boot setting: changing it needs a deploy. The kill
-switch is the runtime brake — a single DB row, read before each destructive
-act, so one `UPDATE` halts every node at its next gate check.
+The kill switch is a development safeguard: it stops a dev instance from
+corrupting a production database, and production does not run with it engaged.
+It is a single DB row, read before each destructive act, so one `UPDATE`
+reaches every node at its next gate check.
 
-**It ships OFF.** A fresh deployment converges nothing destructive — no local
-cancellation, no entitlement revocation, no provider delete — until an operator
-arms it. That is deliberate: the first pass against an imported legacy book is
-exactly when a bad roster does the most damage.
-
-What it stops: the converge sweep's own retractions (cancel, revoke, close),
-the provider refresh's overwrites, and provider deletes and cancels. What keeps
-running: detection, findings and their alerts, additive repairs and
-access-ended notices. A retraction the sweep holds stays `reconcile_required`,
-with `held_by: kill_switch` and the reason in its evidence, until the first
-sweep after the switch is on. The inline convergence after a change is not
-held: its retractions finish a command already admitted.
+**It ships OFF** (engaged): a fresh deployment makes no cancellation,
+revocation, provider delete or pull overwrite until an operator enables it.
+Detection, findings and their alerts, additive repairs and access-ended notices
+run either way. A retraction the sweep holds stays `reconcile_required`, with
+`held_by: kill_switch` and the reason in its evidence, until the first sweep
+after the switch is enabled. Inline convergence after a change is not held: it
+finishes a command already admitted.
 
 ### Stop everything, now
 
