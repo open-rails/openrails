@@ -50,8 +50,10 @@ export type OpenRailsErrorCode =
   | "default_payment_method_invalid"
   | "default_payment_method_required"
   | "default_rate_card_not_found"
+  | "destructive_actions_held"
   | "finding_action_failed"
   | "finding_not_actionable"
+  | "finding_requires_merchant_config"
   | "hold_not_found"
   | "host_event_not_found"
   | "host_principal_invalid"
@@ -127,6 +129,7 @@ export type OpenRailsErrorCode =
   | "product_tier_group_in_use"
   | "provider_cancel_held"
   | "provider_outcome_unknown"
+  | "provider_writes_held"
   | "psp_claim_requires_proof"
   | "psp_credentials_rejected"
   | "psp_exists"
@@ -240,8 +243,10 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The card cannot be the customer's default for the currency." },
   default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
+  destructive_actions_held: { status: 409, type: "invalid_request_error", meaning: "The kill switch holds changes that end access or write to a provider; the proposal stays open." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
+  finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
@@ -317,6 +322,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
   provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
+  provider_writes_held: { status: 409, type: "invalid_request_error", meaning: "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open." },
   psp_claim_requires_proof: { status: 403, type: "authorization_error", meaning: "Claiming a provider account needs credentials that prove control of it." },
   psp_credentials_rejected: { status: 400, type: "invalid_request_error", meaning: "The provider rejected the credentials." },
   psp_exists: { status: 409, type: "invalid_request_error", meaning: "The account is already a PSP, of this merchant or another; update it instead." },
