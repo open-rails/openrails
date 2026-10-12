@@ -583,14 +583,14 @@ SELECT EXISTS (
 
 -- Resume undoes only the current provider target's unsent cancellation. A
 -- previous binding may retain an independent historical deletion obligation.
--- name: SupersedePendingNMIDelete :execrows
+-- name: SupersedePendingNMIDelete :many
 UPDATE billing.provider_intents
 SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND (idempotency_key=sqlc.arg(idempotency_key)::text
        OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
-  AND (status='failed_retryable' OR (status='pending' AND attempts=0));
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
 
 -- A pending quote remains owned after a charge decline: provider preparation
 -- may already have changed its recurring amount. Applied/canceled historical
@@ -848,3 +848,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(inten
   AND subscription_id = sqlc.arg(subscription_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- The current claim clears a prior proven-unsent marker before any new wire
+-- call. A crash after this fence is uncertain and must verify before retrying.
+-- name: FenceDestructiveProviderSend :execrows
+UPDATE billing.provider_intents
+SET result_evidence=coalesce(result_evidence,'{}'::jsonb)-'destructive_before_effect',updated_at=sqlc.arg(now)::timestamptz
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+ AND destructive_action_id=sqlc.arg(destructive_action_id)::uuid
+ AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
+ AND lease_expires_at>sqlc.arg(now)::timestamptz;

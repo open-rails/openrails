@@ -27,12 +27,14 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND stat
 UPDATE billing.destructive_actions
 SET state=sqlc.arg(state)::text,
  started_at=coalesce(started_at,sqlc.narg(started_at)::timestamptz),
- finished_at=sqlc.narg(finished_at)::timestamptz,result=sqlc.narg(result)::text
+ finished_at=sqlc.narg(finished_at)::timestamptz,
+ completion_sequence=CASE WHEN sqlc.arg(state)::text='succeeded' THEN coalesce(completion_sequence,nextval('billing.destructive_actions_admission_sequence_seq')) ELSE completion_sequence END,
+ result=sqlc.narg(result)::text
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND state IN ('reserved','started','uncertain');
 
 -- name: DestructiveActionProviderState :one
 SELECT EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(id)::uuid AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))::boolean AS pending,
- EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(id)::uuid AND (attempts>0 OR status='succeeded'))::boolean AS attempted;
+ EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(id)::uuid AND status='succeeded')::boolean AS succeeded;
 
 -- Directory scope is deliberate: an actor and a deployment cross merchants.
 -- name: FindOpenDestructiveHold :one
@@ -59,7 +61,7 @@ SELECT merchant_id,id FROM billing.destructive_holds WHERE cleared_at IS NULL
 AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid) ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ClearDestructiveHold :one
-UPDATE billing.destructive_holds SET cleared_at=sqlc.arg(now)::timestamptz,clear_through_sequence=(SELECT coalesce(max(admission_sequence),0) FROM billing.destructive_actions),cleared_by_issuer=sqlc.arg(issuer)::text,cleared_by_id=sqlc.arg(actor_id)::text,clear_reason=sqlc.arg(reason)::text
+UPDATE billing.destructive_holds SET cleared_at=sqlc.arg(now)::timestamptz,clear_through_sequence=(SELECT coalesce(max(greatest(admission_sequence,completion_sequence)),0) FROM billing.destructive_actions),cleared_by_issuer=sqlc.arg(issuer)::text,cleared_by_id=sqlc.arg(actor_id)::text,clear_reason=sqlc.arg(reason)::text
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND cleared_at IS NULL RETURNING *;
 
 -- name: EnqueueDestructiveHoldEvent :exec
@@ -77,43 +79,83 @@ SELECT EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.a
 
 -- name: CountDestructiveUnitsForActor :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin<>'automation' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND state='succeeded' AND admission_sequence>sqlc.arg(clear_after)::bigint AND admitted_at>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForMerchant :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin<>'automation' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND state='succeeded' AND admission_sequence>sqlc.arg(clear_after)::bigint AND admitted_at>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForDeployment :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin<>'automation' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND state='succeeded' AND admission_sequence>sqlc.arg(clear_after)::bigint AND admitted_at>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
--- Customer membership scale is billing activity, not a cache or routine sweep.
--- name: DestructiveActiveCustomerScale :one
-WITH active AS (
- SELECT s.merchant_id,s.customer_id FROM billing.subscriptions s
+-- Only read enough eligible memberships to decide this ceiling. Each source
+-- stops at the threshold, so the final union holds at most twice that many IDs.
+-- name: DestructiveMerchantActivityAtLeast :one
+SELECT count(*)::bigint AS active FROM (
+ (SELECT DISTINCT s.merchant_id,s.customer_id FROM billing.subscriptions s
  JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+ JOIN billing.merchants m ON m.id=s.merchant_id
  WHERE s.status IN ('active','past_due') AND s.deleted_at IS NULL AND p.amount>0
+ AND m.deleted_at IS NULL AND m.status='active' AND s.merchant_id=sqlc.arg(merchant_id)::uuid
+ ORDER BY s.merchant_id,s.customer_id LIMIT sqlc.arg(required)::bigint)
  UNION
- SELECT p.merchant_id,p.customer_id FROM billing.payments p
- WHERE p.purchased_at>=sqlc.arg(since)::timestamptz AND p.status='succeeded' AND p.amount>0 AND p.refunded_payment_id IS NULL AND p.deleted_at IS NULL
-), live AS (
- SELECT a.merchant_id FROM active a JOIN billing.customers c ON c.merchant_id=a.merchant_id AND c.id=a.customer_id
- JOIN billing.merchants m ON m.id=a.merchant_id
- WHERE c.deleted_at IS NULL AND m.deleted_at IS NULL AND m.status='active'
+ (SELECT DISTINCT p.merchant_id,p.customer_id FROM billing.payments p
+ JOIN billing.merchants m ON m.id=p.merchant_id
+ WHERE p.purchased_at>=sqlc.arg(since)::timestamptz AND p.status='succeeded'
+ AND p.amount>0 AND p.refunded_payment_id IS NULL AND p.deleted_at IS NULL
+ AND m.deleted_at IS NULL AND m.status='active' AND p.merchant_id=sqlc.arg(merchant_id)::uuid
+ ORDER BY p.merchant_id,p.customer_id LIMIT sqlc.arg(required)::bigint)
+ LIMIT sqlc.arg(required)::bigint
+) AS memberships;
+
+-- Only read enough eligible memberships to decide this ceiling. Each source
+-- stops at the threshold, so the final union holds at most twice that many IDs.
+-- name: DestructiveDeploymentActivityAtLeast :one
+SELECT count(*)::bigint AS active FROM (
+ (SELECT DISTINCT s.merchant_id,s.customer_id FROM billing.subscriptions s
+ JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+ JOIN billing.merchants m ON m.id=s.merchant_id
+ WHERE s.status IN ('active','past_due') AND s.deleted_at IS NULL AND p.amount>0
+ AND m.deleted_at IS NULL AND m.status='active'
+ ORDER BY s.merchant_id,s.customer_id LIMIT sqlc.arg(required)::bigint)
+ UNION
+ (SELECT DISTINCT p.merchant_id,p.customer_id FROM billing.payments p
+ JOIN billing.merchants m ON m.id=p.merchant_id
+ WHERE p.purchased_at>=sqlc.arg(since)::timestamptz AND p.status='succeeded'
+ AND p.amount>0 AND p.refunded_payment_id IS NULL AND p.deleted_at IS NULL
+ AND m.deleted_at IS NULL AND m.status='active'
+ ORDER BY p.merchant_id,p.customer_id LIMIT sqlc.arg(required)::bigint)
+ LIMIT sqlc.arg(required)::bigint
+) AS memberships;
+
+-- name: FindPendingDestructiveAction :one
+SELECT * FROM billing.destructive_actions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND target=sqlc.arg(target)::text
+ AND actor_issuer=sqlc.arg(actor_issuer)::text AND actor_id=sqlc.arg(actor_id)::text
+ AND request_digest=sqlc.arg(request_digest)::text AND state IN ('reserved','started','uncertain')
+ORDER BY admission_sequence LIMIT 1;
+
+-- name: CountDestructiveUnitsForAutomation :one
+WITH counted AS (
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND state IN ('reserved','started','uncertain')
+ UNION ALL
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
-SELECT count(*) FILTER(WHERE merchant_id=sqlc.arg(merchant_id)::uuid)::bigint AS merchant_active,count(*)::bigint AS deployment_active FROM live;
+SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
+ coalesce(sum(units),0)::bigint AS daily FROM counted;
