@@ -28,7 +28,7 @@ UPDATE billing.destructive_actions
 SET state=sqlc.arg(state)::text,
  started_at=coalesce(started_at,sqlc.narg(started_at)::timestamptz),
  finished_at=sqlc.narg(finished_at)::timestamptz,
- completion_sequence=CASE WHEN sqlc.arg(state)::text='succeeded' THEN coalesce(completion_sequence,nextval('billing.destructive_actions_admission_sequence_seq')) ELSE completion_sequence END,
+ completion_sequence=CASE WHEN sqlc.arg(state)::text='succeeded' THEN coalesce(completion_sequence,nextval('billing.destructive_actions_admission_sequence_seq'::regclass)) ELSE completion_sequence END,
  result=sqlc.narg(result)::text
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND state IN ('reserved','started','uncertain');
 
