@@ -3,7 +3,6 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
