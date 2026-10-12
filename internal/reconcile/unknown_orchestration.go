@@ -353,9 +353,19 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			if t.NextBillingAt != nil {
 				next = *t.NextBillingAt
 			}
-			bill, err := observed.ScheduleBill(ctx, d, current, observed.ScheduleReceipt{TransactionID: t.TransactionID, Amount: amount,
-				Currency: currency, OccurredAt: t.OccurredAt, NextBillingAt: next, Approved: t.Success})
-			if err != nil {
+			receipt := observed.ScheduleReceipt{TransactionID: t.TransactionID, Amount: amount, Currency: currency, OccurredAt: t.OccurredAt, NextBillingAt: next, Approved: t.Success}
+			history, err := observed.HistoricalBill(ctx, d, current, receipt)
+			if err != nil || history.Skip {
+				return err
+			}
+			var bill observed.Bill
+			if history.Bill != nil {
+				if sink := declaredHistoryOf(ctx); sink != nil {
+					sink.add(current, *t)
+					return nil
+				}
+				bill = *history.Bill
+			} else if bill, err = observed.ScheduleBill(ctx, d, current, receipt); err != nil {
 				return err
 			}
 			if t.Success {
@@ -364,9 +374,16 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
 				bill.Settled, bill.SettlementSource = true, "cash"
 			}
-			result, err = observed.Record(ctx, d, bill, now)
-			if err == nil {
+			if result, err = observed.Record(ctx, d, bill, now); err != nil {
+				return err
+			}
+			// Settled history renews nothing: only a cycle bill is renewal evidence.
+			if history.Bill == nil {
 				t.ObservedBill = &bill
+			}
+			if result.Payment != nil {
+				_, err = d.Gen(ctx).ResolveChargeAttribution(ctx, gen.ResolveChargeAttributionParams{MerchantID: sub.MerchantID, PspID: sub.PspID,
+					TransactionID: t.TransactionID, PaymentID: result.Payment.ID, Now: now})
 			}
 			return err
 		})

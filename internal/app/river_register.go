@@ -220,6 +220,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add nmi history worker: %w", err)
 	}
+	// Declared charges without an amount, read from their provider once.
+	if err := addTrackedWorker(r, workers, &riverjobs.ChargeAttributionWorker{
+		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
+	}); err != nil {
+		return fmt.Errorf("add charge attribution worker: %w", err)
+	}
 	// Rebills that never happened are recorded as missed.
 	if err := addTrackedWorker(r, workers, &riverjobs.RebillWatchWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
@@ -500,6 +506,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.NMIHistoryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.NMIHistoryInterval},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: read due declared charge attributions.
+	jobs = append(jobs, r.healthPeriodic(
+		riverjobs.ChargeAttributionInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ChargeAttributionArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.ChargeAttributionInterval},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

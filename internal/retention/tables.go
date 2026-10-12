@@ -41,6 +41,7 @@ var Tables = map[string]Table{
 	"provider_bills":                {Permanent, "permanent with the financial order."},
 	"provider_schedules":            {Permanent, permanent},
 	"provider_cycle_receipts":       {Permanent, permanent},
+	"provider_charge_attributions":  {Permanent, permanent},
 	"usage_collection_cadence":      {Permanent, permanent},
 	"owed_items":                    {Permanent, permanent},
 	"running_charges":               {Permanent, permanent},

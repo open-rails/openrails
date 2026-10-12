@@ -15534,6 +15534,12 @@
             "items": {
               "$ref": "#/components/schemas/DeclaredAdminGrant"
             }
+          },
+          "purchases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredPurchase"
+            }
           }
         }
       },
@@ -15542,6 +15548,28 @@
         "properties": {
           "customer": {
             "type": "string"
+          }
+        }
+      },
+      "DeclaredOrderLine": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "description": {
+            "type": "string"
+          },
+          "access_ends_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -15600,6 +15628,64 @@
           "first_due_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "DeclaredPurchase": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "customer": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "psp": {
+            "$ref": "#/components/schemas/PSPRef"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredOrderLine"
+            }
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/DeclaredSettlement"
+          },
+          "evidence": {}
+        }
+      },
+      "DeclaredSettlement": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "payer": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
           }
         }
       },

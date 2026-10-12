@@ -1304,6 +1304,24 @@ type BillingProviderBill struct {
 	CreatedAt         time.Time
 }
 
+// A declared provider charge without an amount: its provider transaction id names the subscription it belongs to. pending until OpenRails reads the transaction from the provider; resolved names the payment it recorded; unresolvable names why no payment was recorded. Retention: permanent, never pruned.
+type BillingProviderChargeAttribution struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	TransactionID  string
+	CustomerID     uuid.UUID
+	SubscriptionID uuid.UUID
+	DeclaredAt     *time.Time
+	Status         string
+	Attempts       int32
+	NextAttemptAt  *time.Time
+	PaymentID      *uuid.UUID
+	ResolvedAt     *time.Time
+	Reason         *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Verified provider transactions bound once to one due cycle of an accepted schedule version. Retention: permanent, never pruned.
 type BillingProviderCycleReceipt struct {
 	MerchantID              uuid.UUID

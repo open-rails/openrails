@@ -808,10 +808,19 @@ export type DeclaredBilling = {
   subscriptions?: DeclaredSubscription[]
   transactions?: DeclaredTransaction[]
   admin_grants?: DeclaredAdminGrant[]
+  purchases?: DeclaredPurchase[]
 }
 
 export type DeclaredCustomer = {
   customer?: string
+}
+
+export type DeclaredOrderLine = {
+  price?: string
+  quantity?: number
+  unit_amount?: string
+  description?: string
+  access_ends_at?: string
 }
 
 export type DeclaredPaymentMethod = {
@@ -833,6 +842,27 @@ export type DeclaredProviderSchedule = {
   interval_hours?: number
   interval_months?: number
   first_due_at?: string
+}
+
+export type DeclaredPurchase = {
+  source_id?: string
+  customer?: string
+  rail?: string
+  psp?: PSPRef
+  transaction_id?: string
+  currency?: string
+  amount?: string
+  paid_at?: string
+  lines?: DeclaredOrderLine[]
+  settlement?: DeclaredSettlement
+  evidence?: unknown
+}
+
+export type DeclaredSettlement = {
+  asset?: string
+  quantity?: string
+  payer?: string
+  recipient?: string
 }
 
 export type DeclaredStripeInvoice = {

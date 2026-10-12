@@ -342,10 +342,12 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 			}
 		}
 		byRail := map[string]*models.Subscription{}
+		byID := map[uuid.UUID]*models.Subscription{}
 		since := now.Add(-3 * 365 * 24 * time.Hour)
 		earliest := now
 		for _, s := range subs {
 			byRail[s.RailSubscriptionID] = s
+			byID[s.ID] = s
 			if s.CurrentPeriodEndsAt != nil {
 				earliest = minTime(earliest, s.CurrentPeriodEndsAt.UTC().Add(-AlignmentSlack(s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt)))
 			}
@@ -364,6 +366,14 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 				return fmt.Errorf("nmi transaction page %d: %w", page, err)
 			}
 			perSub := map[*models.Subscription][]RemoteTransaction{}
+			ids := make([]string, 0, len(sales))
+			for _, sale := range sales {
+				ids = append(ids, sale.TransactionID)
+			}
+			attributed, err := chargeAttributions(ctx, q, mid.UUID(), psp, ids)
+			if err != nil {
+				return err
+			}
 			for _, sale := range sales {
 				id := sale.SubscriptionID
 				if id == "" {
@@ -371,7 +381,11 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 						id = schedules[0]
 					}
 				}
-				if sub := byRail[id]; sub != nil {
+				sub := byRail[id]
+				if declared, ok := byID[attributed[sale.TransactionID]]; ok {
+					sub = declared
+				}
+				if sub != nil {
 					transaction, err := remoteSale(sale.SaleAction, sub.RailSubscriptionID)
 					if err != nil {
 						return err

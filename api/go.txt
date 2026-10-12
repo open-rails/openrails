@@ -1825,11 +1825,18 @@ pkg openrails/billing, type DeclaredBilling struct, Customers []DeclaredCustomer
 pkg openrails/billing, type DeclaredBilling struct, DefaultPSP PSPRef `json:"default_psp,omitzero"`
 pkg openrails/billing, type DeclaredBilling struct, ExpectedSubscriptions *int `json:"expected_subscriptions,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, PaymentMethods []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
+pkg openrails/billing, type DeclaredBilling struct, Purchases []DeclaredPurchase `json:"purchases,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Subscriptions []DeclaredSubscription `json:"subscriptions,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, SubscriptionsExhaustive bool `json:"subscriptions_exhaustive,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Transactions []DeclaredTransaction `json:"transactions,omitempty"`
 pkg openrails/billing, type DeclaredCustomer struct
 pkg openrails/billing, type DeclaredCustomer struct, Customer CustomerID `json:"customer"`
+pkg openrails/billing, type DeclaredOrderLine struct
+pkg openrails/billing, type DeclaredOrderLine struct, AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
+pkg openrails/billing, type DeclaredOrderLine struct, Description string `json:"description,omitempty"`
+pkg openrails/billing, type DeclaredOrderLine struct, Price PriceID `json:"price"`
+pkg openrails/billing, type DeclaredOrderLine struct, Quantity *int `json:"quantity,omitempty"`
+pkg openrails/billing, type DeclaredOrderLine struct, UnitAmount int64 `json:"unit_amount,string"`
 pkg openrails/billing, type DeclaredPaymentMethod struct
 pkg openrails/billing, type DeclaredPaymentMethod struct, Card *CardDetails `json:"card,omitempty"`
 pkg openrails/billing, type DeclaredPaymentMethod struct, CreatedAt time.Time `json:"created_at,omitempty"`
@@ -1847,6 +1854,23 @@ pkg openrails/billing, type DeclaredProviderSchedule struct, IntervalHours int `
 pkg openrails/billing, type DeclaredProviderSchedule struct, IntervalMonths int `json:"interval_months,omitempty"`
 pkg openrails/billing, type DeclaredProviderSchedule struct, Quantity *int `json:"quantity,omitempty"`
 pkg openrails/billing, type DeclaredProviderSchedule struct, SourceReference string `json:"source_reference"`
+pkg openrails/billing, type DeclaredPurchase struct
+pkg openrails/billing, type DeclaredPurchase struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type DeclaredPurchase struct, Currency string `json:"currency"`
+pkg openrails/billing, type DeclaredPurchase struct, Customer CustomerID `json:"customer"`
+pkg openrails/billing, type DeclaredPurchase struct, Evidence json.RawMessage `json:"evidence,omitempty"`
+pkg openrails/billing, type DeclaredPurchase struct, Lines []DeclaredOrderLine `json:"lines"`
+pkg openrails/billing, type DeclaredPurchase struct, PSP PSPRef `json:"psp,omitzero"`
+pkg openrails/billing, type DeclaredPurchase struct, PaidAt time.Time `json:"paid_at"`
+pkg openrails/billing, type DeclaredPurchase struct, Rail string `json:"rail"`
+pkg openrails/billing, type DeclaredPurchase struct, Settlement *DeclaredSettlement `json:"settlement,omitempty"`
+pkg openrails/billing, type DeclaredPurchase struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type DeclaredPurchase struct, TransactionID string `json:"transaction_id"`
+pkg openrails/billing, type DeclaredSettlement struct
+pkg openrails/billing, type DeclaredSettlement struct, Asset string `json:"asset"`
+pkg openrails/billing, type DeclaredSettlement struct, Payer string `json:"payer,omitempty"`
+pkg openrails/billing, type DeclaredSettlement struct, Quantity string `json:"quantity"`
+pkg openrails/billing, type DeclaredSettlement struct, Recipient string `json:"recipient,omitempty"`
 pkg openrails/billing, type DeclaredStripeInvoice struct
 pkg openrails/billing, type DeclaredStripeInvoice struct, AmountDue int64 `json:"amount_due,string"`
 pkg openrails/billing, type DeclaredStripeInvoice struct, AmountOffStripe int64 `json:"amount_off_stripe,string"`

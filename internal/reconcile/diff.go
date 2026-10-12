@@ -25,6 +25,9 @@ type localIndex struct {
 	pmByRailCustomerRef map[string]*LocalPaymentMethod
 	pmByID              map[uuid.UUID]*LocalPaymentMethod
 	prices              []LocalPrice
+	// attributed: provider transaction to the subscription a declared book
+	// named for it.
+	attributed map[string]uuid.UUID
 }
 
 func buildLocalIndex(local *LocalState) *localIndex {
@@ -35,6 +38,7 @@ func buildLocalIndex(local *LocalState) *localIndex {
 		bySubject:           map[uuid.UUID][]*LocalSubscription{},
 		pmByRailCustomerRef: map[string]*LocalPaymentMethod{},
 		pmByID:              map[uuid.UUID]*LocalPaymentMethod{},
+		attributed:          local.Attributions,
 	}
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
@@ -216,6 +220,12 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 	if t.StripeBill != nil {
 		if s := c.local.byPSID[t.StripeBill.SubscriptionID]; s != nil && s.CollectionPolicy == models.CollectionPolicyProvider {
 			return s, "verified_invoice", false
+		}
+	}
+	// A declared book named this exact provider transaction's subscription.
+	if id, ok := c.local.attributed[t.TransactionID]; ok {
+		if s := c.local.byID[id]; s != nil && s.CollectionPolicy != models.CollectionPolicyEngine && s.RailSubscriptionID != "" {
+			return s, "declared_attribution", false
 		}
 	}
 	if provider == ProviderNMI {

@@ -184,6 +184,13 @@ query and each attempt once: card BIN and brand, AVS/CVV the reply lacked, the
 issuer's raw answer (`processor_response_code`) and whether a network token was
 used. Attempts found by a provider read are filled from that read at once.
 
+A declared charge an import could not record (a real transaction id without an
+amount) is read the same way: every 15 minutes, due attributions are read 50
+transaction ids per query, each once, and the charge is recorded at NMI's
+amount and time on its declared subscription. A failed read backs off; an id
+NMI does not have, or reports declined, records no payment. NMI transaction
+ids are digits, so a declared charge with any other id is never recorded.
+
 NMI's own history is kept too, as monthly aggregates per NMI PSP
 (`nmi_history_months`): the numbers `openrails nmi decline-report` prints,
 through the same read. Once a day each PSP's transaction report is read, one

@@ -30,6 +30,49 @@ type DeclaredBilling struct {
 	Transactions   []DeclaredTransaction   `json:"transactions,omitempty"`
 	// AdminGrants are comped access windows with no payment behind them.
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
+	// Purchases are settled one-off sales, each an order with its payment.
+	Purchases []DeclaredPurchase `json:"purchases,omitempty"`
+}
+
+// DeclaredPurchase is one settled one-off sale: an engine-owned order with
+// frozen lines and the rail payment that paid it. Idempotent by SourceID and
+// by (PSP, TransactionID). Amount must equal the lines' total, in a fiat
+// currency; a row that does not is refused with a finding.
+type DeclaredPurchase struct {
+	SourceID string     `json:"source_id"`
+	Customer CustomerID `json:"customer"`
+	Rail     string     `json:"rail"`
+	// PSP is the account that took the payment; falls back to DefaultPSP.
+	PSP           PSPRef              `json:"psp,omitzero"`
+	TransactionID string              `json:"transaction_id"`
+	Currency      string              `json:"currency"`
+	Amount        int64               `json:"amount,string"`
+	PaidAt        time.Time           `json:"paid_at"`
+	Lines         []DeclaredOrderLine `json:"lines"`
+	Settlement    *DeclaredSettlement `json:"settlement,omitempty"`
+	// Evidence is the host's verbatim legacy payload, stored for forensics.
+	Evidence json.RawMessage `json:"evidence,omitempty"`
+}
+
+// DeclaredOrderLine is one line as sold. UnitAmount is the price it was sold
+// at, not today's catalog price. AccessEndsAt ends the product's access
+// window; nil takes the price's access duration from PaidAt.
+type DeclaredOrderLine struct {
+	Price        PriceID    `json:"price"`
+	Quantity     *int       `json:"quantity,omitempty"`
+	UnitAmount   int64      `json:"unit_amount,string"`
+	Description  string     `json:"description,omitempty"`
+	AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
+}
+
+// DeclaredSettlement is how the rail settled a purchase, as its record shows:
+// for Solana, the transfer's token mint, its amount in the token's base units
+// and the paying and receiving wallets.
+type DeclaredSettlement struct {
+	Asset     string `json:"asset"`
+	Quantity  string `json:"quantity"`
+	Payer     string `json:"payer,omitempty"`
+	Recipient string `json:"recipient,omitempty"`
 }
 
 // DeclaredCustomer ensures a customer row for a host subject. Who the
@@ -103,7 +146,9 @@ type DunningEvidence struct {
 
 // DeclaredTransaction is one charge-level fact, successes and declines alike.
 // Amount is in the currency's native units (micros for USD), and must be a
-// whole number of the provider's minor unit.
+// whole number of the provider's minor unit. An approved NMI or CCBill charge
+// names the provider's own transaction id (digits only); one with no amount
+// is looked up at the provider by that id after the import.
 type DeclaredTransaction struct {
 	RailSubscriptionID string    `json:"rail_subscription_id"`
 	TransactionID      string    `json:"transaction_id"`
@@ -164,8 +209,8 @@ type DeclaredAdminGrant struct {
 	EndsAt   *time.Time `json:"ends_at,omitempty"`
 }
 
-// BillingImportResult reports per-SourceID outcomes for subscriptions and
-// admin grants; customers and payment methods are idempotent upserts.
+// BillingImportResult reports per-SourceID outcomes for subscriptions, admin
+// grants and purchases; customers and payment methods are idempotent upserts.
 type BillingImportResult struct {
 	Imported []string          `json:"imported"`
 	Skipped  []string          `json:"skipped"`

@@ -51,6 +51,10 @@ var providerBillReferenceChecks = []rowCheck{
  OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accepted_bill->'Lines')='array' THEN accepted_bill->'Lines' ELSE '[]'::jsonb END) x(line)
  WHERE NOT EXISTS (SELECT 1 FROM billing.prices p JOIN billing.products pr ON pr.merchant_id=$1 AND pr.id=p.product_id
  WHERE p.merchant_id=$1 AND p.id::text=x.line->>'PriceID' AND pr.id::text=x.line->>'ProductID'))`},
+	{"provider_charge_attributions", `NOT EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1
+ AND s.id=provider_charge_attributions.subscription_id AND s.customer_id=provider_charge_attributions.customer_id AND s.psp_id=provider_charge_attributions.psp_id)
+ OR (payment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=provider_charge_attributions.payment_id
+ AND p.psp_id=provider_charge_attributions.psp_id AND p.transaction_id=provider_charge_attributions.transaction_id))`},
 	{"provider_cycle_receipts", `NOT EXISTS (SELECT 1 FROM billing.provider_schedules s WHERE s.merchant_id=$1
  AND s.subscription_id=provider_cycle_receipts.subscription_id AND s.psp_id=provider_cycle_receipts.psp_id
  AND s.source_reference=provider_cycle_receipts.schedule_source_reference

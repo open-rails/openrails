@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
@@ -245,7 +246,8 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 	customer := billing.CustomerID(uid)
 	now := time.Now().UTC().Truncate(time.Second)
 	started, paidThrough := now.Add(-24*time.Hour), now.Add(29*24*time.Hour)
-	railSub, railCustomer, railMethod, txn := "e2e-sub-"+userID, "e2e-cus-"+userID, "e2e-pm-"+userID, "e2e-txn-"+userID
+	// NMI transaction ids are digits.
+	railSub, railCustomer, railMethod, txn := "e2e-sub-"+userID, "e2e-cus-"+userID, "e2e-pm-"+userID, fmt.Sprintf("%020d", binary.BigEndian.Uint64(uid[:8]))
 	result, err := r.Client.ImportBilling(ctx, billing.DeclaredBilling{
 		AsOf:       now,
 		DefaultPSP: billing.PSPRef{Key: PSPKey},

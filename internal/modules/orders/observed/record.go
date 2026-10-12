@@ -151,7 +151,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			return result, err
 		}
 		cancel := models.DerefStr(sub.CancelType)
-		if sub.Status == "canceled" && (bill.Owner == OwnerEngine || cancel == "user" || cancel == "merchant" || cancel == "chargeback") {
+		// A historical charge made before the cancellation is not after it.
+		before := bill.SourceKind == SourceHistory && sub.CanceledAt != nil && !result.Payment.PurchasedAt.After(*sub.CanceledAt)
+		if sub.Status == "canceled" && !before && (bill.Owner == OwnerEngine || cancel == "user" || cancel == "merchant" || cancel == "chargeback") {
 			evidence, _ := json.Marshal(map[string]any{"order_id": billing.OrderID(result.Order.ID).String(), "payment_id": billing.PaymentID(result.Payment.ID).String(), "subscription_id": billing.SubscriptionID(*bill.SubscriptionID).String()})
 			action := "Review this confirmed charge after cancellation and refund it if appropriate; billing and access remain canceled."
 			if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.charge.after_cancellation", Source: pullSource(), SubjectKey: "payment:" + result.Payment.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {

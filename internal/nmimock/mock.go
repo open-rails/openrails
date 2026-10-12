@@ -112,6 +112,12 @@ func (m *Mock) next(prefix string) string {
 	return fmt.Sprintf("%s%08d", prefix, m.seq)
 }
 
+// txnID is a transaction id as NMI issues them: digits only.
+func (m *Mock) txnID() string {
+	m.seq++
+	return fmt.Sprintf("%d", 9_000_000_000+m.seq)
+}
+
 // errLost is a request whose connection failed; a listener aborts it.
 var errLost = errors.New("nmimock: connection reset")
 

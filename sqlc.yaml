@@ -83,6 +83,7 @@ sql:
       - "internal/migrate/postgres/0084_destructive_staff_counts.up.sql"
       - "internal/migrate/postgres/0085_customer_orders.up.sql"
       - "internal/migrate/postgres/0086_platform_custody.up.sql"
+      - "internal/migrate/postgres/0087_provider_charge_attributions.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

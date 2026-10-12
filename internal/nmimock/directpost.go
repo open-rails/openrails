@@ -80,7 +80,7 @@ func (m *Mock) sale(form url.Values) string {
 		amount, currency, scheduleID = s.Amount, "USD", s.ID
 	}
 	if code := charged.Decline; code != "" {
-		d := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
+		d := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
 			Currency: currency, Card: *charged, Declined: code, At: m.now()}
 		m.sales = append(m.sales, d)
 		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
@@ -93,7 +93,7 @@ func (m *Mock) sale(form url.Values) string {
 	if !m.unsupportedDuplicateCheck && (m.duplicateOf(*charged, form.Get("amount")) || m.withinDupSeconds(*charged, form)) {
 		return rejected("Duplicate transaction REFID:3187654322")
 	}
-	s := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
+	s := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
 		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
 		Initial: form.Get("initial_transaction_id"), Card: *charged, At: m.now()}
 	if s.BillingID == "" {
@@ -126,7 +126,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 		return rejected("Invalid Payment Token")
 	}
 	order, amount, currency := form.Get("orderid"), form.Get("amount"), strings.ToUpper(form.Get("currency"))
-	s := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
+	s := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
 		InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id"), Card: c, At: m.now()}
 	if c.Decline != "" && c.Decline != "vault" {
 		s.Declined = c.Decline
@@ -233,7 +233,7 @@ func (m *Mock) validate(form url.Values) string {
 	if m.duplicateOf(*c, "0.00") {
 		return rejected("Duplicate transaction REFID:3187654323")
 	}
-	id := m.next("validate")
+	id := m.txnID()
 	approved := c.Decline == "" || c.Decline == "202" || c.Decline == "203"
 	code := c.Decline
 	if m.declineValid > 0 {
@@ -300,7 +300,7 @@ func (m *Mock) refund(txID, amount string) (string, string) {
 }
 
 func (m *Mock) recordRefund(s *Sale, cents int64) string {
-	id := m.next("rf")
+	id := m.txnID()
 	s.RefundedCents += cents
 	s.RefundIDs = append(s.RefundIDs, id)
 	m.refunds = append(m.refunds, &refund{ID: id, Sale: s, Cents: cents, At: m.now()})

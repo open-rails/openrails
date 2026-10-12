@@ -85,6 +85,7 @@ func TestPeriodicWorkKeepsItsBoundariesAcrossLeaders(t *testing.T) {
 		riverjobs.RebillWatchArgs{}.Kind():               riverjobs.RebillWatchInterval,
 		riverjobs.AttemptEnrichmentArgs{}.Kind():         riverjobs.AttemptEnrichmentInterval,
 		riverjobs.NMIHistoryArgs{}.Kind():                riverjobs.NMIHistoryInterval,
+		riverjobs.ChargeAttributionArgs{}.Kind():         riverjobs.ChargeAttributionInterval,
 		riverjobs.PriceMigrationRedriveArgs{}.Kind():     time.Hour,
 		riverjobs.CleanupExpiredDataArgs{}.Kind():        time.Hour,
 		riverjobs.IdempotencyGCArgs{}.Kind():             15 * time.Minute,

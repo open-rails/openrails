@@ -121,7 +121,8 @@ func (c DeclaredCoverage) validate(got int) error {
 // at it, and lc's clock should be pinned to it so lifecycle writes are
 // deterministic. Idempotent: an existing (rail, rail_subscription_id) row is
 // never lifecycle-touched by the direct lane and only moved forward by the
-// decider lane; charges land ON CONFLICT DO NOTHING.
+// decider lane; charges land ON CONFLICT DO NOTHING. Charges that are settled
+// history go to history, when given, for RecordDeclaredHistory.
 func ImportDeclaredSubscriptions(
 	ctx context.Context,
 	database *db.DB,
@@ -132,7 +133,11 @@ func ImportDeclaredSubscriptions(
 	txns []RemoteTransaction,
 	coverage DeclaredCoverage,
 	asOf time.Time,
+	history *DeclaredHistory,
 ) (map[string]DeclaredOutcome, error) {
+	if history != nil {
+		ctx = context.WithValue(ctx, declaredHistoryKey{}, history)
+	}
 	if database == nil || lc == nil {
 		return nil, fmt.Errorf("declared import: db and lifecycle are required")
 	}
@@ -634,4 +639,70 @@ func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransa
 		}
 	}
 	return out
+}
+
+// DeclaredHistory collects the book's charges that are settled history (see
+// observed.HistoricalBill) while the book's transaction runs, so the import
+// records them afterwards, one short transaction per subscription, rather
+// than holding the merchant's order numbering for the whole batch.
+type DeclaredHistory struct {
+	subs  map[uuid.UUID]*models.Subscription
+	txns  map[uuid.UUID][]RemoteTransaction
+	order []uuid.UUID
+	seen  map[string]bool
+}
+
+// NewDeclaredHistory returns an empty collector.
+func NewDeclaredHistory() *DeclaredHistory {
+	return &DeclaredHistory{subs: map[uuid.UUID]*models.Subscription{}, txns: map[uuid.UUID][]RemoteTransaction{}, seen: map[string]bool{}}
+}
+
+// Len is the number of collected charges.
+func (h *DeclaredHistory) Len() int { return len(h.seen) }
+
+func (h *DeclaredHistory) add(sub *models.Subscription, t RemoteTransaction) {
+	key := sub.ID.String() + "\x1f" + t.TransactionID
+	if h.seen[key] {
+		return
+	}
+	h.seen[key] = true
+	if _, ok := h.subs[sub.ID]; !ok {
+		h.order = append(h.order, sub.ID)
+	}
+	h.subs[sub.ID] = sub
+	t.ObservedBill = nil
+	h.txns[sub.ID] = append(h.txns[sub.ID], t)
+}
+
+type declaredHistoryKey struct{}
+
+func declaredHistoryOf(ctx context.Context) *DeclaredHistory {
+	h, _ := ctx.Value(declaredHistoryKey{}).(*DeclaredHistory)
+	return h
+}
+
+// RecordDeclaredHistory records the collected history after the book commits:
+// one transaction per subscription. A receipt no bill can hold stays a
+// finding and the rest land.
+func RecordDeclaredHistory(ctx context.Context, database *db.DB, h *DeclaredHistory, now time.Time) error {
+	if h == nil {
+		return nil
+	}
+	ctx = context.WithValue(ctx, declaredHistoryKey{}, (*DeclaredHistory)(nil))
+	for _, id := range h.order {
+		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := database.NewWithPgxTx(tx)
+			sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			return retainingUnresolved(ctx, txdb, sub, h.txns[id], func(kept []RemoteTransaction) error {
+				_, err := backfillSubscriptionPayments(ctx, txdb, sub, kept, now, declaredImportLookback)
+				return err
+			})
+		}); err != nil {
+			return fmt.Errorf("declared import: record history of %s: %w", billing.SubscriptionID(id), err)
+		}
+	}
+	return nil
 }

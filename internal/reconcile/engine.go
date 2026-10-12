@@ -456,6 +456,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
+	if loader, ok := e.Local.(chargeAttributionLoader); ok && len(txnIDs) > 0 {
+		if local.Attributions, err = loader.ChargeAttributions(ctx, binding.ID, txnIDs); err != nil {
+			return rep, nil, nil, nil, fmt.Errorf("load charge attributions: %w", err)
+		}
+	}
 	recoveryErrors := map[string]error{}
 	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil {
 		known := make(map[string]bool, len(localPayments))

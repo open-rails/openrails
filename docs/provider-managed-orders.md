@@ -51,13 +51,28 @@ not increase the bill total or grant a second period. A late charge does not
 revive a canceled subscription. Existing provider uncertainty and cancellation
 holds remain in effect.
 
+## Charges before the schedule
+
+A recurring charge pays the cycle it starts. An NMI or CCBill charge made
+before the subscription's first accepted schedule cycle, or any such charge
+of a canceled subscription without one, is settled history: a complete order on
+the subscription's price at the provider's amount, for one cadence from the
+charge (provider bill kind `provider_pre_schedule`). It binds no cycle, so it
+renews nothing, grants no access and infers no schedule; revenue metrics
+count it when it was charged, and renewal cycles never include it. Import,
+the NMI pull and verification record it the same way, once per provider
+transaction.
+
 ## Import and prelaunch upgrade
 
 [Billing import](batch-import.md) accepts explicit verified schedule and invoice
 facts. A live NMI/CCBill import provides its accepted recurring amount, currency,
 cadence and first due boundary. Stripe financial history provides the complete
 invoice and actual settlement evidence. An amount-only transaction cannot
-reconstruct an unknown historical bill from today's catalog.
+reconstruct an unknown historical bill from today's catalog; a charge before
+the accepted schedule is settled history (above). A declared charge without an
+amount is read from the provider by its transaction id. One-off sales import
+as complete orders with their payments.
 
 The order-only payment migration removes `payments.price_id`. It refuses an
 existing book containing payments without orders, rather than deleting records

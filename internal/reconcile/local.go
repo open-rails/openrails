@@ -134,6 +134,15 @@ type LocalState struct {
 	// PriceIDs is the public ID of every price the subscriptions and prices
 	// reference.
 	PriceIDs map[uuid.UUID]billing.PriceID
+	// Attributions are the snapshot's provider transactions a declared book
+	// attributed to a subscription: transaction id to subscription.
+	Attributions map[string]uuid.UUID
+}
+
+// chargeAttributionLoader is a LocalStateLoader that reads declared charge
+// attributions.
+type chargeAttributionLoader interface {
+	ChargeAttributions(ctx context.Context, pspID uuid.UUID, transactionIDs []string) (map[string]uuid.UUID, error)
 }
 
 // LocalStateLoader loads the local rows the diff engine compares against a

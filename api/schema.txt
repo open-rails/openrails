@@ -87,6 +87,7 @@ migration 0083_payment_order_identity.up.sql sha256:7757d34110d14ad4a3a1793d1f47
 migration 0084_destructive_staff_counts.up.sql sha256:bc91316e0ba297ddb4b371ef499766e7bede845fdb9d5cdb6a881dfaff4439b3
 migration 0085_customer_orders.up.sql sha256:94bbf045913ab00e55207f571519836578cdc26264f8eb87c06dc3a1f38c6258
 migration 0086_platform_custody.up.sql sha256:d0d0c6a749137f0dfe7708ac836cad08fba959e2e1c189b3924b78a5cc17a03d
+migration 0087_provider_charge_attributions.up.sql sha256:9e3180faaa91c5f0c195fca9d2addba0386812d6fc42850ab2558d2afba0753c
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1979,6 +1980,31 @@ table billing.provider_bills
   index CREATE INDEX provider_bills_order_id_idx ON billing.provider_bills USING btree (merchant_id, order_id)
   index CREATE UNIQUE INDEX provider_bills_pkey ON billing.provider_bills USING btree (merchant_id, psp_id, source_kind, source_key)
 
+table billing.provider_charge_attributions
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column transaction_id text NOT NULL
+  column customer_id uuid NOT NULL
+  column subscription_id uuid NOT NULL
+  column declared_at timestamp with time zone
+  column status text NOT NULL
+  column attempts integer NOT NULL
+  column next_attempt_at timestamp with time zone
+  column payment_id uuid
+  column resolved_at timestamp with time zone
+  column reason text
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint provider_charge_attributions_attempts_check CHECK ((attempts >= 0))
+  constraint provider_charge_attributions_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id) ON DELETE RESTRICT
+  constraint provider_charge_attributions_pkey PRIMARY KEY (merchant_id, psp_id, transaction_id)
+  constraint provider_charge_attributions_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint provider_charge_attributions_status_check CHECK ((((status = 'pending'::text) AND (next_attempt_at IS NOT NULL) AND (payment_id IS NULL) AND (resolved_at IS NULL) AND (reason IS NULL)) OR ((status = 'resolved'::text) AND (next_attempt_at IS NULL) AND (payment_id IS NOT NULL) AND (resolved_at IS NOT NULL) AND (reason IS NULL)) OR ((status = 'unresolvable'::text) AND (next_attempt_at IS NULL) AND (payment_id IS NULL) AND (resolved_at IS NOT NULL) AND (reason IS NOT NULL) AND (reason <> ''::text))))
+  constraint provider_charge_attributions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE RESTRICT
+  constraint provider_charge_attributions_transaction_id_check CHECK (((octet_length(transaction_id) >= 1) AND (octet_length(transaction_id) <= 128)))
+  index CREATE INDEX provider_charge_attributions_due_idx ON billing.provider_charge_attributions USING btree (next_attempt_at, merchant_id) WHERE (status = 'pending'::text)
+  index CREATE UNIQUE INDEX provider_charge_attributions_pkey ON billing.provider_charge_attributions USING btree (merchant_id, psp_id, transaction_id)
+
 table billing.provider_cycle_receipts
   column merchant_id uuid NOT NULL
   column psp_id uuid NOT NULL
@@ -3323,6 +3349,7 @@ function billing.guard_billing_restore_receipt()
                     'product_entitlements',
                     'products',
                     'provider_bills',
+                    'provider_charge_attributions',
                     'provider_cycle_receipts',
                     'provider_intents',
                     'provider_mutation_logs',

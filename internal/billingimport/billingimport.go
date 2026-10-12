@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -93,6 +94,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 
+	history := reconcile.NewDeclaredHistory()
+	var plans []plannedPurchase
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
@@ -134,6 +137,13 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return fmt.Errorf("ensure customer %s: %w", s.Customer, err)
 			}
 			seen[s.Customer.UUID()] = struct{}{}
+		}
+
+		// Purchases are checked and attributed with the book; each records in
+		// its own transaction once the book commits.
+		plans, err = planPurchases(ctx, q, merchantID.UUID(), psps, opts.Book.Purchases, asOf, &res)
+		if err != nil {
+			return err
 		}
 
 		// Payment methods: idempotent by the PSP-scoped instrument identity. An
@@ -210,13 +220,35 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
 
-		// Transactions → the declared snapshot's charge events.
+		// Transactions → the declared snapshot's charge events. An NMI or
+		// CCBill charge must name the provider's own transaction: a synthetic
+		// id is evidence, never a payment. An approved one without an amount is
+		// attributed to its subscription and read from the provider later.
+		railOf := map[string]string{}
+		for _, s := range opts.Book.Subscriptions {
+			railOf[s.RailSubscriptionID] = strings.ToLower(strings.TrimSpace(s.Rail))
+		}
 		txns := make([]reconcile.RemoteTransaction, 0, len(opts.Book.Transactions))
+		var unverified, attributed []DeclaredTransaction
 		invoiceSnapshots := map[string][]byte{}
 		for _, t := range opts.Book.Transactions {
 			typ := reconcile.TransactionType(t.Type)
 			if t.Type == "" {
 				typ = reconcile.TransactionTypeSale
+			}
+			if rail := railOf[t.RailSubscriptionID]; rail == string(models.RailNMI) || rail == string(models.RailCCBill) {
+				charge := typ == reconcile.TransactionTypeSale || typ == reconcile.TransactionTypeDecline
+				approved := typ == reconcile.TransactionTypeSale && t.Success
+				switch {
+				case charge && !providerTransactionID(rail, t.TransactionID):
+					if approved {
+						unverified = append(unverified, t)
+					}
+					continue
+				case approved && t.Amount == 0:
+					attributed = append(attributed, t)
+					continue
+				}
 			}
 			minor, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount)
 			if err != nil {
@@ -242,7 +274,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// The first approved sale of each NMI schedule is its customer-initiated
 		// recurring signup: the stored-credential anchor dunning retries cite.
 		firstScheduleSale := map[string]reconcile.RemoteTransaction{}
-		for _, t := range txns {
+		anchors := slices.Clone(txns)
+		for _, t := range attributed {
+			anchors = append(anchors, reconcile.RemoteTransaction{TransactionID: t.TransactionID, SubscriptionID: t.RailSubscriptionID,
+				Type: reconcile.TransactionTypeSale, Success: true, OccurredAt: t.OccurredAt.UTC()})
+		}
+		for _, t := range anchors {
 			if t.SubscriptionID == "" || !t.Success || t.Type != reconcile.TransactionTypeSale || t.TransactionID == "" {
 				continue
 			}
@@ -252,7 +289,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		}
 
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
-		anchors := map[string]string{}
+		mandateAnchors := map[string]string{}
 		for _, s := range opts.Book.Subscriptions {
 			subPSP, err := psps.resolve(s.PSP, s.Rail, fmt.Sprintf("subscription %s", s.SourceID))
 			if err != nil {
@@ -314,7 +351,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return err
 			}
 			if anchor != "" {
-				anchors[f.SourceID] = anchor
+				mandateAnchors[f.SourceID] = anchor
 			}
 			facts = append(facts, f)
 		}
@@ -322,13 +359,16 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
 			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
 			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
-		}, asOf)
+		}, asOf, history)
 		if err != nil {
+			return err
+		}
+		if err := attributeCharges(ctx, q, merchantID.UUID(), facts, attributed, unverified, timeutil.FirstClock(opts.Clock).Now().UTC()); err != nil {
 			return err
 		}
 		for _, f := range facts {
 			o := outcomes[f.SourceID]
-			if anchor := anchors[f.SourceID]; anchor != "" && (o.Code == reconcile.DeclaredImported || o.Code == reconcile.DeclaredAlreadyPresent) {
+			if anchor := mandateAnchors[f.SourceID]; anchor != "" && (o.Code == reconcile.DeclaredImported || o.Code == reconcile.DeclaredAlreadyPresent) {
 				if err := importRecurringMandate(ctx, q, merchantID.UUID(), f, anchor, asOf); err != nil {
 					return err
 				}
@@ -365,6 +405,17 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.Committed, Kind: FailpointKind}); err != nil {
 		return res, err
 	}
+	// Settled history and purchases each take a short transaction of their
+	// own, so the merchant's order numbering is never held for the batch.
+	if err := reconcile.RecordDeclaredHistory(ctx, database, history, asOf); err != nil {
+		return res, err
+	}
+	if err := recordPurchases(ctx, database, merchantID.UUID(), plans, asOf, &res); err != nil {
+		return res, err
+	}
+	sort.Strings(res.Imported)
+	sort.Strings(res.Skipped)
+	sort.Strings(res.Blocked)
 	return res, nil
 }
 

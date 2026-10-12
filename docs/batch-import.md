@@ -50,7 +50,7 @@ mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
 other configuration. The HTTP body cap (1 MiB) forces large books to
 batch.
 
-The book (`DeclaredBilling`) carries four record kinds:
+The book (`DeclaredBilling`) carries five record kinds, plus admin grants:
 
 | Kind | Idempotency key | Notes |
 |---|---|---|
@@ -58,6 +58,7 @@ The book (`DeclaredBilling`) carries four record kinds:
 | `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + the `card` (`brand`, `last4`, `exp_month`, `exp_year`); `psp` attributes the vault entry |
 | `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
 | `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount` is a decimal string in the currency's native units (micros for USD) |
+| `purchases` | `source_id` and (psp, transaction_id) | settled one-off sales: frozen lines, the rail payment, the access bought |
 
 **Attribution is required.** Every provider-bound row an import writes
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
@@ -121,6 +122,57 @@ comps — access with no payment behind it — ride the same book as
 `admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
 derives the windows. `Client.ImportBilling` posts the same book over
 `POST /v1/merchant/billing-import`.
+
+### Declared purchases
+
+A `purchases` row (`DeclaredPurchase`) is a one-off sale the legacy system
+settled, such as a wallet top-up. Import records it as a complete
+engine-owned order with frozen `lines` (`DeclaredOrderLine`: `price`,
+optional `quantity`, `unit_amount` as sold, optional `description` and
+`access_ends_at`), its succeeded rail payment (`transaction_id`, `paid_at`),
+and the access each line's product bought: from `paid_at` to `access_ends_at`,
+or for the price's access duration. A credit pack's credits are not
+deposited. `settlement` (`asset`, `quantity` in base units, `payer`,
+`recipient`; for Solana the transfer's token, amount and wallets) and raw
+`evidence` are stored on the payment. Each purchase records in its own
+transaction after the book commits; no provider is called.
+
+`amount` must equal the lines' total in a fiat currency. A row that does not
+(or has no fiat value, or reuses another purchase's `source_id` or
+transaction) is reported `blocked` and kept as a `life.import.purchase_refused`
+finding. Re-importing a recorded purchase reports it `skipped`.
+
+```json
+{"source_id": "wallet-1", "customer": "…", "rail": "solana", "psp": {"key": "solana"},
+ "transaction_id": "5h…", "currency": "USD", "amount": "23000000", "paid_at": "2026-01-02T03:04:05Z",
+ "lines": [{"price": "price_…", "unit_amount": "23000000", "access_ends_at": "2026-02-01T03:04:05Z"}],
+ "settlement": {"asset": "…", "quantity": "23000000", "payer": "…", "recipient": "…"}}
+```
+
+### Charges before the accepted schedule
+
+A recurring charge pays the cycle it starts. An approved NMI or CCBill
+charge made before the subscription's first accepted schedule cycle, and any
+approved charge of a canceled subscription that has no accepted schedule, is
+settled history: a complete provider-owned order whose line, on the
+subscription's price, carries the provider's amount, covering one cadence
+from the charge, with the charge as its payment. It grants no access,
+renews nothing and infers no schedule. A decline there moves no money and is
+not recorded. These orders record in one short transaction per subscription
+after the book commits. A live subscription with no accepted schedule keeps
+its receipts unresolved.
+
+A declared NMI or CCBill charge names the provider's own transaction id,
+which is digits only. Any other id (a host's synthetic id) is evidence: a
+`life.import.transaction_unverified` finding, no payment. An approved charge
+with a real id but no amount is kept as an attribution of that provider
+transaction to its subscription (`provider_charge_attributions`). OpenRails
+reads each one from NMI's Query API once, by transaction id, and records the
+provider's exact amount and time; a provider pull that reads the id binds it
+to the same subscription. An id NMI does not have, or reports declined or
+voided, records no payment and becomes a `life.import.transaction_unverified`
+finding. CCBill attributions are kept until a DataLink reader resolves them.
+Every path records a provider transaction once, by (psp, transaction_id).
 
 ### The migration playbook
 

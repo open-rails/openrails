@@ -118,7 +118,7 @@ func (m *Mock) EditSale(id string, edit func(*Sale)) {
 func (m *Mock) addSale(s Sale) Sale {
 	v := m.mustVault(s.Vault)
 	if s.TransactionID == "" {
-		s.TransactionID = m.next("tx")
+		s.TransactionID = m.txnID()
 	}
 	if s.Currency == "" {
 		s.Currency = "USD"
@@ -195,7 +195,7 @@ func (m *Mock) renew(s *Schedule, approve bool) Sale {
 		if code == "" {
 			code = "202"
 		}
-		sale.TransactionID, sale.BillingID, sale.Card, sale.Currency, sale.Declined = m.next("declined"), v.BillingID, v.Card, "USD", code
+		sale.TransactionID, sale.BillingID, sale.Card, sale.Currency, sale.Declined = m.txnID(), v.BillingID, v.Card, "USD", code
 		m.sales = append(m.sales, &sale)
 		s.NextBilling = s.advance(s.NextBilling)
 		return sale.clone()
