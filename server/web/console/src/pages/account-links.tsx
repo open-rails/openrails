@@ -85,7 +85,7 @@ export function InvitationPage({
             if (step === "register" || step === "login") mode.current = step
           }}
           onSignedIn={() => {
-            if (mode.current === "register") onDone()
+            if (accountCode && mode.current === "register") onDone()
           }}
         />
       )}
