@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -99,4 +101,53 @@ func TestPriceIdentifierEscapesKeysAndHTTPPaths(t *testing.T) {
 	for _, movement := range history.Items {
 		require.Equal(t, expected, movement.Price.ID)
 	}
+}
+
+func TestPriceIdentityBatchesAreBoundedByTheirInputs(t *testing.T) {
+	w := newWorld(t)
+	c := w.client[remote]
+	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bounded-prices", DisplayName: "Batch bounds"})
+	require.NoError(t, err)
+	require.NoError(t, w.catalogExec(t.Context(), w.sql(`INSERT INTO billing.prices (id,merchant_id,product_id,key,amount,currency,archived)
+SELECT gen_random_uuid(),$1,$2,'option-'||i,1000000,'USD',i=1 FROM generate_series(1,101) AS i`), c.MerchantID().UUID(), product.ID.UUID()))
+	all := make([]string, billing.MaxBatchItems)
+	public := make([]billing.PriceID, len(all))
+	for i := range all {
+		all[i] = fmt.Sprintf("bounded-prices:option-%d:v1", i+1)
+		public[i] = billing.PriceID(all[i])
+	}
+	runtime := engine.Graph(w.rt).Runtime
+	ctx := merchant.WithID(t.Context(), c.MerchantID())
+	require.NoError(t, runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		for _, tc := range []struct {
+			name      string
+			ids, want []string
+		}{
+			{"nil", nil, nil},
+			{"empty", []string{}, nil},
+			{"unknown", []string{"absent:price:v1"}, nil},
+			{"duplicate and unknown", []string{all[0], "absent:price:v1", all[0]}, []string{all[0]}},
+			{"full batch", all, all},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				rows, err := runtime.DB.Gen(ctx).ListPriceStorageIDs(ctx, gen.ListPriceStorageIDsParams{MerchantID: c.MerchantID().UUID(), Ids: tc.ids})
+				require.NoError(t, err)
+				require.LessOrEqual(t, len(rows), len(tc.ids))
+				got := make([]string, 0, len(rows))
+				for _, row := range rows {
+					got = append(got, row.PublicID)
+				}
+				require.ElementsMatch(t, tc.want, got)
+			})
+		}
+		rows, err := runtime.DB.Gen(ctx).ListPriceStorageIDs(ctx, gen.ListPriceStorageIDsParams{MerchantID: uuid.New(), Ids: all})
+		require.NoError(t, err)
+		require.Empty(t, rows, "identity resolution remains merchant-scoped")
+		return nil
+	}))
+	read, err := c.ListPrices(t.Context(), billing.PriceListParams{IDs: public})
+	require.NoError(t, err)
+	require.Len(t, read.Items, billing.MaxBatchItems, "an input-sized SQL bound must not truncate a valid full batch")
+	_, err = c.ListPrices(t.Context(), billing.PriceListParams{IDs: append(public, "bounded-prices:option-101:v1")})
+	require.Error(t, err, "the public batch boundary remains 100 IDs")
 }
