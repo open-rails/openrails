@@ -123,7 +123,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return h.stopped(ctx, intent, psid, verifiedEvidence(psid, status, false))
 	}
 
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}

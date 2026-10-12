@@ -359,7 +359,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		return h.recoverReceipt(ctx, intent, p)
 	}
 
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}
@@ -488,7 +488,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return parkedBeforeEffect("stripe not configured: " + err.Error())
 	}
 
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}

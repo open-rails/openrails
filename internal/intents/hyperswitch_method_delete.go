@@ -119,7 +119,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 		return parkedBeforeEffect("accepted deletion fence is inconsistent")
 	}
 	if p.DetachOnly {
-		ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock.Now())
+		ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock)
 		if err != nil {
 			return parkedBeforeEffect(err.Error())
 		}
@@ -144,7 +144,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil {
 		return parkedBeforeEffect("accepted custodian credentials are unavailable")
 	}
-	ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}

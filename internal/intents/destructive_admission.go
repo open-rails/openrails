@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
-	"time"
 )
 
 // staffDestructiveIntent is the durable portion of a protected staff command.
@@ -71,7 +72,7 @@ func (s *Store) finishIntentAction(ctx context.Context, id uuid.UUID, transition
 
 // startProtectedEffect is called immediately before the provider write. A
 // canonical unsent refusal retains its reservation but must face holds again.
-func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingProviderIntent, now time.Time) (context.Context, error) {
+func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingProviderIntent, clock clockwork.Clock) (context.Context, error) {
 	if in.DestructiveActionID == nil {
 		if in.Origin == string(OriginAdmin) && staffDestructiveIntent(in.IntentType) {
 			return ctx, errors.New("staff destructive operation has no admission")
@@ -104,7 +105,10 @@ func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingPr
 	if database == nil {
 		return ctx, errors.New("destructive send fence has no database")
 	}
-	n, err := database.Gen(ctx).FenceDestructiveProviderSend(ctx, gen.FenceDestructiveProviderSendParams{MerchantID: in.MerchantID, ID: in.ID, DestructiveActionID: *in.DestructiveActionID, Attempts: in.Attempts, Now: now})
+	if clock == nil {
+		clock = clockwork.NewRealClock()
+	}
+	n, err := database.Gen(ctx).FenceDestructiveProviderSend(ctx, gen.FenceDestructiveProviderSendParams{MerchantID: in.MerchantID, ID: in.ID, DestructiveActionID: *in.DestructiveActionID, Attempts: in.Attempts, Now: clock.Now()})
 	if err != nil {
 		return ctx, err
 	}

@@ -157,7 +157,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	if current.Status != models.StatusCanceled || current.DeletionScheduledAt == nil {
 		return parkedBeforeEffect("subscription is no longer awaiting this deletion")
 	}
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}

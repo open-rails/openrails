@@ -162,7 +162,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	if !shared && (len(customer.Billing) != 1 || pm.RailMethodRef == "" || customer.Billing[0].ID != pm.RailMethodRef) {
 		return parkedBeforeEffect("native vault contains unqualified billing entries; whole-vault deletion refused")
 	}
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}

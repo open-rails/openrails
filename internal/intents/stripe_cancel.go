@@ -114,7 +114,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if rec.Status == "active" || rec.Status == "trialing" {
 		method, form, op = http.MethodPost, url.Values{"cancel_at_period_end": {"true"}}, "cancel_at_period_end"
 	}
-	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}
