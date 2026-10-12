@@ -285,7 +285,11 @@ the default; `card` shows the card that pays it. Changing the default moves
 every subscription that follows it, and
 `PUT /v1/me/subscriptions/{id}/payment-method` (staff:
 `Client.SetSubscriptionPaymentMethod`) sets or, with `null`, clears one's own
-card. A subscription bought with the default card follows it.
+card. A subscription bought with the default card follows it. Staff selection
+preserves the existing dunning state and next retry deadline, even when the
+same card is submitted again. It neither advances a retry nor resumes a case
+waiting for a new card. Customer card replacement retains its recovery flow;
+the customer may explicitly pay the outstanding order.
 
 Each move carries the subscription's recurring agreement to the card; a card
 with none on the subscription's account is verified first ($0, once per
