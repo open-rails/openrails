@@ -27,6 +27,8 @@ var ownedTables = []string{
 	"customers",
 	"dashboard_configs",
 	"destructive_action_switch",
+	"destructive_actions",
+	"destructive_holds",
 	"destructive_run_before_images",
 	"document_sequences",
 	"failed_usage_windows",

@@ -12,14 +12,14 @@
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, subject, credential, expires_at, psp_id, custodian_id
+    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id
 ) VALUES (
     COALESCE(sqlc.narg(id)::uuid, uuidv7()), sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(subject), sqlc.narg(credential), sqlc.narg(expires_at),
-    sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid
+    sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.narg(destructive_action_id)::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -45,6 +45,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     origin_reason = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE billing.provider_intents.origin_reason
+    END,
+    destructive_action_id = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.destructive_action_id
+        ELSE billing.provider_intents.destructive_action_id
     END,
     actor = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
@@ -583,7 +587,8 @@ SELECT EXISTS (
 UPDATE billing.provider_intents
 SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
-  AND idempotency_key=sqlc.arg(idempotency_key)::text
+  AND (idempotency_key=sqlc.arg(idempotency_key)::text
+       OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
   AND (status='failed_retryable' OR (status='pending' AND attempts=0));
 
