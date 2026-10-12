@@ -97,14 +97,20 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
+	ctx, finishEdit, err := cache.BeginEdit(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	defer finishEdit()
 	for attempt := 0; ; attempt++ {
 		set, err := cache.Reload(ctx, mid)
 		if err != nil {
 			return nil, err
 		}
 		held := set.Merchant
-		if params.ExpectedRevision != nil && *params.ExpectedRevision != held.Revision {
-			return nil, merchants.RevisionMismatch("the configuration", *params.ExpectedRevision, held.Revision)
+		cas := held.Revision
+		if params.ExpectedRevision != nil {
+			cas = *params.ExpectedRevision
 		}
 		next := held.Value
 		if params.Settings != nil {
@@ -120,7 +126,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
 		}
-		set, err = cache.PutMerchant(ctx, mid, next, held.Revision)
+		set, err = cache.PutMerchant(ctx, mid, next, cas)
 		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
 			if params.ExpectedRevision != nil || attempt >= 2 {
 				return nil, ErrRevisionMismatch

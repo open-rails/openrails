@@ -289,6 +289,14 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 	if req.Archived && (len(req.Settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap) {
 		return billing.PSP{}, apperr.Invalidf("archived goes alone in its request").WithParam("archived")
 	}
+	ctx, finishEdit, err := s.config.BeginEdit(ctx, struct {
+		ID      billing.PSPID
+		Request billing.UpdatePSPParams
+	}{pspID, req})
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	defer finishEdit()
 	for attempt := 0; ; attempt++ {
 		j, err := s.load(ctx, id)
 		if err != nil {
@@ -473,6 +481,11 @@ func (s *Service) SetPSPAccount(ctx context.Context, id billing.MerchantID, key,
 		return nil
 	}
 	key = strings.ToLower(strings.TrimSpace(key))
+	ctx, finishEdit, err := s.config.BeginEdit(ctx, struct{ Key, Account string }{key, account})
+	if err != nil {
+		return err
+	}
+	defer finishEdit()
 	for attempt := 0; ; attempt++ {
 		set, err := s.config.Reload(ctx, id)
 		if err != nil {

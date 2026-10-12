@@ -66,7 +66,7 @@ func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
 
 // editWebhooks rewrites the merchant document's webhooks at its current
 // revision, retrying a lost race.
-func (s *store) editWebhooks(ctx context.Context, edit func([]merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error)) error {
+func (s *store) editWebhooks(ctx context.Context, terms any, edit func([]merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error)) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -77,6 +77,11 @@ func (s *store) editWebhooks(ctx context.Context, edit func([]merchantdocs.Alert
 	if !s.config.Writable() {
 		return merchants.ErrConfigReadOnly
 	}
+	ctx, finishEdit, err := s.config.BeginEdit(ctx, terms)
+	if err != nil {
+		return err
+	}
+	defer finishEdit()
 	for attempt := 0; ; attempt++ {
 		set, err := s.config.Reload(ctx, mid)
 		if err != nil {

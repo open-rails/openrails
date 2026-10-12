@@ -120,7 +120,10 @@ func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebho
 		ID: billing.AlertWebhookID(id), Name: strings.TrimSpace(in.Name), URL: rawURL,
 		Format: billing.AlertWebhookFormat(format), Enabled: enabled, CreatedAt: now, UpdatedAt: now,
 	}
-	err = s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+	err = s.store.editWebhooks(ctx, struct {
+		Operation string
+		Request   billing.CreateAlertWebhookParams
+	}{"create", in}, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
 		return append(hooks, hook), nil
 	})
 	if err != nil {
@@ -142,7 +145,10 @@ func (s *Service) ListWebhooks(ctx context.Context, params billing.AlertWebhookL
 // DeleteWebhook removes a webhook sink; returns false when nothing matched.
 func (s *Service) DeleteWebhook(ctx context.Context, webhookID billing.AlertWebhookID) (bool, error) {
 	deleted := false
-	err := s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+	err := s.store.editWebhooks(ctx, struct {
+		Operation string
+		ID        billing.AlertWebhookID
+	}{"delete", webhookID}, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
 		before := len(hooks)
 		hooks = slices.DeleteFunc(hooks, func(h merchantdocs.AlertWebhook) bool { return h.ID == webhookID })
 		deleted = len(hooks) != before
@@ -180,7 +186,11 @@ func (s *Service) UpdateWebhook(ctx context.Context, webhookID billing.AlertWebh
 		return billing.AlertWebhook{}, err
 	}
 	var updated merchantdocs.AlertWebhook
-	err = s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+	err = s.store.editWebhooks(ctx, struct {
+		Operation string
+		ID        billing.AlertWebhookID
+		Request   billing.UpdateAlertWebhookParams
+	}{"update", webhookID, in}, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
 		i := slices.IndexFunc(hooks, func(h merchantdocs.AlertWebhook) bool { return h.ID == webhookID })
 		if i < 0 {
 			return nil, ErrWebhookNotFound
