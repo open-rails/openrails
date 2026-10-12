@@ -28,7 +28,7 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged,
 		billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired, billing.HostEventOrderVoided,
 		billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked, billing.HostEventMandateRevoked,
-		billing.HostEventBalanceLow, billing.HostEventBalanceDepleted:
+		billing.HostEventBalanceLow, billing.HostEventBalanceDepleted, billing.HostEventDestructiveHoldOpened, billing.HostEventDestructiveHoldCleared:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
 	}
