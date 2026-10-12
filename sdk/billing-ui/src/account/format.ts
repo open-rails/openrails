@@ -1,6 +1,7 @@
 import type {
   CardSummary,
   CurrencyScales,
+  Order,
   Payment,
   Price,
   Subscription,
@@ -54,14 +55,28 @@ export function subscriptionName(s: Subscription, { t }: Translator): string {
   )
 }
 
-/** Payment history names its purpose; purchased terms belong to its order. */
+/**
+ * What a payment bought, from the frozen lines of the order it settles: their
+ * names and, for one recurring line, its cadence. Without its order, the kind.
+ */
 export function paymentItem(
   p: Payment,
+  order: Order | undefined,
   m: Translator
 ): { name: string; detail: string | null } {
+  const names = [
+    ...new Set(
+      (order?.lines ?? []).map((l) => l.description.trim()).filter(Boolean)
+    ),
+  ]
+  const line = order?.lines.length === 1 ? order.lines[0] : undefined
   return {
-    name: m.t(p.subscription_id ? "history.subscription" : "history.purchase"),
-    detail: null,
+    name:
+      names.join(", ") ||
+      m.t(p.subscription_id ? "history.subscription" : "history.purchase"),
+    detail: line?.billing_interval_hours
+      ? everyLabel(line.billing_interval_hours, m)
+      : null,
   }
 }
 

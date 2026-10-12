@@ -598,6 +598,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      */
     listOrders(
       opts: CursorOptions & {
+        /** Read exactly these orders (at most 100), e.g. a page of payments'. */
+        ids?: string[]
         origin?: string
         status?: string
         subscriptionId?: string
@@ -607,6 +609,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(orderPage, "/me/orders", {
         query: {
           ...cursorQuery(opts, 20),
+          ids: opts.ids?.length ? opts.ids.join(",") : undefined,
           origin: opts.origin,
           status: opts.status,
           subscription_id: opts.subscriptionId,

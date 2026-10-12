@@ -204,6 +204,8 @@ export interface FakeBilling {
   subscriptions: Row[]
   methods: Row[]
   payments: Row[]
+  /** The bills `GET /me/orders?ids=` reads. */
+  orders: Row[]
   products: Row[]
   /** The payment setup's PSPs in `GET /me/config`. */
   psps: Record<string, unknown>[]
@@ -224,6 +226,7 @@ export function fakeBilling(
       | "subscriptions"
       | "methods"
       | "payments"
+      | "orders"
       | "products"
       | "psps"
       | "currencies"
@@ -234,6 +237,7 @@ export function fakeBilling(
     subscriptions: seed.subscriptions ?? [subscription()],
     methods: seed.methods ?? [paymentMethod()],
     payments: seed.payments ?? [payment()],
+    orders: seed.orders ?? [],
     products: seed.products ?? [product()],
     psps: seed.psps ?? [],
     currencies: seed.currencies ?? currenciesFixture,
@@ -427,6 +431,13 @@ export function fakeBilling(
           return apiError(400, "invalid_query", "keys names 1 to 100 products")
         const data = state.products.filter((p) => keys.includes(String(p.key)))
         return json(200, { data, next_cursor: null })
+      }
+      if (key === "GET /me/orders") {
+        const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)
+        const rows = ids.length
+          ? state.orders.filter((o) => ids.includes(String(o.id)))
+          : state.orders
+        return json(200, cursorPage(rows, limit, cursor))
       }
       if (key === "POST /me/orders") {
         const line = (body?.lines as Row[] | undefined)?.[0]

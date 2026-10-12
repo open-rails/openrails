@@ -1,5 +1,14 @@
 # Changelog
 
+## Every payment belongs to its order
+
+- Breaking: `Payment` no longer carries `price` or `product`; `order_id` names
+  the bill it settles, whose frozen `lines` say what was bought.
+- `listOrders({ ids })` reads exactly the orders a page of payments settles.
+- `PaymentHistory` and `usePayments` name each payment from its order's lines
+  (and one recurring line's cadence) in one extra read per page; `usePayments`
+  returns those orders as `orders`.
+
 ## Embeddable billing administration
 
 - `@openrails/billing-ui/admin` exports `BillingAdmin`, `BillingCustomerSummary`,

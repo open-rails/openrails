@@ -96,7 +96,11 @@ export function PaymentHistory({
                   : null
               const date =
                 formatDate(p.created_at, locale) ?? t("common.notAvailable")
-              const item = paymentItem(p, m)
+              const item = paymentItem(
+                p,
+                p.order_id ? state.orders[p.order_id] : undefined,
+                m
+              )
               return (
                 <tr key={p.id} data-testid="payment-row" data-payment-id={p.id}>
                   <td className="hidden py-3 pr-3 align-top whitespace-nowrap tabular-nums @md:table-cell">

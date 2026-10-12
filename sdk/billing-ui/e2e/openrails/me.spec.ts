@@ -44,6 +44,7 @@ test("seeded customer lists and manages their own billing", async ({
 
   const payments = await api(page, "GET", `${me}/payments`, token)
   expect(payments.status, JSON.stringify(payments.body)).toBe(200)
+  const [paid] = (payments.body as Page<{ order_id: string }>).data
   expect((payments.body as Page<unknown>).data).toEqual([
     expect.objectContaining({
       kind: "charge",
@@ -51,11 +52,25 @@ test("seeded customer lists and manages their own billing", async ({
       amount: "9990000",
       currency: "USD",
       subscription_id: sub.id,
-      price: expect.objectContaining({
-        billing_interval_hours: 720,
-        access_duration_hours: 720,
-      }),
-      product: expect.objectContaining({ display_name: "Membership" }),
+      order_id: expect.stringMatching(/^ord_/),
+    }),
+  ])
+  // What a payment bought is the frozen line of the bill it settles.
+  const bills = await api(page, "GET", `${me}/orders?ids=${paid.order_id}`, token)
+  expect(bills.status, JSON.stringify(bills.body)).toBe(200)
+  expect((bills.body as Page<unknown>).data).toEqual([
+    expect.objectContaining({
+      id: paid.order_id,
+      status: "complete",
+      total: "9990000",
+      lines: [
+        expect.objectContaining({
+          description: "Membership",
+          billing_interval_hours: 720,
+          access_duration_hours: 720,
+          subscription_id: sub.id,
+        }),
+      ],
     }),
   ])
 

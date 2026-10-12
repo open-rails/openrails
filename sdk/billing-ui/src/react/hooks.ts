@@ -10,6 +10,7 @@ import {
 import { localError, toBillingError, type BillingError } from "../client/errors"
 import type {
   NewCard,
+  Order,
   Payment,
   PaymentMethod,
   Product,
@@ -383,6 +384,8 @@ export interface PaymentsOptions {
 
 export interface PaymentsState {
   payments: Payment[] | null
+  /** The bills these payments settle, by order id: what each one bought. */
+  orders: Record<string, Order>
   /** Zero-based. */
   page: number
   hasMore: boolean
@@ -392,6 +395,8 @@ export interface PaymentsState {
   previous: () => void
   refetch: () => void
 }
+
+const noOrders: Record<string, Order> = {}
 
 export function usePayments(options: PaymentsOptions = {}): PaymentsState {
   const { client, version } = useBillingContext()
@@ -408,18 +413,32 @@ export function usePayments(options: PaymentsOptions = {}): PaymentsState {
   )
   const page = cursors.length - 1
   const cursor = cursors[page]
-  const remote = useRemote(`${filter}|${cursor ?? ""}|${version}`, (signal) =>
-    client.listPayments({
-      limit: pageSize,
-      cursor,
-      rail: options.rail,
-      signal,
-    })
+  const remote = useRemote(
+    `${filter}|${cursor ?? ""}|${version}`,
+    async (signal) => {
+      const page = await client.listPayments({
+        limit: pageSize,
+        cursor,
+        rail: options.rail,
+        signal,
+      })
+      // One read names every payment on the page by the order it settles.
+      const ids = [
+        ...new Set(page.data.flatMap((p) => (p.order_id ? [p.order_id] : []))),
+      ]
+      const orders: Record<string, Order> = {}
+      if (ids.length) {
+        const bills = await client.listOrders({ ids, limit: ids.length, signal })
+        for (const o of bills.data) orders[o.id] = o
+      }
+      return { ...page, orders }
+    }
   )
   const data = remote.data
   const nextCursor = data?.next_cursor ?? null
   return {
     payments: data?.data ?? null,
+    orders: data?.orders ?? noOrders,
     page,
     hasMore: nextCursor !== null,
     loading: remote.loading,

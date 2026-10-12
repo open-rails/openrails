@@ -20,6 +20,7 @@ import { BillingProvider, type BillingProviderProps } from "../react/provider"
 import {
   apiError,
   fakeBilling,
+  order,
   payment,
   paymentMethod,
   subscription,
@@ -40,6 +41,18 @@ function mount(
   return render(
     <BillingProvider locale="en-US" {...props} client={client}>{ui}</BillingProvider>
   )
+}
+
+/** A settled bill of one frozen line, as `GET /me/orders` answers it. */
+function bill(id: string, description: string, hours: number | null) {
+  const base = order()
+  const line = (base.lines as Record<string, unknown>[])[0]
+  return order({
+    id,
+    status: "complete",
+    total: "9990000",
+    lines: [{ ...line, description, amount: "9990000", unit_amount: "9990000", billing_interval_hours: hours, access_duration_hours: hours }],
+  })
 }
 
 describe("AccountBilling", () => {
@@ -63,6 +76,7 @@ describe("AccountBilling", () => {
           amount: "-9990000",
         }),
       ],
+      orders: [bill("ord_1", "Pro", 720)],
     })
     mount(<AccountBilling />, server)
 
@@ -79,8 +93,8 @@ describe("AccountBilling", () => {
     expect(card).toHaveTextContent("Default for USD")
 
     const rows = await screen.findAllByTestId("payment-row")
-    expect(rows[0]).toHaveTextContent("Subscription")
-    expect(rows[0]).not.toHaveTextContent("every 30 days")
+    expect(rows[0]).toHaveTextContent("Pro")
+    expect(rows[0]).toHaveTextContent("every 30 days")
     expect(rows[0]).toHaveTextContent("Paid")
     expect(rows[0]).toHaveTextContent("$9.99")
     expect(rows[1]).toHaveTextContent("Refund")
@@ -333,50 +347,55 @@ describe("SubscriptionsPanel", () => {
 })
 
 describe("PaymentHistory", () => {
-  it("names payment purpose without reading retired price or product projections", async () => {
+  it("names what each payment bought from its order, falling back to its kind", async () => {
     const server = fakeBilling({
       payments: [
-        payment({
-          order_id: "ord_weekly",
-          subscription_id: "sub_weekly",
-        }),
-        payment({ id: "pay_2", subscription_id: "sub_1" }),
-        payment({ id: "pay_3" }),
-        payment({
-          id: "pay_4",
-          order_id: "ord_post",
-        }),
+        payment({ order_id: "ord_weekly", subscription_id: "sub_weekly" }),
+        payment({ id: "pay_2", subscription_id: "sub_1", order_id: null }),
+        payment({ id: "pay_3", order_id: null }),
+        payment({ id: "pay_4", order_id: "ord_post" }),
       ],
+      orders: [bill("ord_weekly", "Weekly pass", 168), bill("ord_post", "Post purchase", null)],
     })
     mount(<PaymentHistory />, server)
     const rows = await screen.findAllByTestId("payment-row")
     const item = (i: number) => within(rows[i]).getByTestId("payment-item")
     const period = (i: number) =>
       within(rows[i]).queryByTestId("payment-period")?.textContent ?? null
-    expect(rows.map((_, i) => item(i).textContent)).toEqual([
-      "Subscription",
-      "Subscription",
-      "Purchase",
-      "Purchase",
-    ])
+    await waitFor(() =>
+      expect(rows.map((_, i) => item(i).textContent)).toEqual([
+        "Weekly pass",
+        "Subscription",
+        "Purchase",
+        "Post purchase",
+      ])
+    )
     expect(rows.map((_, i) => period(i))).toEqual([
-      null,
+      "every week",
       null,
       null,
       null,
     ])
+    expect(server.calls.filter((c) => c === "GET /me/orders")).toHaveLength(1)
   })
 
-  it("localizes payment purpose without inventing a cadence", async () => {
+  it("localizes the fallback name and the order's cadence", async () => {
     const server = fakeBilling({
-      payments: [payment({ subscription_id: "sub_1" })],
+      payments: [
+        payment({ subscription_id: "sub_1", order_id: null }),
+        payment({ id: "pay_2", order_id: "ord_1" }),
+      ],
+      orders: [bill("ord_1", "Pro", 720)],
     })
     mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
-    const row = await screen.findByTestId("payment-row")
-    expect(within(row).getByTestId("payment-item")).toHaveTextContent(
+    const rows = await screen.findAllByTestId("payment-row")
+    expect(within(rows[0]).getByTestId("payment-item")).toHaveTextContent(
       "サブスクリプション"
     )
-    expect(within(row).queryByTestId("payment-period")).toBeNull()
+    expect(within(rows[0]).queryByTestId("payment-period")).toBeNull()
+    expect(within(rows[1]).getByTestId("payment-period")).toHaveTextContent(
+      "30日ごと"
+    )
   })
 })
 
