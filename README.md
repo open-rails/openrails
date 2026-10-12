@@ -201,7 +201,7 @@ Then build AuthKit with those roles:
 ```go
 ak, err := authkit.New(ctx, authkit.Config{
 	Database: authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
-	Token:    authkit.TokenConfig{Issuer: "https://myapp.com", IssuedAudiences: []string{"myapp"}},
+	Token:    authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"myapp"}},
 	Keys:     authkit.KeysConfig{Path: "/vault/auth"}, // its signing keys
 	Roles:    rbac,
 	HTTP:     &authkit.HTTPConfig{RefreshCookie: true}, // the browser stays signed in across reloads
