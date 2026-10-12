@@ -502,7 +502,8 @@
       "type AccessNote struct {\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tCustomerID   CustomerID     `json:\"customer_id\"`\n\tNote         AccessNoteKind `json:\"note\"`\n\tSourceType   string         `json:\"source_type\"`\n\tSourceID     string         `json:\"source_id\"`\n\tEntitlements []string       `json:\"entitlements\"`\n}",
       "type AccessNoteKind string",
       "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
-      "type AdminAccess struct {\n\tAdmin          AccessLevel `json:\"admin\"`\n\tCatalog        bool        `json:\"catalog\"`\n\tMerchantConfig bool        `json:\"merchant_config\"`\n\tMetrics        bool        `json:\"metrics\"`\n\tScopeID        string      `json:\"scope_id\"`\n}",
+      "type AdminAccess struct {\n\tAdmin          AccessLevel     `json:\"admin\"`\n\tCatalog        bool            `json:\"catalog\"`\n\tMerchantConfig bool            `json:\"merchant_config\"`\n\tMetrics        bool            `json:\"metrics\"`\n\tScopeID        string          `json:\"scope_id\"`\n\tAssistants     AdminAssistants `json:\"assistants\"`\n}",
+      "type AdminAssistants struct {\n\tCatalogCopilot  bool `json:\"catalog_copilot\"`\n\tCatalogDrafting bool `json:\"catalog_drafting\"`\n}",
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
       "type AdmissionBatchResult struct {\n\tItems []AdmissionResult `json:\"items\"`\n}",
       "type AdmissionBlock string",
@@ -988,12 +989,11 @@
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchants map[string]MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
-      "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1012,7 +1012,7 @@
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr string\n\n\tURL string\n\n\tUsername string\n\tPassword string\n\tDB       int\n\n\tTLS bool\n\n\tCACert string\n}",
       "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
-      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tAdminConsole bool\n\n\tAdminConsoleAuthBase string\n}",
+      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type UserInfo = userinfo.Lookup",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tAuthMount string\n\n\tKVMount string\n\n\tTransitMount string\n}"
@@ -1114,10 +1114,10 @@
       "func MerchantRole(name string) (iam.Role, bool)",
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
-      "type AdminConsole = config.ConsoleMount",
+      "type AdminConsole = hostconfig.ConsoleMount",
       "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tHostedCheckoutURL string\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
       "type ConsoleIssuer = hostconfig.ConsoleIssuer",
-      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tCheckoutAssets fs.FS\n}",
+      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tCheckoutAssets fs.FS\n\n\tConsoleAssets fs.FS\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
       "type FormerNamesMode = config.FormerNamesMode",
       "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
@@ -1129,6 +1129,7 @@
     ],
     "server/internal/hostconfig": [
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
+      "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}"
     ],
     "web/admin": [
@@ -1206,12 +1207,6 @@
       "func (f Field[T]) MarshalJSON() ([]byte, error) {\n\tif err := f.validateField(); err != nil {\n\t\treturn nil, err\n\t}\n\tif !f.Set || f.Null {\n\t\treturn []byte(\"null\"), nil\n\t}\n\n\tif v, ok := any(f.Value).(int64); ok {\n\t\treturn json.Marshal(strconv.FormatInt(v, 10))\n\t}\n\treturn json.Marshal(f.Value)\n}",
       "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAmount          Field[string] `json:\"amount,omitzero\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Amount.Set {\n\t\tif decoded.Amount.Null {\n\t\t\treturn fmt.Errorf(\"amount cannot be null\")\n\t\t}\n\t\tif decoded.UnitAmount.Set || decoded.Currency.Set {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, currency, err := parseAmount(decoded.Amount.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.UnitAmount = Value(amount)\n\t\tdecoded.Currency = Value(currency)\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"access_duration\", decoded.AccessDuration, \u0026decoded.AccessDurationHours},\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}",
       "func (q *Quantity) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMin int `json:\"min\"`\n\t\tMax int `json:\"max\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*q = Quantity(value)\n\treturn nil\n}"
-    ],
-    "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
-      "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
-      "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
-      "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
     ],
     "internal/api": [
       "type ErrorResponse struct {\n\tError ErrorDetails `json:\"error\"`\n}"
@@ -1654,6 +1649,12 @@
     "server/cmd/openrails": [
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
     ],
+    "server/internal/adminconsole": [
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
+      "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
+      "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
+    ],
     "server/internal/hostconfig": [
       "func (p *port) UnmarshalText(text []byte) error {\n\ts := strings.TrimSpace(string(text))\n\tif s == \"\" {\n\t\t*p = 0\n\t\treturn nil\n\t}\n\tval, err := strconv.ParseInt(s, 10, 32)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"invalid port value: %w\", err)\n\t}\n\tif val \u003c 1 || val \u003e 65535 {\n\t\treturn fmt.Errorf(\"invalid port value %d: must be 1-65535\", val)\n\t}\n\t*p = port(val)\n\treturn nil\n}"
     ],
@@ -1995,18 +1996,6 @@
       "riverjobs": "github.com/open-rails/openrails/internal/river",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/adminconsole/adminconsole.go": {
-      "api": "github.com/open-rails/openrails/internal/api",
-      "config": "github.com/open-rails/openrails/internal/config",
-      "fmt": "fmt",
-      "fs": "io/fs",
-      "html": "html",
-      "http": "net/http",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "regexp": "regexp",
-      "strings": "strings"
-    },
     "internal/api/error.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "fmt": "fmt",
@@ -2044,7 +2033,6 @@
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
       "fmt": "fmt",
-      "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "maps": "maps",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -2061,7 +2049,6 @@
     "internal/config/deps.go": {
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
-      "fs": "io/fs",
       "http": "net/http",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "userinfo": "github.com/open-rails/authkit/userinfo",
@@ -4555,6 +4542,18 @@
       "strings": "strings",
       "url": "net/url"
     },
+    "server/internal/adminconsole/adminconsole.go": {
+      "api": "github.com/open-rails/openrails/internal/api",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "fmt": "fmt",
+      "fs": "io/fs",
+      "html": "html",
+      "http": "net/http",
+      "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
+      "regexp": "regexp",
+      "strings": "strings"
+    },
     "server/internal/hostconfig/config.go": {
       "authkit": "github.com/open-rails/authkit",
       "billing": "github.com/open-rails/openrails/internal/config",
@@ -4564,6 +4563,11 @@
       "strconv": "strconv",
       "strings": "strings",
       "time": "time"
+    },
+    "server/internal/hostconfig/console.go": {
+      "fmt": "fmt",
+      "json": "encoding/json",
+      "regexp": "regexp"
     },
     "server/internal/hostconfig/server.go": {
       "fmt": "fmt",
@@ -4612,6 +4616,7 @@
       "riverjobs": "github.com/open-rails/openrails/internal/river"
     },
     "server/server.go": {
+      "admin": "github.com/open-rails/openrails/web/admin",
       "app": "github.com/open-rails/openrails/internal/app",
       "authkit": "github.com/open-rails/authkit",
       "billing": "github.com/open-rails/openrails/billing",

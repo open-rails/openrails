@@ -10490,12 +10490,6 @@
       "AdminAssistants": {
         "type": "object",
         "properties": {
-          "widgets": {
-            "type": "boolean"
-          },
-          "ask": {
-            "type": "boolean"
-          },
           "catalog_copilot": {
             "type": "boolean"
           },
@@ -10504,8 +10498,6 @@
           }
         },
         "required": [
-          "widgets",
-          "ask",
           "catalog_copilot",
           "catalog_drafting"
         ]

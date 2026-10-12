@@ -1033,10 +1033,8 @@ pkg openrails/billing, type AdminAccess struct, MerchantConfig bool `json:"merch
 pkg openrails/billing, type AdminAccess struct, Metrics bool `json:"metrics"`
 pkg openrails/billing, type AdminAccess struct, ScopeID string `json:"scope_id"`
 pkg openrails/billing, type AdminAssistants struct
-pkg openrails/billing, type AdminAssistants struct, Ask bool `json:"ask"`
 pkg openrails/billing, type AdminAssistants struct, CatalogCopilot bool `json:"catalog_copilot"`
 pkg openrails/billing, type AdminAssistants struct, CatalogDrafting bool `json:"catalog_drafting"`
-pkg openrails/billing, type AdminAssistants struct, Widgets bool `json:"widgets"`
 pkg openrails/billing, type Admission struct
 pkg openrails/billing, type Admission struct, Allowed bool `json:"allowed"`
 pkg openrails/billing, type Admission struct, BlockedBy *AdmissionBlock `json:"blocked_by"`

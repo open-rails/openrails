@@ -20,8 +20,6 @@ export type AdminAccess = {
 }
 
 export type AdminAssistants = {
-  widgets: boolean
-  ask: boolean
   catalog_copilot: boolean
   catalog_drafting: boolean
 }
