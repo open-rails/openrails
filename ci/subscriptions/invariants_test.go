@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Money invariants checked when every world ends, whatever the test asserted.
@@ -21,8 +23,9 @@ import (
 //	once:      an order's net captures and non-cash settlement do not exceed
 //	           its accepted total; separate adjustments and partials are valid,
 //	           a provider's extra capture counts once its excess is flagged for
-//	           refund review, and a usage order's rounded-up capture credits
-//	           the balance through the ledger;
+//	           refund review (pull.bill.overpaid), and a usage order's capture
+//	           may exceed by less than one rail minor unit when that remainder
+//	           is credited to its customer;
 //	moved:     payments holds only money that moved: a declined charge is a
 //	           payment attempt, never a failed payments row.
 //
@@ -100,25 +103,43 @@ func (w *world) checkMoneyInvariants() {
 	}
 
 	var twice []string
-	rows, err = w.pool.Query(ctx, `SELECT o.id::text FROM `+schema+`.orders o
+	// Each order whose net captures and non-cash settlement exceed its total,
+	// unless the excess is a flagged provider extra capture; with the excess
+	// and, for usage, the rounding credits its customer received.
+	rows, err = w.pool.Query(ctx, `SELECT o.id::text, o.origin, o.currency, sum(p.amount) + coalesce(b.amount,0) - o.total,
+		    coalesce((SELECT sum(g.amount) FROM `+schema+`.grants g
+		        JOIN `+schema+`.ledger_transfers t ON t.merchant_id=g.merchant_id AND t.grant_id=g.id AND t.amount=g.amount
+		        WHERE g.merchant_id=o.merchant_id AND g.customer_id=o.customer_id AND g.currency=o.currency
+		          AND g.kind='credit' AND g.event='grant' AND g.spec_snapshot->'deposit'->>'source'='invoice_rounding_purchase'), 0)
+		FROM `+schema+`.orders o
 		JOIN `+schema+`.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
 		LEFT JOIN (SELECT merchant_id, order_id, max(non_cash_amount) AS amount
 		    FROM `+schema+`.provider_bills GROUP BY merchant_id, order_id) b
 		  ON b.merchant_id=o.merchant_id AND b.order_id=o.id
 		WHERE p.status IN ('succeeded','refunded') AND p.money_movement='rail' AND p.deleted_at IS NULL
-		  AND o.origin <> 'usage'
 		  AND NOT EXISTS (SELECT 1 FROM `+schema+`.reconciliation_findings f
 		      WHERE f.merchant_id=o.merchant_id AND f.finding_type='pull.bill.overpaid' AND f.subject_key='order:'||o.id::text)
-		GROUP BY o.id, o.total, b.amount HAVING sum(p.amount) + coalesce(b.amount,0) > o.total`)
+		GROUP BY o.id, o.merchant_id, o.customer_id, o.origin, o.currency, o.total, b.amount
+		HAVING sum(p.amount) + coalesce(b.amount,0) > o.total`)
 	if err != nil {
 		t.Errorf("invariants: read order settlements: %v", err)
 		return
 	}
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err == nil {
-			twice = append(twice, key)
+		var key, origin, currency string
+		var excess, credited int64
+		if err := rows.Scan(&key, &origin, &currency, &excess, &credited); err != nil {
+			t.Errorf("invariants: scan order settlement: %v", err)
+			rows.Close()
+			return
 		}
+		// A usage capture rounds up to the rail's minor unit; that remainder,
+		// below one unit of the currency, is credited to the customer.
+		unit, err := moneyutil.RailMinorToNative(currency, 1)
+		if origin == "usage" && err == nil && excess < unit && credited >= excess {
+			continue
+		}
+		twice = append(twice, key)
 	}
 	rows.Close()
 
