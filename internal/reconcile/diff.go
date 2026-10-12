@@ -1604,6 +1604,14 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 }
 
 func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment, changes *changeBuilder) (Finding, bool) {
+	if provider == ProviderStripe {
+		var dispute struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(t.Raw, &dispute) == nil && dispute.Status == "won" {
+			return Finding{}, false
+		}
+	}
 	sub, how, _ := corr.subForTxn(provider, t)
 	if sub == nil {
 		// Try via the disputed charge's local payment.
