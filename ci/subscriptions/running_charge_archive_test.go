@@ -62,7 +62,10 @@ func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, broke.cid(), events.Items[0].Balance.CustomerID)
-	require.EqualValues(t, -3_600_000, events.Items[0].Balance.AvailableAmount)
+	// Crossing midnight posts the preceding day's accrual to owed. The
+	// customer's capacity still includes the whole hour on either side.
+	balance := events.Items[0].Balance
+	require.EqualValues(t, -3_600_000, balance.AvailableAmount-balance.OwedAmount)
 	_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{events.Items[0].ID})
 	require.NoError(t, err)
 
