@@ -7,13 +7,11 @@
       "func (UsageSweepArgs) Kind() string",
       "func (c *Client) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEventID, options ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
-      "func (c *Client) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
       "func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error)",
       "func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigrationID, requestOptions ...RequestOption) (*billing.PriceMigrationCancel, error)",
       "func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams, requestOptions ...RequestOption) (*billing.Subscription, error)",
       "func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams, requestOptions ...RequestOption) ([]billing.CaptureResult, error)",
-      "func (c *Client) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)",
       "func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
@@ -93,7 +91,6 @@
       "func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOption) (*billing.PSPRefresh, error)",
       "func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params billing.RefundPaymentParams, requestOptions ...RequestOption) (*billing.Payment, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
-      "func (c *Client) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req billing.ResolveFindingParams, options ...RequestOption) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error)",
       "func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
@@ -111,6 +108,7 @@
       "func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams, requestOptions ...RequestOption) (*billing.Product, error)",
       "func (c *Client) WaiveOrderBalance(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *LocalClient) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error)",
+      "func (c *LocalClient) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *LocalClient) SCIMHandler() (http.Handler, error)",
       "func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
@@ -1703,8 +1701,7 @@
     "admissions.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
-      "http": "net/http",
-      "v5": "github.com/jackc/pgx/v5"
+      "http": "net/http"
     },
     "alerts.go": {
       "billing": "github.com/open-rails/openrails/billing",

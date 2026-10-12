@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
@@ -290,6 +289,8 @@ func TestCaptureEventTypeMustMatchTheAdmission(t *testing.T) {
 func TestAdmitTxRollsBackWithTheHost(t *testing.T) {
 	f := newFixture(t)
 	p := newPricing(t, f, "admit-tx")
+	local, err := p.engine.LocalMerchant(p.client.MerchantID())
+	require.NoError(t, err)
 	p.meter("units", "gen", catalog.AggregationSum, "units", nil, perUnit(10_000, 0), nil)
 	customer := billing.CustomerID(uuid.New())
 	p.grant(customer, 1_000_000)
@@ -301,7 +302,7 @@ func TestAdmitTxRollsBackWithTheHost(t *testing.T) {
 		tx, err := f.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(context.Background()) }()
-		verdicts, err := p.client.AdmitTx(p.ctx, tx, []billing.AdmitParams{params})
+		verdicts, err := local.AdmitTx(p.ctx, tx, []billing.AdmitParams{params})
 		require.NoError(t, err)
 		if commit {
 			require.NoError(t, tx.Commit(t.Context()))
@@ -315,15 +316,6 @@ func TestAdmitTxRollsBackWithTheHost(t *testing.T) {
 	committed := admitTx(true)
 	require.False(t, committed.Admission.Replayed, "the rolled-back request id was never claimed")
 	require.EqualValues(t, 30_000, p.balance(customer).HeldAmount)
-
-	remote, err := openrails.NewRemoteMerchant("https://openrails.invalid", openrails.RemoteCredential{APIKey: "key"})
-	require.NoError(t, err)
-	_, err = remote.AdmitTx(p.ctx, nil, []billing.AdmitParams{params})
-	require.ErrorIs(t, err, openrails.ErrRemoteClient)
-	_, err = remote.CaptureAdmissionsTx(p.ctx, nil, []billing.CaptureAdmissionParams{{RequestID: "req-1"}})
-	require.ErrorIs(t, err, openrails.ErrRemoteClient)
-	_, err = remote.ReleaseAdmissionsTx(p.ctx, nil, []string{"req-1"})
-	require.ErrorIs(t, err, openrails.ErrRemoteClient)
 }
 
 // A capture or release inside the host's transaction commits with the host's
@@ -331,11 +323,13 @@ func TestAdmitTxRollsBackWithTheHost(t *testing.T) {
 func TestCaptureTxCommitsWithTheHost(t *testing.T) {
 	f := newFixture(t)
 	p := newPricing(t, f, "capture-tx")
+	local, err := p.engine.LocalMerchant(p.client.MerchantID())
+	require.NoError(t, err)
 	p.meter("units", "gen", catalog.AggregationSum, "units", nil, perUnit(10_000, 0), nil)
 	customer := billing.CustomerID(uuid.New())
 	p.grant(customer, 1_000_000)
 	requests := pgx.Identifier{f.schema, "host_requests"}.Sanitize()
-	_, err := f.pool.Exec(t.Context(), "CREATE TABLE "+requests+" (id text PRIMARY KEY, state text NOT NULL)")
+	_, err = f.pool.Exec(t.Context(), "CREATE TABLE "+requests+" (id text PRIMARY KEY, state text NOT NULL)")
 	require.NoError(t, err)
 	state := func(id string) string {
 		t.Helper()
@@ -357,11 +351,11 @@ func TestCaptureTxCommitsWithTheHost(t *testing.T) {
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		_, err = tx.Exec(t.Context(), "UPDATE "+requests+" SET state = 'done' WHERE id = 'done'")
 		require.NoError(t, err)
-		results, err := p.client.CaptureAdmissionsTx(p.ctx, tx, []billing.CaptureAdmissionParams{{RequestID: "done", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
+		results, err := local.CaptureAdmissionsTx(p.ctx, tx, []billing.CaptureAdmissionParams{{RequestID: "done", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "UPDATE "+requests+" SET state = 'failed' WHERE id = 'failed'")
 		require.NoError(t, err)
-		released, err := p.client.ReleaseAdmissionsTx(p.ctx, tx, []string{"failed"})
+		released, err := local.ReleaseAdmissionsTx(p.ctx, tx, []string{"failed"})
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, released[0].Status, "%+v", released[0].Error)
 		if commit {

@@ -23,13 +23,11 @@ pkg openrails, func WithRiverClient(*river.Client[pgx.Tx]) StartOption
 pkg openrails, method (*BoundMerchantError) Error() string
 pkg openrails, method (*Client) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
-pkg openrails, method (*Client) AdmitTx(context.Context, pgx.Tx, []billing.AdmitParams) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*Client) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*Client) CancelOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Client) CancelPriceMigration(context.Context, billing.PriceMigrationID, ...RequestOption) (*billing.PriceMigrationCancel, error)
 pkg openrails, method (*Client) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) CaptureAdmissions(context.Context, []billing.CaptureAdmissionParams, ...RequestOption) ([]billing.CaptureResult, error)
-pkg openrails, method (*Client) CaptureAdmissionsTx(context.Context, pgx.Tx, []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)
 pkg openrails, method (*Client) ChangeSubscription(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChange, error)
 pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
@@ -109,7 +107,6 @@ pkg openrails, method (*Client) RecordUsage(context.Context, []billing.RecordUsa
 pkg openrails, method (*Client) RefreshPSPs(context.Context, ...RequestOption) (*billing.PSPRefresh, error)
 pkg openrails, method (*Client) RefundPayment(context.Context, billing.PaymentID, billing.RefundPaymentParams, ...RequestOption) (*billing.Payment, error)
 pkg openrails, method (*Client) ReleaseAdmissions(context.Context, []string, ...RequestOption) ([]billing.AdmissionResult, error)
-pkg openrails, method (*Client) ReleaseAdmissionsTx(context.Context, pgx.Tx, []string) ([]billing.AdmissionResult, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingParams, ...RequestOption) (*billing.FindingResolution, error)
 pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.CreditGrantID, billing.RevokeCreditGrantParams, ...RequestOption) (*billing.CreditGrant, error)
@@ -135,7 +132,10 @@ pkg openrails, method (*Engine) Ready(context.Context) error
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
+pkg openrails, method (*LocalClient) AdmitTx(context.Context, pgx.Tx, []billing.AdmitParams) ([]billing.AdmissionVerdict, error)
+pkg openrails, method (*LocalClient) CaptureAdmissionsTx(context.Context, pgx.Tx, []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)
 pkg openrails, method (*LocalClient) DeclarePSP(context.Context, billing.PSPDeclaration) (*billing.PSP, error)
+pkg openrails, method (*LocalClient) ReleaseAdmissionsTx(context.Context, pgx.Tx, []string) ([]billing.AdmissionResult, error)
 pkg openrails, method (*LocalClient) SCIMHandler() (http.Handler, error)
 pkg openrails, method (*LocalClient) StartRunningChargeTx(context.Context, pgx.Tx, billing.StartRunningChargeParams) (*billing.RunningCharge, error)
 pkg openrails, method (*LocalClient) StopRunningChargeTx(context.Context, pgx.Tx, string, billing.StopRunningChargeParams) (*billing.RunningCharge, error)
@@ -149,7 +149,7 @@ pkg openrails, method (LocalClient) ApplyCatalog(context.Context, *catalog.Appli
 pkg openrails, method (LocalClient) CancelOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (LocalClient) CancelPriceMigration(context.Context, billing.PriceMigrationID, ...RequestOption) (*billing.PriceMigrationCancel, error)
 pkg openrails, method (LocalClient) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
-pkg openrails, method (LocalClient) CaptureAdmission(context.Context, string, billing.CaptureAdmissionParams, ...RequestOption) (*billing.CaptureReceipt, error)
+pkg openrails, method (LocalClient) CaptureAdmissions(context.Context, []billing.CaptureAdmissionParams, ...RequestOption) ([]billing.CaptureResult, error)
 pkg openrails, method (LocalClient) ChangeSubscription(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChange, error)
 pkg openrails, method (LocalClient) CheckEntitlements(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
 pkg openrails, method (LocalClient) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
@@ -164,6 +164,7 @@ pkg openrails, method (LocalClient) CreateProvisioningToken(context.Context, bil
 pkg openrails, method (LocalClient) CustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
 pkg openrails, method (LocalClient) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (LocalClient) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
+pkg openrails, method (LocalClient) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (LocalClient) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (LocalClient) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)

@@ -468,7 +468,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`; embedded, in the host's transaction: `AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx` |
+| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
 | Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
@@ -518,7 +518,9 @@ See [running charges](running-charges.md).
 `Engine.Merchant` returns the shared `*Client`, whose methods work both in process
 and over HTTP. `Engine.LocalMerchant` is the explicit extension for operations
 that require the local engine: `DeclarePSP`, `SCIMHandler`,
-`StartRunningChargeTx` and `StopRunningChargeTx`. `LocalClient` embeds `*Client`,
+`StartRunningChargeTx`, `StopRunningChargeTx`, `AdmitTx`, `CaptureAdmissionsTx`
+and `ReleaseAdmissionsTx`. The transaction methods commit with the host's own
+rows; see [admissions](admission-operations.md). `LocalClient` embeds `*Client`,
 so ordinary operations remain available; pass `local.Client` to a consumer
 accepting the shared client. The factory does no I/O; merchant binding and
 the existing lifecycle checks remain unchanged. These local methods are absent

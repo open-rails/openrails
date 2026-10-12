@@ -238,7 +238,7 @@ on one merchant from either, and no call names its merchant.
 | `WithMerchant`, `ForMerchantID` on a call; `WithDefaultMerchant`, `WithMerchantID`; `client.With` | Removed: a handle acts on its own merchant. Take the other merchant's handle |
 | `openrails.RequestMerchant` | Removed: OpenRails binds the merchant; a host's `Authenticate` says who the request is |
 | `client.DeclarePSP(ctx, merchantID, declaration)` | `engine.LocalMerchant(merchantID)` returns a `LocalClient`; `local.DeclarePSP(ctx, declaration)` takes the declaration alone |
-| Local-only methods on `*Client` | `DeclarePSP`, `SCIMHandler`, `StartRunningChargeTx`, and `StopRunningChargeTx` are on `*LocalClient`, constructed by `Engine.LocalMerchant`; pass `local.Client` where a shared client is required. `ErrRemoteClient` is removed |
+| Local-only methods on `*Client` | `DeclarePSP`, `SCIMHandler`, `StartRunningChargeTx`, `StopRunningChargeTx`, `AdmitTx`, `CaptureAdmissionsTx`, and `ReleaseAdmissionsTx` are on `*LocalClient`, constructed by `Engine.LocalMerchant`; pass `local.Client` where a shared client is required. `ErrRemoteClient` is removed |
 | `server.Server.Client` | `server.Server.Engine`, whose `Merchant(id)` is any live merchant's handle |
 | `openrails billing export` and `import` with `--url`, `get-merchant-config` and `apply-merchant-config` with `--server-url`, took `--merchant` | They act on the token's merchant and refuse `--merchant`, which names a local merchant |
 
