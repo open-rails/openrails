@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -50,10 +51,11 @@ merchants:
 			cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 			cfg.Engine.Vault = &openrails.VaultConfig{Address: fake.URL(), Token: fake.Token}
 			cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
+			// Keep enrollment closed in this Vault/key-rotation fixture.
 			cfg.Auth = authkit.Config{
 				Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1/" + slug},
 				Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true, VerifyOnly: true},
-				Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+				Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed},
 				HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 				Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
 			}
