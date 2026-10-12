@@ -234,14 +234,14 @@ func TestObservedLateBillKeepsCancellation(t *testing.T) {
 	require.Equal(t, 1, findings, "the late capture requires refund review")
 }
 
-// Native flat-price checkout leaves quantity nil; Stripe's accepted invoice
+// Native flat recurring checkout leaves quantity nil; Stripe's accepted invoice
 // reports one unit. The verified invoice must reuse that order without changing
 // its frozen money or creating a second obligation.
 func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
 	w := orderWorld(t)
 	w.waive("evidenced", "normalized verified invoice exercises checkout correlation without issuing a gateway charge")
 	c := w.newCustomer()
-	price := w.lifetime("observed-flat-checkout", 100)
+	price := w.membership("observed-flat-checkout", 100)
 	order, err := w.client[embedded].CreateOrder(t.Context(), billing.CreateOrderParams{
 		CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: uuid.NewString(),
 	})
