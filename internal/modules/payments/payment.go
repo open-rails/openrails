@@ -82,6 +82,18 @@ func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pay
 	return s.repo.GetByID(ctx, id)
 }
 
+// MatchesPrice verifies accepted commercial identity through the payment's
+// immutable order lines. It does not consult the subscription's current price.
+func (s *PaymentService) MatchesPrice(ctx context.Context, paymentID, priceID uuid.UUID) (bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.repo.db.Gen(ctx).PaymentMatchesOrderPrice(ctx, gen.PaymentMatchesOrderPriceParams{
+		MerchantID: mid.UUID(), PaymentID: paymentID, PriceID: priceID,
+	})
+}
+
 // AttachRelations loads each payment's price, product and subscription.
 func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
 	return s.repo.AttachRelations(ctx, payments...)
