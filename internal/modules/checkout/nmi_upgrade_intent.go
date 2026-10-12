@@ -582,6 +582,14 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if err := h.Checkout.Lifecycle.ChangeTierInPlaceTx(ctx, txDB, change); err != nil {
 			return err
 		}
+		bill := acceptedNMIChangeBill(in, p, sub.CustomerID, nil)
+		result, err := observed.Record(ctx, txDB, bill, h.Checkout.now())
+		if err != nil {
+			return err
+		}
+		if err := observed.SeedSchedule(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.RecurringIntervalHours, p.RecurringAmount, h.Checkout.now()); err != nil {
+			return err
+		}
 		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {
 			if row, err := txDB.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: in.MerchantID, FindingType: finding, SubjectKey: subject}); err == nil {
 				if _, err := txDB.Gen(ctx).MarkReconciliationFindingVanished(ctx, gen.MarkReconciliationFindingVanishedParams{MerchantID: in.MerchantID, ID: row.ID}); err != nil {
@@ -621,14 +629,7 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 		if in.PspID == nil {
 			return errors.New("proration requires its accepted PSP")
 		}
-		if _, err := observed.Record(ctx, d, observed.Bill{
-			PSPID: *in.PspID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID,
-			Owner: observed.OwnerNMISchedule, Kind: "adjustment", SourceKind: "nmi_proration", SourceKey: in.ID.String(),
-			Currency: p.Currency, Total: p.ProrationAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd,
-			ProviderReference: receipt.TransactionID(), Payment: payment, Settled: true, SettlementSource: "cash",
-			Lines: []observed.Line{{PriceID: &p.PriceID, ProductID: &p.ProductID, Description: p.ProductName,
-				UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, AccessDurationHours: p.AccessDurationHours}},
-		}, h.Checkout.now()); err != nil {
+		if _, err := observed.Record(ctx, d, acceptedNMIChangeBill(in, p, customer, payment), h.Checkout.now()); err != nil {
 			return err
 		}
 		stored, err := service.GetByID(ctx, payment.ID)
@@ -647,6 +648,19 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 		return mandates.RecordStored(ctx, d.Gen(ctx), mandates.Stored{MerchantID: in.MerchantID, CustomerID: customer, PaymentMethodID: p.PaymentMethodID, PSPID: *in.PspID,
 			Rail: in.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: payment.TransactionID}, AcceptedAt: h.Checkout.now()})
 	})
+}
+
+// The accepted operation is the adjustment bill identity; the provider sale
+// is its payment. A zero-price downgrade records terms without invented money.
+func acceptedNMIChangeBill(in gen.BillingProviderIntent, p subscriptions.NMIUpgradePayload, customer uuid.UUID, payment *models.Payment) observed.Bill {
+	return observed.Bill{PSPID: p.Instrument.PSPID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID,
+		Owner: observed.OwnerNMISchedule, Kind: "adjustment", SourceKind: "nmi_proration", SourceKey: in.ID.String(),
+		Currency: p.Currency, Total: p.ProrationAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd,
+		ProviderReference: in.ID.String(), Payment: payment, Settled: true, SettlementSource: "cash",
+		Lines: []observed.Line{{PriceID: &p.PriceID, ProductID: &p.ProductID, Description: p.ProductName,
+			UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, BillingIntervalHours: &p.RecurringIntervalHours,
+			AccessDurationHours: p.AccessDurationHours}},
+	}
 }
 
 // nmiUpgradeTierChangeResponse renders an NMI upgrade (tierChangeResponse).
