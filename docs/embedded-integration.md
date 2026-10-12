@@ -515,8 +515,8 @@ and over HTTP. `Engine.LocalMerchant` is the explicit extension for operations
 that require the local engine: `DeclarePSP`, `SCIMHandler`,
 `StartRunningChargeTx` and `StopRunningChargeTx`. `LocalClient` embeds `*Client`,
 so ordinary operations remain available; pass `local.Client` to a consumer
-accepting the shared client. The factory does no I/O, and every operation retains
-its merchant binding and live-merchant check. These local methods are absent
+accepting the shared client. The factory does no I/O; merchant binding and
+the existing lifecycle checks remain unchanged. These local methods are absent
 from remote clients rather than failing at runtime.
 
 One engine serves every live merchant in its directory, each through its own
