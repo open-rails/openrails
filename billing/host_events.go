@@ -30,6 +30,11 @@ func (id *HostEventID) UnmarshalText(b []byte) error {
 type HostEventType string
 
 const (
+	HostEventDestructiveHoldOpened  HostEventType = "destructive.hold_opened"
+	HostEventDestructiveHoldCleared HostEventType = "destructive.hold_cleared"
+)
+
+const (
 	HostEventPaymentSettled     HostEventType = "payment.settled"
 	HostEventDelinquencyGrace   HostEventType = "delinquency.grace"
 	HostEventDelinquencyEntered HostEventType = "delinquency.entered"
@@ -124,13 +129,14 @@ type DelinquencyHostEvent struct {
 // HostEvent has exactly one payload, selected by Type. Acknowledgment is a
 // durable consumer action; it never changes a customer or merchant notification.
 type HostEvent struct {
-	ID             HostEventID           `json:"id"`
-	MerchantID     MerchantID            `json:"merchant_id"`
-	Type           HostEventType         `json:"type"`
-	OccurredAt     time.Time             `json:"occurred_at"`
-	AcknowledgedAt *time.Time            `json:"acknowledged_at"`
-	Payment        *PaymentSettledEvent  `json:"payment"`
-	Delinquency    *DelinquencyHostEvent `json:"delinquency"`
+	DestructiveHold *DestructiveHoldEvent `json:"destructive_hold"`
+	ID              HostEventID           `json:"id"`
+	MerchantID      MerchantID            `json:"merchant_id"`
+	Type            HostEventType         `json:"type"`
+	OccurredAt      time.Time             `json:"occurred_at"`
+	AcknowledgedAt  *time.Time            `json:"acknowledged_at"`
+	Payment         *PaymentSettledEvent  `json:"payment"`
+	Delinquency     *DelinquencyHostEvent `json:"delinquency"`
 	// ProductEntitlements is set for product.entitlements_changed.
 	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
 	// Order is set for the order.* events.
