@@ -70,7 +70,7 @@ func (w *retentionWorld) count(sql string, args ...any) int {
 func (w *retentionWorld) unpaidOrder(customer uuid.UUID) uuid.UUID {
 	id := uuid.New()
 	w.exec(`INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,expires_at)
-        VALUES($1,$2,$3,'purchase','open','requires_payment_method','USD',1000000,now()+interval '24 hours')`, w.merchant, id, customer)
+        VALUES($1,$2,$3,'merchant','open','requires_payment_method','USD',1000000,now()+interval '24 hours')`, w.merchant, id, customer)
 	return id
 }
 
