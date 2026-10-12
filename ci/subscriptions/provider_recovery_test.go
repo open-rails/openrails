@@ -515,19 +515,19 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
 			case <-time.After(30 * time.Second):
 				t.Fatal("the renewal never reached the provider")
 			}
-			pullNow := func() {
+			pullNow := func(want rivertype.JobState) {
 				t.Helper()
 				pull, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
 				require.NoError(t, err)
 				require.Eventually(t, func() bool {
 					job, err := w.jobs.JobGet(t.Context(), pull)
-					return err == nil && (job.FinalizedAt != nil || job.State == rivertype.JobStateRetryable)
+					return err == nil && (job.FinalizedAt != nil || job.State == want)
 				}, time.Minute, 50*time.Millisecond, "the pull runs while the collection records its charge")
 				job, err := w.jobs.JobGet(t.Context(), pull)
 				require.NoError(t, err)
-				require.Equal(t, rivertype.JobStateCompleted, job.State, "the pull must succeed: %v", job.Errors)
+				require.Equal(t, want, job.State, "the pull must reach its expected recovery state: %v", job.Errors)
 			}
-			pullNow()
+			pullNow(rivertype.JobStateCompleted)
 			require.Empty(t, w.openFindings("pull.charge.missing"), "the charge is its operation's, not missing")
 
 			// A previously raised financial finding needs actual local payment
@@ -548,14 +548,31 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
                 VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4)`),
 				w.client[embedded].MerchantID().UUID(), transaction, w.psp[rail].UUID(), rail)
 			require.NoError(t, err)
-			pullNow()
+			// The financial finding deliberately keeps recovery incomplete, so
+			// this job must retry even though the provider observation succeeds.
+			// Count completed, error-free observations that actually read charges;
+			// an arbitrary failed pull cannot satisfy this regression.
+			completedObservations := func() int {
+				t.Helper()
+				var n int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.maintenance_runs
+                    WHERE merchant_id = $1 AND kind = 'reconciliation' AND rails = ARRAY[$2]::text[]
+                      AND status = 'completed' AND error IS NULL
+                      AND (summary->'providers'->$2->>'remote_transactions')::int > 0`),
+					w.client[embedded].MerchantID().UUID(), rail).Scan(&n)
+				require.NoError(t, err)
+				return n
+			}
+			before := completedObservations()
+			pullNow(rivertype.JobStateRetryable)
+			require.Greater(t, completedObservations(), before, "the held finding survives an actual successful provider observation")
 			require.Contains(t, w.openFindings("pull.charge.missing"), transaction, "execution is not evidence of a recorded payment")
 
 			free()
 			w.settle()
 			require.Len(t, e.providerLedger(), 2, "one renewal charge")
 			require.Len(t, completed(w.payments(embedded, e.c.id)), 2, "the collection recorded it")
-			pullNow()
+			pullNow(rivertype.JobStateCompleted)
 			require.Empty(t, w.openFindings("pull.charge.missing"), "the recorded payment resolves its finding")
 			status, body := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
 			require.Equal(t, http.StatusOK, status, "%v", body)
