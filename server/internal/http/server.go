@@ -308,7 +308,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 	}
 	return middleware.ChainHTTP(next,
 		middleware.RecoverHTTP(),
-		middleware.RequestLogHTTP("/health/live", "/health/ready"),
+		middleware.RequestLogHTTP(s.trustedProxies(), "/health/live", "/health/ready"),
 		middleware.SecurityHeadersHTTP(),
 		// CORS is browser transport policy, not API authorization (#765):
 		// every accepted request carries a bearer credential, never an

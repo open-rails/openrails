@@ -7,8 +7,8 @@ import (
 )
 
 // TrustedProxies is the one proxy-aware client-IP resolver, built from the
-// configured trusted proxies, so rate limits, abuse tracking, webhook IP
-// recording and the CCBill allowlist all trust proxies identically.
+// configured trusted proxies, so rate limits, abuse tracking, request logs,
+// webhook IP recording and the CCBill allowlist all trust proxies identically.
 //
 // Empty trusts nothing: every resolution returns the socket peer. When the
 // peer is trusted, ClientIP walks X-Forwarded-For right-to-left past trusted
