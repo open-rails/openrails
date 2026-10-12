@@ -34,9 +34,9 @@ const (
 // Actor is verified command attribution. Credential is audit only; rotation
 // never changes the issuer-qualified principal whose allowance is counted.
 type Actor struct {
-	Issuer     string `json:"issuer"`
-	ID         string `json:"id"`
-	Credential string `json:"credential,omitempty"`
+	Issuer     string
+	ID         string
+	Credential string
 }
 
 // ActorFromContext reads only an identity admitted by OpenRails' route gate.
@@ -124,21 +124,21 @@ const (
 
 // Action is the durable admission, reused by its provider and local effects.
 type Action struct {
-	Origin     string     `json:"origin"`
-	ID         uuid.UUID  `json:"id"`
-	MerchantID uuid.UUID  `json:"merchant_id"`
-	Kind       Kind       `json:"kind"`
-	Target     string     `json:"target"`
-	Key        string     `json:"key"`
-	Digest     string     `json:"digest"`
-	Units      int64      `json:"units"`
-	Actor      Actor      `json:"actor"`
-	State      State      `json:"state"`
-	AdmittedAt time.Time  `json:"admitted_at"`
-	StartedAt  *time.Time `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	Result     string     `json:"result,omitempty"`
-	Replayed   bool       `json:"replayed"`
+	Origin     string
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Kind       Kind
+	Target     string
+	Key        string
+	Digest     string
+	Units      int64
+	Actor      Actor
+	State      State
+	AdmittedAt time.Time
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	Result     string
+	Replayed   bool
 }
 
 type Scope string
@@ -152,21 +152,21 @@ const (
 // Hold is an incident episode. MerchantID is the triggering merchant, not
 // the authority boundary of an actor or deployment hold.
 type Hold struct {
-	ID           uuid.UUID  `json:"id"`
-	MerchantID   uuid.UUID  `json:"merchant_id"`
-	Scope        Scope      `json:"scope"`
-	ScopeKey     string     `json:"scope_key"`
-	TriggerActor Actor      `json:"trigger_actor"`
-	ActionKind   Kind       `json:"action_kind"`
-	Target       string     `json:"target"`
-	Window       string     `json:"window"`
-	Observed     int64      `json:"observed"`
-	Requested    int64      `json:"requested"`
-	Limit        int64      `json:"limit"`
-	OpenedAt     time.Time  `json:"opened_at"`
-	ClearedAt    *time.Time `json:"cleared_at"`
-	ClearedBy    *Actor     `json:"cleared_by"`
-	ClearReason  string     `json:"clear_reason,omitempty"`
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	Scope        Scope
+	ScopeKey     string
+	TriggerActor Actor
+	ActionKind   Kind
+	Target       string
+	Window       string
+	Observed     int64
+	Requested    int64
+	Limit        int64
+	OpenedAt     time.Time
+	ClearedAt    *time.Time
+	ClearedBy    *Actor
+	ClearReason  string
 }
 
 // HoldProjector MUST commit the finding, typed event and durable delivery job

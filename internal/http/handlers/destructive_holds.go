@@ -11,6 +11,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 func ListDestructiveHolds(r *httprequest.Request) {
@@ -18,9 +19,26 @@ func ListDestructiveHolds(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "")
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseDestructiveHoldID)
+	if !ok {
+		return
+	}
 	mid, err := merchant.Require(r.Request.Context())
 	if err != nil {
 		r.ErrorCode(billing.CodePermissionRequired, "")
+		return
+	}
+	if ids != nil {
+		holds, err := r.State.DestructiveAdmissions.ListHoldsByIDs(r.Request.Context(), mid.UUID(), uuidutil.Of(ids))
+		if err != nil {
+			writeRefusal(r, err, "list destructive holds failed")
+			return
+		}
+		out := billing.ListPage[billing.DestructiveHold]{Items: make([]billing.DestructiveHold, 0, len(holds))}
+		for _, hold := range holds {
+			out.Items = append(out.Items, hold.View())
+		}
+		r.SuccessJSON(out)
 		return
 	}
 	page, ok := r.Page()

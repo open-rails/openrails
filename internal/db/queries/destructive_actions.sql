@@ -56,13 +56,16 @@ SELECT * FROM billing.destructive_holds WHERE merchant_id=sqlc.arg(merchant_id):
 SELECT * FROM billing.destructive_holds WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListDestructiveHoldsByIDs :many
+SELECT * FROM billing.destructive_holds WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=ANY(sqlc.arg(ids)::uuid[]) ORDER BY id;
+
 -- Operator discovery returns only incident addresses; tenant details use a scoped read.
 -- name: ListOpenDestructiveHoldAddresses :many
 SELECT merchant_id,id FROM billing.destructive_holds WHERE cleared_at IS NULL
 AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid) ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ClearDestructiveHold :one
-UPDATE billing.destructive_holds SET cleared_at=sqlc.arg(now)::timestamptz,clear_through_sequence=(SELECT coalesce(max(greatest(admission_sequence,completion_sequence)),0) FROM billing.destructive_actions),cleared_by_issuer=sqlc.arg(issuer)::text,cleared_by_id=sqlc.arg(actor_id)::text,clear_reason=sqlc.arg(reason)::text
+UPDATE billing.destructive_holds SET cleared_at=sqlc.arg(now)::timestamptz,clear_through_sequence=greatest((SELECT coalesce(max(admission_sequence),0) FROM billing.destructive_actions),(SELECT coalesce(max(completion_sequence),0) FROM billing.destructive_actions)),cleared_by_issuer=sqlc.arg(issuer)::text,cleared_by_id=sqlc.arg(actor_id)::text,clear_reason=sqlc.arg(reason)::text
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND cleared_at IS NULL RETURNING *;
 
 -- name: EnqueueDestructiveHoldEvent :exec

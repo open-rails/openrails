@@ -10,10 +10,16 @@ import (
 )
 
 // ListDestructiveHolds lists incident episodes that originated at this merchant.
-func (c *Client) ListDestructiveHolds(ctx context.Context, page billing.PageRequest, options ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error) {
+func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams, options ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error) {
+	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.DestructiveHold]
-	err := c.do(ctx, http.MethodGet, "/v1/merchant/destructive-holds?"+cursorQuery(page).Encode(), nil, &out, options...)
-	return &out, err
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/destructive-holds", q), nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // ClearDestructiveHold requires an interactive, self-acting operator credential

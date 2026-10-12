@@ -40,9 +40,16 @@ type DestructiveHold struct {
 	Window     string            `json:"window"`
 	Observed   int64             `json:"observed"`
 	Requested  int64             `json:"requested"`
-	Limit      int64             `json:"limit"`
+	Ceiling    int64             `json:"ceiling"`
 	OpenedAt   time.Time         `json:"opened_at"`
 	ClearedAt  *time.Time        `json:"cleared_at"`
+}
+
+// DestructiveHoldListParams pages a merchant's incidents. IDs instead reads 1
+// to MaxBatchItems named incidents in one page; unknown ones are absent.
+type DestructiveHoldListParams struct {
+	PageRequest
+	IDs []DestructiveHoldID
 }
 
 // ClearDestructiveHoldParams records why an authorized operator cleared this episode.

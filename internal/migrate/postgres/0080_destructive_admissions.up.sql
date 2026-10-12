@@ -32,6 +32,7 @@ CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions
 CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions(merchant_id,(greatest(admitted_at,finished_at))) INCLUDE (units) WHERE state='succeeded';
 CREATE INDEX destructive_actions_recent_idx ON billing.destructive_actions((greatest(admitted_at,finished_at))) INCLUDE (units) WHERE state='succeeded';
 CREATE INDEX destructive_actions_pending_target_idx ON billing.destructive_actions(merchant_id,target,actor_issuer,actor_id,request_digest) WHERE state IN ('reserved','started','uncertain');
+CREATE INDEX destructive_actions_completion_sequence_idx ON billing.destructive_actions(completion_sequence) WHERE completion_sequence IS NOT NULL;
 CREATE INDEX destructive_actions_pending_idx ON billing.destructive_actions(merchant_id,actor_key) INCLUDE (units) WHERE state IN ('reserved','started','uncertain');
 CREATE TRIGGER destructive_actions_immutable BEFORE UPDATE ON billing.destructive_actions
  FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','started_at','finished_at','completion_sequence','result');

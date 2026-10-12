@@ -13,7 +13,7 @@ import (
 )
 
 const clearDestructiveHold = `-- name: ClearDestructiveHold :one
-UPDATE billing.destructive_holds SET cleared_at=$1::timestamptz,clear_through_sequence=(SELECT coalesce(max(greatest(admission_sequence,completion_sequence)),0) FROM billing.destructive_actions),cleared_by_issuer=$2::text,cleared_by_id=$3::text,clear_reason=$4::text
+UPDATE billing.destructive_holds SET cleared_at=$1::timestamptz,clear_through_sequence=greatest((SELECT coalesce(max(admission_sequence),0) FROM billing.destructive_actions),(SELECT coalesce(max(completion_sequence),0) FROM billing.destructive_actions)),cleared_by_issuer=$2::text,cleared_by_id=$3::text,clear_reason=$4::text
 WHERE merchant_id=$5::uuid AND id=$6::uuid AND cleared_at IS NULL RETURNING merchant_id, id, scope, scope_key, actor_issuer, actor_id, credential, action_kind, target, window_name, observed, requested, ceiling, opened_at, cleared_at, clear_through_sequence, cleared_by_issuer, cleared_by_id, clear_reason
 `
 
@@ -701,6 +701,55 @@ type ListDestructiveHoldsParams struct {
 
 func (q *Queries) ListDestructiveHolds(ctx context.Context, arg ListDestructiveHoldsParams) ([]BillingDestructiveHold, error) {
 	rows, err := q.db.Query(ctx, listDestructiveHolds, arg.MerchantID, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingDestructiveHold
+	for rows.Next() {
+		var i BillingDestructiveHold
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.Scope,
+			&i.ScopeKey,
+			&i.ActorIssuer,
+			&i.ActorID,
+			&i.Credential,
+			&i.ActionKind,
+			&i.Target,
+			&i.WindowName,
+			&i.Observed,
+			&i.Requested,
+			&i.Ceiling,
+			&i.OpenedAt,
+			&i.ClearedAt,
+			&i.ClearThroughSequence,
+			&i.ClearedByIssuer,
+			&i.ClearedByID,
+			&i.ClearReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDestructiveHoldsByIDs = `-- name: ListDestructiveHoldsByIDs :many
+SELECT merchant_id, id, scope, scope_key, actor_issuer, actor_id, credential, action_kind, target, window_name, observed, requested, ceiling, opened_at, cleared_at, clear_through_sequence, cleared_by_issuer, cleared_by_id, clear_reason FROM billing.destructive_holds WHERE merchant_id=$1::uuid AND id=ANY($2::uuid[]) ORDER BY id
+`
+
+type ListDestructiveHoldsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListDestructiveHoldsByIDs(ctx context.Context, arg ListDestructiveHoldsByIDsParams) ([]BillingDestructiveHold, error) {
+	rows, err := q.db.Query(ctx, listDestructiveHoldsByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
