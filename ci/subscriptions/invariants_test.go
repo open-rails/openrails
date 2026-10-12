@@ -99,7 +99,7 @@ func (w *world) checkMoneyInvariants() {
 	var twice []string
 	rows, err = w.pool.Query(ctx, `SELECT o.id::text FROM `+schema+`.orders o
 		JOIN `+schema+`.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
-		LEFT JOIN (SELECT merchant_id, order_id, sum(non_cash_amount) AS amount
+		LEFT JOIN (SELECT merchant_id, order_id, max(non_cash_amount) AS amount
 		    FROM `+schema+`.provider_bills GROUP BY merchant_id, order_id) b
 		  ON b.merchant_id=o.merchant_id AND b.order_id=o.id
 		WHERE p.status IN ('succeeded','refunded') AND p.money_movement='rail' AND p.deleted_at IS NULL
