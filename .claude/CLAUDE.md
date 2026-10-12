@@ -67,7 +67,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Permissions are OpenRails' own: `billing.Permission` constants, always the full
   `persona:resource:action` (`read`/`manage`), listed by `billing.Permissions()`. Each
   route declares a pair: the gate admits its `merchant:` name in the bound merchant's
-  group or its `root:` name in the Authenticator's root scope (helpers `auth.Root`).
+  group or its `root:` name in the Authenticator's root scope (`authkit/auth.Root`).
   Hosts build their roles from the constants and pass none; `Mount` fails for a route
   neither of whose names the Authenticator knows. The in-process `Client` checks none.
 - OpenRails admin and operator changes never require step-up or a recent sign-in;
