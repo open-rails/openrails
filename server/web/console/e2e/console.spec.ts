@@ -114,6 +114,31 @@ test("support sees its merchant and account, with no Access administration", asy
   ).toBeVisible()
 })
 
+test("account security remains usable when billing permissions are unavailable", async ({
+  page,
+  request,
+}) => {
+  const operator = await staff(request, "support")
+  await login(page, operator.email)
+  let failedRequests = 0
+  await page.route("**/v1/admin/access", (route) => {
+    failedRequests += 1
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Billing is unavailable." } }),
+    })
+  })
+  await page.goto("/admin/account")
+  await expect.poll(() => failedRequests).toBeGreaterThan(0)
+  await expect(
+    page.getByRole("heading", { name: "Account security", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Sessions", exact: true })
+  ).toBeVisible()
+})
+
 test("a native AuthKit credential write asks for fresh sign-in and retries once", async ({
   page,
   request,
@@ -142,22 +167,30 @@ test("a native AuthKit credential write asks for fresh sign-in and retries once"
   await page.getByRole("link", { name: "API keys", exact: true }).click()
   await page.getByRole("button", { name: /Create API key|New API key/ }).click()
   await page.getByLabel("Name", { exact: true }).fill("Browser proof")
-  await page.getByRole("combobox", { name: "Role", exact: true }).click()
   await page
-    .getByRole("option", { name: /merchant.?directory.?viewer/i })
-    .click()
+    .getByRole("combobox", { name: "Role", exact: true })
+    .selectOption("root:merchant-directory-viewer")
   await page
     .getByRole("button", { name: /Create key|Create API key/, exact: false })
     .last()
     .click()
-  const challenge = page.getByRole("dialog")
+  const challenge = page
+    .getByRole("dialog")
+    .filter({ has: page.locator("input[type=password]") })
   await expect(challenge).toBeVisible()
   await challenge.locator("input[type=password]").fill(password)
   await challenge
     .getByRole("button", { name: /Continue|Confirm|Verify/ })
     .click()
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Copy", exact: true })
+  ).toBeVisible()
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close", exact: true })
+    .last()
+    .click()
   await expect(page.getByText("Browser proof", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: /Copy.*key/i })).toBeVisible()
 })
 
 test("a group invitation reaches enrollment through the shipped console", async ({
