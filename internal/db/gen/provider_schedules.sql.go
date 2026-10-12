@@ -218,3 +218,31 @@ func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSch
 	}
 	return items, nil
 }
+
+const subscriptionRenewalSettledOn = `-- name: SubscriptionRenewalSettledOn :one
+SELECT EXISTS (SELECT 1 FROM billing.orders
+    WHERE merchant_id = $1::uuid AND origin = 'subscription' AND subscription_id = $2::uuid
+      AND period_starts_at >= $3::timestamptz AND period_starts_at < $4::timestamptz
+      AND subscription_bill_kind = 'renewal' AND status = 'complete')::boolean
+`
+
+type SubscriptionRenewalSettledOnParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	DayStart       time.Time
+	DayEnd         time.Time
+}
+
+// A renewal bill of the subscription for the cycle due that day is complete,
+// whoever collected it (a provider receipt or OpenRails' own recovery).
+func (q *Queries) SubscriptionRenewalSettledOn(ctx context.Context, arg SubscriptionRenewalSettledOnParams) (bool, error) {
+	row := q.db.QueryRow(ctx, subscriptionRenewalSettledOn,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.DayStart,
+		arg.DayEnd,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}

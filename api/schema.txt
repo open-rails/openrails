@@ -79,7 +79,7 @@ migration 0075_operational_read_indexes.up.sql sha256:cd72215555b01a71af5b5785c7
 migration 0076_dynamic_pricing.up.sql sha256:67d784d49e2ec82b305b55b9c903cd9de8430813b23c7aaa18d14d9aa78b9fc7
 migration 0077_retire_checkout_creation.up.sql sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
 migration 0078_proposals.up.sql sha256:9dec89446fbca70a67abd7b6cbb8c95fc8ef607fa5ad20f0d86ebcc3c3986a7f
-migration 0079_provider_bill_orders.up.sql sha256:058bf95bc1449ae535d7c1234160e79b80d38f8e523169078595dcc31cd00592
+migration 0079_provider_bill_orders.up.sql sha256:9f078e9bbbe589bd3991ce13ee40db0853d4041b0ca43aa691c75726ae2b8d58
 migration 0080_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
 migration 0081_payment_order_identity.up.sql sha256:73afc94f11e610f641460ab741d9843504bc77b409323f4f2a8ad64a490fc574
 
@@ -1252,6 +1252,7 @@ table billing.orders
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))
+  index CREATE INDEX orders_subscription_period_idx ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
   index CREATE INDEX orders_usage_collection_idx ON billing.orders USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text))
   index CREATE INDEX orders_usage_open_idx ON billing.orders USING btree (merchant_id, customer_id, currency) WHERE ((origin = 'usage'::text) AND (status = ANY (ARRAY['open'::text, 'processing'::text, 'uncollectible'::text])))
   index CREATE UNIQUE INDEX orders_usage_period_key ON billing.orders USING btree (merchant_id, customer_id, currency, period_starts_at, period_ends_at) WHERE (origin = 'usage'::text)

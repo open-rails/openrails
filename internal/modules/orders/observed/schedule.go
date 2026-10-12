@@ -280,7 +280,7 @@ func firstUnsettledCycle(ctx context.Context, q *gen.Queries, sub *models.Subscr
 		return 0, err
 	}
 	for ; index < maxCycleSkip+1; index++ {
-		complete, err := cycleComplete(ctx, q, sub, schedule, scheduleBoundary(schedule.FirstDueAt, hours, months, index))
+		complete, err := cycleComplete(ctx, q, sub, scheduleBoundary(schedule.FirstDueAt, hours, months, index))
 		if err != nil || !complete {
 			return index, err
 		}
@@ -291,19 +291,9 @@ func firstUnsettledCycle(ctx context.Context, q *gen.Queries, sub *models.Subscr
 // maxCycleSkip bounds how many recovered cycles one receipt may step over.
 const maxCycleSkip = 1 << 10
 
-func cycleComplete(ctx context.Context, q *gen.Queries, sub *models.Subscription, schedule gen.BillingProviderSchedule, due time.Time) (bool, error) {
-	mapped, err := q.GetProviderBill(ctx, gen.GetProviderBillParams{MerchantID: sub.MerchantID, PspID: sub.PspID, SourceKind: "provider_cycle", SourceKey: cycleSourceKey(sub.ID, schedule.SourceReference, due)})
-	if db.IsNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: sub.MerchantID, ID: mapped.OrderID})
-	if err != nil {
-		return false, err
-	}
-	return order.Status == "complete", nil
+func cycleComplete(ctx context.Context, q *gen.Queries, sub *models.Subscription, due time.Time) (bool, error) {
+	day := due.UTC().Truncate(24 * time.Hour)
+	return q.SubscriptionRenewalSettledOn(ctx, gen.SubscriptionRenewalSettledOnParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, DayStart: day, DayEnd: day.Add(24 * time.Hour)})
 }
 
 func cycleSourceKey(subscriptionID uuid.UUID, scheduleSource string, due time.Time) string {

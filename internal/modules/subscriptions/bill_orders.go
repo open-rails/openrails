@@ -85,6 +85,11 @@ func renewalBill(ctx context.Context, d *db.DB, params *RenewMembershipParams, s
 	if err == nil {
 		b.ExistingOrderID = &order.ID
 	}
+	// A provider-scheduled bill that OpenRails itself collected (its decline
+	// recovery) is settled by that capture; the engine settles its own.
+	if sub.CollectionPolicy != models.CollectionPolicyEngine && p != nil && p.Amount >= t.Amount {
+		b.Settled, b.SettlementSource = true, "cash"
+	}
 	return observed.Record(ctx, d, b, now)
 }
 

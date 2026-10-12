@@ -29,3 +29,11 @@ VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(transactio
 SELECT due_at FROM billing.provider_cycle_receipts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND schedule_source_reference = sqlc.arg(schedule_source_reference)::text AND approved
 ORDER BY due_at DESC LIMIT 1;
+
+-- name: SubscriptionRenewalSettledOn :one
+-- A renewal bill of the subscription for the cycle due that day is complete,
+-- whoever collected it (a provider receipt or OpenRails' own recovery).
+SELECT EXISTS (SELECT 1 FROM billing.orders
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND subscription_id = sqlc.arg(subscription_id)::uuid
+      AND period_starts_at >= sqlc.arg(day_start)::timestamptz AND period_starts_at < sqlc.arg(day_end)::timestamptz
+      AND subscription_bill_kind = 'renewal' AND status = 'complete')::boolean;

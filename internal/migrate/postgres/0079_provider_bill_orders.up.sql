@@ -10,6 +10,9 @@ COMMENT ON COLUMN billing.orders.subscription_bill_kind IS 'Initial observed enr
 DROP INDEX billing.orders_renewal_key;
 CREATE UNIQUE INDEX orders_renewal_key ON billing.orders (merchant_id, subscription_id, period_starts_at)
     WHERE origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal';
+-- A subscription's bills by period, whoever collects them.
+CREATE INDEX orders_subscription_period_idx ON billing.orders (merchant_id, subscription_id, period_starts_at)
+    WHERE origin = 'subscription';
 
 -- Observing two genuine captures must retain both. Execution remains fenced
 -- by locked orders and durable provider intents, not by discarding receipts.
