@@ -583,14 +583,14 @@ SELECT EXISTS (
 
 -- Resume undoes only the current provider target's unsent cancellation. A
 -- previous binding may retain an independent historical deletion obligation.
--- name: SupersedePendingNMIDelete :many
+-- name: SupersedePendingNMIDelete :execrows
 UPDATE billing.provider_intents
 SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND (idempotency_key=sqlc.arg(idempotency_key)::text
        OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
-  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0));
 
 -- A pending quote remains owned after a charge decline: provider preparation
 -- may already have changed its recurring amount. Applied/canceled historical
@@ -858,3 +858,12 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND destructive_action_id=sqlc.arg(destructive_action_id)::uuid
  AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
  AND lease_expires_at>sqlc.arg(now)::timestamptz;
+
+-- name: SupersedePendingNMIDeleteActions :many
+UPDATE billing.provider_intents
+SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND (idempotency_key=sqlc.arg(idempotency_key)::text
+       OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
+  AND intent_type='nmi_delete_subscription'
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
