@@ -486,13 +486,6 @@ export type CreatePaymentMethodParams = {
   billing_details?: BillingDetails
 }
 
-export type CreatePaymentParams = {
-  order_id?: string
-  amount?: string
-  transaction_id?: string
-  paid_at?: string
-}
-
 export type CreatePriceMigrationParams = {
   from_price_id?: string
   product_key?: string
@@ -1851,6 +1844,13 @@ export type RateTier = {
   flat_amount?: string
 }
 
+export type RecordExternalPaymentParams = {
+  order_id?: string
+  amount?: string
+  transaction_id?: string
+  paid_at?: string
+}
+
 export type RecordUsageBatchParams = {
   items?: RecordUsageParams[]
 }
@@ -1910,10 +1910,6 @@ export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
-}
-
-export type RetryOrderCollectionParams = {
-  payment_method_id?: string
 }
 
 export type RetrySubscriptionNowParams = {

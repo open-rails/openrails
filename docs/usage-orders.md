@@ -62,20 +62,20 @@ Each is an admin change: `billing.MerchantCustomerManage` or `billing.RootCustom
 
 | Route | Client method | Behavior |
 |---|---|---|
-| `POST /v1/admin/orders/{id}/void` | `VoidOrder` | Voids an open or uncollectible usage order and writes off what it owes. Repeating it changes nothing. |
+| `POST /v1/admin/orders/{id}/waive-balance` | `WaiveOrderBalance` | Voids an open or uncollectible usage order and writes off what it owes. Repeating it changes nothing. |
 | `POST /v1/admin/orders/{id}/mark-uncollectible` | `MarkOrderUncollectible` | Stops collecting an open usage order; what it owes stays owed, and collecting it again reopens it. |
-| `POST /v1/admin/orders/{id}/retry-collection` | `RetryOrderCollection` | Charges what the order owes to `payment_method_id`, one of the customer's cards, under an `Idempotency-Key` (1–255 bytes): the same key answers the same collection. 200 with the order; a decline is 402 `card_declined` or `payment_failed` carrying it. |
 
-A retry needs an uncollectible order, or an open one past due or declined
-before; a collection in progress refuses every action
+A collection in progress refuses every action
 (`order_payment_in_progress`). An operation the verifier cannot settle is
 resolved with `openrails intents resolve` (see
 [provider uncertainty](provider-uncertainty.md)). Another origin, or a state
 that does not allow the action, is 409 `order_action_not_allowed`.
 
 Money received outside OpenRails is recorded with `POST /v1/admin/payments`
-(`CreatePayment`): `{order_id, amount, transaction_id, paid_at}`, a positive
+(`RecordExternalPayment`): `{order_id, amount, transaction_id, paid_at}`, a positive
 `amount` up to `amount_due` and a `transaction_id` of 1–255 bytes. It charges
 nothing. The same `transaction_id` with the same terms answers the first
 payment; with other terms it is 422 `idempotency_key_reused`. More than is due
 is 409 `payment_exceeds_due`.
+
+Staff cannot initiate an immediate saved-card charge. The customer pays an outstanding order explicitly; automatic collection and dunning run under the customer's active agreement and configured retry policy. `WaiveOrderBalance` forgives the remaining debt; it does not refund earlier payments. `RecordExternalPayment` records money already received. Marking a balance uncollectible stops scheduled collection while retaining what is owed.

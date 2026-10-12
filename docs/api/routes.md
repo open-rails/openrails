@@ -83,9 +83,8 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 |---|---|---|---|---|---|---|
 | GET | `/v1/admin/orders` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/void` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | sensitive; limit `destructive` |
+| POST | `/v1/admin/orders/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | sensitive; limit `destructive` |
 | POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | sensitive; limit `destructive` |
-| POST | `/v1/admin/orders/{id}/retry-collection` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RetryOrderCollectionParams` | 200 `Order` | sensitive; limit `off_channel`; `Idempotency-Key` |
 | GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
@@ -106,7 +105,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
-| POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
+| POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
 | POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |

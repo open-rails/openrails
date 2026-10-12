@@ -89,7 +89,7 @@ func (in *abuseInstances) pay(i int, addr string) *httptest.ResponseRecorder {
 
 // remove is a destructive admin operation on instance i: five a minute.
 func (in *abuseInstances) remove(i int) *httptest.ResponseRecorder {
-	return in.call(in.staff[i%len(in.staff)], http.MethodPost, "/v1/admin/orders/"+billing.OrderID(uuid.New()).String()+"/void", "198.51.100.8:4711")
+	return in.call(in.staff[i%len(in.staff)], http.MethodPost, "/v1/admin/orders/"+billing.OrderID(uuid.New()).String()+"/waive-balance", "198.51.100.8:4711")
 }
 
 // noPostgres asserts PostgreSQL has nowhere to keep abuse state: no
