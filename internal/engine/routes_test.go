@@ -89,7 +89,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 		require.NotContains(t, r.Path, "/merchant/", "without RouteGroups no merchant-config route is mounted")
 		require.NotContains(t, r.Path, "/catalog/", "without RouteGroups no catalog route is mounted")
 		require.NotContains(t, r.Path, "/metrics/", "without RouteGroups no metrics route is mounted")
-		public = public || r.Path == "/v1/products"
+		public = public || r.Path == "/v1/config"
 		customer = customer || strings.HasPrefix(r.Path, "/v1/me/")
 	}
 	require.True(t, public && customer, "the public and customer routes are always mounted")
