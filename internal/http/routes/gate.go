@@ -988,11 +988,20 @@ func adminAccess(e *Env) router.Handler {
 		g := e.Groups
 		support := has(g.Admin, needAdminRead)
 		access := billing.AdminAccess{
-			Admin:          level(support, support && has(g.Admin, needAdminUpdate)),
-			Catalog:        has(g.Catalog, needCatalog),
-			MerchantConfig: has(g.MerchantConfig, needMerchantConfig),
-			Metrics:        has(g.Metrics, needMetrics),
-			ScopeID:        merchantScope(root, staff.Merchant).ID,
+			Admin:                  level(support, support && has(g.Admin, needAdminUpdate)),
+			Catalog:                level(has(g.Catalog, Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}), has(g.Catalog, needCatalog)),
+			MerchantConfig:         level(has(g.MerchantConfig, needMerchantConfigRead), has(g.MerchantConfig, needMerchantConfig)),
+			Metrics:                has(g.Metrics, needMetrics),
+			ScopeID:                merchantScope(root, staff.Merchant).ID,
+			ApplicationPermissions: []billing.Permission{},
+		}
+		if staff.Identity.SubjectKind == billingauth.SubjectApplication {
+			for _, pair := range e.applicationPermissions {
+				if has(true, pair) {
+					access.ApplicationPermissions = append(access.ApplicationPermissions, pair.Merchant)
+				}
+			}
+			slices.Sort(access.ApplicationPermissions)
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

@@ -219,6 +219,10 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Create and cancel orders",
     section: "programs",
   },
+  "merchant:usage:read": {
+    label: "Read usage and running charges",
+    section: "programs",
+  },
   "merchant:usage:manage": {
     label: "Admit and record usage (charges customers)",
     section: "programs",
@@ -240,8 +244,12 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     section: "staff",
   },
   "merchant:catalog:manage": { label: "Manage the catalog", section: "operator" },
+  "merchant:config:read": {
+    label: "Read PSPs, findings and merchant settings",
+    section: "operator",
+  },
   "merchant:config:manage": {
-    label: "PSPs, findings and merchant settings",
+    label: "Manage PSPs, findings and merchant settings",
     section: "operator",
   },
   "merchant:metrics:read": {

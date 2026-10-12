@@ -15,8 +15,8 @@ export function useAccess(): AdminAccess | undefined {
 export function hasAnyArea(access: AdminAccess): boolean {
   return (
     access.admin !== "none" ||
-    access.catalog ||
-    access.merchant_config ||
+    access.catalog !== "none" ||
+    access.merchant_config !== "none" ||
     access.metrics
   )
 }
@@ -35,7 +35,7 @@ export function useAdminUpdates(): boolean {
 
 // useCatalogArea reports the catalog area: its reads and its edits.
 export function useCatalogArea(): boolean {
-  return useAccess()?.catalog ?? false
+  return (useAccess()?.catalog ?? "none") !== "none"
 }
 
 // useMerchantConfigEdits reports whether that configuration can change here:
@@ -43,19 +43,28 @@ export function useCatalogArea(): boolean {
 // mounted, so the console offers no edits.
 export function useMerchantConfigEdits(): boolean {
   const { data } = useQuery(adminQueries.config())
-  return data?.capabilities.features?.merchant_config_edits ?? false
+  const updates = useMerchantConfigUpdates()
+  return (
+    updates && (data?.capabilities.features?.merchant_config_edits ?? false)
+  )
 }
 
 // useCatalogWrites reports whether the caller may edit the catalog: the
 // catalog area is theirs.
 export function useCatalogWrites(): boolean {
-  return useCatalogArea()
+  return useAccess()?.catalog === "update"
 }
 
 // useMerchantConfig reports the merchant's own configuration: PSPs, settings,
 // findings and notifications.
 export function useMerchantConfig(): boolean {
-  return useAccess()?.merchant_config ?? false
+  return (useAccess()?.merchant_config ?? "none") !== "none"
+}
+
+// useMerchantConfigUpdates reports authority to change merchant configuration,
+// including operational actions that do not edit its source document.
+export function useMerchantConfigUpdates(): boolean {
+  return useAccess()?.merchant_config === "update"
 }
 
 // useMetrics reports business metrics: the dashboard, its widgets, the Ops
@@ -68,7 +77,7 @@ export function useMetrics(): boolean {
 // layout: it shows metrics and is the merchant's configuration.
 export function useDashboardLayout(): boolean {
   const access = useAccess()
-  return (access?.metrics && access.merchant_config) ?? false
+  return (access?.metrics && access.merchant_config === "update") ?? false
 }
 
 // configTabs are the settings tabs that are the merchant's configuration.

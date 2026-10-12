@@ -127,9 +127,11 @@ const (
 	// FeatureCustomerNetwork: the deployment runs the customer network
 	// (openrails.dev).
 	FeatureCustomerNetwork Feature = "customer_network"
+	// FeatureCustomerProvisioning: OpenRails keeps the pushed customer directory.
+	FeatureCustomerProvisioning Feature = "customer_provisioning"
 )
 
-// Level is a customer-support or catalog route's: a read, or an update. A
+// Level is a customer-support, catalog or merchant-config route's: a read, or an update. A
 // support read needs billing.MerchantCustomerRead, an update
 // MerchantCustomerManage, or their root: twins; a catalog update refuses
 // while the catalog is not edited over HTTP.
@@ -346,7 +348,7 @@ func (r Route) Staff() bool {
 // ClientMethod reports a route the Go Client calls: the staff, programmatic
 // and access routes.
 func (r Route) ClientMethod() bool {
-	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn
+	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Name == "GetPublicConfig"
 }
 
 // CatalogUpdate reports a catalog edit or document application.
@@ -389,10 +391,10 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if (r.Handler == nil) == (r.Bind == nil) {
 			panic("routes: " + r.Key() + " needs exactly one of Handler and Bind")
 		}
-		leveled := r.Group == Admin || r.Group == CatalogAdmin
+		leveled := r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig
 		appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
 		if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
-			panic("routes: " + r.Key() + ": an admin or catalog route, and only one, reads or updates; a programmatic POST may say it reads")
+			panic("routes: " + r.Key() + ": an admin, catalog or merchant-config route reads or updates; a programmatic POST may say it reads")
 		}
 		if (r.Group == Network) != (r.Auth == AuthNetwork) || r.Group == Network && !strings.HasPrefix(r.Path, "/v1/network/") {
 			panic("routes: " + r.Key() + ": a network route, and only one, is the account's, under /v1/network")

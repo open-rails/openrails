@@ -143,18 +143,38 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	return r, nil
 }
 
+// RemoteMerchantOptions configures a single merchant's HTTP client.
+type RemoteMerchantOptions struct {
+	// HTTPClient is the transport; nil uses a default http.Client.
+	HTTPClient *http.Client
+	// Timeout bounds each request, including token acquisition, without
+	// extending the caller's deadline. Zero leaves the caller in charge.
+	Timeout time.Duration
+}
+
 // NewRemoteMerchant is the handle of the one merchant credential is bound
 // to, on the server at baseURL: NewRemote and Merchant for a process that
 // acts on a single merchant. Its MerchantID is the one the server's first
 // merchant-bound response names (zero until then); a later response naming
 // another fails the call with a *BoundMerchantError. The caller's context
-// bounds each call.
-func NewRemoteMerchant(baseURL string, credential RemoteCredential) (*Client, error) {
+// and optional Timeout bound each call.
+func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...RemoteMerchantOptions) (*Client, error) {
+	if len(options) > 1 {
+		return nil, fmt.Errorf("openrails: supply at most one RemoteMerchantOptions")
+	}
+	var opts RemoteMerchantOptions
+	if len(options) == 1 {
+		opts = options[0]
+	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{}
+	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if err := validateBaseURL(baseURL); err != nil {
 		return nil, err
 	}
-	handle, err := newRemoteHandle(baseURL, &http.Client{}, 0, billing.MerchantID{}, credential)
+	handle, err := newRemoteHandle(baseURL, client, opts.Timeout, billing.MerchantID{}, credential)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: credential: %w", err)
 	}
@@ -605,7 +625,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		// Holding the engine is the authority: the handle's merchant reaches
 		// the in-process transport as a context value, never as a header.
 		ctx = inprocess.WithMerchant(ctx, c.merchantID)
-	} else {
+	} else if path != "/v1/config" {
 		var err error
 		if bearer, err = c.bearer(ctx); err != nil {
 			return err
@@ -633,8 +653,10 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := c.checkBound(resp.Header); err != nil {
-		return err
+	if path != "/v1/config" {
+		if err := c.checkBound(resp.Header); err != nil {
+			return err
+		}
 	}
 	if err := consume(resp); err != nil {
 		return err
