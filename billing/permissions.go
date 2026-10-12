@@ -47,8 +47,6 @@ const (
 	MerchantCatalogManage Permission = "merchant:catalog:manage"
 	RootCatalogManage     Permission = "root:catalog:manage"
 	// The merchant-config group: PSPs, settings.
-	MerchantConfigRead   Permission = "merchant:config:read"
-	RootConfigRead       Permission = "root:config:read"
 	MerchantConfigManage Permission = "merchant:config:manage"
 	RootConfigManage     Permission = "root:config:manage"
 	// The metrics group: revenue, sales, the dashboard.
@@ -83,7 +81,7 @@ const (
 func Permissions() []Permission {
 	return []Permission{
 		MerchantCustomerRead, RootCustomerRead, MerchantCustomerManage, RootCustomerManage,
-		MerchantCatalogManage, RootCatalogManage, MerchantConfigRead, RootConfigRead, MerchantConfigManage, RootConfigManage,
+		MerchantCatalogManage, RootCatalogManage, MerchantConfigManage, RootConfigManage,
 		MerchantMetricsRead, RootMetricsRead,
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,
 		MerchantUsageRead, RootUsageRead, MerchantUsageManage, RootUsageManage,
