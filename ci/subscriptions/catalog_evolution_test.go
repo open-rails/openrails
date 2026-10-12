@@ -127,23 +127,27 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 	c := w.client[embedded]
 	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "concurrent", DisplayName: "Concurrent"})
 	require.NoError(t, err)
-	const writers = 9
-	results := make([]*billing.Price, writers)
-	errors := make([]error, writers)
-	start := make(chan struct{})
-	var running sync.WaitGroup
-	for i := range writers {
-		running.Go(func() {
-			<-start
-			results[i], errors[i] = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", UnitAmount: int64(i%3+1) * 1_000_000, Currency: "USD"})
-		})
-	}
-	close(start)
-	running.Wait()
-	for i, err := range errors {
-		require.NoError(t, err, "concurrent writer %d", i)
-		require.Equal(t, results[i%3].ID, results[i].ID, "repeated terms keep one immutable ID")
-		require.Equal(t, results[i%3].Version, results[i].Version)
+	// Each round races three writers of equal terms; each later round moves the
+	// key to new terms once (a counted change, within one actor's allowance).
+	const rounds, writers = 3, 3
+	for round := range rounds {
+		results := make([]*billing.Price, writers)
+		errors := make([]error, writers)
+		start := make(chan struct{})
+		var running sync.WaitGroup
+		for i := range writers {
+			running.Go(func() {
+				<-start
+				results[i], errors[i] = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", UnitAmount: int64(round+1) * 1_000_000, Currency: "USD"})
+			})
+		}
+		close(start)
+		running.Wait()
+		for i, err := range errors {
+			require.NoError(t, err, "round %d writer %d", round, i)
+			require.Equal(t, results[0].ID, results[i].ID, "repeated terms keep one immutable ID")
+			require.Equal(t, results[0].Version, results[i].Version)
+		}
 	}
 	prices, err := c.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
 	require.NoError(t, err)
