@@ -1,4 +1,3 @@
--- parent: 54 sha256:95ec31a671c21785bd67e930cf926a2a1ac15b68925b940b3f17558dd862510b
 -- Repair: none-needed New nullable columns; no existing order has a hosted checkout.
 -- A merchant order's hosted checkout: the URL's secret is never stored, only
 -- its sha256, which the checkout host looks the order up by.

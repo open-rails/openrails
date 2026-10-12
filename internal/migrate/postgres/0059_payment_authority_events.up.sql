@@ -1,4 +1,3 @@
--- parent: 58 sha256:4d3c48cf97fc68468c29dceb7df8452b4ebf60175332f5c6d26096a9b879c22a
 -- Repair: none-needed Widened checks refuse no stored row.
 -- A customer revoking a merchant's payment authority is a host event.
 ALTER TABLE billing.host_outbox DROP CONSTRAINT host_outbox_currency_check;

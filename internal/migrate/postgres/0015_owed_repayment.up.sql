@@ -1,4 +1,3 @@
--- parent: 14 sha256:fffb9de8de04d77debe61c57b63f49a4b2b417fc4ca58028f942bc5b8acca035
 -- Repair: none-needed Both vocabularies strictly expand; no existing transfer or
 -- invoice payment can violate the added members.
 ALTER TABLE billing.ledger_transfers DROP CONSTRAINT ledger_transfers_type_check;

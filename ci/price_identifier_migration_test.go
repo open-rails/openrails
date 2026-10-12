@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -48,12 +47,7 @@ func TestPriceIdentifierMigrationPreservesForeignKeys(t *testing.T) {
 	indexMigration := "0075_operational_read_indexes.up.sql"
 	indexes, err := fs.ReadFile(postgresmigrations.FS, indexMigration)
 	require.NoError(t, err)
-	_, indexBody, ok := strings.Cut(string(indexes), "\n")
-	require.True(t, ok)
-	parent := before["0073_notification_events.up.sql"]
-	require.NotNil(t, parent)
-	indexHeader := "-- parent: 73 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
-	before[indexMigration] = &fstest.MapFile{Data: []byte(indexHeader + indexBody)}
+	before[indexMigration] = &fstest.MapFile{Data: indexes}
 	require.Less(t, len(before), len(files))
 	cfg := f.config()
 	cfg.DB = &openrails.DBConfig{URL: dsn}

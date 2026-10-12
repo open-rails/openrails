@@ -1,4 +1,3 @@
--- parent: 53 sha256:4702a440345dd4e1283f175acea5cd762eb89bb85d5134113e1d485cce1f38d2
 -- Repair: none-needed A new table holds no rows.
 -- The cart: one per customer of a merchant, price lines that the order engine
 -- prices on every read. It reserves, claims and charges nothing.

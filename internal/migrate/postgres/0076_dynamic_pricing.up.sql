@@ -1,4 +1,3 @@
--- parent: 75 sha256:cd72215555b01a71af5b5785c786d7366b020428286d2c02426fba38a2c2510d
 -- Repair: none-needed Stated amounts are optional for historical rows. The failed-event check applies to new and updated rows only; historical rows are not validated.
 ALTER TABLE billing.usage_events
     DROP CONSTRAINT usage_events_failed_host_priced_check,

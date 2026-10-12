@@ -338,6 +338,19 @@ func (s *Service) Cancel(ctx context.Context, customerID, id uuid.UUID) (*Order,
 	return s.Get(ctx, id)
 }
 
+// ExpireIfDue materializes an order's elapsed expiry when a command replays
+// it. close rechecks under the order lock, so a concurrent payment that has
+// reached processing or completion keeps its order and ownership claims.
+func (s *Service) ExpireIfDue(ctx context.Context, order *Order) (*Order, error) {
+	if order.Status != string(billing.OrderOpen) || order.ExpiresAt == nil || order.ExpiresAt.After(s.now()) {
+		return order, nil
+	}
+	if err := s.close(ctx, order.CustomerID, order.ID, billing.OrderExpired); err != nil {
+		return nil, err
+	}
+	return s.GetForCustomer(ctx, order.CustomerID, order.ID)
+}
+
 // close moves a live order to canceled or expired. A zero customerID is the
 // system (expiry).
 func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status billing.OrderStatus) error {

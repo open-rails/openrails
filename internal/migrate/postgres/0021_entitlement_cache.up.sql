@@ -1,4 +1,3 @@
--- parent: 20 sha256:5a4a32abdefb11fdbc156f7344586478fa99cad4892d332678b163deabdf5e76
 -- Repair: none-needed The new columns default to zero, and the new tables start
 -- empty; no constraint is added over stored rows.
 

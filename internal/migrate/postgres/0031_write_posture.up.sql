@@ -1,4 +1,3 @@
--- parent: 30 sha256:a5f49ac1e6c1609723b3849130dbe0b721cf26b237b7fd27271cb43859a6a87a
 -- Two copies of one billing book holding the same provider credentials both
 -- bill the customers in it. book_identity records the database the book was
 -- armed in: a copy (a dump restored elsewhere, a second schema) reads as

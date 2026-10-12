@@ -1,4 +1,3 @@
--- parent: 5 sha256:a81cc7beb0b6a859d652c4ebabbd4bc417020d077db85c417310d3d11ec8669f
 -- Repair: none-needed This new immutable receipt table starts empty. Existing
 -- merchant billing restore destinations gain one additional occupancy check.
 CREATE TABLE billing.catalog_restore_receipts (

@@ -1,4 +1,3 @@
--- parent: 8 sha256:08786eb308b4957bbabcbd12bca513fbd1592c4d7ddde3e6f50c938d809538dd
 -- Repair: none-needed Monthly invoice cadence starts uncompleted and is retained
 -- with the merchant book independently of River's disposable job history.
 CREATE TABLE billing.invoice_collection_cadence (

@@ -1,4 +1,3 @@
--- parent: 24 sha256:991d4ede1222d8df27c0b57cb056adf11b31f57725e2873f4d3beb08491df8b1
 -- Repair: none-needed cost_resolutions' new key names cost_refusals, which this file fills for every refused qualification before the key, and every existing resolution closes one.
 -- A hold whose provider cost will not qualify automatically waits for an
 -- operator. Until now only a refused qualification said so: a host that cannot

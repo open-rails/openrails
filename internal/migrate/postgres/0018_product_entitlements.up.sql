@@ -1,4 +1,3 @@
--- parent: 17 sha256:b65eaace52b7ec0595bfdc5db66f5d7fa50b283e907b24ae6f2b749cc267394b
 -- Repair: none-needed product_entitlements is created and filled in this file
 -- before products.entitlements, the only source it copies, is dropped.
 

@@ -1,4 +1,3 @@
--- parent: 49 sha256:0bf9655698fb1d24c0c0074d5d943c4c90f78c4cfecca2d59b35a389f388432d
 -- Repair: none-needed A dropped table refuses no stored row, and nothing reads it.
 -- Card-testing declines are counted in Redis or each process's memory, so the
 -- restore guard stops checking their table.

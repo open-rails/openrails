@@ -1,4 +1,3 @@
--- parent: 33 sha256:444239f9f32989a8c8f5f7c2ae9b3db0925743f624885abdf25386a58fb0e6ab
 -- Reprice batches and plan migrations become one resource, price_migrations.
 -- A subscription's one pending change (a migration's move, a scheduled
 -- downgrade, a deferred seat change) becomes one scheduled_changes row, which

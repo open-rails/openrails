@@ -1,4 +1,3 @@
--- parent: 71 sha256:0c1ef001a156f451cd9cf2c95eecaf0d652cbf812ec1d801140aba3d57e3e755
 -- Repair: none-needed Both columns are new and null on every stored row, which the check accepts.
 -- An admission may hold an estimate of its usage, priced by the meters' rate
 -- cards; the cards that priced it are pinned with it, and its capture is

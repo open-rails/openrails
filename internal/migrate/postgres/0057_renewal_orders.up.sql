@@ -1,4 +1,3 @@
--- parent: 56 sha256:e9517e668a5d7051db4e25635a59305fe68abf75f916514e17a762f3aac61e61
 -- Repair: none-needed Every existing order is a customer's or a merchant's purchase; none renews a subscription.
 -- A renewal of an engine-owned subscription is an order (origin subscription):
 -- one per subscription and period, due when the period starts, with no expiry.

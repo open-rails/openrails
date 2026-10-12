@@ -1,4 +1,3 @@
--- parent: 77 sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
 -- Repair: none-needed Prelaunch: new nullable bill fields do not reconstruct historical obligations or remove any rows.
 ALTER TABLE billing.orders
     ADD COLUMN collection_owner text NOT NULL DEFAULT 'engine',

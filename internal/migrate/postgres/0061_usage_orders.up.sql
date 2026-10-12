@@ -1,4 +1,3 @@
--- parent: 60 sha256:3dfcc6278d758e65d9dadbb4db218304194b67b7fa12b3c002644fa6667ceaa0
 -- Repair: none-needed Each invoice becomes the order of what it billed under the same id; its payments, attempts, ledger transfers and collections name that order.
 -- Usage billed in arrears is an order (origin usage), and invoices go. A
 -- usage order bills the owed charges of a period (or, past the customer's

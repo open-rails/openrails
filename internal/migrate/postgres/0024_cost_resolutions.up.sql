@@ -1,4 +1,3 @@
--- parent: 23 sha256:bc3fbd0d940cb37dcf912d340bbbf38d6ffc5ea7a65f0b7e69991a181dc58de9
 -- An operator closes a hold whose provider billing qualification was refused,
 -- which automatic settlement never will: settled at an attested provider cost,
 -- or written off. One immutable row per operation records the attestation; the

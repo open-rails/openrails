@@ -1,4 +1,3 @@
--- parent: 76 sha256:67d784d49e2ec82b305b55b9c903cd9de8430813b23c7aaa18d14d9aa78b9fc7
 -- Repair: none-needed Prelaunch: historical checkout data is not reconstructed. The new order-only check is NOT VALID for existing rows.
 ALTER TABLE billing.payment_methods ADD COLUMN capture jsonb;
 ALTER TABLE billing.payment_methods ADD CONSTRAINT payment_methods_capture_check CHECK (

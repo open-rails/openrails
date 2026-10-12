@@ -1,4 +1,3 @@
--- parent: 59 sha256:e01d09d0eea16f7bafb39049513fdf37e476891554200f60ec8e3cac9b021673
 -- Repair: none-needed Every checkout so far is hosted, and the backfill says so.
 -- Where an order's checkout page runs: hosted (the customer is sent to it) or
 -- embedded (the merchant's registered origins frame it).

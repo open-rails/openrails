@@ -1,4 +1,3 @@
--- parent: 61 sha256:8a06d6d21d6d7fe0f97c60b2b61fae4f63fb024b57b76f3aacf3a86c8903d9e3
 -- Repair: none-needed Checkout sessions are gone: purchases are orders.
 -- Orders replaced checkout sessions: a browser buys through an order its
 -- customer pays. Open sessions are abandoned with their table.

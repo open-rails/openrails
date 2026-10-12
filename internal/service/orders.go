@@ -797,6 +797,10 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if string(existing.RequestDigest) != string(digest) {
 			return nil, false, errOrderKeyReused
 		}
+		existing, err = rt.Orders.ExpireIfDue(ctx, existing)
+		if err != nil {
+			return nil, true, err
+		}
 		view, err := s.merchantOrderView(ctx, existing)
 		if err != nil {
 			return nil, true, err

@@ -1,4 +1,3 @@
--- parent: 52 sha256:06d3c1ae2a943af8e998eba4ee7868bda5d343e8a9b45410c3d56a80fa59699d
 -- Repair: none-needed Every existing method is active, closed, replaced or removed; none awaits an action.
 -- A card being saved can wait for the customer: the bank asks for 3-D
 -- Secure before the card is stored. Such a method is requires_action, names

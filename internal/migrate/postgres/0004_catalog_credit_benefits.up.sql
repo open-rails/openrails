@@ -1,4 +1,3 @@
--- parent: 3 sha256:ddeb68c931bf73e826b3696f62a28c24603ead460fcbaac083e35a8ba9e2cac0
 -- Repair: none-needed New nullable columns preserve every existing row; old prices have no customer amount range or credit benefit.
 ALTER TABLE billing.products ADD COLUMN credit_grant jsonb;
 ALTER TABLE billing.prices ADD COLUMN customer_amount jsonb;

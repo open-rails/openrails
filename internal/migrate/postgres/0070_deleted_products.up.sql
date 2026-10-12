@@ -1,4 +1,3 @@
--- parent: 69 sha256:cc323dbbea514efdedfbaed5cee269b802fc6705d5abca970bd44575868b870f
 -- Repair: none-needed New nullable columns hold no value, so no row breaks the checks.
 -- A product or price nothing ever referenced can be deleted: deleted_at marks
 -- it (always archived too) and reads leave it out. A referenced one is only

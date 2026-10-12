@@ -1,4 +1,3 @@
--- parent: 72 sha256:de38170fa42bc1f56d0f59653635d57077ab1c71b267dcc348d554e6eaafb854
 -- Repair: none-needed Legacy customer rows are copied before being removed.
 -- Applications own inbox/read/channel policy. These immutable facts survive
 -- independent consumer acknowledgment and the legacy inbox's supersession.

@@ -1,4 +1,3 @@
--- parent: 38 sha256:690fe1558d03aa33f991a192897987e715730705ea89550a2a8c9b94bbdcc351
 -- Repair: none-needed No price was sold per seat, so every quantity becomes NULL; nothing billed seats before.
 -- A recurring price is sold per seat only when it declares its bounds; every
 -- quantity below is NULL unless it is.

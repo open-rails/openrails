@@ -1,4 +1,3 @@
--- parent: 40 sha256:9290dc29214a22da9316ff981c9f04da768aa8174e47cabdf0197698f3bcf119
 -- The two-level default card. A customer's default card per currency pays
 -- their invoices in it and every card subscription in it without a card of its
 -- own; a subscription's payment_method_id becomes that override.

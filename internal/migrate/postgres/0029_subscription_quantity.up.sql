@@ -1,4 +1,3 @@
--- parent: 28 sha256:8a00b86c17c62c53ee657fcdd318301e09d2eb23c88a542d99ba38bd0ce404e1
 -- Repair: none-needed Every existing subscription bills one unit.
 -- Every writer supplies it: the default only fills the existing rows.
 ALTER TABLE billing.subscriptions ADD COLUMN quantity integer NOT NULL DEFAULT 1;

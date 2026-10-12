@@ -1,4 +1,3 @@
--- parent: 62 sha256:4a2f445dbb4f3579c2b2d8979766c2978abb567182dc83d5ef9b0888b08babd1
 -- Repair: none-needed New tables hold no rows, and the widened host_outbox check refuses no stored row.
 -- A running charge: a customer charged at a rate per hour from started_at
 -- until it is stopped. Nothing is written while it runs. The charge so far is
