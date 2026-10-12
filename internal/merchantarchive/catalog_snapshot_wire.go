@@ -113,6 +113,11 @@ func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantI
 		known[c.Name] = true
 		raw, ok := row[c.Name]
 		if !ok {
+			// Snapshots before migration 88 name no required entitlements.
+			if p.Name == "products" && c.Name == "required_entitlements" {
+				none := "{}"
+				values[i] = &none
+			}
 			continue
 		}
 		var value string

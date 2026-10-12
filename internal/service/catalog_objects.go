@@ -69,7 +69,7 @@ func compareCatalogObjects(a, b catalogObject) int {
 
 // catalogFields are each object's owned fields, in the order results list them.
 var catalogFields = map[billing.CatalogObjectKind][]string{
-	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "credit_grant", "rate_cards"},
+	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards"},
 	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "psp_links"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
 }
@@ -163,15 +163,16 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			return nil, err
 		}
 		state[productObject(p.Key)] = &catalogObjectState{revision: p.Revision, productID: p.ID, fields: map[string]json.RawMessage{
-			"display_name": catalogJSON(p.DisplayName),
-			"description":  catalogJSON(p.Description),
-			"tier_group":   catalogOptionalText(p.TierGroup),
-			"tier_rank":    catalogJSON(int(p.TierRank)),
-			"archived":     catalogJSON(p.Archived),
-			"ownership":    catalogOptionalText(p.Ownership),
-			"entitlements": catalogJSON(append([]string{}, entitlements...)),
-			"credit_grant": credit,
-			"rate_cards":   rateCards,
+			"display_name":          catalogJSON(p.DisplayName),
+			"description":           catalogJSON(p.Description),
+			"tier_group":            catalogOptionalText(p.TierGroup),
+			"tier_rank":             catalogJSON(int(p.TierRank)),
+			"archived":              catalogJSON(p.Archived),
+			"ownership":             catalogOptionalText(p.Ownership),
+			"entitlements":          catalogJSON(append([]string{}, entitlements...)),
+			"credit_grant":          credit,
+			"rate_cards":            rateCards,
+			"required_entitlements": catalogJSON(append([]string{}, p.RequiredEntitlements...)),
 		}}
 	}
 	prices, err := q.ListCatalogStatePrices(ctx, merchantID)
@@ -330,6 +331,13 @@ func documentProductFields(key string, d catalogwire.ApplyProduct) (map[string]j
 		keys = append([]string{}, keys...)
 		slices.Sort(keys)
 		out["entitlements"] = catalogJSON(keys)
+	}
+	if d.RequiredEntitlements.Set {
+		keys, err := catalogwire.NormalizeRequiredEntitlements(d.RequiredEntitlements.Value)
+		if err != nil {
+			return nil, apperr.Invalidf("product %q: %v", key, err)
+		}
+		out["required_entitlements"] = catalogJSON(append([]string{}, keys...))
 	}
 	if d.CreditGrant.Set {
 		out["credit_grant"] = json.RawMessage("null")

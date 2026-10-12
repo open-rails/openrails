@@ -3,7 +3,7 @@
 -- name: CreateProduct :execrows
 INSERT INTO billing.products (
     id, merchant_id, key, display_name, description, credit_grant,
-    tier_group, tier_rank, ownership, archived, created_at, updated_at
+    tier_group, tier_rank, ownership, required_entitlements, archived, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
@@ -11,6 +11,7 @@ INSERT INTO billing.products (
     NULLIF(sqlc.narg(tier_group)::text, ''),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),
     sqlc.narg(ownership)::text,
+    sqlc.arg(required_entitlements)::text[],
     sqlc.arg(archived)::boolean,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -62,6 +63,7 @@ UPDATE billing.products SET
     tier_group = CASE WHEN sqlc.arg(set_tier_group)::boolean THEN NULLIF(sqlc.narg(tier_group)::text, '') ELSE tier_group END,
     tier_rank = COALESCE(sqlc.narg(tier_rank)::int, tier_rank),
     ownership = CASE WHEN sqlc.arg(set_ownership)::boolean THEN sqlc.narg(ownership)::text ELSE ownership END,
+    required_entitlements = CASE WHEN sqlc.arg(set_required_entitlements)::boolean THEN sqlc.arg(required_entitlements)::text[] ELSE required_entitlements END,
     archived = COALESCE(sqlc.narg(archived)::boolean, archived),
     revision = CASE WHEN sqlc.arg(keys_changed)::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
@@ -78,6 +80,7 @@ UPDATE billing.products SET
     tier_group = NULLIF(sqlc.narg(tier_group)::text, ''),
     tier_rank = sqlc.arg(tier_rank)::int,
     ownership = sqlc.narg(ownership)::text,
+    required_entitlements = sqlc.arg(required_entitlements)::text[],
     archived = sqlc.arg(archived)::boolean,
     deleted_at = NULL,
     created_at = now(),

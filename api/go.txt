@@ -638,6 +638,7 @@ pkg openrails/billing, const CodeCustomerIssuerMismatch untyped string = "custom
 pkg openrails/billing, const CodeDefaultPaymentMethodInvalid untyped string = "default_payment_method_invalid"
 pkg openrails/billing, const CodeDefaultPaymentMethodRequired untyped string = "default_payment_method_required"
 pkg openrails/billing, const CodeDestructiveActionsHeld untyped string = "destructive_actions_held"
+pkg openrails/billing, const CodeEntitlementRequired untyped string = "entitlement_required"
 pkg openrails/billing, const CodeFindingRequiresMerchantConfig untyped string = "finding_requires_merchant_config"
 pkg openrails/billing, const CodeHostPrincipalInvalid untyped string = "host_principal_invalid"
 pkg openrails/billing, const CodeIdempotencyKeyInUse untyped string = "idempotency_key_in_use"
@@ -1681,6 +1682,7 @@ pkg openrails/billing, type CreateProductParams struct, DisplayName string `json
 pkg openrails/billing, type CreateProductParams struct, Entitlements []string `json:"entitlements,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, Key string `json:"key"`
 pkg openrails/billing, type CreateProductParams struct, Ownership catalog.Ownership `json:"ownership,omitempty"`
+pkg openrails/billing, type CreateProductParams struct, RequiredEntitlements []string `json:"required_entitlements,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, TierGroup *string `json:"tier_group,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, TierRank int `json:"tier_rank,omitempty"`
 pkg openrails/billing, type CreateProvisioningTokenParams struct
@@ -2526,6 +2528,7 @@ pkg openrails/billing, type OrderLineRefusal struct
 pkg openrails/billing, type OrderLineRefusal struct, Code string `json:"code"`
 pkg openrails/billing, type OrderLineRefusal struct, Hint *string `json:"hint"`
 pkg openrails/billing, type OrderLineRefusal struct, Message string `json:"message"`
+pkg openrails/billing, type OrderLineRefusal struct, Missing []string `json:"missing,omitempty"`
 pkg openrails/billing, type OrderLineRefusal struct, OwnedBy *string `json:"owned_by"`
 pkg openrails/billing, type OrderListParams struct
 pkg openrails/billing, type OrderListParams struct, CustomerID CustomerID
@@ -2928,6 +2931,7 @@ pkg openrails/billing, type Product struct, ID ProductID `json:"id"`
 pkg openrails/billing, type Product struct, Key string `json:"key"`
 pkg openrails/billing, type Product struct, Ownership *catalog.Ownership `json:"ownership"`
 pkg openrails/billing, type Product struct, Prices []Price `json:"prices"`
+pkg openrails/billing, type Product struct, RequiredEntitlements []string `json:"required_entitlements"`
 pkg openrails/billing, type Product struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type Product struct, TierGroup *string `json:"tier_group"`
 pkg openrails/billing, type Product struct, TierRank int `json:"tier_rank"`
@@ -3336,6 +3340,7 @@ pkg openrails/billing, type UpdateProductParams struct, DisplayName catalog.Fiel
 pkg openrails/billing, type UpdateProductParams struct, Entitlements catalog.Field[[]string] `json:"entitlements,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 pkg openrails/billing, type UpdateProductParams struct, Ownership catalog.Field[catalog.Ownership] `json:"ownership,omitzero"`
+pkg openrails/billing, type UpdateProductParams struct, RequiredEntitlements catalog.Field[[]string] `json:"required_entitlements,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierGroup catalog.Field[string] `json:"tier_group,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierRank catalog.Field[int] `json:"tier_rank,omitzero"`
 pkg openrails/billing, type Usage struct
@@ -3461,6 +3466,7 @@ pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
 pkg openrails/catalog, const MaxEntitlementReplacements untyped int = 100
 pkg openrails/catalog, const MaxProductEntitlements untyped int = 10000
 pkg openrails/catalog, const MaxQuantity untyped int = 10000
+pkg openrails/catalog, const MaxRequiredEntitlements untyped int = 100
 pkg openrails/catalog, const ModelDynamic Model = "dynamic"
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
@@ -3479,6 +3485,7 @@ pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func DeriveOwnership(Ownership, bool, []OwnershipPrice) Ownership
 pkg openrails/catalog, func NormalizeEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func NormalizeProductEntitlements([]string) ([]string, error)
+pkg openrails/catalog, func NormalizeRequiredEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
@@ -3534,6 +3541,7 @@ pkg openrails/catalog, type ApplyProduct struct, Entitlements Field[[]string] `j
 pkg openrails/catalog, type ApplyProduct struct, Ownership Field[Ownership] `json:"ownership,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Prices map[string]ApplyPrice `json:"prices,omitempty"`
 pkg openrails/catalog, type ApplyProduct struct, RateCards Field[[]RateCard] `json:"rate_cards,omitzero"`
+pkg openrails/catalog, type ApplyProduct struct, RequiredEntitlements Field[[]string] `json:"required_entitlements,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierGroup Field[string] `json:"tier_group,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierRank Field[int] `json:"tier_rank,omitzero"`
 pkg openrails/catalog, type CreditGrantSpec struct

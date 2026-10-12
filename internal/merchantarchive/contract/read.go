@@ -111,8 +111,16 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			r.Values = r.Values[:len(p.Columns)]
 		}
-		// Products and prices before migration 68 were never deleted.
-		if (p.Name == "products" || p.Name == "prices") && len(r.Values) == len(p.Columns)-1 {
+		// Products and prices before migration 68 were never deleted; products
+		// before migration 88 required no entitlements.
+		if p.Name == "products" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, nil)
+		}
+		if p.Name == "products" && len(r.Values) == len(p.Columns)-1 {
+			none := "{}"
+			r.Values = append(r.Values, &none)
+		}
+		if p.Name == "prices" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
 		if err := ValidateValues(p, r.Values); err != nil {

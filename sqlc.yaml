@@ -84,6 +84,7 @@ sql:
       - "internal/migrate/postgres/0085_customer_orders.up.sql"
       - "internal/migrate/postgres/0086_platform_custody.up.sql"
       - "internal/migrate/postgres/0087_provider_charge_attributions.up.sql"
+      - "internal/migrate/postgres/0088_required_entitlements.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

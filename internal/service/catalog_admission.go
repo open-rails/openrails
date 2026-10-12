@@ -226,6 +226,13 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 			slices.Sort(keys)
 			fields["entitlements"] = catalogJSON(keys)
 		}
+		if req.SetRequiredEntitlements {
+			keys, err := catalogwire.NormalizeRequiredEntitlements(req.RequiredEntitlements)
+			if err != nil {
+				return nil, apperr.Invalidf("%s", err)
+			}
+			fields["required_entitlements"] = catalogJSON(append([]string{}, keys...))
+		}
 		if req.SetTierGroup {
 			fields["tier_group"] = catalogOptionalText(req.TierGroup)
 		}
@@ -308,6 +315,9 @@ func createProductPlan(req billing.CreateProductParams) catalogClassification {
 			return nil, err
 		}
 		if _, err := catalogwire.NormalizeEntitlements(req.Entitlements); err != nil {
+			return nil, apperr.Invalidf("%s", err)
+		}
+		if _, err := catalogwire.NormalizeRequiredEntitlements(req.RequiredEntitlements); err != nil {
 			return nil, apperr.Invalidf("%s", err)
 		}
 		return nil, nil

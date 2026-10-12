@@ -100,6 +100,14 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 		}
 	}
 	product.Entitlements = entitlements
+	required, err := catalogwire.NormalizeRequiredEntitlements(product.RequiredEntitlements)
+	if err != nil {
+		return apperr.Invalidf("%v", err)
+	}
+	if required == nil {
+		required = []string{}
+	}
+	product.RequiredEntitlements = required
 	credit, err := models.PointerToJSONB(product.CreditGrant)
 	if err != nil {
 		return err
@@ -114,33 +122,35 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 	}
 	// The id is the key's: a deleted product of this key revives instead.
 	rows, err := s.db.Gen(ctx).ReviveProduct(ctx, gen.ReviveProductParams{
-		MerchantID:  product.MerchantID,
-		ID:          product.ID,
-		DisplayName: product.DisplayName,
-		Description: desc,
-		CreditGrant: credit,
-		TierGroup:   product.TierGroup,
-		TierRank:    tierRank32,
-		Ownership:   ownershipColumn(product.Ownership),
-		Archived:    product.Archived,
+		MerchantID:           product.MerchantID,
+		ID:                   product.ID,
+		DisplayName:          product.DisplayName,
+		Description:          desc,
+		CreditGrant:          credit,
+		TierGroup:            product.TierGroup,
+		TierRank:             tierRank32,
+		Ownership:            ownershipColumn(product.Ownership),
+		Archived:             product.Archived,
+		RequiredEntitlements: required,
 	})
 	if err != nil {
 		return err
 	}
 	if rows == 0 {
 		rows, err = s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
-			ID:          product.ID,
-			MerchantID:  product.MerchantID,
-			Key:         product.Key,
-			DisplayName: product.DisplayName,
-			Description: desc,
-			CreditGrant: credit,
-			TierGroup:   product.TierGroup,
-			TierRank:    tierRank32,
-			Ownership:   ownershipColumn(product.Ownership),
-			Archived:    product.Archived,
-			CreatedAt:   product.CreatedAt,
-			UpdatedAt:   product.UpdatedAt,
+			ID:                   product.ID,
+			MerchantID:           product.MerchantID,
+			Key:                  product.Key,
+			DisplayName:          product.DisplayName,
+			Description:          desc,
+			CreditGrant:          credit,
+			TierGroup:            product.TierGroup,
+			TierRank:             tierRank32,
+			Ownership:            ownershipColumn(product.Ownership),
+			Archived:             product.Archived,
+			RequiredEntitlements: required,
+			CreatedAt:            product.CreatedAt,
+			UpdatedAt:            product.UpdatedAt,
 		})
 		if err != nil {
 			return err
@@ -337,7 +347,10 @@ type ProductDefinitionUpdateParams struct {
 	TierRank        *int
 	Ownership       catalogwire.Ownership
 	SetOwnership    bool
-	Archived        *bool
+	// RequiredEntitlements replaces the keys a buyer must hold when set.
+	RequiredEntitlements    []string
+	SetRequiredEntitlements bool
+	Archived                *bool
 	// KeyEdit attributes a change of Entitlements.
 	KeyEdit KeyEdit
 }
@@ -371,6 +384,17 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 			return nil, change, err
 		}
 	}
+	var required []string
+	if params.SetRequiredEntitlements {
+		if params.RequiredEntitlements == nil {
+			return nil, change, apperr.Invalidf("required_entitlements must be a string list, not null; use [] for none")
+		}
+		keys, err := catalogwire.NormalizeRequiredEntitlements(params.RequiredEntitlements)
+		if err != nil {
+			return nil, change, apperr.Invalidf("%v", err)
+		}
+		required = keys
+	}
 	credit, err := models.PointerToJSONB(params.CreditGrant)
 	if err != nil {
 		return nil, change, err
@@ -392,6 +416,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
 		TierRank: rank, Ownership: ownershipColumn(params.Ownership), SetOwnership: params.SetOwnership,
+		RequiredEntitlements: required, SetRequiredEntitlements: params.SetRequiredEntitlements,
 		Archived: params.Archived, KeysChanged: change.Changed(),
 	})
 	if err != nil {

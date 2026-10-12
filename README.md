@@ -93,6 +93,8 @@ products:
 
 Products and their prices are maps keyed by a stable key you choose. The entitlements are arbitrary strings you choose; OpenRails tracks these, but it's up to your application to give them meaning. Above, we created strings for our membership and for individual products.
 
+A product may also list `required_entitlements`: keys the customer must already hold to order it. A members-only course with `required_entitlements: ["channel:membership"]` sells only to members; anyone else's order, and a checkout paid after their membership ended, is refused `403 entitlement_required`, with the keys they lack in `metadata.missing`.
+
 #### Build the billing client
 
 Next, configure your merchant. This contains secrets that allow OpenRails to talk to your PSP (payment service provider).

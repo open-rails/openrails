@@ -16,7 +16,7 @@ Kubernetes server-side apply does (`catalog_field_owners`).
 
 | Object | Fields |
 |---|---|
-| product | `display_name`, `description`, `tier_group`, `tier_rank`, `archived`, `ownership`, `entitlements`, `credit_grant`, `rate_cards` |
+| product | `display_name`, `description`, `tier_group`, `tier_rank`, `archived`, `ownership`, `entitlements`, `required_entitlements`, `credit_grant`, `rate_cards` |
 | price key (every version under a product's key) | `currency`, `unit_amount`, `access_duration_hours`, `billing_interval_hours`, `trial_unit_amount`, `trial_duration_hours`, `customer_amount`, `quantity`, `archived`, `psp_links` |
 | meter | `event_type`, `value_property`, `aggregation`, `unit`, `group_by` |
 

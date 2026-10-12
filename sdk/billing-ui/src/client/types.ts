@@ -401,12 +401,14 @@ export const orderSchema = z.object({
 })
 export type Order = z.infer<typeof orderSchema>
 
-/** Why a line cannot be bought: `already_owned`, `unavailable`, ... */
+/** Why a line cannot be bought: `already_owned`, `entitlement_required`, `unavailable`, ... */
 export const orderLineRefusalSchema = z.object({
   code: z.string(),
   message: z.string(),
   owned_by: z.string().nullish(),
   hint: z.string().nullish(),
+  /** `entitlement_required`: the required keys the customer lacks. */
+  missing: z.array(z.string()).optional(),
 })
 export type OrderLineRefusal = z.infer<typeof orderLineRefusalSchema>
 
@@ -465,6 +467,8 @@ export const productSchema = z.object({
   description: z.string(),
   /** Opaque entitlement keys granted by the product. */
   entitlements: z.array(z.string()),
+  /** Keys a customer must already hold to order the product. */
+  required_entitlements: z.array(z.string()).optional(),
   /** Prepaid balance fulfilled once for each qualifying successful payment. */
   credit_grant: z
     .object({

@@ -22,10 +22,13 @@ type Product struct {
 	Description string `json:"description"`
 	// Entitlements are opaque access keys granted by the purchased price.
 	// The price defines their access duration; keys have no separate duration.
-	Entitlements []string                 `json:"entitlements"`
-	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
-	TierGroup    *string                  `json:"tier_group"`
-	TierRank     int                      `json:"tier_rank"`
+	Entitlements []string `json:"entitlements"`
+	// RequiredEntitlements are the keys a customer must already hold to order
+	// the product; empty sells it to anyone.
+	RequiredEntitlements []string                 `json:"required_entitlements"`
+	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	TierGroup            *string                  `json:"tier_group"`
+	TierRank             int                      `json:"tier_rank"`
 	// Ownership is the declared rule; null derives it (catalog.DeriveOwnership).
 	Ownership *catalog.Ownership `json:"ownership"`
 	Archived  bool               `json:"archived"`
@@ -39,30 +42,36 @@ type Product struct {
 // CreateProductParams creates a product. Archived creates it retired, for a
 // historical plan that still has subscribers.
 type CreateProductParams struct {
-	Key          string                   `json:"key"`
-	DisplayName  string                   `json:"display_name"`
-	Description  string                   `json:"description,omitempty"`
-	Entitlements []string                 `json:"entitlements,omitempty"`
-	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
-	TierGroup    *string                  `json:"tier_group,omitempty"`
-	TierRank     int                      `json:"tier_rank,omitempty"`
+	Key          string   `json:"key"`
+	DisplayName  string   `json:"display_name"`
+	Description  string   `json:"description,omitempty"`
+	Entitlements []string `json:"entitlements,omitempty"`
+	// RequiredEntitlements are the keys a customer must already hold to order
+	// the product.
+	RequiredEntitlements []string                 `json:"required_entitlements,omitempty"`
+	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	TierGroup            *string                  `json:"tier_group,omitempty"`
+	TierRank             int                      `json:"tier_rank,omitempty"`
 	// Ownership declares the rule; empty derives it.
 	Ownership catalog.Ownership `json:"ownership,omitempty"`
 	Archived  bool              `json:"archived,omitempty"`
 }
 
 // UpdateProductParams changes a product's fields: an omitted field is left
-// as it is. An empty entitlements list clears it; null is invalid. Null
-// clears description and tier_group.
+// as it is. An empty entitlements or required_entitlements list clears it;
+// null is invalid. Null clears description and tier_group.
 // Archiving takes the product off sale; its purchases and subscribers keep
 // their access.
 type UpdateProductParams struct {
-	DisplayName  catalog.Field[string]                  `json:"display_name,omitzero"`
-	Description  catalog.Field[string]                  `json:"description,omitzero"`
-	Entitlements catalog.Field[[]string]                `json:"entitlements,omitzero"`
-	CreditGrant  catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
-	TierGroup    catalog.Field[string]                  `json:"tier_group,omitzero"`
-	TierRank     catalog.Field[int]                     `json:"tier_rank,omitzero"`
+	DisplayName  catalog.Field[string]   `json:"display_name,omitzero"`
+	Description  catalog.Field[string]   `json:"description,omitzero"`
+	Entitlements catalog.Field[[]string] `json:"entitlements,omitzero"`
+	// RequiredEntitlements are the keys a customer must already hold to
+	// order the product.
+	RequiredEntitlements catalog.Field[[]string]                `json:"required_entitlements,omitzero"`
+	CreditGrant          catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
+	TierGroup            catalog.Field[string]                  `json:"tier_group,omitzero"`
+	TierRank             catalog.Field[int]                     `json:"tier_rank,omitzero"`
 	// Ownership declares the rule; null derives it again.
 	Ownership catalog.Field[catalog.Ownership] `json:"ownership,omitzero"`
 	Archived  catalog.Field[bool]              `json:"archived,omitzero"`

@@ -323,16 +323,19 @@ type OrderPreviewLine struct {
 }
 
 // OrderLineRefusal is why a line cannot be bought. Code is already_owned,
-// unavailable, currency_mismatch, quantity_invalid, quantity_not_allowed,
-// amount_not_allowed, amount_required or amount_invalid. An already_owned line
-// names its owner (a subscription, product access or an unpaid order) and a
-// hint: change (change that subscription instead) or resume (pay that order,
-// or resume that subscription).
+// entitlement_required, unavailable, currency_mismatch, quantity_invalid,
+// quantity_not_allowed, amount_not_allowed, amount_required or amount_invalid.
+// An already_owned line names its owner (a subscription, product access or an
+// unpaid order) and a hint: change (change that subscription instead) or
+// resume (pay that order, or resume that subscription). An
+// entitlement_required line lists the product's required entitlements the
+// customer lacks in Missing.
 type OrderLineRefusal struct {
-	Code    string  `json:"code"`
-	Message string  `json:"message"`
-	OwnedBy *string `json:"owned_by"`
-	Hint    *string `json:"hint"`
+	Code    string   `json:"code"`
+	Message string   `json:"message"`
+	OwnedBy *string  `json:"owned_by"`
+	Hint    *string  `json:"hint"`
+	Missing []string `json:"missing,omitempty"`
 }
 
 // OrderListParams selects orders, newest first; every filter is optional.

@@ -112,7 +112,7 @@ func (s *CheckoutAttemptService) payOrderHosted(ctx context.Context, in OrderPay
 		case !orders.Payable(current, now):
 			return orders.ErrNotPayable
 		}
-		if err := s.orders.StillFree(ctx, q, order, now); err != nil {
+		if err := s.orders.StillBuyable(ctx, q, order, now); err != nil {
 			return err
 		}
 		expires := now.Add(orderAttemptTTL)

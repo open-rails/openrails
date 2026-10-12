@@ -220,24 +220,25 @@ func (q *Queries) ListCatalogStatePrices(ctx context.Context, merchantID uuid.UU
 const listCatalogStateProducts = `-- name: ListCatalogStateProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description,
        COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = products.merchant_id AND pe.product_id = products.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements,
-       credit_grant, tier_group, tier_rank, ownership, archived, revision
+       credit_grant, tier_group, tier_rank, ownership, required_entitlements, archived, revision
 FROM billing.products
 WHERE merchant_id = $1::uuid AND deleted_at IS NULL
 ORDER BY key
 `
 
 type ListCatalogStateProductsRow struct {
-	ID           uuid.UUID
-	Key          string
-	DisplayName  string
-	Description  string
-	Entitlements []byte
-	CreditGrant  []byte
-	TierGroup    *string
-	TierRank     int32
-	Ownership    *string
-	Archived     bool
-	Revision     int64
+	ID                   uuid.UUID
+	Key                  string
+	DisplayName          string
+	Description          string
+	Entitlements         []byte
+	CreditGrant          []byte
+	TierGroup            *string
+	TierRank             int32
+	Ownership            *string
+	RequiredEntitlements []string
+	Archived             bool
+	Revision             int64
 }
 
 // Catalog objects as one state, read under the catalog lock before and after
@@ -261,6 +262,7 @@ func (q *Queries) ListCatalogStateProducts(ctx context.Context, merchantID uuid.
 			&i.TierGroup,
 			&i.TierRank,
 			&i.Ownership,
+			&i.RequiredEntitlements,
 			&i.Archived,
 			&i.Revision,
 		); err != nil {

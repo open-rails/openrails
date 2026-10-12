@@ -144,6 +144,15 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 			case err == nil && open.ExpiresAt != nil && !open.ExpiresAt.After(s.now()):
 				return &staleOpenOrder{id: open.ID}
 			case err == nil:
+				// Answering it is ordering again: the customer still holds what
+				// its products require.
+				lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{open.ID}})
+				if err != nil {
+					return err
+				}
+				if err := entitled(ctx, q, mid.UUID(), in.CustomerID, string(in.Origin), lines, s.now()); err != nil {
+					return err
+				}
 				id, found = open.ID, true
 				return nil
 			case !errors.Is(err, pgx.ErrNoRows):
