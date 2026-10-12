@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,9 +39,9 @@ type admissionWorld struct {
 
 func newAdmissionsWorld(t *testing.T) *admissionWorld {
 	t.Helper()
-	dsn := os.Getenv("OPENRAILS_E2E_DSN")
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
 	if dsn == "" {
-		t.Skip("OPENRAILS_E2E_DSN is required")
+		t.Fatal("OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
 	require.NoError(t, err)
@@ -73,9 +74,14 @@ func (w *admissionWorld) project(ctx context.Context, tx pgx.Tx, h destructive.H
 	}
 	return gen.New(tx).EnqueueDestructiveHoldEvent(ctx, gen.EnqueueDestructiveHoldEventParams{MerchantID: h.MerchantID, EventType: kind, HoldID: h.ID, OccurredAt: at, Data: data, DedupeKey: kind + ":" + h.ID.String()})
 }
+func (w *admissionWorld) q(sql string) string {
+	out, err := sqlschema.Rewrite(sql, w.schema)
+	require.NoError(w.t, err)
+	return out
+}
 func (w *admissionWorld) exec(sql string, args ...any) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), strings.ReplaceAll(sql, "billing.", w.schema+"."), args...)
+	_, err := w.pool.Exec(w.t.Context(), w.q(sql), args...)
 	require.NoError(w.t, err)
 }
 func (w *admissionWorld) merchant() uuid.UUID {
@@ -196,6 +202,13 @@ func TestDestructiveAdmissionReplayBatchAndNoEffect(t *testing.T) {
 	otherIssuer.Actor.Issuer = "https://different.test"
 	_, err = w.gate.Admit(t.Context(), otherIssuer)
 	require.NoError(t, err, "issuer-qualified actor is distinct")
+	pending, found, err := w.gate.FindPending(t.Context(), mid, c.Target, c.Actor, c.Digest)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, retry.ID, pending.ID)
+	_, found, err = w.gate.FindPending(t.Context(), mid, c.Target, otherIssuer.Actor, c.Digest)
+	require.NoError(t, err)
+	require.False(t, found, "another issuer's actor cannot resume this pending command")
 }
 
 func TestDestructiveAdmissionScopesAndClearEpoch(t *testing.T) {
@@ -360,27 +373,6 @@ func TestDestructiveAdmissionAutomationAndUnsentFence(t *testing.T) {
 	require.NoError(t, err, "possible effects still retain recovery authority")
 }
 
-func TestDestructiveAdmissionPendingLookup(t *testing.T) {
-	w := newAdmissionsWorld(t)
-	mid := w.merchant()
-	c := command(mid, "operator")
-	c.Kind = destructive.ConfigurationChange
-	a, err := w.gate.Admit(t.Context(), c)
-	require.NoError(t, err)
-	_, err = w.gate.Start(t.Context(), mid, a.ID)
-	require.NoError(t, err)
-	require.NoError(t, w.gate.Finish(t.Context(), mid, a.ID, destructive.OutcomeUncertain, "vault response lost"))
-	previous, found, err := w.gate.FindPending(t.Context(), mid, c.Target, c.Actor, c.Digest)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, a.ID, previous.ID)
-	other := c.Actor
-	other.Issuer = "https://other.test"
-	_, found, err = w.gate.FindPending(t.Context(), mid, c.Target, other, c.Digest)
-	require.NoError(t, err)
-	require.False(t, found)
-}
-
 // queryReceipt records the generated query for an EXPLAIN of that same SQL,
 // while exercising its normal typed reader and schema rewriting first.
 type queryReceipt struct {
@@ -398,13 +390,17 @@ func (q *queryReceipt) QueryRow(ctx context.Context, sql string, args ...any) pg
 func TestDestructiveAdmissionActivityThresholdPlan(t *testing.T) {
 	w := newAdmissionsWorld(t)
 	mid, other := w.merchant(), w.merchant()
-	product, price := uuid.New(), uuid.New()
-	w.exec(`INSERT INTO billing.products(merchant_id,id,key,display_name,tier_rank,archived) VALUES($1,$2,'scale','Scale',0,false)`, mid, product)
-	w.exec(`INSERT INTO billing.prices(merchant_id,id,product_id,key,amount,currency,archived) VALUES($1,$2,$3,'scale',1000000,'USD',false)`, mid, price, product)
 	w.exec(`INSERT INTO billing.customers(merchant_id,id) SELECT $1,md5(n::text)::uuid FROM generate_series(1,2000)n`, mid)
-	w.exec(`INSERT INTO billing.payments(merchant_id,customer_id,price_id,channel,transaction_id,amount,list_amount,currency,status,purchased_at)
- SELECT $1,c.id,$2,'manual',c.id::text||':'||n::text,1000000,1000000,'USD','succeeded',now()-interval '1 day'
- FROM billing.customers c CROSS JOIN generate_series(1,2)n WHERE c.merchant_id=$1`, mid, price)
+	// Two paid orders per customer: each payment settles its own complete order.
+	w.exec(`WITH bills AS MATERIALIZED (
+ SELECT c.id AS customer_id,uuidv7() AS order_id,uuidv7() AS payment_id,now()-interval '1 day' AS paid_at
+ FROM billing.customers c CROSS JOIN generate_series(1,2)n WHERE c.merchant_id=$1
+), orders AS (
+ INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,number,payment_id,expires_at,completed_at)
+ SELECT $1,order_id,customer_id,'merchant','complete','succeeded','USD',1000000,order_id::text,payment_id,paid_at,paid_at FROM bills
+)
+INSERT INTO billing.payments(merchant_id,id,customer_id,order_id,channel,transaction_id,amount,list_amount,currency,status,purchased_at)
+SELECT $1,payment_id,customer_id,order_id,'manual',payment_id::text,1000000,1000000,'USD','succeeded',paid_at FROM bills`, mid)
 	w.exec(`ANALYZE billing.payments`)
 	w.exec(`ANALYZE billing.merchants`)
 	capture := &queryReceipt{DBTX: w.db.Qx(t.Context())}
@@ -413,7 +409,7 @@ func TestDestructiveAdmissionActivityThresholdPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 17, n, "duplicates spend one membership and query stops at threshold")
 	var plan string
-	sql := "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + strings.ReplaceAll(capture.sql, "billing.", w.schema+".")
+	sql := "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + w.q(capture.sql)
 	require.NoError(t, w.pool.QueryRow(t.Context(), sql, capture.args...).Scan(&plan))
 	t.Log("merchant activity plan:", plan)
 	require.Contains(t, plan, "Limit")
@@ -424,7 +420,7 @@ func TestDestructiveAdmissionActivityThresholdPlan(t *testing.T) {
 	n, err = q.DestructiveDeploymentActivityAtLeast(t.Context(), gen.DestructiveDeploymentActivityAtLeastParams{Since: w.clock.Now().Add(-30 * 24 * time.Hour), Required: 17})
 	require.NoError(t, err)
 	require.EqualValues(t, 17, n)
-	sql = "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + strings.ReplaceAll(capture.sql, "billing.", w.schema+".")
+	sql = "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + w.q(capture.sql)
 	require.NoError(t, w.pool.QueryRow(t.Context(), sql, capture.args...).Scan(&plan))
 	t.Log("deployment activity plan:", plan)
 	require.Contains(t, plan, "payments_destructive_scale_idx")

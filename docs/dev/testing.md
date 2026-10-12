@@ -95,4 +95,6 @@ Add a small public-client contract to `ci/`. Use a deterministic local
 transport for provider behavior, keep each test on a fresh schema, and assert
 the durable result and the negative safety case. A deliberate behavior change
 sweeps `ci/` and `server/ci` for the codes, statuses, paths and fields it
-changed: green in one package is not green.
+changed: green in one package is not green. A test behind the `e2e` or
+`integration` tag runs only in a suite, so it lives under `ci/`, `server/ci` or
+`examples/`; `TestEndToEndTestsLiveInTheSuites` refuses one anywhere else.
