@@ -157,15 +157,7 @@ describe("payment detail", () => {
     status: "partially_refunded",
     amount_refunded: "5000000",
     card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
-    product: {
-      id: "prod_1",
-      key: "pro",
-      display_name: "Pro plan",
-      description: "",
-      tier_group: null,
-      tier_rank: 1,
-      archived: false,
-    },
+    order_id: "ord_purchase",
     refunds: [
       aPayment("pay_r1", {
         kind: "refund",
@@ -176,7 +168,7 @@ describe("payment detail", () => {
     ],
   })
 
-  it("shows the card, product and refunds, and refunds what remains", async () => {
+  it("shows the card, order and refunds, and refunds what remains", async () => {
     let refunded = false
     routes["/admin/payments/pay_1"] = () =>
       refunded ? { ...charge, status: "refunded" } : charge
@@ -188,7 +180,7 @@ describe("payment detail", () => {
       )
     }
     await at("/payments/pay_1", "/payments/:id", <PaymentDetailPage />)
-    await vi.waitFor(() => expect(text()).toContain("Pro plan"))
+    await vi.waitFor(() => expect(text()).toContain("ord_purchase"))
     expect(text()).toContain("visa ••••4242")
     expect(text()).toContain("pay_r1")
     expect(text()).toContain("-$5.00")
