@@ -74,8 +74,8 @@ UPDATE billing.reconciliation_findings SET status='auto_fixed',resolution='admin
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND finding_type='life.destructive.hold' AND subject_key=sqlc.arg(hold_id)::text AND status IN ('requires_review','reconcile_required','ignored');
 
 -- name: HasDestructiveArchiveBarrier :one
-SELECT EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND admitted_at>sqlc.arg(since)::timestamptz)))
- OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=sqlc.arg(merchant_id)::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid))) AS held;
+SELECT (EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND admitted_at>sqlc.arg(since)::timestamptz)))
+ OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=sqlc.arg(merchant_id)::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid))))::boolean AS held;
 
 -- name: CountDestructiveUnitsForActor :one
 WITH counted AS (
