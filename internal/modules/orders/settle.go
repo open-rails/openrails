@@ -308,7 +308,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		}
 		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
-			PaymentMetadata: map[string]any{"order_id": order.ID.String()},
+			ExistingOrderID: &order.ID, PaymentMetadata: map[string]any{"order_id": order.ID.String()},
 		}
 		if e := charge.Enrolled; e != nil {
 			if len(order.Lines) != 1 {
