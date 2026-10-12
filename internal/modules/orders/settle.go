@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -302,7 +303,8 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
 			ProductID: models.DerefUUID(line.ProductID), PriceID: models.DerefUUID(line.PriceID), PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
-			AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
+			RecurringIntervalHours: intPtr(line.BillingIntervalHours),
+			AcceptedAt:             now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}
 		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
@@ -329,6 +331,20 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		holderType, holder = "subscription", sub.ID
 		if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: order.MerchantID, ID: line.ID, SubscriptionID: &sub.ID}); err != nil {
 			return err
+		}
+		if charge.Enrolled != nil {
+			owner := string(terms.CollectionPolicy)
+			n, err := q.BindObservedOrderOwner(ctx, gen.BindObservedOrderOwnerParams{MerchantID: order.MerchantID, OrderID: order.ID,
+				CollectionOwner: owner, PspID: charge.PSPID})
+			if err != nil || n != 1 {
+				return errors.Join(err, observed.ErrConflict)
+			}
+			order.CollectionOwner, order.PspID = owner, &charge.PSPID
+			if charge.Rail == string(models.RailNMI) || charge.Rail == string(models.RailCCBill) {
+				if err := observed.SeedSchedule(ctx, d, order.ID, sub.ID, terms.PeriodEnd, int(*line.BillingIntervalHours), terms.RecurringAmount, now); err != nil {
+					return err
+				}
+			}
 		}
 		if len(order.Lines) == 1 && charge.PaymentID != uuid.Nil {
 			if err := q.SetPaymentSubscription(ctx, gen.SetPaymentSubscriptionParams{MerchantID: order.MerchantID, ID: charge.PaymentID, SubscriptionID: sub.ID,
