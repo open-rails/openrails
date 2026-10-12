@@ -518,7 +518,8 @@ func anyHeld(owned map[string]bool, keys []string) bool {
 ```
 
 **List courses**, with prices and what the user owns. A page costs one product
-read (`ListProducts`) and one entitlement read, never one per course:
+read (`ListProducts`, none while the client holds those products in memory) and
+one entitlement read, never one per course:
 
 ```go
 // GET /api/courses?cursor=&limit= pages over the host's courses. Each page

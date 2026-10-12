@@ -11,8 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// hostOnly are the engine settings a host builds in code; no file key sets them.
-var hostOnly = map[string]bool{"Merchants": true, "Checkout": true}
+// hostOnly are the engine settings a host builds in code; no file key sets
+// them. The server's own engine handles keep the default read cache.
+var hostOnly = map[string]bool{"Merchants": true, "Checkout": true, "ReadCache": true}
 
 // Every file key reaches the server's configuration, and every engine setting
 // is either a file key or deliberately host-only.

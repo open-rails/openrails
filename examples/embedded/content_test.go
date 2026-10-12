@@ -102,8 +102,9 @@ func TestMediaURLs(t *testing.T) {
 
 // The course list pages over the host's courses. Each page joins in its
 // products' live prices and what the user owns with one product read and one
-// entitlement read, never one per course; signed out, it reads no
-// entitlements at all. A members-only video is sold with the membership.
+// entitlement read, never one per course; products the client read recently
+// come from memory with no read at all. Signed out, it reads no entitlements.
+// A members-only video is sold with the membership.
 func TestCourseList(t *testing.T) {
 	app := startApp(t)
 	type price struct{ Key, Amount, Currency, Terms string }
@@ -118,23 +119,23 @@ func TestCourseList(t *testing.T) {
 		Data       []row
 		NextCursor *string `json:"next_cursor"`
 	}
-	read := func(token, query string, entitlementReads int) {
+	read := func(token, query string, productReads, entitlementReads int) {
 		t.Helper()
 		page.Data, page.NextCursor = nil, nil
 		app.queries.reset()
 		app.call(t, token, http.MethodGet, "/api/courses?"+query, nil, &page)
-		require.Equal(t, 1, app.queries.count("ListProductsFiltered"), "one product read per page")
-		require.Equal(t, 1, app.queries.count("ListCurrentPricesByProducts"), "its prices with it")
+		require.Equal(t, productReads, app.queries.count("ListProductsFiltered"), "product reads per page")
+		require.Equal(t, productReads, app.queries.count("ListCurrentPricesByProducts"), "their prices with them")
 		require.Equal(t, entitlementReads, app.queries.count("ListValidEntitlementCaches"), "entitlement reads per page")
 	}
 	cssPrices := []price{{"rent", "1990000", "USD", "for 3 days"}, {"purchase", "4990000", "USD", "to keep"}}
 	membershipPrices := []price{{"monthly", "10000000", "USD", "every 30 days"}, {"yearly", "99000000", "USD", "every 365 days"}}
 
-	read("", "limit=1", 0)
+	read("", "limit=1", 1, 0)
 	require.Equal(t, []row{{"css-101", "Intro to CSS", false, false, "course-101", cssPrices}}, page.Data)
-	read("", "limit=1&cursor="+*page.NextCursor, 0)
+	read("", "limit=1&cursor="+*page.NextCursor, 1, 0)
 	require.Equal(t, "tailwind-102", page.Data[0].Slug)
-	read("", "limit=1&cursor="+*page.NextCursor, 0)
+	read("", "limit=1&cursor="+*page.NextCursor, 1, 0)
 	require.Equal(t, []row{{"live-qa", "Live Q&A", true, false, "channel-membership", membershipPrices}}, page.Data)
 	require.Nil(t, page.NextCursor)
 
@@ -147,11 +148,11 @@ func TestCourseList(t *testing.T) {
 	}
 	alice := app.signUp(t, "alice")
 	app.buy(t, alice, "course-101", "purchase")
-	read(alice, "", 1)
+	read(alice, "", 0, 1)
 	require.Equal(t, []bool{true, false, false}, owned(), "her course only")
 	carol := app.signUp(t, "carol")
 	app.buy(t, carol, "channel-membership", "yearly")
-	read(carol, "", 1)
+	read(carol, "", 0, 1)
 	require.Equal(t, []bool{true, true, true}, owned(), "a member owns every video")
 
 	require.Equal(t, http.StatusBadRequest, app.get(t, "", "/api/courses?limit=0").StatusCode)

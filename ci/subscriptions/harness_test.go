@@ -89,6 +89,9 @@ var everyPermission = func() (out []billing.Permission) {
 }()
 
 // routeGroups turns on every route group the harness mounts.
+// liveReads turns every cached Client read off.
+var liveReads = openrails.ReadCache{openrails.ReadCatalog: {}, openrails.ReadMeters: {}, openrails.ReadPublicConfig: {}, openrails.ReadMerchantConfiguration: {}}
+
 var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 
 // verifier is a neutral host's Authenticator: HS256 tokens. Its "staff"
@@ -535,8 +538,10 @@ func (w *world) start() {
 	local, err := rt.MerchantBySlug(w.slug)
 	require.NoError(t, err)
 	host := w.auth.hostToken(t)
+	// Scenarios write through every channel and read over HTTP at once, which
+	// a cached remote read promises only after RefreshAfter: it reads live.
 	over, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{
-		Token: func(context.Context) (string, error) { return host, nil }})
+		Token: func(context.Context) (string, error) { return host, nil }}, openrails.RemoteMerchantOptions{ReadCache: liveReads})
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
