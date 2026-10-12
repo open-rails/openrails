@@ -814,6 +814,10 @@ type BillingOrder struct {
 	CollectionFailedAt *time.Time
 	// When a usage order's next scheduled charge runs; NULL while none is scheduled.
 	NextCollectionAttemptAt *time.Time
+	// Frozen collection authority: engine, NMI schedule with existing OpenRails dunning, or provider billing. A provider bill is never a generic local charge command.
+	CollectionOwner string
+	// Initial observed enrollment, renewal, or a separate adjustment bill. Provider bills use scoped provider identity rather than period timestamps as document identity.
+	SubscriptionBillKind *string
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
@@ -840,6 +844,8 @@ type BillingOrderLine struct {
 	CreatedAt            time.Time
 	// A usage line's accrual source (e.g. metered:<meter>); NULL on a priced line.
 	Source *string
+	// The finalized provider amount is authoritative, including exact seat rounding and explicit signed provider adjustments; quantity and unit amount remain the accepted snapshot.
+	ProviderAmount bool
 }
 
 // Owed charges awaiting their usage order: an accrual is born pending and gates arrears exposure; finalization moves it onto an order (order_id, status billed), so it bills once. Retention: permanent, never pruned.
@@ -1209,6 +1215,22 @@ type BillingProductEntitlement struct {
 	// Who added the key: a catalog application id (sha256:...), an operator, or migration.
 	AddedBy   string
 	RemovedBy *string
+}
+
+// Scoped immutable provider bill identity and accepted order snapshot. Multiple verified aliases can name one order. Settlement proof never executes collection. Retention: permanent with the financial order.
+type BillingProviderBill struct {
+	MerchantID        uuid.UUID
+	PspID             uuid.UUID
+	SourceKind        string
+	SourceKey         string
+	OrderID           uuid.UUID
+	CustomerID        uuid.UUID
+	Snapshot          []byte
+	ProviderReference string
+	SettlementSource  *string
+	NonCashAmount     int64
+	SettledAt         *time.Time
+	CreatedAt         time.Time
 }
 
 // Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.

@@ -16,18 +16,18 @@ INSERT INTO billing.orders (
 -- exists.
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
-    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at
+    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at, subscription_bill_kind
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, 'subscription',
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.arg(subscription_id)::uuid, sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz,
-    sqlc.arg(due_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+    sqlc.arg(due_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, 'renewal'
 )
-ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' DO NOTHING;
+ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal' DO NOTHING;
 
 -- name: GetRenewalOrder :one
 SELECT * FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
   AND subscription_id = sqlc.arg(subscription_id)::uuid AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz;
 
 -- name: VoidRenewalOrder :execrows
@@ -43,7 +43,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 -- name: GetOpenRenewalOrder :one
 -- The subscription's unpaid renewal, if any.
 SELECT * FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
   AND subscription_id = sqlc.arg(subscription_id)::uuid AND status IN ('open', 'processing')
 ORDER BY period_starts_at DESC
 LIMIT 1;
