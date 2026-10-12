@@ -530,7 +530,7 @@ UPDATE billing.destructive_actions
 SET state=$1::text,
  started_at=coalesce(started_at,$2::timestamptz),
  finished_at=$3::timestamptz,
- completion_sequence=CASE WHEN $1::text='succeeded' THEN coalesce(completion_sequence,nextval('billing.destructive_actions_admission_sequence_seq')) ELSE completion_sequence END,
+ completion_sequence=CASE WHEN $1::text='succeeded' THEN coalesce(completion_sequence,nextval('billing.destructive_actions_admission_sequence_seq'::regclass)) ELSE completion_sequence END,
  result=$4::text
 WHERE merchant_id=$5::uuid AND id=$6::uuid AND state IN ('reserved','started','uncertain')
 `
