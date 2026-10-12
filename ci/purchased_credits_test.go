@@ -76,6 +76,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
 	ctx := t.Context()
+	declareDynamicMeter(t, client, "api", "units")
 	face := int64(2_000_000)
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "api-credit", DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", Amount: &face}})
 	require.NoError(t, err)
@@ -168,7 +169,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 		deliver(raw)
 	}
 	providerEvent("evt_partial_credit_refund", "refund.created", map[string]any{"object": "refund", "id": "re_credit_second", "amount": 50, "currency": "usd", "status": "succeeded", "payment_intent": "pi_credit_2"})
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api", Amount: 1_500_000, Source: "api", SourceID: "consume-remaining-credit"})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api", Amount: new(int64(1_500_000)), Source: "api", SourceID: "consume-remaining-credit"})
 	require.NoError(t, err)
 	providerEvent("evt_credit_disputed", "charge.dispute.created", map[string]any{"object": "dispute", "id": "dp_credit_second", "amount": 50, "currency": "usd", "status": "needs_response", "payment_intent": "pi_credit_2"})
 	providerEvent("evt_credit_dispute_won", "charge.dispute.closed", map[string]any{"object": "dispute", "id": "dp_credit_second", "amount": 50, "currency": "usd", "status": "won", "payment_intent": "pi_credit_2"})

@@ -3,6 +3,8 @@ package billing
 import (
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/google/uuid"
 )
 
@@ -54,11 +56,9 @@ type RecordUsageParams struct {
 	Currency    string           `json:"currency"`
 	EventType   string           `json:"event_type"`
 	Dimensions  map[string]int64 `json:"dimensions,omitempty"`
-	// Amount is the host-priced cost in native units. Zero records an event
-	// the rate cards of its event type's meters price when it is recorded
-	// (UsageEvent.Charges); a failed event's Amount is what the failure cost,
-	// and is never rated.
-	Amount int64 `json:"amount,string"`
+	// Amount is the optional native-unit cost a dynamic card charges. Other
+	// cards ignore it. A failed event must state its cost and is never rated.
+	Amount *int64 `json:"amount,omitempty,string"`
 	// Outcome is succeeded when empty.
 	Outcome  UsageOutcome   `json:"outcome,omitempty"`
 	Resource string         `json:"resource,omitempty"`
@@ -72,8 +72,7 @@ type RecordUsageParams struct {
 }
 
 // UsageEvent is one recorded usage event. Amount is what it charged: the
-// host's price, or the sum of its Charges when its meters' rate cards priced
-// it. A failed event's ForgivenAmount is what its grace absorbed, so Amount +
+// sum of its Charges, or the cost of failed usage after grace. A failed event's ForgivenAmount is what its grace absorbed, so Amount +
 // ForgivenAmount is the cost the host reported. Replayed: the event was
 // already recorded and this call metered nothing.
 type UsageEvent struct {
@@ -91,8 +90,7 @@ type UsageEvent struct {
 	Source         string           `json:"source"`
 	SourceID       string           `json:"source_id"`
 	// Charges are what each priced meter charged the event when it was
-	// recorded; empty for an event no priced meter consumes and for a
-	// host-priced event.
+	// recorded; empty for an event no priced meter consumes and failed usage.
 	Charges []UsageCharge `json:"charges"`
 	// BalanceTransactionID is the ledger posting a priced event made: its
 	// first charge's when meters priced it.
@@ -102,16 +100,18 @@ type UsageEvent struct {
 	Replayed             bool                  `json:"replayed"`
 }
 
-// UsageCharge is what one meter charged one usage event: R(Q+q) - R(Q), where
+// UsageCharge is what one meter charged one usage event. Dynamic charges
+// take the stated amount; other models charge R(Q+q) - R(Q), where
 // q is Quantity in the meter's unit, Q the customer's quantity of the meter
 // (and Cell) earlier in the event's billing period, and R the rate card's
 // price for a period. Cell is the matrix cell it was priced in, null without
 // a matrix.
 type UsageCharge struct {
-	MeterKey string  `json:"meter_key"`
-	Cell     *string `json:"cell"`
-	Quantity int64   `json:"quantity"`
-	Amount   int64   `json:"amount,string"`
+	MeterKey string        `json:"meter_key"`
+	Model    catalog.Model `json:"model"`
+	Cell     *string       `json:"cell"`
+	Quantity int64         `json:"quantity"`
+	Amount   int64         `json:"amount,string"`
 }
 
 // ErrUsageNotPriced is a usage event a priced meter cannot price: its matrix

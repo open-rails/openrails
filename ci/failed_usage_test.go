@@ -36,7 +36,7 @@ func TestFailedUsage(t *testing.T) {
 	require.NoError(t, err)
 	failed := func(sourceID string, amount int64) billing.RecordUsageParams {
 		return billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "gpu",
-			Amount: amount, Source: "worker", SourceID: sourceID, Outcome: billing.UsageFailed}
+			Amount: new(int64(amount)), Source: "worker", SourceID: sourceID, Outcome: billing.UsageFailed}
 	}
 	delegated := func(invoker, sourceID string, amount int64) billing.RecordUsageParams {
 		in := failed(sourceID, amount)

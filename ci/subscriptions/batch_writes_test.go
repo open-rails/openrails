@@ -80,11 +80,12 @@ func TestProductAccessGrantBatches(t *testing.T) {
 // refuse its neighbours, and each answers what recording it alone would.
 func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "batch", "units")
 	c := w.newCustomer()
 	_, err := createCreditGrant(t.Context(), w.client[embedded], c.customerID(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	event := func(source string, amount int64) billing.RecordUsageParams {
-		return billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "usd", EventType: "batch", Amount: amount, Source: "test", SourceID: source}
+		return billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "usd", EventType: "batch", Amount: new(int64(amount)), Source: "test", SourceID: source}
 	}
 	zero := event("orphan", 1)
 	zero.CustomerID = billing.CustomerID{}
@@ -153,6 +154,7 @@ func TestHostEventsAcknowledgeInBatches(t *testing.T) {
 // missing HTTP key both recover it; changed monetary terms fail per item.
 func TestUsageRetriesUseSourceIdentity(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "replay", "units")
 	c := w.newCustomer()
 	_, err := createCreditGrant(t.Context(), w.client[embedded], c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -160,7 +162,7 @@ func TestUsageRetriesUseSourceIdentity(t *testing.T) {
 		t.Helper()
 		input := map[string]any{"items": []any{map[string]any{
 			"customer_id": c.id, "invoker": c.id, "currency": "USD", "event_type": "replay",
-			"amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
+			"dimensions": map[string]int64{"units": 1}, "amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
 		}}}
 		raw, err := json.Marshal(input)
 		require.NoError(t, err)

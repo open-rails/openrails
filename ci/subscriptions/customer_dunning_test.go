@@ -37,12 +37,13 @@ func TestCustomerRead(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, client := t.Context(), w.client[remote]
+	declareDynamicMeter(t, client, "customer-read", "units")
 	debtor, saver := w.newCustomer(), w.newCustomer()
 	const owed = int64(50_000_000)
 	limit := billing.CreditLimit{Currency: "USD", Amount: 2 * owed}
 	_, err := client.UpdateCustomer(ctx, debtor.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{limit}})
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: debtor.cid(), Invoker: debtor.id, Currency: "USD", EventType: "customer-read", Amount: owed, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: debtor.cid(), Invoker: debtor.id, Currency: "USD", EventType: "customer-read", Amount: new(int64(owed)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	_, err = createCreditGrant(ctx, client, saver.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -86,6 +87,7 @@ func TestOverdueUsageOrders(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, client := t.Context(), w.client[remote]
+	declareDynamicMeter(t, client, "overdue", "units")
 	debtor := w.newCustomer()
 	const owed = int64(50_000_000)
 	_, err := client.UpdateCustomer(ctx, debtor.cid(), billing.UpdateCustomerParams{
@@ -93,7 +95,7 @@ func TestOverdueUsageOrders(t *testing.T) {
 		InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice, NetTermsDays: 30}),
 	})
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: debtor.cid(), Invoker: debtor.id, Currency: "USD", EventType: "overdue", Amount: owed, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: debtor.cid(), Invoker: debtor.id, Currency: "USD", EventType: "overdue", Amount: new(int64(owed)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	w.runPass(invoicePass{})

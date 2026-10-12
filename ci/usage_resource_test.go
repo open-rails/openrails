@@ -46,11 +46,12 @@ func TestRecordedUsageKeepsItsResource(t *testing.T) {
 	f := newFixture(t)
 	bill, client := f.runtimeWithStripe(t, "resource-"+uuid.NewString()[:8], nil)
 	ctx := t.Context()
+	declareDynamicMeter(t, client, "gpu", "units")
 	customer := billing.CustomerID(uuid.New())
 	_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: "seed"})
 	require.NoError(t, err)
 	usage := func(sourceID, resource string, amount int64, metadata map[string]any) billing.RecordUsageParams {
-		return billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "gpu", Amount: amount,
+		return billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "gpu", Amount: new(int64(amount)), Dimensions: map[string]int64{"units": 1},
 			Resource: resource, Metadata: metadata, Source: "worker", SourceID: sourceID}
 	}
 	results, err := client.RecordUsage(ctx, []billing.RecordUsageParams{

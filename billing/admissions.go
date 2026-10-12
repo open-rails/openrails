@@ -58,6 +58,8 @@ type AdmitParams struct {
 // period quantities, without advancing them, and are pinned with the
 // admission: its capture is priced by them.
 type UsageEstimate struct {
+	// Amount is what a dynamic card charges for this estimate.
+	Amount     *int64           `json:"amount,omitempty,string"`
 	EventType  string           `json:"event_type"`
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"`
@@ -154,16 +156,15 @@ type CaptureUsage struct {
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }
 
-// CaptureAdmissionParams settles one admitted request. Usage alone is priced
-// by the admission's pinned rate cards (or the cards in force when it pinned
-// none): its event type must be the admitted one. Amount instead settles at a
-// host-stated price, recording Usage when it is set. Above the hold the rest
-// is owed, never clamped. The first capture fixes its terms: an exact retry
-// answers its receipt, a changed one is ErrIdempotencyKeyReused.
+// CaptureAdmissionParams settles one admitted request. Usage is required and
+// priced by the admission's pinned cards (or the cards in force when none were
+// pinned). Its event type must be the admitted one. Dynamic cards charge Amount;
+// other cards price the quantities. Above the hold the rest is owed, never
+// clamped. An exact retry answers the first receipt; changed terms are refused.
 type CaptureAdmissionParams struct {
-	RequestID string        `json:"request_id"`
-	Usage     *CaptureUsage `json:"usage,omitempty"`
-	Amount    *int64        `json:"amount,omitempty,string"`
+	RequestID string       `json:"request_id"`
+	Usage     CaptureUsage `json:"usage" binding:"required"`
+	Amount    *int64       `json:"amount,omitempty,string"`
 }
 
 // CaptureAdmissionBatchParams settles 1 to MaxAdmissionBatchItems admitted

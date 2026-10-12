@@ -321,7 +321,7 @@ var jsonRules = map[string]jsonRule{
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
-	"usage_events.charges":          array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
+	"usage_events.charges":          array(object(map[string]jsonRule{"model": textValue, "meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
 	"checkout_attempts.metadata":    metadataJSON,
 	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{
@@ -341,7 +341,7 @@ var jsonRules = map[string]jsonRule{
 	"provider_intents.result_evidence":    nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":          object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
 	"admission_operations.capture_terms":  nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
-	"admission_operations.estimate_usage": nullable(object(map[string]jsonRule{"event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
+	"admission_operations.estimate_usage": nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
 	"admission_operations.rate_cards":     nullable(array(pinnedRateCardJSON)),
 }
 

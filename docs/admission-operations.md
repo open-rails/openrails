@@ -27,8 +27,10 @@ for an admission that pinned none), advancing the customer's period
 quantities, and the usage is recorded as an event with its `charges`. The hold
 leaves the held total and the charges post in one transaction: balance first,
 the rest owed. Priced above the hold, the whole charge posts and the excess is
-owed, never clamped; bound it by the estimate (`max_tokens`). An `amount`
-instead settles at a host-stated price, recording the usage when it is named.
+owed, never clamped; bound it by the estimate (`max_tokens`). Usage is always
+required. The item's optional `amount` is what each pinned `dynamic` card
+charges; other cards ignore it and price the quantities. A usage estimate may
+include an `amount` under `usage` by the same rule.
 
 The receipt is `request_id`, `customer_id`, `currency`, `estimated_amount`,
 `amount` (what was charged), `charges`, `usage_event_id`,
@@ -63,7 +65,7 @@ Request reservations and hard spend windows use PostgreSQL under the existing cu
 | Released | Zero | Zero |
 | Captured | Zero | Actual captured amount |
 
-Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. The first capture fixes its terms (event type, resource, source/id, dimensions, metadata and a host-stated amount) and its charge. Exact retries recover the original receipt, even after a price change; changing or adding terms conflicts (`idempotency_key_reused`). If a usage event is requested, its insert shares the capture transaction, so any insert failure rolls back the ledger, state and window update. A usage identity already claimed by another request conflicts; it never silently drops the new usage evidence.
+Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. The first capture fixes its terms (event type, resource, source/id, dimensions, metadata and a host-stated amount) and its charge. Exact retries recover the original receipt, even after a price change; changing or adding terms conflicts (`idempotency_key_reused`). The usage event insert shares the capture transaction, so any insert failure rolls back the ledger, state and window update. A usage identity already claimed by another request conflicts; it never silently drops the new usage evidence.
 
 Extension applies only to a still-open, unexpired request and moves its effective deadline later. The original requested deadline remains part of the immutable request identity. A late worker uses the original operation to record consumed work; it cannot manufacture a new authorization by replaying an expired request with different terms.
 

@@ -117,6 +117,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	w.start()
 	ctx := t.Context()
 	client := w.client[embedded]
+	declareDynamicMeter(t, client, "ids", "units")
 
 	// An NMI membership through one renewal: its subscription, payments, card,
 	// attempts, rebill cycle and host events.
@@ -151,7 +152,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	d := w.newCustomer()
 	_, err = w.client[remote].UpdateCustomer(ctx, d.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: d.cid(), Invoker: d.id, Currency: "USD", EventType: "ids", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: d.cid(), Invoker: d.id, Currency: "USD", EventType: "ids", Amount: new(int64(50_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

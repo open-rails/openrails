@@ -33,6 +33,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
+			declareDynamicMeter(t, w.client[remote], "pull-invoice", "units")
 			e := enroll(t, w, "nmi", remote)
 			end := e.periodEnd()
 			if !invoiceMode {
@@ -51,7 +52,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			if invoiceMode {
 				_, err := w.client[remote].UpdateCustomer(t.Context(), e.c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
 				require.NoError(t, err)
-				_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+				_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: new(int64(50_000_000)), Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
 				job, err := w.jobs.Insert(t.Context(), monthlyInvoicePass{FinalizePreviousMonth: true}, &river.InsertOpts{Queue: openrails.QueueBilling})

@@ -1,6 +1,6 @@
 package catalog
 
-// Model selects which price block of a RatePrice applies.
+// Model selects how a rate card prices its fee or usage.
 type Model string
 
 const (
@@ -13,6 +13,9 @@ const (
 	ModelTiered Model = "tiered"
 	// ModelPackage charges per started package of units.
 	ModelPackage Model = "package"
+	// ModelDynamic charges an event's stated amount when its sum meter takes
+	// a positive quantity. It has no price block.
+	ModelDynamic Model = "dynamic"
 )
 
 // TierMode is how a tiered price applies its bands.
@@ -57,7 +60,8 @@ const (
 	AggregationLatest      Aggregation = "latest"
 )
 
-// RatePrice is a charge model: Model names the one block that is set.
+// RatePrice is a charge model: Model names the one block that is set, except
+// dynamic, which takes the amount from the event and has no block.
 // Amounts are native units of Currency.
 type RatePrice struct {
 	Model    Model  `json:"model"`

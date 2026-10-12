@@ -93,7 +93,8 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 	for _, value := range []any{
 		billing.AdmitParams{EstimatedAmount: 9007199254740993, AccrualRateDeltaPerHour: math.MaxInt64},
 		billing.Admission{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64, CapturedAmount: &max},
-		billing.RecordUsageParams{Amount: math.MaxInt64, Outcome: billing.UsageFailed},
+		billing.UsageEstimate{Amount: new(int64(math.MaxInt64))},
+		billing.RecordUsageParams{Amount: new(int64(math.MaxInt64)), Outcome: billing.UsageFailed},
 		billing.UsageEvent{Amount: 9007199254740993, ForgivenAmount: math.MaxInt64, Outcome: billing.UsageFailed},
 		billing.CaptureAdmissionParams{RequestID: "r", Amount: &max},
 	} {

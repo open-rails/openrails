@@ -20,6 +20,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "credits-"+uuid.NewString()[:8])
 	ctx := t.Context()
+	declareDynamicMeter(t, client, "inference", "units")
 
 	// Customer settings create a customer OpenRails has not seen.
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
@@ -90,7 +91,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 		return replay[0].Admission
 	}
 	require.Equal(t, billing.AdmissionOpen, *state().State)
-	inference := &billing.CaptureUsage{EventType: "inference"}
+	inference := billing.CaptureUsage{EventType: "inference", Dimensions: map[string]int64{"units": 1}}
 	receipt, err := captureAdmission(ctx, client, requestID, 250_000, inference)
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, receipt.Amount)
@@ -105,15 +106,15 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	_, err = releaseAdmission(ctx, client, requestID)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
-	event, err := recordUsage(ctx, client, billing.RecordUsageParams{
+	event, err := recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1},
 		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
-		Amount: 50_000, Source: "worker", SourceID: "event-1",
+		Amount: new(int64(50_000)), Source: "worker", SourceID: "event-1",
 	})
 	require.NoError(t, err)
 	require.False(t, event.Replayed)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1},
 		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
-		Amount: 1, Source: "worker", SourceID: strings.Repeat("k", 256),
+		Amount: new(int64(1)), Source: "worker", SourceID: strings.Repeat("k", 256),
 	})
 	require.ErrorIs(t, err, billing.ErrInvalid, "a key longer than the table holds is invalid input")
 

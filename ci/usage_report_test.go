@@ -111,6 +111,9 @@ func TestUsageReportPages(t *testing.T) {
 	f := newFixture(t)
 	bill, client := f.runtimeWithStripe(t, "usage-"+uuid.NewString()[:8], nil)
 	ctx := t.Context()
+	declareDynamicMeter(t, client, "gpu", "seconds")
+	declareDynamicMeter(t, client, "cpu", "cores")
+	declareDynamicMeter(t, client, "call", "units")
 	record := func(customer billing.CustomerID, items []billing.RecordUsageParams) {
 		t.Helper()
 		_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: "seed-" + customer.String()})
@@ -128,10 +131,10 @@ func TestUsageReportPages(t *testing.T) {
 
 	customer := billing.CustomerID(uuid.New())
 	gpu := func(invoker string, amount int64) billing.RecordUsageParams {
-		return billing.RecordUsageParams{EventType: "gpu", Invoker: invoker, Amount: amount, Dimensions: map[string]int64{"seconds": amount / 100}}
+		return billing.RecordUsageParams{EventType: "gpu", Invoker: invoker, Amount: new(int64(amount)), Dimensions: map[string]int64{"seconds": amount / 100}}
 	}
 	cpu := func(invoker string, amount int64) billing.RecordUsageParams {
-		return billing.RecordUsageParams{EventType: "cpu", Invoker: invoker, Amount: amount, Dimensions: map[string]int64{"cores": 1}}
+		return billing.RecordUsageParams{EventType: "cpu", Invoker: invoker, Amount: new(int64(amount)), Dimensions: map[string]int64{"cores": 1}}
 	}
 	record(customer, []billing.RecordUsageParams{
 		gpu("d", 200), gpu("d", 300), cpu("B", 300), gpu("a", 300), cpu("c", 300), gpu("f", 100), cpu("e", 50),
@@ -216,7 +219,7 @@ func TestUsageReportPages(t *testing.T) {
 		heavy := billing.CustomerID(uuid.New())
 		var items []billing.RecordUsageParams
 		for i := range 101 {
-			items = append(items, billing.RecordUsageParams{EventType: "call", Invoker: fmt.Sprintf("i-%03d", i), Amount: 1})
+			items = append(items, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, EventType: "call", Invoker: fmt.Sprintf("i-%03d", i), Amount: new(int64(1))})
 		}
 		record(heavy, items)
 		them := readUsageAs(t, bill, heavy)

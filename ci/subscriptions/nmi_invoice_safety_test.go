@@ -48,6 +48,7 @@ func invoicePasses(f *fleet, collect bool, on ...*world) []pass {
 func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.OrderID {
 	f.t.Helper()
 	client := f.any().client[remote]
+	declareDynamicMeter(f.t, client, "invoice-safety", "units")
 	previous, err := client.ListOrders(f.t.Context(), billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
 	require.NoError(f.t, err)
 	existing := make(map[billing.OrderID]bool, len(previous.Items))
@@ -56,7 +57,7 @@ func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.OrderID {
 	}
 	_, err = client.UpdateCustomer(f.t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 3 * nmiInvoiceAmount}}})
 	require.NoError(f.t, err)
-	_, err = recordUsage(f.t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(f.t.Context(), client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: new(int64(nmiInvoiceAmount)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(f.t, err)
 	f.advance(time.Minute)
 	f.waitPassJobs(invoicePasses(f, false, on...))

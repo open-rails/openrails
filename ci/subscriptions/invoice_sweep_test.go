@@ -29,6 +29,7 @@ func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, client := t.Context(), w.client[embedded]
+	declareDynamicMeter(t, client, "sweep", "units")
 	active, dormant, newcomer := w.newCustomer(), w.newCustomer(), w.newCustomer()
 	run := w.clock.Now().Add(31 * 24 * time.Hour)
 	from, to, err := money.PreviousBillingPeriod(run, run, money.BillingBoundaryFixedInterval)
@@ -37,7 +38,7 @@ func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	for c, at := range map[*customer]time.Time{active: activity, dormant: from.AddDate(0, -6, 0), newcomer: to.Add(time.Hour)} {
 		_, err := client.UpdateCustomer(ctx, c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 10_000_000}}})
 		require.NoError(t, err)
-		_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "sweep", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
+		_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "sweep", Amount: new(int64(5_000_000)), Source: "e2e", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		// The owed accrual takes the database's clock; move it onto the world's.
 		tx, err := w.pool.Begin(ctx)

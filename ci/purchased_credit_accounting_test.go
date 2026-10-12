@@ -32,6 +32,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	local := f.localRuntime(t, "credit-accounting-"+uuid.NewString()[:8])
 	client := local.Client
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
+	declareDynamicMeter(t, client, "api.call", "units")
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
 	customer := billing.CustomerID(uuid.New())
@@ -148,7 +149,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	other.PaidAmount = 200_000_000
 	secondGrant, err := svc.Fund(ctx, other)
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: 60_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: new(int64(60_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.ErrorIs(t, svc.ValidateRefund(ctx, payment.ID, 80_000_000), billing.ErrConflict)
 	require.NoError(t, syncRefund(80_000_000))
@@ -231,7 +232,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 		require.EqualValues(t, 0, remaining, "expiry retires the lot; its pending cash refund will use the same retired source")
 		return stop
 	}), stop)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: 100_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: new(int64(100_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	_, err = paymentService.CompleteRefundReservation(ctx, reserved.ID, uuid.NewString(), nil)
 	require.NoError(t, err)
@@ -246,7 +247,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	_, err = paymentService.Refund(ctx, fourth.ID, uuid.NewString(), 50_000_000, payments.ReversalRefund)
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api.call", Amount: new(int64(50_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	chargeback, err := paymentService.Refund(ctx, fourth.ID, uuid.NewString(), 50_000_000, payments.ReversalChargeback)
 	require.NoError(t, err)

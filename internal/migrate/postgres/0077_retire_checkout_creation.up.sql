@@ -1,6 +1,5 @@
--- parent: 72 sha256:de38170fa42bc1f56d0f59653635d57077ab1c71b267dcc348d554e6eaafb854
+-- parent: 76 sha256:67d784d49e2ec82b305b55b9c903cd9de8430813b23c7aaa18d14d9aa78b9fc7
 -- Repair: none-needed Prelaunch: historical checkout data is not reconstructed. The new order-only check is NOT VALID for existing rows.
--- Candidate 77 follows dynamic pricing 76; its final parent link is pending integration.
 ALTER TABLE billing.payment_methods ADD COLUMN capture jsonb;
 ALTER TABLE billing.payment_methods ADD CONSTRAINT payment_methods_capture_check CHECK (
     capture IS NULL OR (custodian = 'hyperswitch' AND jsonb_typeof(capture) = 'object' AND octet_length(capture::text) <= 16384));

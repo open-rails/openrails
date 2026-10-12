@@ -116,6 +116,7 @@ func requireRefused(t *testing.T, err error) {
 // other way.
 func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	w, client := newRetentionWorld(t)
+	declareDynamicMeter(t, client, "inference", "units")
 	ctx := t.Context()
 	now := w.clock.Now()
 	thisMonth := retention.MonthStart(now)
@@ -148,7 +149,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	_, err = captureAdmission(ctx, client, request, 90_000, &billing.CaptureUsage{EventType: "inference"})
+	_, err = captureAdmission(ctx, client, request, 90_000, billing.CaptureUsage{EventType: "inference", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("admission_operations", thisMonth)))
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("usage_events", thisMonth)))
@@ -265,6 +266,7 @@ func TestPartitionedReadsPruneToTheirMonths(t *testing.T) {
 // recorded once within the ingest window.
 func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	w, client := newRetentionWorld(t)
+	declareDynamicMeter(t, client, "inference", "units")
 	ctx := t.Context()
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 	for _, c := range []billing.CustomerID{customer, other} {
@@ -303,7 +305,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	require.NoError(t, err)
 
 	// A usage coordinate is recorded once, whatever time each attempt reports.
-	usage := billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"}
+	usage := billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: new(int64(5_000)), Source: "worker", SourceID: "event-1"}
 	first, err := recordUsage(ctx, client, usage)
 	require.NoError(t, err)
 	require.False(t, first.Replayed)
@@ -313,17 +315,17 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, again.Replayed)
 	require.Equal(t, first.ID, again.ID)
-	usage.Amount = 6_000
+	usage.Amount = new(int64(6_000))
 	_, err = recordUsage(ctx, client, usage)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.usage_events WHERE merchant_id = $1 AND source_id = 'event-1'`, w.merchant))
 
 	// An event is accepted within the ingest window and no further back or ahead.
 	backdated := time.Now().Add(-retention.UsageIngestWindow + time.Hour)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: new(int64(1)), Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
 	require.NoError(t, err)
 	for name, at := range map[string]time.Time{"stale": time.Now().Add(-retention.UsageIngestWindow - time.Hour), "future": time.Now().Add(time.Hour)} {
-		_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: name, OccurredAt: &at})
+		_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: new(int64(1)), Source: "worker", SourceID: name, OccurredAt: &at})
 		require.ErrorIs(t, err, billing.ErrInvalid, name)
 	}
 }
@@ -333,6 +335,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 // tables are never touched.
 func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	w, client := newRetentionWorld(t)
+	declareDynamicMeter(t, client, "inference", "units")
 	ctx := t.Context()
 	day := 24 * time.Hour
 
@@ -426,7 +429,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	// Money that must survive everything below.
 	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: new(int64(5_000)), Source: "worker", SourceID: "event-1"})
 	require.NoError(t, err)
 	permanent := func() map[string]int {
 		out := map[string]int{}
