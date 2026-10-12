@@ -1115,13 +1115,20 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	var paidThrough time.Time
 	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
 		paidThrough = sub.CurrentPeriodEndsAt.UTC()
-	} else if s.PriceService != nil {
-		price, err := s.PriceService.GetByID(ctx, original.PriceID)
+	} else if s.DB != nil && original.OrderID != nil {
+		mid, err := merchant.Require(ctx)
 		if err != nil {
-			return fmt.Errorf("load stripe price for won dispute recovery: %w", err)
+			return err
 		}
-		if price.RecurringCycleHours() != nil && *price.RecurringCycleHours() > 0 {
-			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.RecurringCycleHours()) * time.Hour)
+		order, err := s.DB.Gen(ctx).GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: *original.OrderID})
+		if err != nil {
+			return fmt.Errorf("load won-dispute billing obligation: %w", err)
+		}
+		if order.CustomerID != original.CustomerID || order.SubscriptionID == nil || *order.SubscriptionID != sub.ID {
+			return errors.New("won-dispute payment order belongs to another subscription")
+		}
+		if order.PeriodEndsAt != nil {
+			paidThrough = order.PeriodEndsAt.UTC()
 		}
 	}
 	if !paidThrough.After(now) {
