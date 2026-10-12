@@ -272,7 +272,7 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth, RouteGroups: everyGroup}))
-	staff := auth.Person(uuid.NewString(), billing.RootCustomerRead, billing.RootCustomerManage, billing.RootConfigManage)
+	staff := auth.Person(uuid.NewString(), billing.RootCustomerRead, billing.RootCustomerManage, billing.RootConfigRead)
 	customer := auth.Person(uuid.NewString())
 
 	for name, got := range map[string]bindingCall{

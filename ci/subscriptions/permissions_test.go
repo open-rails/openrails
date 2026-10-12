@@ -62,17 +62,21 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 		refused(name, role, http.MethodPost, "/v1/admin/credit-grants", map[string]any{})
 	}
 
-	// The access read answers one level, whichever name is held.
+	// The access read answers one level, whichever name is held. A write-only
+	// grant does not expose a console section without its separate read grant.
 	for _, tc := range []struct {
 		merchant, root billing.Permission
 		want           map[string]any
 	}{
-		{billing.MerchantCustomerRead, billing.RootCustomerRead, map[string]any{"admin": "read", "catalog": false, "merchant_config": false, "metrics": false}},
-		{billing.MerchantCatalogManage, billing.RootCatalogManage, map[string]any{"admin": "none", "catalog": true, "merchant_config": false, "metrics": false}},
-		{billing.MerchantConfigManage, billing.RootConfigManage, map[string]any{"admin": "none", "catalog": false, "merchant_config": true, "metrics": false}},
-		{billing.MerchantMetricsRead, billing.RootMetricsRead, map[string]any{"admin": "none", "catalog": false, "merchant_config": false, "metrics": true}},
+		{billing.MerchantCustomerRead, billing.RootCustomerRead, map[string]any{"admin": "read", "catalog": "none", "merchant_config": "none", "metrics": false}},
+		{billing.MerchantCatalogRead, billing.RootCatalogRead, map[string]any{"admin": "none", "catalog": "read", "merchant_config": "none", "metrics": false}},
+		{billing.MerchantCatalogManage, billing.RootCatalogManage, map[string]any{"admin": "none", "catalog": "none", "merchant_config": "none", "metrics": false}},
+		{billing.MerchantConfigRead, billing.RootConfigRead, map[string]any{"admin": "none", "catalog": "none", "merchant_config": "read", "metrics": false}},
+		{billing.MerchantConfigManage, billing.RootConfigManage, map[string]any{"admin": "none", "catalog": "none", "merchant_config": "none", "metrics": false}},
+		{billing.MerchantMetricsRead, billing.RootMetricsRead, map[string]any{"admin": "none", "catalog": "none", "merchant_config": "none", "metrics": true}},
 	} {
 		tc.want["scope_id"] = shop
+		tc.want["application_permissions"] = []any{}
 		for _, role := range []string{heldIn(shop, tc.merchant), "only:" + string(tc.root)} {
 			status, access := get(role, "/v1/admin/access")
 			require.Equal(t, http.StatusOK, status, "%s: %v", role, access)
