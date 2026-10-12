@@ -223,14 +223,14 @@ func (q *Queries) CreateOrderLine(ctx context.Context, arg CreateOrderLineParams
 const createRenewalOrder = `-- name: CreateRenewalOrder :execrows
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
-    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at
+    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at, subscription_bill_kind
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, 'subscription',
     'open', 'requires_payment_method', $4::text, $5::bigint,
     $6::uuid, $7::timestamptz, $8::timestamptz,
-    $9::timestamptz, $10::timestamptz, $10::timestamptz
+    $9::timestamptz, $10::timestamptz, $10::timestamptz, 'renewal'
 )
-ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' DO NOTHING
+ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal' DO NOTHING
 `
 
 type CreateRenewalOrderParams struct {
@@ -332,7 +332,7 @@ func (q *Queries) EnqueueOrderHostEvent(ctx context.Context, arg EnqueueOrderHos
 }
 
 const getCustomerOrder = `-- name: GetCustomerOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid
 `
 
@@ -389,13 +389,15 @@ func (q *Queries) GetCustomerOrder(ctx context.Context, arg GetCustomerOrderPara
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }
 
 const getOpenRenewalOrder = `-- name: GetOpenRenewalOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
-WHERE merchant_id = $1::uuid AND origin = 'subscription'
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
+WHERE merchant_id = $1::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
   AND subscription_id = $2::uuid AND status IN ('open', 'processing')
 ORDER BY period_starts_at DESC
 LIMIT 1
@@ -454,12 +456,14 @@ func (q *Queries) GetOpenRenewalOrder(ctx context.Context, arg GetOpenRenewalOrd
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }
 
 const getOrder = `-- name: GetOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -515,6 +519,8 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }
@@ -561,7 +567,7 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 }
 
 const getOrderByIdempotencyKey = `-- name: GetOrderByIdempotencyKey :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND idempotency_key = $3::text
 `
@@ -619,12 +625,14 @@ func (q *Queries) GetOrderByIdempotencyKey(ctx context.Context, arg GetOrderById
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }
 
 const getOrderLine = `-- name: GetOrderLine :one
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -657,12 +665,13 @@ func (q *Queries) GetOrderLine(ctx context.Context, arg GetOrderLineParams) (Bil
 		&i.ProductAccessID,
 		&i.CreatedAt,
 		&i.Source,
+		&i.ProviderAmount,
 	)
 	return i, err
 }
 
 const getOrderLineBySubscription = `-- name: GetOrderLineBySubscription :one
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND order_id = $2::uuid
   AND subscription_id = $3::uuid
 `
@@ -699,6 +708,7 @@ func (q *Queries) GetOrderLineBySubscription(ctx context.Context, arg GetOrderLi
 		&i.ProductAccessID,
 		&i.CreatedAt,
 		&i.Source,
+		&i.ProviderAmount,
 	)
 	return i, err
 }
@@ -732,8 +742,8 @@ func (q *Queries) GetOwnershipClaim(ctx context.Context, arg GetOwnershipClaimPa
 }
 
 const getRenewalOrder = `-- name: GetRenewalOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
-WHERE merchant_id = $1::uuid AND origin = 'subscription'
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
+WHERE merchant_id = $1::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
   AND subscription_id = $2::uuid AND period_starts_at = $3::timestamptz
 `
 
@@ -790,6 +800,8 @@ func (q *Queries) GetRenewalOrder(ctx context.Context, arg GetRenewalOrderParams
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }
@@ -932,7 +944,7 @@ func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipPa
 }
 
 const listOrderLines = `-- name: ListOrderLines :many
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND order_id = ANY($2::uuid[])
 ORDER BY order_id, "position"
 `
@@ -972,6 +984,7 @@ func (q *Queries) ListOrderLines(ctx context.Context, arg ListOrderLinesParams) 
 			&i.ProductAccessID,
 			&i.CreatedAt,
 			&i.Source,
+			&i.ProviderAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -1024,7 +1037,7 @@ func (q *Queries) ListOrderSweepMerchants(ctx context.Context, arg ListOrderSwee
 }
 
 const listOrdersByIDs = `-- name: ListOrdersByIDs :many
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -1088,6 +1101,8 @@ func (q *Queries) ListOrdersByIDs(ctx context.Context, arg ListOrdersByIDsParams
 			&i.CollectionFailureCount,
 			&i.CollectionFailedAt,
 			&i.NextCollectionAttemptAt,
+			&i.CollectionOwner,
+			&i.SubscriptionBillKind,
 		); err != nil {
 			return nil, err
 		}
@@ -1100,7 +1115,7 @@ func (q *Queries) ListOrdersByIDs(ctx context.Context, arg ListOrdersByIDsParams
 }
 
 const listOrdersPage = `-- name: ListOrdersPage :many
-SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.completed_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at, o.payment_status, o.checkout_secret_hash, o.checkout_expires_at, o.checkout_success_url, o.checkout_cancel_url, o.checkout_saved_payment_methods, o.subscription_id, o.period_starts_at, o.period_ends_at, o.due_at, o.voided_at, o.checkout_ui_mode, o.amount_paid, o.uncollectible_at, o.collection_method, o.po_number, o.memo, o.tax, o.billing_contacts, o.collection_failure_count, o.collection_failed_at, o.next_collection_attempt_at FROM billing.orders o
+SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.completed_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at, o.payment_status, o.checkout_secret_hash, o.checkout_expires_at, o.checkout_success_url, o.checkout_cancel_url, o.checkout_saved_payment_methods, o.subscription_id, o.period_starts_at, o.period_ends_at, o.due_at, o.voided_at, o.checkout_ui_mode, o.amount_paid, o.uncollectible_at, o.collection_method, o.po_number, o.memo, o.tax, o.billing_contacts, o.collection_failure_count, o.collection_failed_at, o.next_collection_attempt_at, o.collection_owner, o.subscription_bill_kind FROM billing.orders o
 WHERE o.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR o.customer_id = $2::uuid)
   AND ($3::text IS NULL OR o.status = $3::text)
@@ -1195,6 +1210,8 @@ func (q *Queries) ListOrdersPage(ctx context.Context, arg ListOrdersPageParams) 
 			&i.CollectionFailureCount,
 			&i.CollectionFailedAt,
 			&i.NextCollectionAttemptAt,
+			&i.CollectionOwner,
+			&i.SubscriptionBillKind,
 		); err != nil {
 			return nil, err
 		}
@@ -1248,7 +1265,7 @@ func (q *Queries) ListOwnershipClaims(ctx context.Context, arg ListOwnershipClai
 }
 
 const lockOrder = `-- name: LockOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -1305,6 +1322,8 @@ func (q *Queries) LockOrder(ctx context.Context, arg LockOrderParams) (BillingOr
 		&i.CollectionFailureCount,
 		&i.CollectionFailedAt,
 		&i.NextCollectionAttemptAt,
+		&i.CollectionOwner,
+		&i.SubscriptionBillKind,
 	)
 	return i, err
 }

@@ -8,9 +8,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 )
 
 type CreateMembershipParams struct {
+	// ProviderBill is finalized evidence; its payment and order are recorded atomically with these local effects.
+	ProviderBill *observed.Bill
+
 	// InitialPaymentReversal records a captured initial engine payment whose
 	// refund/dispute already exists at first readback. It creates accounting and
 	// a canceled agreement without granting access or announcing activation.
@@ -37,6 +41,9 @@ type CreateMembershipParams struct {
 }
 
 type RenewMembershipParams struct {
+	// ProviderBill identifies a verified provider obligation and its actual settlement.
+	ProviderBill *observed.Bill
+
 	// PreviousPeriodEnd is the accepted engine obligation boundary. A recovery
 	// purchase may start later; native renewals leave this nil and retain their
 	// existing PeriodStart fence.
