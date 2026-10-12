@@ -90,6 +90,13 @@ func TestProviderArchiveIdentityAndSchedule(t *testing.T) {
 	fields["cadence_hours"] = "720"
 	p, values = row(t, "provider_schedules", fields)
 	require.ErrorContains(t, ValidateValues(p, values), "cadence", "two schedule clocks cannot be accepted")
+	fields["cadence_hours"], fields["cadence_months"] = "2147483640", "0"
+	bill.Lines[0].BillingIntervalHours = new(2147483640)
+	raw, err = json.Marshal(bill)
+	require.NoError(t, err)
+	fields["accepted_bill"] = string(raw)
+	p, values = row(t, "provider_schedules", fields)
+	require.ErrorContains(t, ValidateValues(p, values), "cadence", "accepted cadence cannot overflow a runtime duration")
 }
 
 func TestProviderArchiveWireRetainsReplayIdentity(t *testing.T) {
