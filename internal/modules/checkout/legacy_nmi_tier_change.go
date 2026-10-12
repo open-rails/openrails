@@ -151,7 +151,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	database := s.SubscriptionService.Database()
 	if prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key); err == nil {
-		return s.replayTierChangeOperation(ctx, prior, &SubscriptionChangeRequest{SubscriptionID: sub.ID, PriceID: billing.PriceID(newPrice.ID).String()}, user)
+		return s.replayTierChangeOperation(ctx, prior, &SubscriptionChangeRequest{SubscriptionID: sub.ID, PriceID: newPrice.PublicID.String()}, user)
 	} else if !db.IsNotFound(err) {
 		return nil, err
 	}
@@ -236,5 +236,5 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	return tierChangeResponse(intent)
+	return s.tierChangeResponse(ctx, intent)
 }

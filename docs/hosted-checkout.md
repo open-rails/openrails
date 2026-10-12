@@ -37,7 +37,7 @@ own router sends the checkout host's requests to `HostedCheckout()`.
 ```json
 {
   "customer_id": "4d1c…",
-  "lines": [{ "price_id": "price_…" }],
+  "lines": [{ "price_id": "premium:buy-usd:v1" }],
   "checkout": {
     "success_url": "https://shop.example/thanks?order={ORDER_ID}",
     "cancel_url": "https://shop.example/cart",

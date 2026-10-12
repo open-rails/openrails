@@ -71,7 +71,7 @@ func TestCartSharedAcrossHosts(t *testing.T) {
 	require.Equal(t, micros(39_000_000), chosen.body["total"])
 	refused := put(b, deposit.ID, map[string]any{"amount": "999999"})
 	require.Equal(t, "amount_invalid", orderLines(refused)[2]["refusal"].(map[string]any)["code"], "a line out of bounds is kept, refused")
-	require.Equal(t, http.StatusNotFound, put(a, billing.PriceID(uuid.New()), map[string]any{}).status)
+	require.Equal(t, http.StatusNotFound, put(a, billing.PriceID("test:" + uuid.NewString() + ":v1"), map[string]any{}).status)
 	require.Equal(t, http.StatusBadRequest, put(a, book.ID, map[string]any{"quantity": -1}).status)
 	removed := put(a, deposit.ID, map[string]any{"quantity": 0})
 	require.Equal(t, []string{book.ID.String(), annual.ID.String()}, cartPrices(removed))

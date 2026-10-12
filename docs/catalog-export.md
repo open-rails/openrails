@@ -20,7 +20,7 @@ Every row and stored column from these nine catalog tables is included:
 | Table | Retained state |
 |---|---|
 | `products` | All products, including archived products, original UUIDs, current revisions, entitlements, credit grants and tiers |
-| `prices` | All immutable price versions, including archived ones, original UUIDs, versions, durations, trials and deposit bounds |
+| `prices` | All immutable price versions, including archived ones, private row UUIDs, stored revisions, durations, trials and deposit bounds |
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
 | `catalog_meters` | Current meter definitions and revisions |
@@ -120,3 +120,9 @@ and `psp_links` declarations or replace them with independently provisioned
 references. Omitting them preserves existing destination bindings; an empty list
 cannot remove an existing binding. Catalog application never creates remote
 provider objects.
+
+Price identity in the merchant API is `product-key:price-key:v1`. Snapshots
+retain private UUID foreign keys and zero-based storage revisions so every
+historical financial reference and provider link survives restore. The public
+ID is derived during migration and restore; its version is the stored revision
+plus one. Snapshot UUIDs are not accepted as public price selectors.

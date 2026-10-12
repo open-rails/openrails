@@ -154,7 +154,7 @@ export function SubscriptionDetailPage() {
               {sub.price?.unit_amount !== undefined && sub.price?.currency ? (
                 <Link
                   className="underline-offset-2 hover:underline"
-                  to={`/catalog/prices/${sub.price_id}`}
+                  to={`/catalog/prices/${encodeURIComponent(sub.price_id)}`}
                 >
                   {formatNativeAmount(
                     sub.price.unit_amount,
@@ -164,7 +164,7 @@ export function SubscriptionDetailPage() {
               ) : (
                 <Link
                   className="text-xs underline-offset-2 hover:underline"
-                  to={`/catalog/prices/${sub.price_id}`}
+                  to={`/catalog/prices/${encodeURIComponent(sub.price_id)}`}
                 >
                   {shortId(sub.price_id ?? "—", 13)}
                 </Link>

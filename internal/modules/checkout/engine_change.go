@@ -165,7 +165,7 @@ func (s *CheckoutService) addEngineSeats(ctx context.Context, req *SubscriptionC
 	subID := billing.SubscriptionID(c.sub.ID)
 	end := terms.PeriodEnd
 	return &TierChangeResponse{
-		Status: "succeeded", Effective: "now", PriceID: billing.PriceID(terms.PriceID), Quantity: subscriptions.CloneQuantity(terms.Quantity), Rail: string(c.sub.Rail), SubscriptionID: &subID,
+		Status: "succeeded", Effective: "now", PriceID: c.currentPrice.PublicID, Quantity: subscriptions.CloneQuantity(terms.Quantity), Rail: string(c.sub.Rail), SubscriptionID: &subID,
 		Currency: terms.Currency, NextChargeAmount: terms.RecurringAmount, NextChargeDate: &end,
 		Message: fmt.Sprintf("Now %d seats; nothing is due before %s.", *terms.Quantity, end.UTC().Format("January 2, 2006")),
 	}, nil
@@ -267,7 +267,7 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 	if err != nil {
 		return nil, err
 	}
-	return tierChangeResponse(current)
+	return s.tierChangeResponse(ctx, current)
 }
 
 // engineUpgradeRefusal types an admission refusal; nothing was charged.
@@ -320,7 +320,7 @@ func (s *CheckoutService) scheduleEngineChange(ctx context.Context, c *changeTar
 	end := *sub.CurrentPeriodEndsAt
 	subID := billing.SubscriptionID(sub.ID)
 	return &TierChangeResponse{
-		Status: "succeeded", Effective: "period_end", PriceID: billing.PriceID(next.ID), Quantity: quantity,
+		Status: "succeeded", Effective: "period_end", PriceID: next.PublicID, Quantity: quantity,
 		Rail: string(sub.Rail), SubscriptionID: &subID, DelayedStart: &end,
 		Currency: next.Currency, NextChargeAmount: amount, NextChargeDate: &end,
 		Message: fmt.Sprintf("Scheduled: %s%s from %s. Nothing is charged now.", product.DisplayName, seatsText(quantity), end.UTC().Format("January 2, 2006")),
@@ -348,7 +348,7 @@ func (s *CheckoutService) cancelEngineChange(ctx context.Context, c *changeTarge
 	end := *sub.CurrentPeriodEndsAt
 	subID := billing.SubscriptionID(sub.ID)
 	return &TierChangeResponse{
-		Status: "succeeded", Effective: "now", PriceID: billing.PriceID(sub.PriceID), Quantity: subscriptions.CloneQuantity(sub.Quantity),
+		Status: "succeeded", Effective: "now", PriceID: c.currentPrice.PublicID, Quantity: subscriptions.CloneQuantity(sub.Quantity),
 		Rail: string(sub.Rail), SubscriptionID: &subID,
 		Currency: c.currentPrice.Currency, NextChargeAmount: amount, NextChargeDate: &end,
 		Message: "The scheduled change is canceled; nothing is charged.",
@@ -423,7 +423,7 @@ func (s *CheckoutService) previewEngineSchedule(ctx context.Context, resp *TierC
 		return nil, err
 	}
 	end := *c.sub.CurrentPeriodEndsAt
-	resp.PriceID, resp.Quantity, resp.Effective, resp.NextChargeAmount, resp.NextChargeDate = billing.PriceID(next.ID), quantity, "period_end", amount, &end
+	resp.PriceID, resp.Quantity, resp.Effective, resp.NextChargeAmount, resp.NextChargeDate = next.PublicID, quantity, "period_end", amount, &end
 	resp.Message = fmt.Sprintf("No charge now. From %s: %s%s at %s.", end.UTC().Format("January 2, 2006"), product.DisplayName, seatsText(quantity), formatMinorAmount(amount, next.Currency))
 	return resp, nil
 }
@@ -474,7 +474,7 @@ func seatsText(q *int) string {
 // engineChangeResponse renders an engine change charged now: the changed
 // membership while unresolved; once paid, the successor of an upgrade or the
 // same membership with its new seats.
-func engineChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+func engineChangeResponse(in gen.BillingProviderIntent, priceID billing.PriceID) (*TierChangeResponse, error) {
 	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return nil, err
@@ -486,7 +486,7 @@ func engineChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, er
 	subID := billing.SubscriptionID(changed)
 	end := p.Terms.PeriodEnd
 	resp := &TierChangeResponse{
-		Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID), Quantity: subscriptions.CloneQuantity(p.Terms.Quantity),
+		Effective: "now", PriceID: priceID, Quantity: subscriptions.CloneQuantity(p.Terms.Quantity),
 		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
 	}

@@ -146,10 +146,14 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 	if err != nil {
 		return nil, err
 	}
+	publicPrice, err := s.PriceService.GetByID(ctx, subject.PriceID)
+	if err != nil {
+		return nil, err
+	}
 	price := strings.TrimSpace(req.PriceID)
 	if user == nil || !sameCustomer(subject.UserID, user.ID) ||
 		(req.SubscriptionID != uuid.Nil && req.SubscriptionID != subject.SubscriptionID) ||
-		(price != subject.RequestedPrice && (price == "" || price != billing.PriceID(subject.PriceID).String())) ||
+		(price != subject.RequestedPrice && (price == "" || price != publicPrice.PublicID.String())) ||
 		(req.Quantity != nil && !subscriptions.SameQuantity(req.Quantity, subject.Quantity)) {
 		return nil, tierChangeIdempotencyConflict()
 	}
@@ -160,20 +164,28 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 			return nil, err
 		}
 	}
-	return tierChangeResponse(in)
+	return s.tierChangeResponse(ctx, in)
 }
 
 // tierChangeResponse renders an operation's durable state: the stored
 // result, its coded refusal, or "processing" naming it while the provider
 // outcome is unresolved.
-func tierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+func (s *CheckoutService) tierChangeResponse(ctx context.Context, in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+	subject, err := decodeTierChangeSubject(in)
+	if err != nil {
+		return nil, err
+	}
+	price, err := s.PriceService.GetByID(ctx, subject.PriceID)
+	if err != nil {
+		return nil, err
+	}
 	switch in.IntentType {
 	case TypeNMIUpgrade:
-		return nmiUpgradeTierChangeResponse(in)
+		return nmiUpgradeTierChangeResponse(in, price.PublicID)
 	case TypeStripeTierChange:
-		return stripeTierChangeResponse(in)
+		return stripeTierChangeResponse(in, price.PublicID)
 	case TypeInitialMembership:
-		return engineChangeResponse(in)
+		return engineChangeResponse(in, price.PublicID)
 	}
 	return nil, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
 }

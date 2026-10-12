@@ -25,7 +25,7 @@ import (
 )
 
 // A key identifies a product-local chain; equal money under another key is a
-// separate price. Reusing financial terms preserves the original UUID/revision.
+// separate price. Reusing financial terms preserves the original immutable ID/version.
 func TestCatalogProductScopedPriceVersions(t *testing.T) {
 	w := newWorld(t)
 	for _, tp := range []topology{embedded, remote} {
@@ -44,16 +44,16 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 				require.NoError(t, err)
 				products[i] = product
 				original[i] = create(product, "monthly", 1_000_000)
-				require.Zero(t, original[i].Version)
-				alias := create(product, "other-price", 1_000_000)
+				require.EqualValues(t, 1, original[i].Version)
+				alias := create(product, "alternate-price", 1_000_000)
 				require.NotEqual(t, original[i].ID, alias.ID, "equal financial terms cannot steal another key")
-				require.Zero(t, alias.Version)
+				require.EqualValues(t, 1, alias.Version)
 				repeat := create(product, "monthly", 1_000_000)
 				require.Equal(t, original[i].ID, repeat.ID)
 				require.Equal(t, original[i].Version, repeat.Version)
 			}
 			next := create(products[0], "monthly", 2_000_000)
-			require.EqualValues(t, 1, next.Version)
+			require.EqualValues(t, 2, next.Version)
 			require.NotEqual(t, original[0].ID, next.ID)
 			prior, err := c.GetPrice(t.Context(), original[0].ID, billing.GetPriceParams{})
 			require.NoError(t, err)
@@ -63,10 +63,10 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 			require.Equal(t, original[1].ID, other.ID)
 			restored := create(products[0], "monthly", 1_000_000)
 			require.Equal(t, original[0].ID, restored.ID)
-			require.Zero(t, restored.Version)
+			require.EqualValues(t, 1, restored.Version)
 			require.False(t, restored.Archived)
 			third := create(products[0], "monthly", 3_000_000)
-			require.EqualValues(t, 2, third.Version, "reactivating v0 does not reset version allocation")
+			require.EqualValues(t, 3, third.Version, "reactivating v1 does not reset version allocation")
 			for i, product := range products {
 				history, err := priceKeyHistory(t.Context(), c, product.Key, "monthly", billing.PageRequest{})
 				require.NoError(t, err)
@@ -84,8 +84,9 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 				FROM billing.products WHERE id=$2`), legacyID, products[0].ID.UUID())
 			require.NoError(t, err)
 			imported := create(products[0], "imported", 4_000_000)
-			require.Equal(t, billing.PriceID(legacyID), imported.ID)
-			require.Zero(t, imported.Version)
+			require.Equal(t, legacyID, w.priceStorageID(imported.ID))
+			require.Equal(t, products[0].Key+":imported:v1", imported.ID.String())
+			require.EqualValues(t, 1, imported.Version)
 		})
 	}
 }
@@ -152,7 +153,7 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 			live++
 		}
 	}
-	require.Equal(t, map[int64]bool{0: true, 1: true, 2: true}, revisions)
+	require.Equal(t, map[int64]bool{1: true, 2: true, 3: true}, revisions)
 	require.Equal(t, 1, live)
 }
 
@@ -297,7 +298,7 @@ func TestCatalogImmutableDatabaseRows(t *testing.T) {
 		"product delete":   fmt.Sprintf("DELETE FROM billing.products WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := w.catalogExec(t.Context(), w.sql(statement), price.ID.UUID())
+			err := w.catalogExec(t.Context(), w.sql(statement), w.priceStorageID(price.ID))
 			var pgerr *pgconn.PgError
 			require.ErrorAs(t, err, &pgerr)
 			require.Equal(t, "23514", pgerr.Code, "immutable row must be rejected before referential checks")
@@ -379,7 +380,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, err)
 	current, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", Currency: "USD", UnitAmount: 9_000_000})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, current.Version)
+	require.EqualValues(t, 3, current.Version)
 	versions, err := c.ListPrices(t.Context(), billing.PriceListParams{ProductID: current.ProductID})
 	require.NoError(t, err)
 	require.Len(t, versions.Items, 3)
@@ -444,9 +445,9 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			}
 			for _, price := range versions.Items {
 				var revision int64
-				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision FROM "+name+".prices WHERE id=$1", price.ID.UUID()).Scan(&revision))
+				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision FROM "+name+".prices WHERE id=$1", w.priceStorageID(price.ID)).Scan(&revision))
 				if tc.name == "current" {
-					require.Equal(t, price.Version, revision, "current archives preserve the exact public version")
+					require.Equal(t, price.Version, revision+1, "the public version is the preserved storage revision plus one")
 				}
 			}
 			boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
@@ -480,7 +481,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			require.NoError(t, err)
 			price, err = priceByKey(t.Context(), next, "portable", "purchase")
 			require.NoError(t, err)
-			require.EqualValues(t, 3, price.Version, "new terms allocate after all restored versions")
+			require.EqualValues(t, 4, price.Version, "new terms allocate after all restored versions")
 			require.NoError(t, nextEngine.Close(t.Context()))
 		})
 	}

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -56,8 +55,8 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		id := billing.OrderID(*p.OrderID)
 		out.OrderID = &id
 	}
-	if p.PriceID != uuid.Nil {
-		id := billing.PriceID(p.PriceID)
+	if p.Price != nil {
+		id := p.Price.PublicID
 		out.PriceID = &id
 	}
 	if p.Price != nil {

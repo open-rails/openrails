@@ -240,10 +240,14 @@ type StaffChangeNotice struct {
 // QueueStaffChangeNotice queues the notice once per change in the caller's
 // transaction; it is emailed after commit or by the notification sweep.
 func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscription, n StaffChangeNotice) (*models.NotificationQueue, error) {
+	refs, err := db.PriceReferences(ctx, d.Gen(ctx), []uuid.UUID{sub.PriceID, n.PriceID})
+	if err != nil {
+		return nil, err
+	}
 	next, at := n.NextAmount, n.EffectiveAt.UTC()
 	data := billing.NotificationData{
 		Source: "staff", Message: "Changed by support at your request.",
-		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: billing.PriceID(sub.PriceID), ToPriceID: billing.PriceID(n.PriceID), ToProductName: n.ProductName,
+		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: refs[sub.PriceID], ToPriceID: refs[n.PriceID], ToProductName: n.ProductName,
 		Quantity: CloneQuantity(n.Quantity), Currency: n.Currency, NewAmount: &next, EffectiveAt: &at, TransactionID: n.TransactionID,
 	}
 	if n.Charged > 0 {

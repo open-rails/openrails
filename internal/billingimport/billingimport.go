@@ -251,10 +251,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if err != nil {
 				return err
 			}
+			price, err := q.GetPriceByPublicID(ctx, gen.GetPriceByPublicIDParams{MerchantID: merchantID.UUID(), PublicID: s.Price.String()})
+			if err != nil {
+				return fmt.Errorf("resolve subscription %s price: %w", s.SourceID, err)
+			}
 			f := reconcile.DeclaredSubscriptionFact{
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
-				PriceID:            s.Price.UUID(),
+				PriceID:            price.ID,
 				Rail:               s.Rail,
 				RailSubscriptionID: s.RailSubscriptionID,
 				PspID:              subPSP,

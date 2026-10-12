@@ -75,9 +75,9 @@ var routeArguments = map[string][]any{
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
-	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID(uuid.New()), ToPriceID: billing.PriceID(uuid.New())}},
+	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1"), ToPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1")}},
 	"PreviewPriceMigration": {billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: "monthly"}},
-	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
+	"UpdatePrice":           {billing.PriceID("test:" + uuid.NewString() + ":v1"), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
 	"UpdateProduct":         {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
 	"UpdateAlertWebhook":    {billing.AlertWebhookID(uuid.New()), billing.UpdateAlertWebhookParams{Enabled: catalog.Value(true)}},
 	"UpdateCustomer":        {billing.CustomerID(uuid.New()), billing.UpdateCustomerParams{BillingPolicy: catalog.Null[string]()}},
@@ -102,6 +102,9 @@ var synonyms = []string{"Retrieve", "Fetch", "Read", "Find", "Lookup", "Search",
 // fill sets v so that a method's own checks pass: every field set.
 func fill(v reflect.Value, depth int) {
 	switch v.Interface().(type) {
+	case billing.PriceID:
+		v.Set(reflect.ValueOf(billing.PriceID("test:price:v1")))
+		return
 	case time.Time:
 		v.Set(reflect.ValueOf(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 		return

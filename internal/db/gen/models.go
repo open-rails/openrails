@@ -1058,6 +1058,8 @@ type BillingPrice struct {
 	BillingIntervalHours *int32
 	// Seat bounds {min, max} of a recurring price sold per seat; amount is per seat. NULL: the price has no quantity.
 	Quantity []byte
+	// Public immutable ID product-key:price-key:v1. Percent-encoded keys; financial versions start at one. UUID id remains a private foreign key.
+	PublicID string
 }
 
 // One row per price key of a product: its revision advances on every change to any of its versions or their PSP links. Written only by the prices and price_psp_bindings triggers, which rebuild it on restore.

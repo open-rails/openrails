@@ -82,7 +82,21 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		return err
 	}
 	price.Revision = row.Revision
+	price.PublicID = billing.PriceID(row.PublicID)
 	return nil
+}
+
+// GetByPublicID resolves a canonical immutable identifier in the bound merchant.
+func (s *PriceService) GetByPublicID(ctx context.Context, id billing.PriceID) (*models.Price, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.db.Gen(ctx).GetPriceByPublicID(ctx, gen.GetPriceByPublicIDParams{MerchantID: mid.UUID(), PublicID: id.String()})
+	if err != nil {
+		return nil, err
+	}
+	return s.db.PriceFromGen(ctx, row)
 }
 
 func (s *PriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error) {
@@ -228,7 +242,7 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 // PriceFilter contains optional filters for listing prices
 // IDs, when not nil, reads those prices instead, in one page.
 type PriceFilter struct {
-	IDs        []uuid.UUID
+	IDs        []string
 	Archived   *bool
 	Currency   string
 	ProductID  *uuid.UUID
@@ -244,7 +258,7 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 		return billing.ListPage[*models.Price]{}, queryScopeErr
 	}
 	if filter.IDs != nil {
-		rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: filter.IDs})
+		rows, err := s.db.Gen(ctx).ListPricesWithProductByPublicIDs(ctx, gen.ListPricesWithProductByPublicIDsParams{MerchantID: queryMerchant.UUID(), Ids: filter.IDs})
 		if err != nil {
 			return billing.ListPage[*models.Price]{}, err
 		}

@@ -78,6 +78,7 @@ type SolanaLocalRecord struct {
 	// checkout_attempt fields.
 	CustomerID           uuid.UUID
 	PriceID              uuid.UUID
+	PublicPriceID        string
 	SessionStatus        string
 	SettledTransactionID string // session.transaction_id once succeeded
 	ExpectedRecipient    string
@@ -773,13 +774,14 @@ const (
 // RemoteTransaction.Raw under "solana_discovery"; makeSolanaDiscoveryPS4
 // routes on it (clean one-off => backfill lane; park => operator triage).
 type solanaDiscovery struct {
-	Verdict     string `json:"verdict"` // "clean" | "park"
-	ParkReason  string `json:"park_reason,omitempty"`
-	Kind        string `json:"kind"` // one_off | pull
-	MemoLocalID string `json:"memo_local_id"`
-	LocalKind   string `json:"local_kind"` // checkout_attempt | pull_intent | none
-	CustomerID  string `json:"customer_id,omitempty"`
-	PriceID     string `json:"price_id,omitempty"`
+	Verdict       string `json:"verdict"` // "clean" | "park"
+	ParkReason    string `json:"park_reason,omitempty"`
+	Kind          string `json:"kind"` // one_off | pull
+	MemoLocalID   string `json:"memo_local_id"`
+	LocalKind     string `json:"local_kind"` // checkout_attempt | pull_intent | none
+	CustomerID    string `json:"customer_id,omitempty"`
+	PriceID       string `json:"price_id,omitempty"`
+	PublicPriceID string `json:"public_price_id,omitempty"`
 }
 
 // walletTransfer is the single asset a transaction moved INTO the merchant
@@ -1112,6 +1114,7 @@ func (f *SolanaFetcher) verifyWalletDiscovery(ctx context.Context, c *walletScan
 		default:
 			d.CustomerID = rec.CustomerID.String()
 			d.PriceID = rec.PriceID.String()
+			d.PublicPriceID = rec.PublicPriceID
 		}
 	case SolanaLocalKindPullIntent:
 		d.LocalKind = rec.Kind

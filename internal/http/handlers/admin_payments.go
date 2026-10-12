@@ -95,6 +95,10 @@ func RefundPayment(r *httprequest.Request) {
 		writeAdminRefundError(r, err)
 		return
 	}
+	if err := r.State.PaymentService.AttachRelations(r.Request.Context(), refund); err != nil {
+		r.InternalError("read refund price", err)
+		return
+	}
 	r.JSON(status, PaymentToAPI(refund, nil))
 }
 

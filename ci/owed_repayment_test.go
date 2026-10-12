@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
@@ -35,6 +36,8 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "owed-credit", DisplayName: "Credit"})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 20_000_000})
+	require.NoError(t, err)
+	storedPrice, err := catalog.NewPriceService(database).GetByPublicID(ctx, price.ID)
 	require.NoError(t, err)
 	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
 	require.NoError(t, err)
@@ -85,7 +88,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	}
 	purchase := func(customer billing.CustomerID, face, paid int64) (*models.Payment, purchasedcredits.Params) {
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: price.ID.UUID(), Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
+		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
 			TransactionID: uuid.NewString(), Amount: paid, ListAmount: paid, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now}
 		require.NoError(t, paymentService.Create(ctx, p))
 		params := purchasedcredits.Params{CustomerID: identity.CustomerID(customer), PaymentID: p.ID, ProductID: product.ID.UUID(), Currency: "USD", Amount: face, PaidAmount: paid, StartsAt: now}
@@ -247,7 +250,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.EqualValues(t, 300_000, bal.OwedAmount, "a charged-back repayment is owed again")
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		recovery := &models.Payment{ID: uuid.New(), CustomerID: disputed.UUID(), PriceID: price.ID.UUID(), Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
+		recovery := &models.Payment{ID: uuid.New(), CustomerID: disputed.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
 			TransactionID: uuid.NewString(), Amount: 20_000_000, ListAmount: 20_000_000, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt: now, CreatedAt: now, RefundedPaymentID: &payment.ID, ReversalKind: new(payments.ReversalDisputeReversal),
 			Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}}

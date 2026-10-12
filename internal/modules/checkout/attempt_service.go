@@ -1633,7 +1633,7 @@ func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, 
 		railSelector = strings.TrimSpace(psp)
 	}
 	req := &CheckoutRequest{
-		PriceID:           billing.PriceID(*session.PriceID).String(),
+		PriceID:           session.PublicPriceID.String(),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
 		Card:              payment.Card,
@@ -1769,7 +1769,7 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 		CreatedAt: session.CreatedAt,
 	}
 	if session.PriceID != nil {
-		id := billing.PriceID(*session.PriceID)
+		id := session.PublicPriceID
 		resp.PriceID = &id
 	}
 	if len(session.Metadata) > 0 {

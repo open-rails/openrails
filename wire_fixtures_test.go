@@ -36,7 +36,7 @@ func canonicalWireFixtures() map[string]any {
 	param, sourceID := "amount", "deposit-1"
 	periodHours, expMonth, expYear := 720, 12, 2030
 	card := &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242"), ExpMonth: &expMonth, ExpYear: &expYear}
-	priceFixtureValue := billing.Price{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, BillingIntervalHours: &periodHours,
+	priceFixtureValue := billing.Price{ID: priceFixture, Version: 1, Key: "monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, BillingIntervalHours: &periodHours,
 		PSPs: map[string]billing.PSPLinkState{"mobius": {Status: billing.PSPLinkLinked, SyncStatus: billing.SyncStatusUnknown}}, PendingManualActions: []billing.PendingAction{}, CreatedAt: when, UpdatedAt: when}
 	return map[string]any{
 		"error_envelope.json": errorEnvelope{Error: billing.ErrorDetails{
@@ -136,8 +136,8 @@ var (
 	invokerFixture        = "host"
 	customerFixture       = billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
 	productFixture        = billing.ProductID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
-	priceFixture          = billing.PriceID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
-	scheduledPriceFixture = billing.PriceID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"))
+	priceFixture          = billing.PriceID("pro:monthly:v1")
+	scheduledPriceFixture = billing.PriceID("pro:monthly:v2")
 	subscriptionFixture   = billing.SubscriptionID(uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 	methodFixture         = billing.PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	paymentFixture        = billing.PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))

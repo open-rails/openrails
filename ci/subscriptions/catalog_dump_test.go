@@ -105,7 +105,7 @@ products:
 		ProductID: pack.ID, Key: "buy", Currency: "USD", UnitAmount: 90000000,
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, currentPack.Version)
+	require.EqualValues(t, 2, currentPack.Version)
 
 	dump := func(w *world) ([]byte, *catalog.Application) {
 		t.Helper()
@@ -161,7 +161,7 @@ products:
 	restoredPack, err := priceByKey(t.Context(), target.client[embedded], "api-pack", "buy")
 	require.NoError(t, err)
 	require.NotEqual(t, currentPack.ID, restoredPack.ID, "semantic copy uses destination identities")
-	require.EqualValues(t, 0, restoredPack.Version, "full historical version numbers require the billing archive")
+	require.EqualValues(t, 1, restoredPack.Version, "full historical version numbers require the billing archive")
 
 	// Content-addressed apply is a one-time batch, not a rollback command.
 	product, err := productByKey(t.Context(), target.client[embedded], "premium")

@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-const testPriceID = "price_11111111-1111-1111-1111-111111111111"
+const testPriceID = "premium:monthly:v1"
 
 // The fingerprint is a durable replay identity: whitespace-insensitive where
 // the executor trims, and a replay under another body conflicts.

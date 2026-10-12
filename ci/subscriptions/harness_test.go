@@ -1233,3 +1233,11 @@ func extendAdmission(ctx context.Context, client *openrails.Client, requestID st
 	}
 	return results[0].Admission, results[0].Err()
 }
+
+// priceStorageID is for probes of private foreign keys, never API calls.
+func (w *world) priceStorageID(id billing.PriceID) uuid.UUID {
+	w.t.Helper()
+	var stored uuid.UUID
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.sql(`SELECT id FROM billing.prices WHERE merchant_id=$1 AND public_id=$2`), w.client[embedded].MerchantID().UUID(), id.String()).Scan(&stored))
+	return stored
+}

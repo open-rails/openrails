@@ -78,13 +78,11 @@ export function PriceDetailPage() {
         </Button>
         <div>
           <h2 className="flex items-center gap-2 text-sm">
-            {product
-              ? `${product.key}.${price.key}.v${price.version}`
-              : price.key}
+            {price.id}
             {price.archived && <Badge variant="secondary">archived</Badge>}
           </h2>
           <p className="text-xs text-muted-foreground">
-            {shortId(price.id, 16)}
+            {product?.display_name}
           </p>
         </div>
         <div className="ml-auto">
@@ -156,12 +154,10 @@ export function PriceDetailPage() {
                     <TableCell>
                       <Link
                         className="text-xs underline-offset-2 hover:underline"
-                        to={`/catalog/prices/${entry.price.id}`}
+                        to={`/catalog/prices/${encodeURIComponent(entry.price.id)}`}
                         title={entry.price.id}
                       >
-                        {product
-                          ? `${product.key}.${entry.price.key}.v${entry.price.version}`
-                          : shortId(entry.price.id, 13)}
+                        {entry.price.id}
                       </Link>
                     </TableCell>
                   </TableRow>
@@ -199,11 +195,8 @@ export function PriceDetailPage() {
             {latestBatch.skipped > 0 && (
               <p className="text-xs text-muted-foreground">
                 {latestBatch.skipped} subscription
-                {latestBatch.skipped === 1
-                  ? " was"
-                  : "s were"}{" "}
-                left alone because another change was already scheduled for
-                them.
+                {latestBatch.skipped === 1 ? " was" : "s were"} left alone
+                because another change was already scheduled for them.
               </p>
             )}
           </CardContent>
@@ -215,7 +208,9 @@ export function PriceDetailPage() {
 
 function CancelMigrationButton({ migrationId }: { migrationId: string }) {
   const queryClient = useQueryClient()
-  const cancelBatch = useMutation(adminMutations.cancelPriceMigration(queryClient))
+  const cancelBatch = useMutation(
+    adminMutations.cancelPriceMigration(queryClient)
+  )
   const confirm = useConfirm()
   return (
     <Button

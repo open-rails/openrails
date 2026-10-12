@@ -194,17 +194,25 @@ func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, 
 	return s.subscriptionRepo.ReplaceForTierChange(ctx, oldSub, newSub, s.now())
 }
 
-func (f GetSubscriptionsFilters) repo() SubscriptionFilters {
+func (s *SubscriptionService) filters(ctx context.Context, f GetSubscriptionsFilters) (SubscriptionFilters, error) {
+	var priceID uuid.UUID
+	if !f.PriceID.IsZero() {
+		price, err := catalog.NewPriceService(s.Database()).GetByPublicID(ctx, f.PriceID)
+		if err != nil {
+			return SubscriptionFilters{}, err
+		}
+		priceID = price.ID
+	}
 	var customer string
 	if !f.CustomerID.IsZero() {
 		customer = f.CustomerID.String()
 	}
 	return SubscriptionFilters{
-		UserID: customer, Status: f.Status, PriceID: f.PriceID.UUID(), Rail: f.Rail,
+		UserID: customer, Status: f.Status, PriceID: priceID, Rail: f.Rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
 		Dunning: f.Dunning, Sort: f.Sort,
-	}
+	}, nil
 }
 
 // ListSubscribers is one page of the merchant's subscriptions matching f, in
@@ -237,7 +245,14 @@ func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscrip
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err
 	}
-	rows, err := s.subscriptionRepo.ListPage(ctx, f.repo(), pagination.Fetch(limit), afterAt, afterID)
+	filter, err := s.filters(ctx, f)
+	if db.IsNotFound(err) {
+		return billing.ListPage[*models.Subscription]{Items: []*models.Subscription{}}, nil
+	}
+	if err != nil {
+		return billing.ListPage[*models.Subscription]{}, err
+	}
+	rows, err := s.subscriptionRepo.ListPage(ctx, filter, pagination.Fetch(limit), afterAt, afterID)
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err
 	}
@@ -261,7 +276,14 @@ func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscriptio
 
 // CountSubscribers is how many of the merchant's subscriptions match f.
 func (s *SubscriptionService) CountSubscribers(ctx context.Context, f GetSubscriptionsFilters) (int64, error) {
-	return s.subscriptionRepo.Count(ctx, f.repo())
+	filter, err := s.filters(ctx, f)
+	if db.IsNotFound(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return s.subscriptionRepo.Count(ctx, filter)
 }
 
 func (s *SubscriptionService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {

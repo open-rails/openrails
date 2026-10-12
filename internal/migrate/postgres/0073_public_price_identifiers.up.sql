@@ -1,3 +1,4 @@
+-- parent: 69 sha256:cc323dbbea514efdedfbaed5cee269b802fc6705d5abca970bd44575868b870f
 -- Repair: public IDs are derived from existing immutable product and price keys
 -- and revisions. Private UUID foreign keys and accepted financial terms remain
 -- unchanged. The internal zero-based revision is exposed as version revision+1.
@@ -30,7 +31,10 @@ WHERE product.merchant_id = price.merchant_id AND product.id = price.product_id;
 ALTER TABLE billing.prices ENABLE TRIGGER catalog_authored_price;
 ALTER TABLE billing.prices ENABLE TRIGGER immutable_price_terms;
 ALTER TABLE billing.prices ALTER COLUMN public_id SET NOT NULL;
-ALTER TABLE billing.prices ADD CONSTRAINT prices_public_id_key UNIQUE (merchant_id, public_id);
+-- An encoded legacy key can exceed a btree text entry's size. Hash only for
+-- lookup; exact text comparison remains mandatory. Existing immutable tuple
+-- uniqueness already makes the canonical public ID unique per merchant.
+CREATE INDEX prices_public_id_idx ON billing.prices (merchant_id, sha256(public_id::bytea));
 
 CREATE FUNCTION billing.assign_price_public_id() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO pg_catalog, billing AS $$

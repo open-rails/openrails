@@ -46,10 +46,11 @@ func (q *Queries) AcknowledgeHostEvents(ctx context.Context, arg AcknowledgeHost
 }
 
 const listHostEvents = `-- name: ListHostEvents :many
-SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
+SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, price.public_id AS payment_price_id,
   p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
+LEFT JOIN billing.prices price ON price.merchant_id = p.merchant_id AND price.id = p.price_id
 WHERE h.merchant_id = $1::uuid
   AND ($2::text = '' OR h.event_type = $2::text)
   AND ($3::uuid IS NULL OR h.payment_id = $3::uuid)
@@ -82,7 +83,7 @@ type ListHostEventsRow struct {
 	DeliveredAt           *time.Time
 	DedupeKey             string
 	PaymentCustomerID     *uuid.UUID
-	PaymentPriceID        *uuid.UUID
+	PaymentPriceID        *string
 	PaymentSubscriptionID *uuid.UUID
 	PaymentOrderID        *uuid.UUID
 }
@@ -134,10 +135,11 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 }
 
 const listHostEventsByIDs = `-- name: ListHostEventsByIDs :many
-SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
+SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, price.public_id AS payment_price_id,
   p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
+LEFT JOIN billing.prices price ON price.merchant_id = p.merchant_id AND price.id = p.price_id
 WHERE h.merchant_id = $1::uuid AND h.id = ANY($2::uuid[])
 ORDER BY h.id
 `
@@ -161,7 +163,7 @@ type ListHostEventsByIDsRow struct {
 	DeliveredAt           *time.Time
 	DedupeKey             string
 	PaymentCustomerID     *uuid.UUID
-	PaymentPriceID        *uuid.UUID
+	PaymentPriceID        *string
 	PaymentSubscriptionID *uuid.UUID
 	PaymentOrderID        *uuid.UUID
 }

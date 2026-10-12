@@ -8,7 +8,7 @@ import (
 )
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
-// OpenRails-minted resources travel as prefixed text (prod_, price_, sub_,
+// OpenRails-minted resources travel as prefixed text (prod_, sub_,
 // pay_, pm_, mdt_, chk_, att_, cyc_, psp_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
@@ -21,7 +21,6 @@ type (
 	// CustomerID is the host's stable subject UUID under the bound merchant.
 	CustomerID      uuid.UUID
 	ProductID       uuid.UUID
-	PriceID         uuid.UUID
 	SubscriptionID  uuid.UUID
 	PaymentID       uuid.UUID
 	PaymentMethodID uuid.UUID
@@ -41,7 +40,6 @@ type (
 
 const (
 	ProductIDPrefix         = "prod_"
-	PriceIDPrefix           = "price_"
 	SubscriptionIDPrefix    = "sub_"
 	PaymentIDPrefix         = "pay_"
 	PaymentMethodIDPrefix   = "pm_"
@@ -78,10 +76,7 @@ func ParseProductID(s string) (ProductID, error) {
 	u, err := parsePrefixedID("product", ProductIDPrefix, s)
 	return ProductID(u), err
 }
-func ParsePriceID(s string) (PriceID, error) {
-	u, err := parsePrefixedID("price", PriceIDPrefix, s)
-	return PriceID(u), err
-}
+
 func ParseSubscriptionID(s string) (SubscriptionID, error) {
 	u, err := parsePrefixedID("subscription", SubscriptionIDPrefix, s)
 	return SubscriptionID(u), err
@@ -132,7 +127,6 @@ func ParseCustomerID(s string) (CustomerID, error) {
 
 func (id CustomerID) UUID() uuid.UUID        { return uuid.UUID(id) }
 func (id ProductID) UUID() uuid.UUID         { return uuid.UUID(id) }
-func (id PriceID) UUID() uuid.UUID           { return uuid.UUID(id) }
 func (id SubscriptionID) UUID() uuid.UUID    { return uuid.UUID(id) }
 func (id PaymentID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PaymentMethodID) UUID() uuid.UUID   { return uuid.UUID(id) }
@@ -146,7 +140,6 @@ func (id PSPID) UUID() uuid.UUID             { return uuid.UUID(id) }
 
 func (id CustomerID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
 func (id ProductID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
-func (id PriceID) IsZero() bool           { return uuid.UUID(id) == uuid.Nil }
 func (id SubscriptionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentMethodID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
@@ -161,7 +154,6 @@ func (id PSPID) IsZero() bool             { return uuid.UUID(id) == uuid.Nil }
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
 func (id ProductID) String() string  { return formatPrefixedID(ProductIDPrefix, uuid.UUID(id)) }
-func (id PriceID) String() string    { return formatPrefixedID(PriceIDPrefix, uuid.UUID(id)) }
 func (id SubscriptionID) String() string {
 	return formatPrefixedID(SubscriptionIDPrefix, uuid.UUID(id))
 }
@@ -183,7 +175,6 @@ func (id PSPID) String() string     { return formatPrefixedID(PSPIDPrefix, uuid.
 
 func (id CustomerID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
 func (id ProductID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
-func (id PriceID) MarshalText() ([]byte, error)           { return []byte(id.String()), nil }
 func (id SubscriptionID) MarshalText() ([]byte, error)    { return []byte(id.String()), nil }
 func (id PaymentID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id PaymentMethodID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
@@ -205,11 +196,7 @@ func (id *ProductID) UnmarshalText(text []byte) error {
 	*id = parsed
 	return err
 }
-func (id *PriceID) UnmarshalText(text []byte) error {
-	parsed, err := ParsePriceID(string(text))
-	*id = parsed
-	return err
-}
+
 func (id *SubscriptionID) UnmarshalText(text []byte) error {
 	parsed, err := ParseSubscriptionID(string(text))
 	*id = parsed
