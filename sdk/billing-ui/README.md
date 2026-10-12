@@ -1,7 +1,7 @@
 # @openrails/billing-ui
 
-Embeddable OpenRails billing UI: the checkout flow and the customer's account
-billing (subscriptions, saved cards, payment history).
+Embeddable OpenRails billing UI: checkout, customer account billing, and staff
+administration inside the host's application.
 
 | Import                            | Contents                                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------- |
@@ -9,6 +9,8 @@ billing (subscriptions, saved cards, payment history).
 | `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
 | `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
+| `@openrails/billing-ui/admin` | `BillingAdmin`, `BillingCustomerSummary`, access and confirmation helpers |
+| `@openrails/billing-ui/admin.css` | Scoped staff administration styles |
 
 The checkout owns the browser payment flow, behind `<BuyButton>`, `<Offers>`
 and `<OrderCheckout>`: the signed-in customer's order, read and paid with
@@ -171,6 +173,37 @@ so while the read fails or its card PSPs are temporarily unavailable; and the
 deployment's (`GET /config`), whose currency registry amounts use over the
 pinned copy. `useCustomerConfig()`, `useConfig()` and `useCurrencyScales()`
 read the same copies for host components.
+
+## Staff administration
+
+Install the admin entry's optional peer with `pnpm add @tanstack/react-query`.
+The host owns sign-in and passes its authenticated transport and router:
+
+```tsx
+import { BillingAdmin } from "@openrails/billing-ui/admin"
+import "@openrails/billing-ui/admin.css"
+
+<BillingAdmin
+  baseUrl="/billing/v1"
+  auth={auth}
+  basePath="/admin/billing"
+  navigation={{ pathname, search, navigate }}
+  appearance={{ theme: "inherit" }}
+/>
+```
+
+`auth` implements `authFetch`; it can be an AuthKit client or a host transport.
+Mount the component for the signed-in person and remount when that identity
+changes. Omitting `navigation` uses browser history. Each instance owns its
+transport, selected merchant, and query namespace, including when the host
+supplies a shared `queryClient`.
+
+`useBillingAdminAccess` reads the staff member's capabilities for the host's
+navigation. `BillingCustomerSummary` supplies a bounded billing preview for a
+host customer page. `settingsTabs`, `customerPanels`, and `userHref` compose
+host content and links. The customer imports above do not load admin code or
+styles. See the [BillingAdmin integration guide](https://github.com/open-rails/openrails/blob/master/docs/billing-admin.md)
+for merchant selection, permissions, localization, and standalone console setup.
 
 ## Catalog and plan changes
 

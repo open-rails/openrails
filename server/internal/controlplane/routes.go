@@ -21,11 +21,11 @@ import (
 // Registration, AuthKit's admin surface and browser OIDC are not mounted.
 var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
 
-// registrationRouteGroups is AuthKit's JSON API, mounted when people can
-// register (open or invite-only). Browser OIDC stays unmounted.
+// registrationRouteGroups adds invitation enrollment to the staff account
+// and group surface. Site-wide administration and browser OIDC stay unmounted.
 var registrationRouteGroups = []iam.RouteGroup{
-	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount, iam.RouteAdmin,
-	iam.RoutePermissionGroups, iam.RouteDeviceKeys,
+	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount,
+	iam.RoutePermissionGroups,
 }
 
 // routeGroups is the explicit list of AuthKit route groups a control plane

@@ -9,7 +9,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -19,9 +18,8 @@ import (
 // Routes materializes the HTTP surface sel selects for the host's root
 // router, and fails before anything mounts without the Auth it needs:
 // nothing is ever mounted open. It is the public, customer and webhook routes
-// and the route groups sel.RouteGroups turns on, under sel.Prefix, and the
-// admin console at its /admin. A standalone server's engine refuses: its
-// surface is the server's.
+// and the route groups sel.RouteGroups turns on, under sel.Prefix. A
+// standalone server's engine refuses: its surface is the server's.
 func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -64,24 +62,12 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 			return nil, fmt.Errorf("openrails: %w", err)
 		}
 	}
-	if sel.AdminConsoleAuthBase != "" {
-		if config.ValidateMountPath("Routes.AdminConsoleAuthBase", sel.AdminConsoleAuthBase) != nil {
-			return nil, fmt.Errorf("openrails: invalid Routes.AdminConsoleAuthBase %q: want the path your AuthKit's JSON API is served at on this origin, its APIBase() such as /auth/v1: absolute, no scheme or host, no trailing slash", sel.AdminConsoleAuthBase)
-		}
-	}
 	table, err := embedhttp.ConfiguredRoutes(a, sel)
 	if err != nil {
 		return nil, err
 	}
 	for i := range table.Entries {
 		table.Entries[i].Path = sel.Prefix + strings.TrimPrefix(table.Entries[i].Path, "/billing")
-	}
-	if sel.AdminConsole {
-		console, err := e.adminConsoleRoutes(sel)
-		if err != nil {
-			return nil, err
-		}
-		table.Entries = append(table.Entries, console...)
 	}
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err
@@ -104,52 +90,6 @@ func logMount(sel config.Routes, routes int) {
 	}
 	log.WithFields(fields).Info("openrails: routes mounted")
 }
-
-// adminConsoleRoutes serves the console at sel.Prefix's /admin, against the
-// admin API there and the host's AuthKit (sel.AdminConsoleAuthBase) on the
-// same origin.
-func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
-	a := e.App
-	if b := sel.RouteGroups; !b.Admin && !b.Catalog && !b.MerchantConfig && !b.Metrics {
-		return nil, fmt.Errorf("openrails: AdminConsole drives the staff routes; turn on at least one of RouteGroups.Admin, Catalog, MerchantConfig or Metrics")
-	}
-	if !adminconsole.Present(a.ConsoleAssets) {
-		return nil, fmt.Errorf("openrails: Routes.AdminConsole needs a console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
-	}
-	path := sel.Prefix + "/admin"
-	authBase := sel.AdminConsoleAuthBase
-	if authBase == "" {
-		authBase = authKitAPIBase
-	}
-	console := adminconsole.Config{AuthBaseURL: authBase, APIBaseURL: sel.Prefix + "/v1"}
-	console.Assistants(a.Config.LLM, sel.RouteGroups.Catalog)
-	// The console acts for the merchant its sign-in binds: the one whose
-	// Issuer the engine declares. Staff of several merchants would need a
-	// token exchanged per merchant, which an embedded console cannot get.
-	var issued []string
-	for slug := range e.declared {
-		if a.Config.Merchants[slug].Issuer != "" {
-			issued = append(issued, slug)
-		}
-	}
-	if len(issued) != 1 {
-		return nil, fmt.Errorf("openrails: Routes.AdminConsole acts for the one merchant whose Issuer Config.Merchants declares, the issuer staff sign in at; this engine declares %d (a console over several merchants is not supported yet)", len(issued))
-	}
-	slug := issued[0]
-	console.Merchant = &adminconsole.Merchant{ID: e.declared[slug].String(), Slug: slug, DisplayName: a.Config.Merchants[slug].DisplayName}
-	handler, err := adminconsole.Handler(path, console, a.ConsoleAssets)
-	if err != nil {
-		return nil, fmt.Errorf("openrails: %w", err)
-	}
-	return []router.Entry{
-		{Method: http.MethodGet, Path: path, Handler: handler},
-		{Method: http.MethodGet, Path: path + "/{asset...}", Handler: handler},
-	}, nil
-}
-
-// authKitAPIBase is AuthKit's default APIBase: where an embedded console
-// signs staff in without Routes.AdminConsoleAuthBase.
-const authKitAPIBase = "/api/v1"
 
 // SCIMHandler is the SCIM service provider for mid, rooted at the SCIM root
 // (/Users, /Bulk): a directory in the same process pushes to it, and holding

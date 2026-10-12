@@ -39,7 +39,8 @@ const (
 )
 
 type Runtime struct {
-	Auth *authkit.Client
+	Auth       *authkit.Client
+	StaffRoles map[string]iam.Role
 	// Engine is the embedded engine; Client is its merchant's handle.
 	Engine  *openrails.Engine
 	Client  *openrails.Client
@@ -72,7 +73,8 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		}
 	}()
 	signer := solanago.NewWallet().PrivateKey
-	auth, err := authkit.New(ctx, authConfig(baseURL), authkit.Deps{Postgres: pool})
+	authCfg, staffRoles := authConfig(baseURL)
+	auth, err := authkit.New(ctx, authCfg, authkit.Deps{Postgres: pool})
 	if err != nil {
 		return nil, fmt.Errorf("authkit: %w", err)
 	}
@@ -136,23 +138,40 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
-	return &Runtime{Auth: auth, Engine: engine, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
+	return &Runtime{Auth: auth, StaffRoles: staffRoles, Engine: engine, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
 }
 
 // billingRoutes is the billing surface the storefront and account pages call.
-var billingRoutes = openrails.Routes{Prefix: "/billing"}
+var billingRoutes = openrails.Routes{Prefix: "/billing", RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true}}
 
 // authConfig is AuthKit's configuration: its JSON API at /auth/v1 beside
 // OpenRails at /billing, open registration and no second factor.
-func authConfig(issuer string) authkit.Config {
+func authConfig(issuer string) (authkit.Config, map[string]iam.Role) {
+	roles := authkit.NewRoles(authkit.CustomRoles)
+	merchant := roles.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)
+	var grants []iam.Grant
+	var read iam.Perm
+	for _, permission := range billing.Permissions() {
+		if permission.Persona() == billing.MerchantGroupPersona {
+			merchant.Permission(permission.Resource(), permission.Action())
+			continue
+		}
+		grant := roles.Root.Permission(permission.Resource(), permission.Action())
+		grants = append(grants, grant)
+		if permission == billing.RootCustomerRead {
+			read = grant
+		}
+	}
+	staff := map[string]iam.Role{"admin": roles.Root.Role("billing-admin", grants...), "reader": roles.Root.Role("billing-reader", read)}
 	return authkit.Config{
+		Roles:        roles,
 		Database:     authkit.DatabaseConfig{Schema: AuthSchema, RiverSchema: AuthSchema},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth"},
 		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-	}
+	}, staff
 }
 
 // checkoutRouting sells the card product through the card PSP and everything

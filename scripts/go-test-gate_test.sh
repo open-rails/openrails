@@ -38,6 +38,7 @@ expect_fail() {
   fi
 }
 
+expect_pass  "a nested module" -C server ./internal/hostconfig TestSigningKeySource
 expect_pass  "a real test"        "${pkg}" TestGateFixturePasses
 expect_pass  "several matches"    "${pkg}" 'TestGateFixturePasses|TestGateFixturePassesToo'
 expect_fail  "pattern matches nothing" "matched no test" \

@@ -1,0 +1,598 @@
+import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { useAdminServices } from "#orck/admin/context"
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Activity01Icon,
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  Delete02Icon,
+  InformationCircleIcon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import * as React from "react"
+import { Link, useNavigate, useParams } from "#orck/admin/router"
+
+import { CursorPager } from "#orck/admin/components/cursor-pager"
+import { useConfirm } from "#orck/admin/lib/confirm"
+import { useCursorPages } from "#orck/admin/lib/cursor-pages"
+import { LinkedTableRow } from "#orck/admin/components/linked-table-row"
+import { Badge } from "#orck/admin/components/ui/badge"
+import { Button } from "#orck/admin/components/ui/button"
+import { Input } from "#orck/admin/components/ui/input"
+import { Skeleton } from "#orck/admin/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "#orck/admin/components/ui/table"
+import { ApiError } from "#orck/admin/lib/api/client"
+import type { Meter } from "#orck/client/generated/wire"
+import { formatDate } from "#orck/admin/lib/format"
+
+import { useCatalogWrites } from "#orck/admin/lib/capabilities"
+
+import { MeterFormDialog } from "./meter-form"
+import {
+  meterCollectionState,
+  meterDefinitionLocked,
+  summarizeRateCard,
+} from "./metering-model"
+import { RateCardEditor } from "./rate-card-editor"
+
+const PAGE_SIZE = 200
+
+export function CatalogMeteringPage() {
+  const { text: adminText } = useAdminUI()
+
+  const { adminQueries } = useAdminServices()
+
+  const [search, setSearch] = React.useState("")
+  const pages = useCursorPages("", PAGE_SIZE)
+  const { data, isPending, error, refetch } = useQuery(
+    adminQueries.usageMeters(pages.size, pages.cursor)
+  )
+  const writesAllowed = useCatalogWrites()
+  const meters = data?.data ?? []
+  const normalizedSearch = search.trim().toLowerCase()
+  const filtered = normalizedSearch
+    ? meters.filter((meter) =>
+        [
+          meter.key,
+          meter.event_type,
+          meter.aggregation,
+          meter.unit,
+          meter.rate_card?.product_key,
+        ].some((value) => value?.toLowerCase().includes(normalizedSearch))
+      )
+    : meters
+  const state = meterCollectionState({
+    pending: isPending,
+    error: error instanceof ApiError ? error : error ? { status: 500 } : null,
+    count: meters.length,
+  })
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <h1 className="text-2xl font-semibold tracking-tight text-balance">
+            <AdminMessage id={"Metering"} />
+          </h1>
+          <p className="mt-1 text-sm text-pretty text-muted-foreground">
+            <AdminMessage
+              id={
+                "Define usage streams and the default rates charged when usage is recorded. Applications report the events separately."
+              }
+            />
+          </p>
+        </div>
+        {writesAllowed && state !== "permission" && (
+          <MeterFormDialog writesAllowed />
+        )}
+      </div>
+
+      {data && !writesAllowed && (
+        <ReadOnlyNotice>
+          <AdminMessage
+            id={
+              "Catalog updates are disabled. Meter definitions and rates are visible here; changes require the host operator."
+            }
+          />
+        </ReadOnlyNotice>
+      )}
+
+      {state === "loading" ? (
+        <MeteringSkeleton />
+      ) : state === "permission" ? (
+        <PageMessage
+          title={adminText("Metering access is restricted")}
+          description={adminText(
+            "Your role does not have permission to read the merchant catalog."
+          )}
+        />
+      ) : state === "error" ? (
+        <PageMessage
+          title={adminText("Metering could not be loaded")}
+          description={adminText(
+            "Try again. If the problem continues, check the OpenRails API logs."
+          )}
+          action={
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              <AdminMessage id={"Try again"} />
+            </Button>
+          }
+        />
+      ) : state === "empty" ? (
+        <PageMessage
+          title={adminText("No usage meters yet")}
+          description={adminText(
+            "Create a meter to describe the events your application will report and bill."
+          )}
+          action={writesAllowed ? <MeterFormDialog writesAllowed /> : undefined}
+        />
+      ) : (
+        <>
+          <div className="relative w-full sm:max-w-xs">
+            <HugeiconsIcon
+              icon={Search01Icon}
+              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="pl-8"
+              placeholder={adminText("Filter this page…")}
+              aria-label={adminText("Filter meters on this page")}
+            />
+          </div>
+          <div className="max-w-full overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Meter"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Event"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Aggregation"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Default price"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Product"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Activity"} />
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <AdminMessage id={"Last event"} />
+                  </TableHead>
+                  <TableHead>
+                    <span className="sr-only">
+                      <AdminMessage id={"Open"} />
+                    </span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((meter) => (
+                  <MeterRow key={meter.key} meter={meter} />
+                ))}
+                {filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="h-24 text-center text-muted-foreground"
+                    >
+                      <AdminMessage id={"No meters on this page match “"} />
+                      {search}”.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <CursorPager
+            pages={pages}
+            rows={data?.data?.length ?? 0}
+            nextCursor={data?.next_cursor}
+            busy={isPending}
+            sizes={[100, 200, 500]}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
+function MeterRow({ meter }: { meter: Meter }) {
+  return (
+    <LinkedTableRow to={`/catalog/metering/${encodeURIComponent(meter.key)}`}>
+      <TableCell>
+        <Link
+          className="font-medium underline-offset-3 hover:underline"
+          to={`/catalog/metering/${encodeURIComponent(meter.key)}`}
+        >
+          {meter.key}
+        </Link>
+        {meter.unit && (
+          <p className="text-xs text-muted-foreground">{meter.unit}</p>
+        )}
+      </TableCell>
+      <TableCell>{meter.event_type}</TableCell>
+      <TableCell>
+        <Badge variant="secondary">{meter.aggregation}</Badge>
+      </TableCell>
+      <TableCell className="font-medium tabular-nums">
+        {summarizeRateCard(meter.rate_card)}
+      </TableCell>
+      <TableCell>{meter.rate_card?.product_key ?? "—"}</TableCell>
+      <TableCell>
+        <span className="inline-flex items-center gap-1.5 text-sm">
+          <span
+            className={`size-1.5 rounded-full ${meter.has_activity ? "bg-settled" : "bg-muted-foreground/50"}`}
+          />
+          {meter.has_activity ? "Active" : "No events"}
+        </span>
+      </TableCell>
+      <TableCell className="text-muted-foreground tabular-nums">
+        {formatDate(meter.last_event_at)}
+      </TableCell>
+      <TableCell className="text-right">
+        <HugeiconsIcon
+          icon={ArrowRight01Icon}
+          className="ml-auto size-4 text-muted-foreground"
+        />
+      </TableCell>
+    </LinkedTableRow>
+  )
+}
+
+export function MeterDetailPage() {
+  const { text: adminText } = useAdminUI()
+
+  const { adminQueries } = useAdminServices()
+
+  const { key = "" } = useParams()
+  const meterKey = key
+  const navigate = useNavigate()
+  const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
+  const writesAllowed = useCatalogWrites()
+  const productsQuery = useQuery(
+    adminQueries.allProducts({ errorAction: "Load products for metering" })
+  )
+
+  if (meterQuery.isPending) return <MeterDetailSkeleton />
+  if (meterQuery.error) {
+    const notFound =
+      meterQuery.error instanceof ApiError && meterQuery.error.status === 404
+    const forbidden =
+      meterQuery.error instanceof ApiError && meterQuery.error.status === 403
+    return (
+      <PageMessage
+        title={
+          forbidden
+            ? "Metering access is restricted"
+            : notFound
+              ? "Meter not found"
+              : "Meter could not be loaded"
+        }
+        description={
+          forbidden
+            ? "Your role does not have permission to read this meter."
+            : notFound
+              ? "This meter does not exist in the active merchant catalog."
+              : "Try loading the meter again."
+        }
+        action={
+          forbidden ? undefined : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                notFound
+                  ? navigate("/catalog/metering")
+                  : void meterQuery.refetch()
+              }
+            >
+              {notFound ? "Back to metering" : "Try again"}
+            </Button>
+          )
+        }
+      />
+    )
+  }
+  const meter = meterQuery.data
+  if (!meter) return null
+  const definitionLock = meterDefinitionLocked(meter, writesAllowed)
+
+  return (
+    <div className="flex min-w-0 flex-col gap-8">
+      <header className="flex flex-wrap items-start gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate("/catalog/metering")}
+          aria-label={adminText("Back to metering")}
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-semibold tracking-tight">
+              {meter.key}
+            </h1>
+            {!writesAllowed && (
+              <Badge variant="secondary">
+                <AdminMessage id={"read-only"} />
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {meter.event_type} · {meter.aggregation}
+            {meter.unit ? ` · ${meter.unit}` : ""}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <MeterFormDialog meter={meter} writesAllowed={writesAllowed} />
+          <RateCardEditor
+            meter={meter}
+            writesAllowed={writesAllowed}
+            products={productsQuery.data?.data ?? []}
+            productsPending={productsQuery.isPending}
+            productsError={Boolean(productsQuery.error)}
+            productsForbidden={
+              productsQuery.error instanceof ApiError &&
+              productsQuery.error.status === 403
+            }
+          />
+        </div>
+      </header>
+
+      {!writesAllowed && (
+        <ReadOnlyNotice>
+          <AdminMessage
+            id={"Catalog updates are disabled. The console is read-only."}
+          />
+        </ReadOnlyNotice>
+      )}
+
+      <section className="grid gap-4">
+        <div>
+          <h2 className="text-base font-semibold">
+            <AdminMessage id={"Event contract"} />
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-pretty text-muted-foreground">
+            <AdminMessage
+              id={
+                "Creating this meter does not send events. The host application must report idempotent usage to"
+              }
+            />{" "}
+            <code className="text-foreground">
+              <AdminMessage id={"/app/usage-events"} />
+            </code>
+            <AdminMessage id={" with this shape."} />
+          </p>
+        </div>
+        <dl className="grid gap-x-8 gap-y-4 border-y py-4 sm:grid-cols-2 lg:grid-cols-4">
+          <ContractFact
+            label={adminText("Event type")}
+            value={meter.event_type}
+          />
+          <ContractFact
+            label={adminText("Aggregation")}
+            value={
+              meter.aggregation === "sum"
+                ? `Sum ${meter.value_property}`
+                : "Count each event"
+            }
+          />
+          <ContractFact label={adminText("Meter key")} value={meter.key} />
+          <ContractFact
+            label={adminText("Billing support")}
+            value={meter.billing_supported ? "Supported" : "Read only"}
+          />
+          {Object.entries(meter.group_by ?? {}).map(([name, property]) => (
+            <ContractFact
+              key={name}
+              label={`Dimension: ${name}`}
+              value={property}
+            />
+          ))}
+        </dl>
+        {definitionLock && writesAllowed && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <HugeiconsIcon icon={Activity01Icon} className="size-4" />
+            {definitionLock}
+          </p>
+        )}
+      </section>
+
+      <DefaultRateSection meter={meter} writesAllowed={writesAllowed} />
+    </div>
+  )
+}
+
+function DefaultRateSection({
+  meter,
+  writesAllowed,
+}: {
+  meter: Meter
+  writesAllowed: boolean
+}) {
+  const { toast, toastApiError, adminMutations } = useAdminServices()
+
+  const { text: adminText } = useAdminUI()
+
+  const confirm = useConfirm()
+  const queryClient = useQueryClient()
+  const remove = useMutation(
+    adminMutations.deleteDefaultUsageRateCard(queryClient)
+  )
+  const card = meter.rate_card
+  const handleDelete = async () => {
+    const removing = await confirm({
+      title: "Remove the default rate?",
+      description:
+        "New usage for this meter will stop being rated after removal. Billed usage orders and accrued amounts remain unchanged.",
+      confirmLabel: "Remove default",
+      cancelLabel: "Keep rate",
+      tone: "destructive",
+    })
+    if (!removing) return
+    try {
+      await remove.mutateAsync(meter)
+      toast.success("Default rate removed")
+    } catch (error) {
+      toastApiError(error, "Remove default rate")
+    }
+  }
+  return (
+    <section className="grid gap-4 border-t pt-7">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold">
+            <AdminMessage id={"Default rate"} />
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            <AdminMessage id={"Used for every customer."} />
+          </p>
+        </div>
+        {card && writesAllowed && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={remove.isPending}
+            onClick={() => void handleDelete()}
+          >
+            <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+            {remove.isPending ? "Removing…" : "Remove default"}
+          </Button>
+        )}
+      </div>
+      {!meter.billing_supported ? (
+        <ReadOnlyNotice>
+          <AdminMessage
+            id={
+              "This meter uses an aggregation that the billing engine cannot rate."
+            }
+          />
+        </ReadOnlyNotice>
+      ) : !card ? (
+        <p className="border-y py-6 text-sm text-muted-foreground">
+          <AdminMessage
+            id={
+              "No default rate. Usage is recorded but is not billed by this meter."
+            }
+          />
+        </p>
+      ) : (
+        <dl className="grid gap-x-8 gap-y-4 border-y py-4 sm:grid-cols-2 lg:grid-cols-4">
+          <ContractFact
+            label={adminText("Price")}
+            value={summarizeRateCard(card)}
+          />
+          <ContractFact label={adminText("Product")} value={card.product_key} />
+          <ContractFact
+            label={adminText("Model")}
+            value={card.price.model.replace("_", " ")}
+          />
+          <ContractFact
+            label={adminText("Filter")}
+            value={
+              Object.keys(card.filter ?? {}).length
+                ? Object.entries(card.filter ?? {})
+                    .map(([key, values]) => `${key}: ${values.join(", ")}`)
+                    .join(" · ")
+                : "All matching events"
+            }
+          />
+          <ContractFact
+            label={adminText("Allowance")}
+            value={
+              card.allowance?.included !== undefined
+                ? `${card.allowance.included.toLocaleString()} included`
+                : "None"
+            }
+          />
+          <ContractFact
+            label={adminText("Updated")}
+            value={formatDate(card.updated_at)}
+          />
+        </dl>
+      )}
+    </section>
+  )
+}
+
+function ContractFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-sm font-medium break-words tabular-nums">
+        {value || "—"}
+      </dd>
+    </div>
+  )
+}
+
+function ReadOnlyNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">
+      <HugeiconsIcon
+        icon={InformationCircleIcon}
+        className="mt-0.5 size-4 shrink-0"
+      />
+      <p>{children}</p>
+    </div>
+  )
+}
+
+function PageMessage({
+  title,
+  description,
+  action,
+}: {
+  title: string
+  description: string
+  action?: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col items-start gap-3 border-y py-10">
+      <div>
+        <h2 className="text-sm font-medium">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+      {action}
+    </div>
+  )
+}
+
+function MeteringSkeleton() {
+  return (
+    <div className="grid gap-3">
+      <Skeleton className="h-8 w-64" />
+      {Array.from({ length: 5 }).map((_, index) => (
+        <Skeleton key={index} className="h-11 w-full" />
+      ))}
+    </div>
+  )
+}
+
+function MeterDetailSkeleton() {
+  return (
+    <div className="grid gap-6">
+      <Skeleton className="h-10 w-72" />
+      <Skeleton className="h-28 w-full" />
+      <Skeleton className="h-36 w-full" />
+      <Skeleton className="h-40 w-full" />
+    </div>
+  )
+}

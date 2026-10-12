@@ -29,7 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/service"
-	admin "github.com/open-rails/openrails/web/admin"
 )
 
 // Engine is one embedded engine.
@@ -93,10 +92,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 			return nil, err
 		}
 	}
-	consoleAssets := deps.ConsoleAssets
-	if consoleAssets == nil {
-		consoleAssets = admin.FS()
-	}
 	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
 		url := deps.Postgres.Config().ConnString()
 		if url == "" {
@@ -135,7 +130,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
-	application.ConsoleAssets = consoleAssets
 	// Each declared merchant is provisioned before a route or a worker can
 	// see it; the issuer that binds its credentials is recorded with it.
 	ids := make([]billing.MerchantID, len(declarations))

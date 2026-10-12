@@ -1,0 +1,765 @@
+import type { AdminClient } from "./api/client"
+import type { AdminAPI } from "./api"
+import type { createQueries } from "./queries"
+import { ApiError, collectCursorPages } from "#orck/admin/lib/api/client"
+
+import type {
+  CreateAlertWebhookParams,
+  CreatePSPParams,
+  CreatePriceParams,
+  Meter,
+  UpdateAlertWebhookParams,
+  UpdateMerchantConfigurationParams,
+  UpdatePSPParams,
+  UpdateProductParams,
+} from "#orck/client/generated/wire"
+
+import {
+  mutationOptions,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query"
+import {
+  type DefaultUsageRateCardRequest,
+  type PaymentFilters,
+  type ProductGrant,
+  type ProductRequest,
+  type UsageMeterRequest,
+  type SubscriptionFilters,
+} from "#orck/admin/lib/api/endpoints"
+import { type Widget } from "#orck/admin/lib/api/metrics"
+
+import type {
+  ChangeSubscriptionParams,
+  Customer,
+} from "#orck/client/generated/wire"
+
+import type { AdminSubscription } from "#orck/admin/lib/api/types"
+
+const EXPORT_PAGE = 200
+
+const collectAllCursorPages = async <T>(
+  listPage: (
+    limit: number,
+    cursor?: string
+  ) => Promise<{ data: T[]; next_cursor: string | null }>
+) => {
+  const rows: T[] = []
+  let cursor: string | undefined
+  for (;;) {
+    const page = await listPage(EXPORT_PAGE, cursor)
+    rows.push(...page.data)
+    if (!page.next_cursor || page.data.length === 0) return rows
+    cursor = page.next_cursor
+  }
+}
+
+const invalidateExact = (
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+) => queryClient.invalidateQueries({ queryKey, exact: true })
+
+const invalidateExactOnSuccess =
+  (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
+    invalidateExact(queryClient, queryKey)
+
+const invalidateTreeOnSuccess =
+  (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
+    queryClient.invalidateQueries({ queryKey })
+
+// reloadIfMoved refetches what an edit was refused for: an object another
+// edit changed since it was read (revision_mismatch).
+const reloadIfMoved =
+  (queryClient: QueryClient, ...queryKeys: QueryKey[]) =>
+  (err: unknown) => {
+    if (err instanceof ApiError && err.code === "revision_mismatch") {
+      void Promise.all(
+        queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
+      )
+    }
+  }
+
+export function createMutations(
+  client: AdminClient,
+  api: AdminAPI,
+  queries: ReturnType<typeof createQueries>
+) {
+  const { selectedMerchant } = client
+  const {
+    askCatalog,
+    cancelPriceMigration,
+    cancelSubscription,
+    changeSubscriptionPaymentMethod,
+    changeSubscription,
+    createPrice,
+    createProduct,
+    createWebhook,
+    createPSP,
+    deleteWebhook,
+    getCustomer,
+    getProductByKey,
+    grantProductAccess,
+    listCustomers,
+    listPayments,
+    listSubscriptions,
+    putUsageMeterRateCard,
+    updatePSP,
+    putUsageMeter,
+    previewPriceMigration,
+    previewSubscriptionChange,
+    applyCatalog,
+    refreshPSPs,
+    refundPayment,
+    createPriceMigration,
+    resolveFinding,
+    resumeSubscription,
+    revokeProductAccess,
+    updateCustomer,
+    updateMerchantConfiguration,
+    updatePrice,
+    updateProduct,
+    updateWebhook,
+    putDashboard,
+  } = api
+
+  const { adminQueries, merchantQueryKeys } = queries
+
+  // Every factory pins the selected merchant once, up front, with
+  // merchantQueryKeys(). Callbacks fire after the request returns, by which time
+  // the operator may have switched merchants, so a key built inside onSuccess /
+  // onSettled from the live queryKeys would name the wrong merchant: the
+  // initiating merchant's screens stay stale and an untouched merchant's cache is
+  // invalidated. Importing the live queryKeys here is blocked by lint.
+  const readOnlyNow = (queryClient: QueryClient) => (err: Error) => {
+    if (err instanceof ApiError && err.merchantConfigReadOnly)
+      void queryClient.invalidateQueries({
+        queryKey: adminQueries.config().queryKey,
+      })
+  }
+
+  const webhooksChanged =
+    (queryClient: QueryClient, keys: ReturnType<typeof merchantQueryKeys>) =>
+    () =>
+      Promise.all([
+        invalidateExact(queryClient, [...keys.alerts(), "webhooks"]),
+        invalidateExact(queryClient, keys.settings()),
+      ])
+  const adminMutations = {
+    saveDashboard: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      const dashboardKey = keys.dashboard()
+      return mutationOptions({
+        mutationKey: [...dashboardKey, "save"],
+        mutationFn: (widgets: Widget[]) => putDashboard(widgets),
+        onSuccess: (saved) => queryClient.setQueryData(dashboardKey, saved),
+      })
+    },
+
+    findCustomer: () => {
+      const keys = merchantQueryKeys()
+      const customersKey = keys.customers()
+      return mutationOptions({
+        mutationKey: [...customersKey, "find"],
+        mutationFn: async (term: string) => {
+          const result = await listCustomers(term, 1, "")
+          return result.data[0]
+        },
+      })
+    },
+    exportCustomers: () => {
+      const keys = merchantQueryKeys()
+      const customersKey = keys.customers()
+      return mutationOptions({
+        mutationKey: [...customersKey, "export"],
+        mutationFn: (search: string) =>
+          collectAllCursorPages<Customer>((limit, cursor) =>
+            listCustomers(search, limit, cursor ?? "")
+          ),
+      })
+    },
+    exportSubscriptions: () => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, "export"],
+        mutationFn: (filters: SubscriptionFilters) =>
+          collectAllCursorPages<AdminSubscription>((limit, cursor) =>
+            listSubscriptions(filters, limit, cursor)
+          ),
+      })
+    },
+    exportPayments: () => {
+      const keys = merchantQueryKeys()
+      const paymentsKey = keys.payments()
+      return mutationOptions({
+        mutationKey: [...paymentsKey, "export"],
+        mutationFn: (filters: PaymentFilters) =>
+          collectCursorPages((cursor) =>
+            listPayments(filters, { limit: EXPORT_PAGE, cursor })
+          ),
+      })
+    },
+    resolveFinding: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      const opsKey = keys.ops()
+      return mutationOptions({
+        mutationKey: [...opsKey, "findings", "resolve"],
+        mutationFn: ({
+          id,
+          outcome,
+          notes,
+        }: {
+          id: string
+          outcome: "approve" | "ignore"
+          notes: string
+        }) => resolveFinding(id, outcome, notes),
+        onSuccess: invalidateTreeOnSuccess(queryClient, opsKey),
+      })
+    },
+    refundPayment: (
+      queryClient: QueryClient,
+      paymentId: string,
+      customerId?: string,
+      subscriptionId?: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const paymentsKey = keys.payments()
+      const customerKey = customerId ? keys.customer(customerId) : undefined
+      const subscriptionKey = subscriptionId
+        ? keys.subscription(subscriptionId)
+        : undefined
+      return mutationOptions({
+        mutationKey: [...paymentsKey, paymentId, "refund"],
+        mutationFn: ({
+          amount,
+          reason,
+          revokeAccess,
+        }: {
+          amount: string
+          reason: string
+          revokeAccess: boolean
+        }) => refundPayment(paymentId, amount, reason, revokeAccess),
+        onSuccess: () =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: paymentsKey }),
+            ...(customerKey
+              ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+              : []),
+            ...(subscriptionKey
+              ? [queryClient.invalidateQueries({ queryKey: subscriptionKey })]
+              : []),
+          ]),
+      })
+    },
+    cancelSubscription: (
+      queryClient: QueryClient,
+      subscriptionId: string,
+      customerId?: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      const customerKey = customerId ? keys.customer(customerId) : undefined
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, subscriptionId, "cancel"],
+        mutationFn: ({
+          reason,
+          revokeAccess,
+        }: {
+          reason: string
+          revokeAccess: boolean
+        }) => cancelSubscription(subscriptionId, reason, revokeAccess),
+        onSuccess: () =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+            ...(customerKey
+              ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+              : []),
+          ]),
+      })
+    },
+    resumeSubscription: (
+      queryClient: QueryClient,
+      subscriptionId: string,
+      customerId?: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      const customerKey = customerId ? keys.customer(customerId) : undefined
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, subscriptionId, "resume"],
+        mutationFn: () => resumeSubscription(subscriptionId),
+        onSuccess: () =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+            ...(customerKey
+              ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+              : []),
+          ]),
+      })
+    },
+    changeSubscriptionPaymentMethod: (
+      queryClient: QueryClient,
+      subscriptionId: string,
+      customerId?: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      const customerKey = customerId ? keys.customer(customerId) : undefined
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, subscriptionId, "payment-method"],
+        mutationFn: (paymentMethodId: string | null) =>
+          changeSubscriptionPaymentMethod(subscriptionId, paymentMethodId),
+        onSuccess: () =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+            ...(customerKey
+              ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+              : []),
+          ]),
+      })
+    },
+    previewSubscriptionChange: (subscriptionId: string) => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, subscriptionId, "change", "preview"],
+        mutationFn: (change: ChangeSubscriptionParams) =>
+          previewSubscriptionChange(subscriptionId, change),
+      })
+    },
+    changeSubscription: (
+      queryClient: QueryClient,
+      subscriptionId: string,
+      customerId?: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const subscriptionsKey = keys.subscriptions()
+      const customerKey = customerId ? keys.customer(customerId) : undefined
+      const paymentsKey = keys.payments()
+      return mutationOptions({
+        mutationKey: [...subscriptionsKey, subscriptionId, "change"],
+        mutationFn: (request: {
+          change: ChangeSubscriptionParams
+          idempotencyKey: string
+        }) =>
+          changeSubscription(
+            subscriptionId,
+            request.change,
+            request.idempotencyKey
+          ),
+        onSuccess: () =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+            queryClient.invalidateQueries({ queryKey: paymentsKey }),
+            ...(customerKey
+              ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+              : []),
+          ]),
+      })
+    },
+    grantCustomerProductAccess: (
+      queryClient: QueryClient,
+      customerId: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const customerKey = keys.customer(customerId)
+      return mutationOptions({
+        mutationKey: [...customerKey, "product-access", "grant"],
+        mutationFn: (grant: ProductGrant) =>
+          grantProductAccess(customerId, grant),
+        onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+      })
+    },
+    revokeCustomerProductAccess: (
+      queryClient: QueryClient,
+      customerId: string
+    ) => {
+      const keys = merchantQueryKeys()
+      const customerKey = keys.customer(customerId)
+      return mutationOptions({
+        mutationKey: [...customerKey, "product-access", "revoke"],
+        mutationFn: ({
+          grantId,
+          reason,
+        }: {
+          grantId: string
+          reason: string
+        }) => revokeProductAccess(grantId, reason),
+        onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
+      })
+    },
+    askCatalogCopilot: () => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "copilot", "ask"],
+        mutationFn: (question: string) => askCatalog(question),
+      })
+    },
+    loadCatalogPriceDraft: () => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "copilot", "load-price-draft"],
+        mutationFn: async ({
+          productKey,
+          priceKey,
+        }: {
+          productKey: string
+          priceKey: string
+        }) => {
+          const product = await getProductByKey(productKey)
+          const price = product.prices.find((p) => p.key === priceKey)
+          if (!price) throw new Error(`No live price ${productKey}/${priceKey}`)
+          return {
+            price,
+            productName: product.display_name,
+            productKey: product.key,
+          }
+        },
+      })
+    },
+    createCatalogDraftPrice: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "copilot", "create-price"],
+        mutationFn: (price: CreatePriceParams) => createPrice(price),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    applyCatalog: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "apply"],
+        mutationFn: ({
+          document,
+          force,
+        }: {
+          document: string
+          force: boolean
+        }) => applyCatalog(document, force),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    refreshPSPs: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalogDrift(), "refresh"],
+        mutationFn: () => refreshPSPs(),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalogDrift()),
+      })
+    },
+    createProduct: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "products", "create"],
+        mutationFn: (product: ProductRequest) => createProduct(product),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    updateProduct: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "products", "update"],
+        mutationFn: ({
+          id,
+          product,
+        }: {
+          id: string
+          product: UpdateProductParams
+        }) => updateProduct(id, product),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+        onError: reloadIfMoved(queryClient, keys.catalog()),
+      })
+    },
+    setProductActive: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "products", "set-active"],
+        mutationFn: ({
+          id,
+          active,
+          revision,
+        }: {
+          id: string
+          active: boolean
+          revision: number
+        }) =>
+          updateProduct(id, { archived: !active, expected_revision: revision }),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+        onError: reloadIfMoved(queryClient, keys.catalog()),
+      })
+    },
+    createPrice: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "prices", "create"],
+        mutationFn: (price: CreatePriceParams) => createPrice(price),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    setPriceActive: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "prices", "set-active"],
+        mutationFn: ({
+          id,
+          active,
+          revision,
+        }: {
+          id: string
+          active: boolean
+          revision: number
+        }) =>
+          updatePrice(id, { archived: !active, expected_revision: revision }),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+        onError: reloadIfMoved(queryClient, keys.catalog()),
+      })
+    },
+    putUsageMeter: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      const metersKey = keys.usageMeters()
+      return mutationOptions({
+        mutationKey: [...metersKey, "put"],
+        mutationFn: ({
+          key,
+          meter,
+        }: {
+          key: string
+          meter: UsageMeterRequest
+        }) => putUsageMeter(key, meter),
+        onSuccess: (_result, { key }) =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: metersKey }),
+            queryClient.invalidateQueries({
+              queryKey: keys.usageMeter(key),
+            }),
+          ]),
+        onError: reloadIfMoved(queryClient, metersKey),
+      })
+    },
+    putDefaultUsageRateCard: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      const metersKey = keys.usageMeters()
+      return mutationOptions({
+        mutationKey: [...metersKey, "rate-card", "put"],
+        mutationFn: ({
+          meter,
+          rateCard,
+        }: {
+          meter: Meter
+          rateCard: DefaultUsageRateCardRequest
+        }) => putUsageMeterRateCard(meter, rateCard),
+        onSuccess: (_result, { meter }) =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: metersKey }),
+            queryClient.invalidateQueries({
+              queryKey: keys.usageMeter(meter.key),
+            }),
+          ]),
+        onError: reloadIfMoved(queryClient, metersKey),
+      })
+    },
+    deleteDefaultUsageRateCard: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      const metersKey = keys.usageMeters()
+      return mutationOptions({
+        mutationKey: [...metersKey, "rate-card", "delete"],
+        mutationFn: (meter: Meter) => putUsageMeterRateCard(meter, null),
+        onSuccess: (_result, meter) =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: metersKey }),
+            queryClient.invalidateQueries({
+              queryKey: keys.usageMeter(meter.key),
+            }),
+          ]),
+      })
+    },
+    previewPriceChange: () => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "prices", "preview-change"],
+        mutationFn: ({
+          productKey,
+          priceKey,
+        }: {
+          productKey: string
+          priceKey: string
+        }) => previewPriceMigration(productKey, priceKey),
+      })
+    },
+    changePrice: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "prices", "change"],
+        mutationFn: async ({
+          price,
+          migration,
+        }: {
+          price: CreatePriceParams
+          migration?: {
+            productKey: string
+            priceKey: string
+            effectiveAt: string
+          }
+        }) => {
+          const created = await createPrice(price)
+          if (migration) {
+            await createPriceMigration(
+              migration.productKey,
+              migration.priceKey,
+              created.id,
+              migration.effectiveAt
+            )
+          }
+          return created
+        },
+        // The price can be created before scheduling fails. Always refresh so
+        // the UI reflects that partial server-side success, or the key's
+        // current revision after a revision_mismatch.
+        onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    cancelPriceMigration: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.catalog(), "price-migrations", "cancel"],
+        mutationFn: (migrationId: string) => cancelPriceMigration(migrationId),
+        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      })
+    },
+    // Merchant-config edits: a refused revision means the form is stale, so
+    // reload either way; merchant_config_read_only rereads the capabilities so
+    // the console turns read-only.
+    updateMerchantConfiguration: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.settings(), "update"],
+        mutationFn: (update: UpdateMerchantConfigurationParams) =>
+          updateMerchantConfiguration(update),
+        onSettled: invalidateExactOnSuccess(queryClient, keys.settings()),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+    createPSP: (queryClient: QueryClient) => {
+      const merchant = selectedMerchant()
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.settings(), "psps", "create"],
+        retry: false,
+        gcTime: 0,
+        mutationFn: (psp: CreatePSPParams) => {
+          if (selectedMerchant() !== merchant)
+            throw new Error("Merchant changed; reopen this form before saving")
+          return createPSP(psp)
+        },
+        onSettled: invalidateExactOnSuccess(queryClient, [
+          ...keys.settings(),
+          "psps",
+        ]),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+    // Rotation, settings and archiving: one PATCH at the revision the caller
+    // read. A refused revision reloads the list.
+    updatePSP: (queryClient: QueryClient) => {
+      const merchant = selectedMerchant()
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.settings(), "psps", "update"],
+        retry: false,
+        gcTime: 0,
+        mutationFn: ({ id, psp }: { id: string; psp: UpdatePSPParams }) => {
+          if (selectedMerchant() !== merchant)
+            throw new Error("Merchant changed; reopen this form before saving")
+          return updatePSP(id, psp)
+        },
+        onSettled: invalidateExactOnSuccess(queryClient, [
+          ...keys.settings(),
+          "psps",
+        ]),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+    setCreditLimit: () => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.settings(), "customer-controls", "credit-limit"],
+        mutationFn: ({
+          customerId,
+          currency,
+          amount,
+        }: {
+          customerId: string
+          currency: string
+          amount: string
+        }) =>
+          updateCustomer(customerId, { credit_limits: [{ currency, amount }] }),
+      })
+    },
+    lookupCustomerControls: () => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.settings(), "customer-controls", "lookup"],
+        mutationFn: async ({
+          customerId,
+          currency,
+        }: {
+          customerId: string
+          currency: string
+        }) => {
+          const { settings } = await getCustomer(customerId).catch((err) => {
+            if (err instanceof ApiError && err.status === 404)
+              throw new Error("No customer has this ID")
+            throw err
+          })
+          const code = currency.toUpperCase()
+          return {
+            currency: code,
+            creditLimit:
+              settings.credit_limits.find((l) => l.currency === code)?.amount ??
+              "0",
+            trustLevel:
+              settings.trust_levels.find((l) => l.currency === code)
+                ?.trust_level ?? "",
+          }
+        },
+      })
+    },
+    // Alert webhooks live in the merchant's configuration, so a change moves
+    // its revision too.
+    createWebhook: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.alerts(), "webhooks", "create"],
+        mutationFn: (webhook: CreateAlertWebhookParams) =>
+          createWebhook(webhook),
+        onSuccess: webhooksChanged(queryClient, keys),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+    updateWebhook: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.alerts(), "webhooks", "update"],
+        mutationFn: ({
+          id,
+          webhook,
+        }: {
+          id: string
+          webhook: UpdateAlertWebhookParams
+        }) => updateWebhook(id, webhook),
+        onSuccess: webhooksChanged(queryClient, keys),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+    deleteWebhook: (queryClient: QueryClient) => {
+      const keys = merchantQueryKeys()
+      return mutationOptions({
+        mutationKey: [...keys.alerts(), "webhooks", "delete"],
+        mutationFn: (id: string) => deleteWebhook(id),
+        onSuccess: webhooksChanged(queryClient, keys),
+        onError: readOnlyNow(queryClient),
+      })
+    },
+  }
+  return { adminMutations }
+}

@@ -1,0 +1,36 @@
+import fs from "node:fs"
+import path from "node:path"
+import react from "@vitejs/plugin-react"
+import type { Plugin } from "vite"
+import { defineConfig } from "vitest/config"
+
+const keepGoEmbedPlaceholder: Plugin = {
+  name: "keep-go-embed-placeholder",
+  apply: "build",
+  writeBundle({ dir }) {
+    if (dir) fs.writeFileSync(path.join(dir, ".gitkeep"), "")
+  },
+}
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "./" : "/admin/",
+  plugins: [react(), keepGoEmbedPlaceholder],
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "src") },
+    dedupe: [
+      "react",
+      "react-dom",
+      "@tanstack/react-query",
+      "@openrails/auth-ui",
+    ],
+  },
+  build: { outDir: "dist", emptyOutDir: true },
+  test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
+  server: {
+    proxy: {
+      "/v1": "http://localhost:3053",
+      "/auth": "http://localhost:3053",
+      "/admin/config.json": "http://localhost:3053",
+      "/admin/merchants": "http://localhost:3053",
+    },
+  },
+}))

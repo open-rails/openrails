@@ -207,7 +207,7 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 func proseDocs(t *testing.T, root string) []string {
 	t.Helper()
 	var docs []string
-	for _, pattern := range []string{"README.md", ".claude/CLAUDE.md", "compatibility/README.md", "sdk/billing-ui/*.md", "sdk/billing-ui/docs/*.md", "web/admin/README.md"} {
+	for _, pattern := range []string{"README.md", ".claude/CLAUDE.md", "compatibility/README.md", "sdk/billing-ui/*.md", "sdk/billing-ui/docs/*.md", "server/web/console/README.md"} {
 		found, err := filepath.Glob(filepath.Join(root, pattern))
 		require.NoError(t, err)
 		docs = append(docs, found...)

@@ -103,7 +103,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 | Every HTTP route | [api/routes.md](api/routes.md), `api/openapi.json` |
 | Moving from v0 | [migrating-to-v1.md](migrating-to-v1.md) |
 | Migrating an existing subscriber base in | [batch-import.md](batch-import.md) |
-| Admin console on/off + usage | [admin-console.md](admin-console.md) |
+| Admin console on/off + usage | [billing-admin.md](billing-admin.md) |
 | Day-2 ops, safety levers, cutover | [operator-guide.md](operator-guide.md), [operations.md](operations.md) |
 | Vocabulary | [glossary.md](glossary.md) |
 

@@ -39,6 +39,6 @@ func TestCatalogHumanAmountInputIsDocumented(t *testing.T) {
 	}
 	require.Contains(t, exclusions, []string{"amount", "unit_amount"})
 	require.Contains(t, exclusions, []string{"amount", "currency"})
-	require.Contains(t, string(files[consoleDir+"wire.ts"]), "amount?: string\n")
+	require.Contains(t, string(files[billingUIDir+"wire.ts"]), "amount?: string\n")
 	require.NotContains(t, price.Properties, "trial_amount")
 }

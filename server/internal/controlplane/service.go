@@ -134,13 +134,20 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 			}
 		}
 	}
-	// A self-hosted server registers nobody unless it says so.
+	// Local staff join by invitation; issuer-only servers enroll nobody.
+	// An explicitly closed policy remains more restrictive.
 	reg := &auth.Registration
 	if reg.NativeUserMode == "" {
 		reg.NativeUserMode = iam.RegistrationModeClosed
+		if opts.LocalSignIn {
+			reg.NativeUserMode = iam.RegistrationModeInviteOnly
+		}
 	}
 	if reg.NativeUserMode != iam.RegistrationModeClosed && reg.Verification == "" {
 		reg.Verification = iam.RegistrationVerificationRequired
+	}
+	if opts.LocalSignIn {
+		consoleFrontend(&auth.Frontend, cfg.PublicBillingBaseURL, auth.Token.Issuer)
 	}
 	var http authkit.HTTPConfig
 	if auth.HTTP != nil {
@@ -220,7 +227,33 @@ func validate(auth authkit.Config, opts Options) error {
 	if (registers || auth.Registration.PasswordlessLogin) && !opts.LocalSignIn {
 		return errors.New("controlplane: registration and passwordless login need local sign-in")
 	}
+	if mode == iam.RegistrationModeOpen {
+		return errors.New("controlplane: open self-registration is unavailable on the standalone server; use auth.registration.native_user_mode=invite_only (the local sign-in default), or closed")
+	}
 	return nil
+}
+
+// Console link landings belong to /admin, not the issuer's JSON API path.
+// Explicit frontend settings stay with the operator who configured them.
+func consoleFrontend(front *authkit.FrontendConfig, publicURL, issuer string) {
+	if front.BaseURL == "" {
+		base := publicURL
+		if base == "" {
+			base = issuer
+		}
+		if parsed, err := url.Parse(base); err == nil && parsed.Host != "" {
+			parsed.Path, parsed.RawPath, parsed.RawQuery, parsed.Fragment = "", "", "", ""
+			front.BaseURL = strings.TrimRight(parsed.String(), "/")
+		}
+	}
+	for target, path := range map[*string]string{
+		&front.InvitePath: "/admin/invite", &front.PasswordResetPath: "/admin/reset",
+		&front.VerifyPath: "/admin/verify", &front.PasswordlessPath: "/admin/passwordless",
+	} {
+		if *target == "" {
+			*target = path
+		}
+	}
 }
 
 // New is the control plane over client, the AuthKit client built from

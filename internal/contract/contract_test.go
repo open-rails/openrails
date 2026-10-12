@@ -62,7 +62,7 @@ func TestOpenAPICoversTheCatalog(t *testing.T) {
 func TestTypeScriptIsClosed(t *testing.T) {
 	files, err := Files(os.DirFS("../.."))
 	require.NoError(t, err)
-	for _, name := range []string{billingUIDir + "wire.ts", consoleDir + "wire.ts"} {
+	for _, name := range []string{billingUIDir + "wire.ts"} {
 		src := string(files[name])
 		declared := map[string]bool{"ListPage": true, "Record": true, "T": true}
 		for _, line := range strings.Split(src, "\n") {

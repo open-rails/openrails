@@ -31,6 +31,6 @@ func TestCatalogDurationAliasesAreDocumented(t *testing.T) {
 		require.Contains(t, price.Properties, name)
 		require.Contains(t, price.Properties, name+"_hours")
 		require.Equal(t, []string{name, name + "_hours"}, price.AllOf[i].Not.Required)
-		require.Contains(t, string(files[consoleDir+"wire.ts"]), name+"?: string | null")
+		require.Contains(t, string(files[billingUIDir+"wire.ts"]), name+"?: string | null")
 	}
 }

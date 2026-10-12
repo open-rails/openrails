@@ -73,6 +73,9 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 		{billing.MerchantMetricsRead, billing.RootMetricsRead, map[string]any{"admin": "none", "catalog": false, "merchant_config": false, "metrics": true}},
 	} {
 		tc.want["scope_id"] = shop
+		tc.want["assistants"] = map[string]any{
+			"catalog_copilot": false, "catalog_drafting": false,
+		}
 		for _, role := range []string{heldIn(shop, tc.merchant), "only:" + string(tc.root)} {
 			status, access := get(role, "/v1/admin/access")
 			require.Equal(t, http.StatusOK, status, "%s: %v", role, access)

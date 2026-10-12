@@ -12,7 +12,7 @@ git:
 
 before:
   hooks:
-    # web/admin/embed.go go:embeds the console build into every binary.
+    # server/web/console/embed.go go:embeds the console build into every binary.
     - bash scripts/build-admin-console.sh
     - bash scripts/pack-billing-ui.sh {{ .Version }} build/billing-ui
 

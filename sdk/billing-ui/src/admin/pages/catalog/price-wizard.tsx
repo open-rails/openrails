@@ -1,0 +1,541 @@
+import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { useAdminServices } from "#orck/admin/context"
+import * as React from "react"
+
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import { FormFieldErrors } from "#orck/admin/components/form-field-errors"
+import { Badge } from "#orck/admin/components/ui/badge"
+import { Button } from "#orck/admin/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "#orck/admin/components/ui/dialog"
+import { Input } from "#orck/admin/components/ui/input"
+import { Label } from "#orck/admin/components/ui/label"
+import type { PriceChangeDraft } from "#orck/admin/lib/api/copilot"
+import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import type { Price } from "#orck/client/generated/wire"
+import {
+  formatNativeAmount,
+  nativeAmountFromInput,
+  nativeAmountToInput,
+} from "#orck/admin/lib/format"
+
+import { priceIntervalLabel } from "#orck/admin/pages/catalog/price-format"
+import {
+  buildReviewText,
+  defaultEffectiveDate,
+  defaultMigrationMode,
+  DEFAULT_NOTICE_WINDOW_DAYS,
+  detectDirection,
+  isEffectiveDateValid,
+  minEffectiveDate,
+  type MigrationMode,
+} from "#orck/admin/pages/catalog/price-wizard-logic"
+
+const toDateInputValue = (d: Date) => d.toISOString().slice(0, 10)
+
+const priceChangeFormValues = (price: Price, draft?: PriceChangeDraft) => ({
+  amountInput: nativeAmountToInput(
+    draft?.new_amount ?? price.unit_amount,
+    price.currency
+  ),
+  mode: (draft?.migration ? "migrate" : "grandfather") as MigrationMode,
+  effectiveAt: draft?.migration?.effective_at
+    ? toDateInputValue(new Date(draft.migration.effective_at))
+    : "",
+})
+
+// PriceChangeWizard is the #777 console price-change wizard — the ONLY
+// amount-edit affordance on a price. Three steps: new amount -> migration
+// plan (direction-aware defaults, live affected-count preview, notice-window
+// gate on increase+migrate) -> review in words, then confirm applies the
+// catalog price update followed (if migrating) by the price migration.
+//
+// draft (#779): when the catalog copilot proposed this change, the dialog
+// opens PRE-FILLED straight at Step 3 (review) — the affected count already
+// rode in the draft, so no extra preview call is needed. Confirm behaves
+// EXACTLY as a hand-typed change (the same create-price and price-migration
+// calls).
+export function PriceChangeWizard({
+  price,
+  productName,
+  productKey,
+  draft,
+  onDone,
+}: {
+  price: Price
+  productName: string
+  productKey: string | undefined
+  draft?: PriceChangeDraft
+  onDone?: () => void
+}) {
+  const { toast, toastApiError, adminMutations, adminQueries } =
+    useAdminServices()
+
+  const { id: adminId } = useAdminUI()
+
+  const queryClient = useQueryClient()
+  const [open, setOpen] = React.useState(() => !!draft)
+  const [step, setStep] = React.useState<1 | 2 | 3>(() => (draft ? 3 : 1))
+  const previewPriceChange = useMutation(adminMutations.previewPriceChange())
+  const changePrice = useMutation(adminMutations.changePrice(queryClient))
+  const affectedCount =
+    previewPriceChange.data?.matched ?? draft?.affected_count ?? null
+  const { data: configuration } = useQuery({
+    ...adminQueries.merchantConfiguration(),
+    enabled: open,
+  })
+  const noticeWindowDays =
+    configuration?.settings.reprice_notice_window_days ??
+    DEFAULT_NOTICE_WINDOW_DAYS
+
+  const [now] = React.useState(() => new Date())
+  const form = useForm({
+    defaultValues: priceChangeFormValues(price, draft),
+    onSubmit: async ({ value }) => {
+      if (!productKey || price.customer_amount) return
+      const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
+      if (newAmount === null || BigInt(newAmount) <= 0n) return
+
+      try {
+        const created = await changePrice.mutateAsync({
+          price: {
+            product_id: price.product_id,
+            unit_amount: newAmount,
+            currency: price.currency,
+            access_duration_hours: price.access_duration_hours ?? undefined,
+            billing_interval_hours: price.billing_interval_hours ?? undefined,
+            trial_unit_amount: price.trial_unit_amount ?? undefined,
+            trial_duration_hours: price.trial_duration_hours ?? undefined,
+            key: price.key,
+            psps: Object.keys(price.psps ?? {}),
+            expected_revision: price.revision,
+          },
+          migration:
+            value.mode === "migrate"
+              ? {
+                  productKey,
+                  priceKey: price.key,
+                  effectiveAt: new Date(value.effectiveAt).toISOString(),
+                }
+              : undefined,
+        })
+        if (created.pending_manual_actions?.length) {
+          toast.warning(
+            `Price updated. One step is left for you: ${created.pending_manual_actions.map((action) => `${action.psp}: ${action.hint}`).join(". ")}`
+          )
+        } else {
+          toast.success(
+            value.mode === "migrate"
+              ? "Price updated and migration scheduled"
+              : "Price updated"
+          )
+        }
+        handleOpenChange(false)
+        onDone?.()
+      } catch (err) {
+        toastApiError(err, "Change price")
+      }
+    },
+  })
+
+  const reset = () => {
+    setStep(1)
+    form.reset(priceChangeFormValues(price))
+    previewPriceChange.reset()
+  }
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      reset()
+    }
+    setOpen(next)
+  }
+
+  const enterStep2 = () => {
+    if (!productKey || price.customer_amount) return
+    const amount = nativeAmountFromInput(
+      form.state.values.amountInput,
+      price.currency
+    )
+    const direction = detectDirection(
+      amount ?? price.unit_amount,
+      price.unit_amount
+    )
+    form.setFieldValue("mode", defaultMigrationMode(direction))
+    form.setFieldValue(
+      "effectiveAt",
+      toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays))
+    )
+    setStep(2)
+    previewPriceChange.reset()
+    previewPriceChange.mutate(
+      { productKey, priceKey: price.key },
+      { onError: (err) => toastApiError(err, "Preview affected subscribers") }
+    )
+  }
+
+  // Archived (prior-version) rows are history, not the editable current
+  // price. Each product/key pair has exactly one live edit target.
+  // Wait for the product before allowing previews or scheduling a migration.
+  if (price.archived || !productKey || price.customer_amount) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        title={
+          price.customer_amount
+            ? "This price lets customers choose an amount. Change its limits through a catalog application or the client."
+            : price.archived
+              ? "This is an archived version. Change the current price for this key instead."
+              : "Load the product before changing its price."
+        }
+      >
+        <AdminMessage id={"Change price"} />
+      </Button>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      {!draft && (
+        <DialogTrigger
+          render={
+            <Button variant="outline" size="sm">
+              <AdminMessage id={"Change price"} />
+            </Button>
+          }
+        />
+      )}
+      <DialogContent className={DIALOG_FORM}>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (step !== 3) return
+            void form.handleSubmit()
+          }}
+        >
+          <form.Subscribe
+            selector={(state) => [state.values, state.isSubmitting] as const}
+          >
+            {([values, isSubmitting]) => {
+              const newAmount =
+                nativeAmountFromInput(values.amountInput, price.currency) ??
+                price.unit_amount
+              const direction = detectDirection(newAmount, price.unit_amount)
+              const minDate = minEffectiveDate(direction, now, noticeWindowDays)
+              const dateValid =
+                values.mode !== "migrate" ||
+                (!!values.effectiveAt &&
+                  isEffectiveDateValid(
+                    direction,
+                    new Date(values.effectiveAt),
+                    now,
+                    noticeWindowDays
+                  ))
+
+              return (
+                <>
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <AdminMessage id={"Change price for "} />
+                      {productName}
+                      {draft && (
+                        <Badge variant="secondary">
+                          <AdminMessage id={"drafted by copilot"} />
+                        </Badge>
+                      )}
+                    </DialogTitle>
+                    <DialogDescription>
+                      <AdminMessage id={"Step "} />
+                      {step}
+                      <AdminMessage id={" of 3:"} />{" "}
+                      {step === 1
+                        ? "new amount"
+                        : step === 2
+                          ? "migration plan"
+                          : "review"}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {step === 1 && (
+                    <div className="grid gap-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase">
+                            <AdminMessage id={"Current amount"} />
+                          </p>
+                          <p className="font-medium">
+                            {formatNativeAmount(
+                              price.unit_amount,
+                              price.currency
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase">
+                            <AdminMessage id={"Currency · interval"} />
+                          </p>
+                          <p className="font-medium">
+                            {price.currency.toUpperCase()} ·{" "}
+                            {priceIntervalLabel(price)}
+                          </p>
+                        </div>
+                      </div>
+                      <form.Field
+                        name="amountInput"
+                        validators={{
+                          onBlur: ({ value }) => {
+                            const amount = nativeAmountFromInput(
+                              value,
+                              price.currency
+                            )
+                            if (amount === null || BigInt(amount) <= 0n) {
+                              return "Enter an amount greater than zero."
+                            }
+                            return undefined
+                          },
+                        }}
+                      >
+                        {(field) => (
+                          <div className="grid gap-1.5">
+                            <Label htmlFor={adminId("wiz-amount")}>
+                              <AdminMessage id={"New amount (major units)"} />
+                            </Label>
+                            <Input
+                              id={adminId("wiz-amount")}
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(event) =>
+                                field.handleChange(event.target.value)
+                              }
+                              autoFocus
+                            />
+                            <FormFieldErrors errors={field.state.meta.errors} />
+                          </div>
+                        )}
+                      </form.Field>
+                      {direction !== "unchanged" && (
+                        <p className="text-sm text-muted-foreground">
+                          <AdminMessage id={"This is a price"} />{" "}
+                          <span className="font-medium text-foreground">
+                            {direction === "increase" ? "increase" : "decrease"}
+                          </span>
+                          <AdminMessage
+                            id={
+                              ". Currency and interval stay locked to the current price."
+                            }
+                          />
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {step === 2 && (
+                    <div className="grid gap-3">
+                      <p className="text-sm">
+                        {affectedCount === null && previewPriceChange.isPending
+                          ? "Checking affected subscribers…"
+                          : `${(affectedCount ?? 0).toLocaleString()} active subscription${affectedCount === 1 ? "" : "s"} on prior versions of ${price.key}.`}
+                      </p>
+                      <form.Field name="mode">
+                        {(field) => (
+                          <div className="grid gap-2">
+                            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+                              <input
+                                type="radio"
+                                name={field.name}
+                                className="mt-1"
+                                checked={field.state.value === "grandfather"}
+                                onChange={() =>
+                                  field.handleChange("grandfather")
+                                }
+                              />
+                              <span>
+                                <span className="font-medium">
+                                  <AdminMessage id={"Grandfather."} />
+                                </span>{" "}
+                                <AdminMessage
+                                  id={
+                                    "Existing subscribers keep the current price."
+                                  }
+                                />
+                                {direction === "increase" && (
+                                  <Badge variant="secondary" className="ml-2">
+                                    <AdminMessage id={"default"} />
+                                  </Badge>
+                                )}
+                              </span>
+                            </label>
+                            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+                              <input
+                                type="radio"
+                                name={field.name}
+                                className="mt-1"
+                                checked={field.state.value === "migrate"}
+                                onChange={() => field.handleChange("migrate")}
+                              />
+                              <span>
+                                <span className="font-medium">
+                                  <AdminMessage id={"Migrate."} />
+                                </span>{" "}
+                                <AdminMessage
+                                  id={
+                                    "Move everyone to the new price at their first renewal on or after a date you choose."
+                                  }
+                                />
+                                {direction === "decrease" && (
+                                  <Badge variant="secondary" className="ml-2">
+                                    <AdminMessage id={"default"} />
+                                  </Badge>
+                                )}
+                              </span>
+                            </label>
+                          </div>
+                        )}
+                      </form.Field>
+                      {values.mode === "migrate" && (
+                        <form.Field name="effectiveAt">
+                          {(field) => (
+                            <div className="grid gap-1.5">
+                              <Label htmlFor={adminId("wiz-effective")}>
+                                <AdminMessage id={"Effective date"} />
+                              </Label>
+                              <Input
+                                id={adminId("wiz-effective")}
+                                type="date"
+                                value={field.state.value}
+                                min={
+                                  minDate
+                                    ? toDateInputValue(minDate)
+                                    : undefined
+                                }
+                                onBlur={field.handleBlur}
+                                onChange={(event) =>
+                                  field.handleChange(event.target.value)
+                                }
+                              />
+                              {direction === "increase" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  <AdminMessage id={"Must be at least "} />
+                                  {noticeWindowDays}
+                                  <AdminMessage
+                                    id={
+                                      " days away. Card networks require that much notice before a price goes up. You can change the number in Settings."
+                                    }
+                                  />
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  <AdminMessage
+                                    id={
+                                      "A price going down needs no notice, so today is fine."
+                                    }
+                                  />
+                                </p>
+                              )}
+                              {!dateValid && (
+                                <p
+                                  className="text-xs text-destructive"
+                                  role="alert"
+                                >
+                                  <AdminMessage id={"Pick a later date."} />
+                                </p>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                <AdminMessage
+                                  id={
+                                    "A reprice_scheduled notice is queued for every affected subscriber as soon as you confirm."
+                                  }
+                                />
+                              </p>
+                            </div>
+                          )}
+                        </form.Field>
+                      )}
+                    </div>
+                  )}
+
+                  {step === 3 && (
+                    <div className="grid gap-3">
+                      <p className="rounded-md border bg-muted/40 p-3 text-sm">
+                        {buildReviewText({
+                          newAmount,
+                          currentAmount: price.unit_amount,
+                          currency: price.currency,
+                          affectedCount: affectedCount ?? 0,
+                          plan: {
+                            mode: values.mode,
+                            effectiveAt:
+                              values.mode === "migrate"
+                                ? new Date(values.effectiveAt).toISOString()
+                                : "",
+                          },
+                          now,
+                        })}
+                      </p>
+                    </div>
+                  )}
+
+                  <DialogFooter>
+                    {step > 1 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={isSubmitting}
+                        onClick={() => setStep((value) => (value - 1) as 1 | 2)}
+                      >
+                        <AdminMessage id={"Back"} />
+                      </Button>
+                    )}
+                    {step === 1 && (
+                      <Button
+                        type="button"
+                        disabled={
+                          !values.amountInput ||
+                          direction === "unchanged" ||
+                          BigInt(newAmount) <= 0n
+                        }
+                        onClick={enterStep2}
+                      >
+                        <AdminMessage id={"Next"} />
+                      </Button>
+                    )}
+                    {step === 2 && (
+                      <Button
+                        type="button"
+                        disabled={!dateValid || previewPriceChange.isPending}
+                        onClick={() => setStep(3)}
+                      >
+                        <AdminMessage id={"Next"} />
+                      </Button>
+                    )}
+                    {step === 3 && (
+                      <Button type="submit" disabled={isSubmitting}>
+                        {isSubmitting ? "Working…" : "Confirm"}
+                      </Button>
+                    )}
+                  </DialogFooter>
+                </>
+              )
+            }}
+          </form.Subscribe>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}

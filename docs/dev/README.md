@@ -13,7 +13,7 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 
 | Target | What it does |
 |---|---|
-| `task build` | Build `bin/openrails` from `server/cmd/openrails` (embeds `web/admin/dist` if built) |
+| `task build` | Build `bin/openrails` from `server/cmd/openrails` (embeds `server/web/console/dist` if built) |
 | `task run` | Build + run the server |
 | `task dev` | Hot-reload dev server (Air, `.air.toml`) |
 | `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
@@ -22,7 +22,7 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 | `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` includes the local staleness gate |
 | `task test` | Source guardrails + unit tests (`-race`) + focused e2e contracts (requires `OPENRAILS_E2E_DSN`) |
 | `task ci-local` | Run the same compact checks and e2e contracts as CI |
-| `task admin-build` | Build the admin console SPA into `web/admin/dist` (gitignored) |
+| `task admin-build` | Build the admin console SPA into `server/web/console/dist` (gitignored) |
 | `task build-console-binary` | `admin-build` + `build`: the binary with the console embedded |
 | `task fmt` / `task clean` | `go fmt` + `goimports` / remove build artifacts |
 
@@ -125,10 +125,10 @@ In the root module:
 - `api/` — the frozen-contract snapshots: `go.txt`, `openapi.json`, `schema.txt`
 - `ci/` — the end-to-end suite: public-client contracts with disposable PostgreSQL schemas and deterministic provider transports; `server/ci` is the server's (`scripts/e2e.sh` runs both)
 - `scripts/` — Task-target implementations
-- `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
+- `server/web/console/` — admin console SPA source; `embed.go` embeds its `dist/` build
 
 The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
-`nmimock` and `stripemock`), `web/admin` and `server` are the only importable non-`main` packages;
+`nmimock` and `stripemock`), `server/web/console` and `server` are the only importable non-`main` packages;
 `internal/contractaudit` `TestPublicPackages` fails on any other.
 
 ## Releases

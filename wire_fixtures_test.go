@@ -29,7 +29,7 @@ type errorEnvelope struct {
 }
 
 // canonicalWireFixtures pins success, error, null, omitted, empty-list, list,
-// time and int64-boundary money shapes. web/admin reads the same files.
+// time and int64-boundary money shapes. server/web/console reads the same files.
 func canonicalWireFixtures() map[string]any {
 	when := time.Date(2026, 9, 16, 0, 0, 0, 123456789, time.UTC)
 	maxMoney, minMoney, zero := int64(math.MaxInt64), int64(math.MinInt64), int64(0)

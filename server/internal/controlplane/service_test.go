@@ -16,7 +16,7 @@ import (
 
 // The server passes the host's AuthKit configuration through, setting only
 // the product's own: roles, the API key prefix, its River schema, the
-// resource's scopes, a closed registration by default, and its HTTP mount.
+// resource's scopes, invitation-only local registration, and its HTTP mount.
 // Every refusal precedes AuthKit's construction, so none needs a database.
 func TestAuthKitConfiguration(t *testing.T) {
 	engine := &config.Config{TrustedProxies: []string{"10.0.0.0/8"}}
@@ -28,6 +28,7 @@ func TestAuthKitConfiguration(t *testing.T) {
 		"auth.token.issuer is required":     {authkit.Config{}, Options{}},
 		"is not one of open":                {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: "sometimes"}}, Options{}},
 		"need local sign-in":                {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{}},
+		"open self-registration":            {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{LocalSignIn: true}},
 		"passwordless login need local sig": {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{PasswordlessLogin: true}}, Options{}},
 	} {
 		_, err := AuthKit(engine, tc.auth, tc.opts)
@@ -50,7 +51,7 @@ func TestAuthKitConfiguration(t *testing.T) {
 	got, err = AuthKit(engine, authkit.Config{
 		Token:        issuer,
 		Resource:     authkit.ResourceConfig{ID: "https://api.openrails.example.com", Scopes: map[string][]string{"x": {"y"}}},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen},
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeInviteOnly},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 	}, Options{LocalSignIn: true})
 	require.NoError(t, err)
@@ -58,6 +59,8 @@ func TestAuthKitConfiguration(t *testing.T) {
 	require.Equal(t, iam.RegistrationVerificationRequired, got.Registration.Verification)
 	require.Contains(t, got.HTTP.Groups, iam.RouteRegistration)
 	require.NotContains(t, got.HTTP.Groups, iam.RouteBrowserOIDC)
+	require.NotContains(t, got.HTTP.Groups, iam.RouteAdmin)
+	require.Equal(t, "/admin/invite", got.Frontend.InvitePath)
 	require.Subset(t, got.HTTP.Groups, []iam.RouteGroup{iam.RouteAuthorizationServer, iam.RouteSCIM}, "what trusted issuers call: the token endpoint and the directory")
 	require.Empty(t, got.HTTP.TrustedProxies, "a declared posture is kept")
 
@@ -66,6 +69,19 @@ func TestAuthKitConfiguration(t *testing.T) {
 	t.Cleanup(pool.Close)
 	_, err = New(nil, engine, got, pool, Options{})
 	require.ErrorContains(t, err, "AuthKit client is required")
+}
+
+func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
+	engine := &config.Config{PublicBillingBaseURL: "https://billing.example.com/v1"}
+	got, err := AuthKit(engine, authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true})
+	require.NoError(t, err)
+	require.Equal(t, iam.RegistrationModeInviteOnly, got.Registration.NativeUserMode)
+	require.Equal(t, "https://billing.example.com", got.Frontend.BaseURL)
+	require.Equal(t, "/admin/invite", got.Frontend.InvitePath)
+	require.Equal(t, "/admin/reset", got.Frontend.PasswordResetPath)
+	require.Equal(t, "/admin/verify", got.Frontend.VerifyPath)
+	require.Equal(t, "/admin/passwordless", got.Frontend.PasswordlessPath)
+	require.NotContains(t, got.HTTP.Groups, iam.RouteAdmin)
 }
 
 // AuthKit's routes sit beneath /auth under an origin issuer, else beneath

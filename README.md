@@ -240,11 +240,6 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 		Programmatic:   false, // /v1/app: your backend's own calls over HTTP, each with its permission, and SCIM user provisioning; embedded, your Go code calls the Client instead
 	},
 
-	// The staff dashboard at /billing/admin. It has one area per staff group above,
-	// shown only when that group is on and the staff member holds its permission;
-	// the admin area is read-only without billing.RootCustomerManage. Here support
-	// sees and helps customers; operators see all four.
-	AdminConsole: true,
 })
 ```
 
@@ -265,7 +260,6 @@ you turn it on, embedded or standalone:
 | business metrics, read-only (`/v1/metrics`, `/v1/metrics/dashboard`) | `RouteGroups.Metrics` | `root:metrics:read` | staff, or your backend |
 | programmatic (`/v1/app`) | `RouteGroups.Programmatic` | an application credential holding the route's permission (`root:entitlements:read`, `root:usage:manage`, …) | your backend, never a person |
 | user provisioning (`/v1/app/scim/v2`) | `RouteGroups.Programmatic`, without `Deps.UserInfo` | an application credential or a provisioning token | your user directory |
-| admin console (`/admin`) | `AdminConsole: true`, with at least one staff group on | each area's permission | staff, in the browser |
 
 Each permission is also admitted by its `merchant:` name, held in the scope of
 the merchant the request acts on.
@@ -581,8 +575,6 @@ until `RouteGroups` turns it on:
   needs. Embedded,
   your Go code calls the same operations on the `Client` and you can leave this
   off.
-- `AdminConsole`: `true` serves the staff dashboard at `/billing/admin` (below);
-  off by default.
 
 `bill` is the engine: it starts the workers, mounts the routes and reports
 readiness. `shop` is your merchant's handle, the Go `Client`: every admin,
@@ -612,42 +604,20 @@ ends after its 3 days; a canceled membership keeps access until its paid term en
 
 #### Admin dashboard
 
-OpenRails ships a dashboard for your staff, the admin console, with four areas:
-customer support (customers, subscriptions, payments and refunds, orders),
-the catalog, merchant config (PSPs, findings, settings) and business metrics.
-It is off by default; `AdminConsole: true` serves it at `/billing/admin`, over
-the routes it drives. This one has only customer support:
+The standalone server's console is at `/admin`, with Billing, Access and
+Account tabs. Configure app sign-in with `admin_console.issuers`, or offer
+local accounts with `local_sign_in`; see the [standalone console](docs/billing-admin.md).
 
-```go
-err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:         ak.Authenticator(),
-	Prefix:       "/billing",
-	RouteGroups:  openrails.RouteGroups{Admin: true},
-	AdminConsole: true,
-})
-```
+The browser entry and JSON API have separate URLs. For a server hosted at
+`https://billing.doujins.com`, open `https://billing.doujins.com/admin`.
+`GET /v1/metrics/dashboard` returns the saved JSON layout and widget definitions;
+`POST /v1/metrics/query` returns chart data. A host embedding `BillingAdmin`
+chooses its own `basePath`.
 
-- **Who signs in**: your staff, with their AuthKit accounts, through your
-  AuthKit at `/api/v1` on the same origin. Every page calls the routes of its
-  area, which check that the staff member holds that area's permission. A
-  `sensitive` change after a stale sign-in asks them to confirm it is them.
-- **What each sees**: an area appears only when its group is on and the
-  staff member holds its permission; on load the console asks
-  `GET /v1/admin/access`, which any signed-in staff member may call. Customer
-  support is read-only without `root:customer:manage`. Editing the metrics
-  dashboard's layout needs `root:config:manage` as well as
-  `root:metrics:read`. Someone holding none of them sees only that they have
-  no access.
-- **Requirements**: at least one staff group on (`RouteGroups.Admin`, `Catalog`,
-  `MerchantConfig` or `Metrics`), and a console build passed as
-  `Deps.ConsoleAssets` ([admin console](docs/admin-console.md)); `Mount` fails
-  without either.
-- **Its own host**: the dashboard calls `/billing/v1` and `/api/v1` on its own
-  origin, and the admin routes answer no cross-origin requests. To serve it at
-  `billing.example.com`, send that host to this server.
-
-The standalone server's switch is `admin_console.enabled` in `config.yaml`
-(with `admin_console.path`), and its route groups are `route_groups` there.
+An embedded engine serves the billing API. The host owns its admin pages
+and authenticates their calls through `Routes.Auth`. `GET /v1/admin/access`
+reports the caller's permitted areas and the assistants enabled there;
+customer support is read-only without `root:customer:manage`.
 
 #### Share one River fleet
 
@@ -875,7 +845,7 @@ What you will set next:
 |---|---|
 | Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.UserInfo` (embedded) or SCIM provisioning (standalone) |
 | Turn on the staff and programmatic routes | `Routes.RouteGroups` (admin, catalog, merchant config, metrics, programmatic), and grant `billing.Permissions()` in your roles |
-| Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
+| Serve the admin console | The standalone server ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
 | Report readiness | `bill.Ready(ctx)` and `bill.Probes()` in your own health handler |
@@ -1695,7 +1665,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 **Run your business** — for the merchant defining plans and managing customers:
 
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
-- [Admin console](docs/admin-console.md) — the merchant portal: turning it on/off, building the assets, and using it.
+- [Admin console](docs/billing-admin.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
 - Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md).
 

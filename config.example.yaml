@@ -88,7 +88,10 @@ naming:
 
 # Sign-in to OpenRails' own accounts (password, passwordless, registration).
 # Off, the default: people sign in at a trusted issuer, and the console with it
-# (admin_console.issuer). Turn it on when you have no identity provider.
+# (admin_console.issuers). Turn it on when you have no identity provider.
+# Invited enrollment needs a verification sender, such as email_smtp. For
+# existing or bootstrapped accounts only, set auth.registration.native_user_mode
+# to closed (AUTH_REGISTRATION_NATIVE_USER_MODE=closed).
 # local_sign_in: true
 
 # Declaring vault connects to it (VAULT_* env settings declare it too). Name a
@@ -192,18 +195,18 @@ route_groups:
   metrics: true          # business metrics, read-only
   programmatic: true     # your backend's calls and SCIM user provisioning
 
-# Merchant admin console (staff dashboard), served at path. Off by default:
-# while enabled is false no console route exists. Needs console assets in the
-# binary: `task build` embeds web/admin/dist after `task admin-build`; enabled
-# without them refuses boot. It signs in through the control plane's AuthKit.
+# The standalone staff console is always served at /admin. Release builds
+# include its assets; `task build` embeds server/web/console/dist after
+# `task admin-build`. A source build without assets serves build instructions
+# with status 503. Configure app issuers or local_sign_in for staff sign-in.
 admin_console:
-  enabled: false
-  # path: /admin             # e.g. /billing/admin when /admin is taken
-  # issuer:                  # staff sign in at a merchant's trusted issuer
-  #   url: https://example.com/auth
-  #   client_id: openrails-console   # public client, redirect URI <console path>/callback
-  #   # name: Example        # sign-in button; default the trusted issuer's name
-  #   # scope: openid profile email offline_access openrails:merchant  # when the issuer needs offline_access
+  issuers: {} # /admin is always served; add one sign-in choice per merchant
+  # issuers:
+  #   example-merchant: # merchant id or name; root for operators
+  #     url: https://example.com/auth
+  #     client_id: billing-console # public PKCE client; redirect URI https://billing.example.com/admin/callback
+  #     name: Example app
+  #     scope: openid profile email offline_access openrails:merchant
 
 # The hosted checkout: merchant orders created with `checkout` get a short-lived
 # URL on this origin, where the customer pays. It must be an origin of its own

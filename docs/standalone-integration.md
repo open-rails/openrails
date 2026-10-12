@@ -463,13 +463,17 @@ embedded host mounts them, and each merchant's group as its scope.
 | `server.Config` | Meaning |
 |---|---|
 | `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
-| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; a closed registration and the engine's trusted proxies when unset. |
+| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; invitation-only registration and `/admin` link landings for local staff (closed without local sign-in), and the engine's trusted proxies when unset. Explicit closed enrollment stays restrictive; open self-registration is refused. |
 | `LocalSignIn` | Serve sign-in to the server's own accounts. Without it people sign in at a trusted issuer. |
 | `Naming` | The rename policy for merchant names. |
 | `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |
 | `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer, for `Auth.Resource.ID`. |
 | `Addr` | Where `Run` listens; default `:3053`. |
 | `PrivateAddr` | Where `Run` also serves `PrivateHandler`, the operator's `/metrics`; empty serves none (`private_port`). |
+
+The console build is a server dependency: `server.Deps.ConsoleAssets` accepts
+a filesystem rooted at `index.html`; nil uses the build embedded in the binary.
+The embedded `openrails.New` engine does not serve the console.
 
 `server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's own
 (`Auth`, an `authkit.Deps`: its senders, key source and the rest; nil Postgres

@@ -47,14 +47,20 @@ const VARIABLE_TO_CSS: Record<keyof CheckoutVariables, string> = {
 }
 
 export function appearanceStyle(
-  appearance: CheckoutAppearance | undefined
+  appearance: CheckoutAppearance | undefined,
+  namespace: "orck" | "orba" = "orck"
 ): CSSProperties | undefined {
   const variables = appearance?.variables
   if (!variables) return undefined
   const style: Record<string, string> = {}
   for (const [key, value] of Object.entries(variables)) {
     if (!value) continue
-    style[VARIABLE_TO_CSS[key as keyof CheckoutVariables]] = value
+    style[
+      VARIABLE_TO_CSS[key as keyof CheckoutVariables].replace(
+        "--orck-",
+        `--${namespace}-`
+      )
+    ] = value
   }
   return style as CSSProperties
 }

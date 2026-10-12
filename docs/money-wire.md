@@ -65,7 +65,7 @@ accept any fractional precision. A timestamp with no value is `null`.
 The registry has one owner. Go consumers read it with `billing.Currencies()`
 / `billing.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
 table from the `currencies` of the public `GET /v1/config`. The admin UI's
-`web/admin/src/lib/currency-units.json` is generated from it by
+`sdk/billing-ui/src/client/generated/currencies.ts` is generated from it by
 `go run ./scripts/currency-units` and pinned by a Go test. It formats exact decimal strings with BigInt/Intl, including
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input.
@@ -80,7 +80,7 @@ internal records and keep integers.
 
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
-(`web/admin/src/lib/api/wire-fixtures.test.ts`) both decode them.
+(`sdk/billing-ui/src/admin/lib/money.test.ts`) both decode them.
 `wire_money_guard_test.go` walks the root package, `billing`, `catalog`
 and `internal` (all but SQLC output) and fails when a
 monetary field (any integer, float or untyped `any`/`map[string]any`/
@@ -94,7 +94,7 @@ shrink; `TestWireMoneyGuardDetects` proves each rule fires.
 
 ## Admin console browser support
 
-The exact display path (`web/admin/src/lib/format.ts`) depends on:
+The exact display path (`sdk/billing-ui/src/admin/lib/format.ts`) depends on:
 
 | Feature | Used for | Minimum (MDN compat data) |
 |---|---|---|

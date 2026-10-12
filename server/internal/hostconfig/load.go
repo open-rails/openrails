@@ -336,6 +336,14 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return databaseConfig, nil
 	}
 
+	for _, old := range []string{"admin_console.enabled", "admin_console.path"} {
+		if k.Exists(old) {
+			return nil, fmt.Errorf("%s was removed: the standalone console is always served at /admin; configure admin_console.issuers and local_sign_in", old)
+		}
+	}
+	if k.Exists("admin_console.issuer") {
+		return nil, fmt.Errorf("admin_console.issuer was renamed: declare admin_console.issuers keyed by merchant id or name (root for operators)")
+	}
 	// HARD CUT (#469): the AuthKit control plane is always on in standalone
 	// mode; the verifier-only deployment mode is gone. The former
 	// auth.control_plane.enabled knob is rejected — not silently ignored — so a

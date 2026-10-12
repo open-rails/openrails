@@ -196,7 +196,7 @@ kubectl -n openrails create secret generic openrails-redis \
 
 TLS ends at the ingress controller (cert-manager, or the controller's own ACME).
 Every path goes to the server: the API, `/v1/webhooks/{rail}/{account_id}` for
-the PSPs' webhooks, and the admin console when `admin_console.enabled`. Give the
+the PSPs' webhooks, and the standalone admin console at `/admin`. Give the
 same public origin to `public_billing_base_url`, `auth.token.issuer` and
 `auth.resource.id`.
 

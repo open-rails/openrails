@@ -305,20 +305,23 @@ is the caller's reproducible idempotency key: retrying it can never double-credi
 
 ### The admin console
 
-A React SPA served at its path (`/admin/` by default), driving the same `/v1/admin/*` API — off by
-default. It mounts only when console assets are built into the binary **and** it is
-switched on: `Routes.AdminConsole` embedded, `admin_console.enabled: true` (env
-`ADMIN_CONSOLE_ENABLED`) standalone. Login is a real AuthKit
-login (password standalone; OIDC when the embedded host configures it). Build and
-mount details: `docs/admin-console.md`.
+The standalone server always serves its staff console at `/admin`, with
+**Billing**, **Access** and **Account**. BillingAdmin supplies the billing pages;
+AuthKit components supply group administration and account security. Staff use
+configured app issuers or the separately enabled local sign-in. Release binaries
+include the assets; a source build without them answers 503 with build instructions.
+
+Embedded hosts compose `@openrails/billing-ui/admin` at their chosen UI path;
+the embedded Go engine serves no console. Build and mounting details are in
+`docs/billing-admin.md`.
 
 Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift
 view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
-PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
-pages, such as the team and API keys. Each area shows only to staff holding its
+PSPs, credit limit, trust level), **Dashboard**. Hosts may extend BillingAdmin with their own pages and panels. Each billing area
+shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).
 - **Dashboard**: a widget grid over the metrics API. Saved and default dashboards remain available. Operators can move, resize, rename and remove existing widgets, choose their chart type and change whether they follow the dashboard's date range. Built-in AI metrics questions, widget creation and refinement are not available.
 

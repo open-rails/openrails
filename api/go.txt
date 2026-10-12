@@ -231,7 +231,6 @@ pkg openrails, type DatabaseConfig struct, Schema string
 pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock
-pkg openrails, type Deps struct, ConsoleAssets fs.FS
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
@@ -360,8 +359,6 @@ pkg openrails, type RouteGroups struct, Metrics bool
 pkg openrails, type RouteGroups struct, Programmatic bool
 pkg openrails, type Routes = config.Routes
 pkg openrails, type Routes struct
-pkg openrails, type Routes struct, AdminConsole bool
-pkg openrails, type Routes struct, AdminConsoleAuthBase string
 pkg openrails, type Routes struct, Auth billingauth.Authenticator
 pkg openrails, type Routes struct, Prefix string
 pkg openrails, type Routes struct, RouteGroups config.RouteGroups
@@ -1041,10 +1038,14 @@ pkg openrails/billing, type AcknowledgeNotificationEventsParams struct
 pkg openrails/billing, type AcknowledgeNotificationEventsParams struct, NotificationIDs []NotificationID `json:"notification_ids"`
 pkg openrails/billing, type AdminAccess struct
 pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
+pkg openrails/billing, type AdminAccess struct, Assistants AdminAssistants `json:"assistants"`
 pkg openrails/billing, type AdminAccess struct, Catalog bool `json:"catalog"`
 pkg openrails/billing, type AdminAccess struct, MerchantConfig bool `json:"merchant_config"`
 pkg openrails/billing, type AdminAccess struct, Metrics bool `json:"metrics"`
 pkg openrails/billing, type AdminAccess struct, ScopeID string `json:"scope_id"`
+pkg openrails/billing, type AdminAssistants struct
+pkg openrails/billing, type AdminAssistants struct, CatalogCopilot bool `json:"catalog_copilot"`
+pkg openrails/billing, type AdminAssistants struct, CatalogDrafting bool `json:"catalog_drafting"`
 pkg openrails/billing, type Admission struct
 pkg openrails/billing, type Admission struct, Allowed bool `json:"allowed"`
 pkg openrails/billing, type Admission struct, BlockedBy *AdmissionBlock `json:"blocked_by"`
@@ -3315,16 +3316,13 @@ pkg openrails/server, method (*Server) Start(context.Context, ...openrails.Start
 pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
 pkg openrails/server, method (*Server) UnlinkCustomer(context.Context, billing.NetworkAccountID, billing.CustomerLinkID) (*billing.CustomerLink, error)
 pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, string) error
-pkg openrails/server, type AdminConsole = config.ConsoleMount
+pkg openrails/server, type AdminConsole = hostconfig.ConsoleConfig
 pkg openrails/server, type AdminConsole struct
-pkg openrails/server, type AdminConsole struct, AuthBaseURL string
-pkg openrails/server, type AdminConsole struct, Extensions map[string]any
-pkg openrails/server, type AdminConsole struct, Path string
+pkg openrails/server, type AdminConsole struct, Issuers map[string]hostconfig.ConsoleIssuer `koanf:"issuers"`
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string
 pkg openrails/server, type Config struct, AdminConsole *AdminConsole
 pkg openrails/server, type Config struct, Auth authkit.Config
-pkg openrails/server, type Config struct, ConsoleIssuer *ConsoleIssuer
 pkg openrails/server, type Config struct, DrainDelay time.Duration
 pkg openrails/server, type Config struct, Engine openrails.Config
 pkg openrails/server, type Config struct, HostedCheckoutURL string
@@ -3343,6 +3341,7 @@ pkg openrails/server, type ConsoleIssuer struct, URL string
 pkg openrails/server, type Deps struct
 pkg openrails/server, type Deps struct, Auth authkit.Deps
 pkg openrails/server, type Deps struct, CheckoutAssets fs.FS
+pkg openrails/server, type Deps struct, ConsoleAssets fs.FS
 pkg openrails/server, type Deps struct, Engine openrails.Deps
 pkg openrails/server, type Deps struct, HasVaultedPaymentMethod func(context.Context, string) (bool, error)
 pkg openrails/server, type FormerNamesConfig = config.FormerNamesConfig
@@ -3366,5 +3365,5 @@ pkg openrails/server, type Server struct
 pkg openrails/server, var ErrInvalidMerchantName error
 pkg openrails/server, var ErrMerchantNotFound error
 pkg openrails/server, var ErrRenamesDisabled error
-pkg openrails/web/admin, func FS() fs.FS
+pkg openrails/server/web/console, func FS() fs.FS
 pkg openrails/web/checkout, func FS() fs.FS

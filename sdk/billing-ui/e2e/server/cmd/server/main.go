@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -67,6 +68,14 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		}
 		reply(w, http.StatusOK, rt.Catalog)
 	})
+	mux.HandleFunc("POST /__test/staff/{role}", func(w http.ResponseWriter, r *http.Request) {
+		user, err := rt.CreateStaff(r.Context(), r.PathValue("role"))
+		if err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		reply(w, http.StatusCreated, user)
+	})
 	mux.HandleFunc("POST /__test/users", func(w http.ResponseWriter, r *http.Request) {
 		u, err := rt.CreateUser(r.Context())
 		if err != nil {
@@ -92,6 +101,9 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		reply(w, http.StatusOK, out)
 	})
 	if static != "" {
+		mux.HandleFunc("GET /admin/{path...}", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(static, "admin.html"))
+		})
 		mux.Handle("GET /", http.FileServer(http.Dir(static)))
 	}
 
