@@ -17,25 +17,27 @@ afterEach(unmount)
 
 it("shows qualified price versions while history links keep the immutable price ids", async () => {
   browserEnvironment()
-  const current = aPrice("price_current", "prod_premium", {
+  const current = aPrice("premium:monthly:v2", "prod_premium", {
     key: "monthly",
-    version: 1,
+    version: 2,
     revision: 3,
   })
-  const previous = aPrice("price_previous", "prod_premium", {
+  const previous = aPrice("premium:monthly:v1", "prod_premium", {
     key: "monthly",
-    version: 0,
+    version: 1,
     revision: 3,
     archived: true,
   })
   await server({
-    "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
-    "/catalog/prices/price_current": current,
+    "/config": {
+      capabilities: { route_groups: { catalog_write: true }, features: {} },
+    },
+    "/catalog/prices/premium%3Amonthly%3Av2": current,
     "/catalog/products/prod_premium": aProduct("prod_premium", 0, {
       key: "premium",
       display_name: "Premium",
     }),
-    "/catalog/prices/price_current/history": {
+    "/catalog/prices/premium%3Amonthly%3Av2/history": {
       data: [current, previous].map((price) => ({
         price,
         effective_at: price.created_at,
@@ -50,7 +52,7 @@ it("shows qualified price versions while history links keep the immutable price 
   const queries = client()
   await mount(
     <QueryClientProvider client={queries}>
-      <MemoryRouter initialEntries={["/catalog/prices/price_current"]}>
+      <MemoryRouter initialEntries={["/catalog/prices/premium%3Amonthly%3Av2"]}>
         <Routes>
           <Route path="/catalog/prices/:id" element={<PriceDetailPage />} />
         </Routes>
@@ -58,7 +60,7 @@ it("shows qualified price versions while history links keep the immutable price 
     </QueryClientProvider>
   )
 
-  expect(document.querySelector("h2")?.textContent).toBe("premium.monthly.v1")
+  expect(document.querySelector("h2")?.textContent).toBe("premium:monthly:v2")
   expect(
     [...document.querySelectorAll<HTMLAnchorElement>("table a")].map(
       (link) => ({
@@ -67,8 +69,14 @@ it("shows qualified price versions while history links keep the immutable price 
       })
     )
   ).toEqual([
-    { label: "premium.monthly.v1", href: "/catalog/prices/price_current" },
-    { label: "premium.monthly.v0", href: "/catalog/prices/price_previous" },
+    {
+      label: "premium:monthly:v2",
+      href: "/catalog/prices/premium%3Amonthly%3Av2",
+    },
+    {
+      label: "premium:monthly:v1",
+      href: "/catalog/prices/premium%3Amonthly%3Av1",
+    },
   ])
   queries.clear()
 })

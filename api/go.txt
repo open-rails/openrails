@@ -730,7 +730,6 @@ pkg openrails/billing, const PaymentPending PaymentStatus = "pending"
 pkg openrails/billing, const PaymentRefund PaymentKind = "refund"
 pkg openrails/billing, const PaymentRefunded PaymentStatus = "refunded"
 pkg openrails/billing, const PaymentSucceeded PaymentStatus = "succeeded"
-pkg openrails/billing, const PriceIDPrefix untyped string = "price_"
 pkg openrails/billing, const PriceMigrationIDPrefix untyped string = "pmig_"
 pkg openrails/billing, const ProductAccessIDPrefix untyped string = "pa_"
 pkg openrails/billing, const ProductAccessSourceGrace ProductAccessSourceType = "grace"
@@ -799,6 +798,7 @@ pkg openrails/billing, func ErrorCodes() []ErrorCode
 pkg openrails/billing, func LookupCurrency(string) (CurrencyUnits, bool)
 pkg openrails/billing, func LookupErrorCode(string) (ErrorCode, bool)
 pkg openrails/billing, func NewCard(string, int, int, string) (*Card, error)
+pkg openrails/billing, func NewPriceID(string, string, int64) (PriceID, error)
 pkg openrails/billing, func NormalizeMerchantSlug(string) string
 pkg openrails/billing, func ParseAlertWebhookID(string) (AlertWebhookID, error)
 pkg openrails/billing, func ParseBalanceTransactionID(string) (BalanceTransactionID, error)
@@ -968,7 +968,6 @@ pkg openrails/billing, method (Permission) Resource() string
 pkg openrails/billing, method (PriceID) IsZero() bool
 pkg openrails/billing, method (PriceID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PriceID) String() string
-pkg openrails/billing, method (PriceID) UUID() uuid.UUID
 pkg openrails/billing, method (PriceMigrationID) IsZero() bool
 pkg openrails/billing, method (PriceMigrationID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PriceMigrationID) String() string
@@ -2465,7 +2464,7 @@ pkg openrails/billing, type PriceChangeDraft struct, NewAmount int64 `json:"new_
 pkg openrails/billing, type PriceChangeDraft struct, PriceKey string `json:"price_key"`
 pkg openrails/billing, type PriceChangeDraft struct, ProductKey string `json:"product_key"`
 pkg openrails/billing, type PriceChangeDraft struct, ReviewText string `json:"review_text"`
-pkg openrails/billing, type PriceID [16]byte
+pkg openrails/billing, type PriceID string
 pkg openrails/billing, type PriceKeyMovement struct
 pkg openrails/billing, type PriceKeyMovement struct, Archived bool `json:"archived"`
 pkg openrails/billing, type PriceKeyMovement struct, EffectiveAt time.Time `json:"effective_at"`

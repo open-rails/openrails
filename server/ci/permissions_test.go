@@ -121,7 +121,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		{string(billing.MerchantUsageManage), http.MethodPost, "/v1/app/admissions/release", `{"request_ids":["req-1"]}`, http.StatusOK},
 		{string(billing.MerchantUsageManage), http.MethodGet, "/v1/app/running-charges/never-started", "", http.StatusNotFound},
 		{string(billing.MerchantEventsRead), http.MethodGet, "/v1/app/host-events", "", http.StatusOK},
-		{string(billing.MerchantOrdersManage), http.MethodPost, "/v1/app/orders/preview", `{"customer_id":"` + customer + `","lines":[{"price_id":"` + billing.PriceID(uuid.New()).String() + `"}]}`, http.StatusOK},
+		{string(billing.MerchantOrdersManage), http.MethodPost, "/v1/app/orders/preview", `{"customer_id":"` + customer + `","lines":[{"price_id":"` + billing.PriceID("test:" + uuid.NewString() + ":v1").String() + `"}]}`, http.StatusOK},
 	}
 	for _, route := range routes {
 		w := send(handler, backend([]string{route.perm}), route.method, route.path, route.body)

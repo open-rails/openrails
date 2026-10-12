@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"strings"
 	"time"
 
@@ -34,9 +35,10 @@ type CheckoutAttempt struct {
 	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
-	PriceID *uuid.UUID          `json:"price_id"`
-	OrderID *uuid.UUID          `json:"order_id,omitempty"`
-	Mode    CheckoutAttemptMode `json:"mode"`
+	PriceID       *uuid.UUID          `json:"price_id"`
+	PublicPriceID billing.PriceID     `json:"-"`
+	OrderID       *uuid.UUID          `json:"order_id,omitempty"`
+	Mode          CheckoutAttemptMode `json:"mode"`
 
 	Rail   Rail                  `json:"rail"`
 	Status CheckoutAttemptStatus `json:"status"`

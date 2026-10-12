@@ -906,7 +906,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	} else if pending != nil {
 		return &TierChangeResponse{
 			Status:  "blocked",
-			PriceID: billing.PriceID(newPrice.ID), Rail: "stripe",
+			PriceID: newPrice.PublicID, Rail: "stripe",
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1005,7 +1005,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 	if action == "downgrade" {
 		return &TierChangeResponse{
 			Status:  "blocked",
-			PriceID: billing.PriceID(newPrice.ID),
+			PriceID: newPrice.PublicID,
 			Rail:    "ccbill",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -1020,7 +1020,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 	resp := &TierChangeResponse{
 		Status:         "requires_action",
 		Effective:      "now",
-		PriceID:        billing.PriceID(newPrice.ID),
+		PriceID:        newPrice.PublicID,
 		SubscriptionID: &subID,
 		Rail:           "ccbill",
 		Message:        "Redirect to CCBill to complete upgrade",

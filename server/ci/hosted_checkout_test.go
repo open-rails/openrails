@@ -212,7 +212,7 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	// A host serving no checkout refuses one.
 	_, embedded := newFixture(t).runtime(t, uniqueName("embedded"))
 	_, err := embedded.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
-		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID(uuid.New())}}, Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}})
+		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID("test:" + uuid.NewString() + ":v1")}}, Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}})
 	var refusal *billing.StatusError
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, "hosted_checkout_unavailable", refusal.Code)

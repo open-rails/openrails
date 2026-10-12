@@ -185,7 +185,11 @@ func (s *Service) pruneCatalogObjects(ctx context.Context, objects []catalogObje
 		case billing.CatalogObjectProduct:
 			_, err = s.DeactivateProduct(ctx, billing.ProductID(state.productID))
 		case billing.CatalogObjectPrice:
-			_, err = s.DeactivatePrice(ctx, billing.PriceID(state.priceID))
+			id, refErr := s.catalogDatabase().PriceReference(ctx, state.priceID)
+			if refErr != nil {
+				return refErr
+			}
+			_, err = s.DeactivatePrice(ctx, id)
 		}
 		if err != nil {
 			return fmt.Errorf("prune %s: %w", obj, err)

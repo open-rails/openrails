@@ -142,7 +142,7 @@ func (s *CheckoutService) ConfirmSubscriptionChange(ctx context.Context, subscri
 	if err != nil {
 		return nil, err
 	}
-	resp, err := tierChangeResponse(current)
+	resp, err := s.tierChangeResponse(ctx, current)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +202,10 @@ func (s *CheckoutService) changeSubscription(ctx context.Context, req *Subscript
 // request that charged nothing. A failure is logged: the change stands.
 func (s *CheckoutService) notifyStaffChange(ctx context.Context, c *changeTarget, resp *TierChangeResponse) {
 	product := c.product.DisplayName
-	if resp.PriceID != billing.PriceID(c.price.ID) {
-		if price, err := s.PriceService.GetByID(ctx, resp.PriceID.UUID()); err == nil {
+	priceID := c.price.ID
+	if resp.PriceID != c.price.PublicID {
+		if price, err := s.PriceService.GetByPublicID(ctx, resp.PriceID); err == nil {
+			priceID = price.ID
 			if p, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
 				product = p.DisplayName
 			}
@@ -218,7 +220,7 @@ func (s *CheckoutService) notifyStaffChange(ctx context.Context, c *changeTarget
 		key = "canceled:" + c.pending.ID.String()
 	}
 	notice, err := subscriptions.QueueStaffChangeNotice(ctx, s.SubscriptionService.Database(), c.sub, subscriptions.StaffChangeNotice{
-		Key: key, PriceID: resp.PriceID.UUID(), ProductName: product, Quantity: resp.Quantity,
+		Key: key, PriceID: priceID, ProductName: product, Quantity: resp.Quantity,
 		Currency: resp.Currency, NextAmount: resp.NextChargeAmount, EffectiveAt: at,
 	})
 	if err != nil {
@@ -292,7 +294,7 @@ func (s *CheckoutService) previewSubscriptionChange(ctx context.Context, req *Su
 		return nil, err
 	}
 	sub := c.sub
-	resp := &TierChangePreviewResponse{PriceID: billing.PriceID(c.price.ID), Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
+	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
 		case c.clears():

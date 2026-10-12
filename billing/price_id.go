@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // PriceID identifies immutable financial terms within a merchant's catalog.
@@ -15,10 +16,14 @@ type PriceID string
 
 // NewPriceID constructs an immutable price identifier from its stable keys.
 func NewPriceID(productKey, priceKey string, version int64) (PriceID, error) {
-	if strings.TrimSpace(productKey) == "" || strings.TrimSpace(priceKey) == "" || len(productKey) > 255 || len(priceKey) > 255 || version < 1 {
-		return "", fmt.Errorf("price ID requires product and price keys of 1-255 bytes and a positive version")
+	if !validPriceKey(productKey) || !validPriceKey(priceKey) || version < 1 {
+		return "", fmt.Errorf("price ID requires nonempty UTF-8 product and price keys and a positive version")
 	}
 	return PriceID(escapePriceKey(productKey) + ":" + escapePriceKey(priceKey) + ":v" + strconv.FormatInt(version, 10)), nil
+}
+
+func validPriceKey(key string) bool {
+	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }
 
 // ParsePriceID accepts only canonical, versioned identifiers; UUIDs and

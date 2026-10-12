@@ -65,6 +65,7 @@ sql:
       - "internal/migrate/postgres/0066_drop_rate_overrides_and_product_archives.up.sql"
       - "internal/migrate/postgres/0067_agreement_revocations.up.sql"
       - "internal/migrate/postgres/0068_drop_provider_operations.up.sql"
+      - "internal/migrate/postgres/0073_public_price_identifiers.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -42,7 +42,7 @@ products:
 	require.Equal(t, 365, *p.CreditGrant.ExpiresAfterDays)
 	first, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
-	require.EqualValues(t, 0, first.Version)
+	require.EqualValues(t, 1, first.Version)
 	apply(fmt.Sprintf(`schema_version: 1
 products:
   %s:
@@ -53,7 +53,7 @@ products:
 	second, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.NotEqual(t, first.ID, second.ID)
-	require.EqualValues(t, 1, second.Version)
+	require.EqualValues(t, 2, second.Version)
 	old, err := w.client[embedded].GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
 	require.True(t, old.Archived)
@@ -73,7 +73,7 @@ products:
 	restored, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, restored.ID)
-	require.EqualValues(t, 0, restored.Version)
+	require.EqualValues(t, 1, restored.Version)
 	for _, tp := range []topology{embedded, remote} {
 		_, err := w.client[tp].UpdateProduct(t.Context(), p.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
 		require.Error(t, err)
@@ -99,11 +99,11 @@ products:
 	require.NoError(t, err)
 	_, err = w.client[remote].UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 	require.NoError(t, err)
-	err = w.catalogExec(t.Context(), w.sql(`UPDATE billing.prices SET customer_amount='{"min_amount":"2000000","max_amount":"100000000"}'::jsonb WHERE id=$1`), first.ID.UUID())
+	err = w.catalogExec(t.Context(), w.sql(`UPDATE billing.prices SET customer_amount='{"min_amount":"2000000","max_amount":"100000000"}'::jsonb WHERE id=$1`), w.priceStorageID(first.ID))
 	require.Error(t, err, "deposit bounds are immutable in the database")
 	for _, bounds := range []string{`{"min_amount":null,"max_amount":"100000000"}`, `{"min_amount":"1000000","max_amount":null}`} {
 		err = w.catalogExec(t.Context(), w.sql(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,billing_interval_hours,customer_amount)
-   SELECT gen_random_uuid(),merchant_id,product_id,'invalid',0,currency,NULL,$2::jsonb FROM billing.prices WHERE id=$1`), first.ID.UUID(), bounds)
+   SELECT gen_random_uuid(),merchant_id,product_id,'invalid',0,currency,NULL,$2::jsonb FROM billing.prices WHERE id=$1`), w.priceStorageID(first.ID), bounds)
 		require.Error(t, err, "null bounds must fail a database check")
 	}
 }

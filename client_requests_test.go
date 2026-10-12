@@ -201,7 +201,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	c := remoteHandle(t, "http://openrails.invalid", opts)
 	now := time.Now()
 	customerID := billing.CustomerID(uuid.New())
-	price, subscription, method := billing.PriceID(uuid.New()), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())
+	price, subscription, method := billing.PriceID("test:" + uuid.NewString() + ":v1"), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
@@ -263,8 +263,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.UpdateProduct(ctx, billing.ProductID{}, billing.UpdateProductParams{})
 			return err
 		},
-		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID{}, billing.GetPriceParams{}); return err },
-		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID{}, billing.UpdatePriceParams{}); return err },
+		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID(""), billing.GetPriceParams{}); return err },
+		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID(""), billing.UpdatePriceParams{}); return err },
 		"access list customer": func() error {
 			_, err := c.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{{}}})
 			return err

@@ -516,7 +516,14 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 		filter.CustomerID = new(params.CustomerID.UUID())
 	}
 	if !params.PriceID.IsZero() {
-		filter.PriceID = new(params.PriceID.UUID())
+		price, err := s.rt.PriceService.GetByPublicID(ctx, params.PriceID)
+		if db.IsNotFound(err) {
+			return billing.ListPage[billing.Order]{Items: []billing.Order{}}, nil
+		}
+		if err != nil {
+			return billing.ListPage[billing.Order]{}, err
+		}
+		filter.PriceID = &price.ID
 	}
 	if params.Status != "" {
 		filter.Status = new(string(params.Status))

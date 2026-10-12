@@ -75,3 +75,25 @@ Declare the merchant in `Config.Merchants`, and a host whose `catalog.yaml` is t
 truth in `MerchantDeclaration.Catalog` (`catalog.ParseApplicationYAML`). Everything else is
 a Client method. See [embedding](embedded-integration.md) and the
 [merchant guide](merchant-guide.md).
+
+Price IDs name immutable financial versions: product `premium`, price key
+`buy-usd`, and version one have ID `premium:buy-usd:v1`. New terms under the
+same keys create `premium:buy-usd:v2`; existing orders and subscriptions keep
+v1. Archiving and restoring v1 do not renumber it. Recreating identical terms
+also returns v1. `Price.Version` is this one-based financial version;
+`Price.Revision` is the separate optimistic-concurrency counter for changes
+to the price key or its provider links.
+
+Use `billing.ParsePriceID("premium:buy-usd:v1")` for a stored spelling, or
+`billing.NewPriceID("premium", "buy-usd", 1)` when constructing it from keys.
+`GetPrice`, `UpdatePrice`, `ListPriceHistory`, order lines, subscription
+changes, and price filters all take the canonical ID. They do not accept a
+UUID alias. `ListPrices` can instead filter by `ProductKey` and `Key` to find
+the current version without guessing its number.
+
+Database UUIDs remain private foreign keys so upgrades preserve accepted
+financial facts, provider identities, and historical references. Migration
+0073 derives public IDs from existing immutable keys and the stored revision.
+It does not reprice existing purchases or contact payment providers. Existing
+applications must switch stored public IDs to the IDs returned by the updated
+catalog API when upgrading their client and server together.

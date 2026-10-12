@@ -115,7 +115,8 @@ type Price struct {
 	// of the key or its PSP links. An edit may send it back as
 	// expected_revision.
 	Revision int64 `json:"revision"`
-	// Version numbers this price's terms within its key, from zero.
+	// Version numbers this price's immutable terms within its key, from one.
+	// It is the v1 suffix in ID; restoring archived terms keeps that version.
 	Version              int64                   `json:"version"`
 	ID                   PriceID                 `json:"id"`
 	Key                  string                  `json:"key"`

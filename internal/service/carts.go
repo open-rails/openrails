@@ -65,7 +65,11 @@ func (s *Service) SetCartLine(ctx context.Context, actor OrderActor, price billi
 	if err != nil {
 		return nil, err
 	}
-	if err := rt.Orders.SetCartLine(ctx, actor.Customer.UUID(), price.UUID(), params.Quantity, params.Amount); err != nil {
+	resolved, err := s.rt.PriceService.GetByPublicID(ctx, price)
+	if err != nil {
+		return nil, priceLookup(err)
+	}
+	if err := rt.Orders.SetCartLine(ctx, actor.Customer.UUID(), resolved.ID, params.Quantity, params.Amount); err != nil {
 		return nil, err
 	}
 	return s.cartView(ctx, rt, actor.Customer)

@@ -99,6 +99,8 @@ var excludedColumns = map[string]string{
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
+	// Canonical price IDs are reconstructed from immutable keys and revision.
+	"prices": "public_id",
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	"psps":              "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",

@@ -66,7 +66,7 @@ products:
 	_, err = c.ApplyCatalog(t.Context(), rates, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	// A retained binding references an already provisioned account; no secret is copied.
-	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), first.ID.UUID(), w.psp["nmi"].UUID())
+	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), w.priceStorageID(first.ID), w.psp["nmi"].UUID())
 	require.NoError(t, err)
 	w.settle()
 	w.stop()
@@ -179,7 +179,7 @@ products:
 	require.True(t, preserved)
 	_, err = w.pool.Exec(t.Context(), "CREATE TABLE "+dst+`.purchase_reference_probe(merchant_id uuid,price_id uuid,FOREIGN KEY(merchant_id,price_id) REFERENCES `+dst+`.prices(merchant_id,id))`)
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.purchase_reference_probe VALUES($1,$2)`, mid.UUID(), first.ID.UUID())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.purchase_reference_probe VALUES($1,$2)`, mid.UUID(), w.priceStorageID(first.ID))
 	require.NoError(t, err)
 	for _, table := range []string{"payments", "subscriptions", "grants", "ledger_transfers", "provider_intents"} {
 		var count int

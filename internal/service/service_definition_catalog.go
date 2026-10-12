@@ -624,13 +624,13 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	if id.IsZero() {
 		return nil, apperr.Invalidf("price_id required")
 	}
-	priceID := id.UUID()
 	// Declarative PSP link rotation: the supplied entries merge into the
 	// existing links; an empty link clears its PSP.
-	existing, getErr := prices.GetByID(ctx, priceID)
+	existing, getErr := prices.GetByPublicID(ctx, id)
 	if getErr != nil {
 		return nil, priceLookup(getErr)
 	}
+	priceID := existing.ID
 	if existing.CustomerAmount != nil {
 		for _, link := range req.PSPLinks {
 			if len(link) > 0 {

@@ -48,7 +48,7 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 		{appUsage, http.MethodPost, "/v1/app/admissions/release", func() any { return map[string]any{"request_ids": []string{"req-1"}} }, http.StatusOK},
 		{appEvents, http.MethodGet, "/v1/app/host-events", func() any { return nil }, http.StatusOK},
 		{appOrders, http.MethodPost, "/v1/app/orders/preview", func() any {
-			return map[string]any{"customer_id": c.id, "lines": []any{map[string]any{"price_id": billing.PriceID(uuid.New()).String()}}}
+			return map[string]any{"customer_id": c.id, "lines": []any{map[string]any{"price_id": billing.PriceID("test:" + uuid.NewString() + ":v1").String()}}}
 		}, http.StatusOK},
 	}
 	shop := w.client[embedded].MerchantID().String()

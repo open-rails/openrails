@@ -213,8 +213,7 @@ func (s *Service) GetPrice(ctx context.Context, id billing.PriceID) (*billing.Pr
 	if id.IsZero() {
 		return nil, apperr.Invalidf("price_id required")
 	}
-	priceID := id.UUID()
-	p, err := prices.GetByID(ctx, priceID)
+	p, err := prices.GetByPublicID(ctx, id)
 	if err != nil {
 		return nil, priceLookup(err)
 	}
@@ -264,7 +263,14 @@ func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams
 	if err != nil {
 		return billing.ListPage[billing.Price]{}, err
 	}
-	filter := catalog.PriceFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency),
+	ids := make([]string, 0, len(params.IDs))
+	if params.IDs == nil {
+		ids = nil
+	}
+	for _, id := range params.IDs {
+		ids = append(ids, id.String())
+	}
+	filter := catalog.PriceFilter{IDs: ids, Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency),
 		ProductKey: strings.TrimSpace(params.ProductKey), Key: strings.TrimSpace(params.Key), Recurring: params.Recurring}
 	if !params.ProductID.IsZero() {
 		id := params.ProductID.UUID()
@@ -331,11 +337,12 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 	if id.IsZero() {
 		return nil, apperr.Invalidf("price_id required")
 	}
-	priceID := id.UUID()
-	current, err := prices.GetByID(ctx, priceID)
+	resolved, err := prices.GetByPublicID(ctx, id)
 	if err != nil {
 		return nil, priceLookup(err)
 	}
+	priceID := resolved.ID
+	current := resolved
 	products, err := s.requireProductService()
 	if err != nil {
 		return nil, err
@@ -405,7 +412,11 @@ func (s *Service) deactivatePrice(ctx context.Context, id billing.PriceID) (*bil
 	if id.IsZero() {
 		return nil, apperr.Invalidf("price_id required")
 	}
-	priceID := id.UUID()
+	resolved, err := prices.GetByPublicID(ctx, id)
+	if err != nil {
+		return nil, priceLookup(err)
+	}
+	priceID := resolved.ID
 	if err := prices.Deactivate(ctx, priceID); err != nil {
 		return nil, priceLookup(err)
 	}
@@ -794,4 +805,17 @@ func cloneRails(in map[string]map[string]string) map[string]map[string]string {
 		out[k] = inner
 	}
 	return out
+}
+
+// VerifyPublicPriceSync resolves the merchant's canonical price identifier.
+func (s *Service) VerifyPublicPriceSync(ctx context.Context, id billing.PriceID) (map[string]billing.PSPLinkState, error) {
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
+	}
+	price, err := prices.GetByPublicID(ctx, id)
+	if err != nil {
+		return nil, priceLookup(err)
+	}
+	return s.VerifyPriceSync(ctx, price.ID)
 }

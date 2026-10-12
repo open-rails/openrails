@@ -359,7 +359,7 @@ func requireTypedID(field string, id wireID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr(field + " is required")
 	}
-	return id.String(), nil
+	return url.PathEscape(id.String()), nil
 }
 
 // bearer mints the credential for the next call. There is no fallback; a mint
