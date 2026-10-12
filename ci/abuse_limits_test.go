@@ -214,6 +214,9 @@ func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	client.AddHook(heldRedisCommands{released: released})
 	in := newAbuseInstancesWithRedis(t, 2, &openrails.RedisConfig{Addr: client.Options().Addr}, client)
+	for _, bill := range in.engines {
+		require.Same(t, client, engine.Graph(bill).Runtime.RedisClient, "the blocked client is the actual dependency")
+	}
 	release()
 
 	for i, bill := range in.engines {
