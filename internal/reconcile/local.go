@@ -139,6 +139,10 @@ type LocalState struct {
 type LocalStateLoader interface {
 	Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error)
 	PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
+	// ExecutingOperations is, of ids, the PSP's provider operations executing
+	// at now: claimed, their lease live. Empty ids asks whether the PSP has
+	// any: the answer then holds a zero id.
+	ExecutingOperations(ctx context.Context, pspID uuid.UUID, ids []uuid.UUID, now time.Time) (map[uuid.UUID]bool, error)
 }
 
 // PGLocalStateLoader loads local state through the sqlc layer on a
@@ -286,6 +290,27 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	}
 
 	return state, nil
+}
+
+func (l *PGLocalStateLoader) ExecutingOperations(ctx context.Context, pspID uuid.UUID, ids []uuid.UUID, now time.Time) (map[uuid.UUID]bool, error) {
+	scope, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := l.DB.Gen(ctx)
+	out := map[uuid.UUID]bool{}
+	if len(ids) == 0 {
+		busy, err := q.ReconcilePSPHasExecutingOperations(ctx, gen.ReconcilePSPHasExecutingOperationsParams{MerchantID: scope.UUID(), PspID: pspID, Now: now})
+		if busy {
+			out[uuid.Nil] = true
+		}
+		return out, err
+	}
+	rows, err := q.ReconcileExecutingOperations(ctx, gen.ReconcileExecutingOperationsParams{MerchantID: scope.UUID(), PspID: pspID, Ids: ids, Now: now})
+	for _, id := range rows {
+		out[id] = true
+	}
+	return out, err
 }
 
 func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error) {

@@ -3,8 +3,8 @@
 package ci_test
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net"
@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/auth"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -57,16 +58,21 @@ type abuseInstances struct {
 	admin   staffMember
 }
 
-func newAbuseInstances(t *testing.T, n int, redis *openrails.RedisConfig) *abuseInstances {
+func newAbuseInstances(t *testing.T, n int, redisConfig *openrails.RedisConfig) *abuseInstances {
+	t.Helper()
+	return newAbuseInstancesWithRedis(t, n, redisConfig, nil)
+}
+
+func newAbuseInstancesWithRedis(t *testing.T, n int, redisConfig *openrails.RedisConfig, client *redis.Client) *abuseInstances {
 	t.Helper()
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"limits-" + uuid.NewString()[:8]: {DisplayName: "Limits"}}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "e2e-site", SecretKey: "e2e-secret"}
-	cfg.Redis = redis
+	cfg.Redis = redisConfig
 	in := &abuseInstances{f: f, admin: staffMember(uuid.NewString())}
 	for range n {
-		bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+		bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Redis: client})
 		buyers, admins := http.NewServeMux(), http.NewServeMux()
 		require.NoError(t, openrailshttp.Mount(buyers, bill, openrails.Routes{Auth: authtest.Deny{}}))
 		require.NoError(t, openrailshttp.Mount(admins, bill, openrails.Routes{Auth: in.admin, RouteGroups: staffGroups}))
@@ -192,19 +198,27 @@ func TestInstancesWithRedisShareAbuseLimits(t *testing.T) {
 	in.noPostgres(t)
 }
 
-// A configured Redis that does not answer costs sharing, not service.
-// Construction asks it nothing but the background health probe (it reads
-// commands and answers none, so a caller that waited would wait); then it is
-// down and refuses. Every instance is ready with Redis degraded, serves
-// requests and enforces each limit in its own memory, counting the fallbacks.
-// PostgreSQL holds none of it.
+// Construction returns while every command on the injected Redis client is
+// blocked, including PING. Its background health probes may wait; a synchronous
+// command would prevent construction from returning and fail the test timeout.
+// After release the client stays unavailable: each engine serves and enforces
+// its limits in memory, counting fallbacks, and PostgreSQL holds none of it.
 func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
-	silent := newSilentRedis(t)
-	in := newAbuseInstances(t, 2, &openrails.RedisConfig{Addr: silent.addr()})
-	for _, command := range silent.commands() {
-		require.Contains(t, []string{"HELLO", "CLIENT", "PING"}, command, "construction asks Redis nothing but its background health probe")
+	released := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(released) }) }
+	// Defers run before engine cleanup, so an assertion failure never leaves
+	// Close waiting for a health probe whose hook is still blocked.
+	defer release()
+	client := redis.NewClient(&redis.Options{Addr: "unused.invalid:6379"})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	client.AddHook(heldRedisCommands{released: released})
+	in := newAbuseInstancesWithRedis(t, 2, &openrails.RedisConfig{Addr: client.Options().Addr}, client)
+	for _, bill := range in.engines {
+		require.Same(t, client, engine.Graph(bill).Runtime.RedisClient, "the blocked client is the actual dependency")
 	}
-	silent.close()
+	release()
+
 	for i, bill := range in.engines {
 		require.NoError(t, bill.Start(t.Context()))
 		require.Eventually(t, func() bool { return degraded(t, bill) }, 15*time.Second, 50*time.Millisecond, "instance %d is ready with Redis degraded", i)
@@ -216,93 +230,26 @@ func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
 	}
 }
 
-// silentRedis accepts connections and completes a client's handshake, then
-// reads commands and answers none, as a Redis that hangs would; close makes it
-// refuse, as a stopped one does.
-type silentRedis struct {
-	listener net.Listener
-	mu       sync.Mutex
-	seen     []string
-	conns    []net.Conn
+// heldRedisCommands never contacts a server. No command (including connection
+// setup, an individual PING, or a pipeline) can finish until release; afterward
+// each reports Redis unavailable. There are no listener or reader goroutines.
+type heldRedisCommands struct{ released <-chan struct{} }
+
+var errHeldRedisUnavailable = errors.New("test Redis is unavailable")
+
+func (h heldRedisCommands) wait() error {
+	<-h.released
+	return errHeldRedisUnavailable
 }
 
-func newSilentRedis(t *testing.T) *silentRedis {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	r := &silentRedis{listener: listener}
-	t.Cleanup(r.close)
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			r.mu.Lock()
-			r.conns = append(r.conns, conn)
-			r.mu.Unlock()
-			go r.read(conn)
-		}
-	}()
-	return r
+func (h heldRedisCommands) DialHook(redis.DialHook) redis.DialHook {
+	return func(context.Context, string, string) (net.Conn, error) { return nil, h.wait() }
 }
 
-func (r *silentRedis) addr() string { return r.listener.Addr().String() }
-
-// read records each command's name: a RESP array's first bulk string.
-func (r *silentRedis) read(conn net.Conn) {
-	in := bufio.NewReader(conn)
-	for {
-		line, err := in.ReadString('\n')
-		if err != nil {
-			return
-		}
-		if !strings.HasPrefix(line, "*") {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(line[1:]))
-		if err != nil {
-			continue
-		}
-		var args []string
-		for range n {
-			if _, err := in.ReadString('\n'); err != nil { // $<len>
-				return
-			}
-			arg, err := in.ReadString('\n')
-			if err != nil {
-				return
-			}
-			args = append(args, strings.TrimSpace(arg))
-		}
-		if len(args) == 0 {
-			continue
-		}
-		command := strings.ToUpper(args[0])
-		r.mu.Lock()
-		r.seen = append(r.seen, command)
-		r.mu.Unlock()
-		switch command {
-		case "HELLO": // the client falls back to RESP2
-			_, _ = conn.Write([]byte("-ERR unknown command 'HELLO'\r\n"))
-		case "CLIENT":
-			_, _ = conn.Write([]byte("+OK\r\n"))
-		}
-	}
+func (h heldRedisCommands) ProcessHook(redis.ProcessHook) redis.ProcessHook {
+	return func(context.Context, redis.Cmder) error { return h.wait() }
 }
 
-func (r *silentRedis) commands() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.seen...)
-}
-
-func (r *silentRedis) close() {
-	_ = r.listener.Close()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, conn := range r.conns {
-		_ = conn.Close()
-	}
-	r.conns = nil
+func (h heldRedisCommands) ProcessPipelineHook(redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(context.Context, []redis.Cmder) error { return h.wait() }
 }

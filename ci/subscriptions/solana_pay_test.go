@@ -726,7 +726,9 @@ func TestSolanaPayCreditsOnlyFinalized(t *testing.T) {
 		Amount: req.amount, Reference: req.reference, Memo: req.memo, Confirmed: true, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
 	require.Equal(t, "open", p.confirm(req), "a transfer still confirming is not an error")
-	p.until(func() bool { return p.nextPoll(req).After(p.w.clock.Now()) }, "the reference is read")
+	// The read reschedules the reference after the clock, which stands still
+	// here, so the wait sees it once it lands; moving the clock would hide it.
+	p.eventually(func() bool { return p.nextPoll(req).After(p.w.clock.Now()) }, "the reference is read")
 	require.Equal(t, "requires_action", p.status(req), "confirmed is not credited")
 	require.Empty(t, p.receiptOn(req, sig))
 
