@@ -86,6 +86,7 @@ migration 0082_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f
 migration 0083_payment_order_identity.up.sql sha256:7757d34110d14ad4a3a1793d1f474ef1fd6f10e499164da351bcc530fd8a66e9
 migration 0084_destructive_staff_counts.up.sql sha256:bc91316e0ba297ddb4b371ef499766e7bede845fdb9d5cdb6a881dfaff4439b3
 migration 0085_customer_orders.up.sql sha256:94bbf045913ab00e55207f571519836578cdc26264f8eb87c06dc3a1f38c6258
+migration 0086_platform_custody.up.sql sha256:d0d0c6a749137f0dfe7708ac836cad08fba959e2e1c189b3924b78a5cc17a03d
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -387,7 +388,7 @@ table billing.custodians
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint custodians_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text])))
   constraint custodians_id_kind_key UNIQUE (merchant_id, id, kind)
-  constraint custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text, 'hyperswitch'::text])))
+  constraint custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text, 'hyperswitch'::text, 'platform'::text])))
   constraint custodians_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint custodians_nonempty_check CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
   constraint custodians_pkey PRIMARY KEY (merchant_id, id)
@@ -1583,13 +1584,14 @@ table billing.payment_methods
   column contact_cardholder_at timestamp with time zone
   column setup_ref text
   column capture jsonb
+  column wallet_card_id uuid
   constraint payment_methods_capture_check CHECK (((capture IS NULL) OR ((custodian = 'hyperswitch'::text) AND (jsonb_typeof(capture) = 'object'::text) AND (octet_length((capture)::text) <= 16384))))
   constraint payment_methods_card_exp_month_check CHECK (((card_exp_month >= 1) AND (card_exp_month <= 12)))
   constraint payment_methods_card_exp_year_check CHECK (((card_exp_year >= 2000) AND (card_exp_year <= 2199)))
   constraint payment_methods_card_expiry_pair_check CHECK (((card_exp_month IS NULL) = (card_exp_year IS NULL)))
   constraint payment_methods_card_last4_check CHECK ((card_last4 ~ '^[0-9]{4}$'::text))
   constraint payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text])))
-  constraint payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text])))
+  constraint payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text, 'platform'::text])))
   constraint payment_methods_custodian_id_custodian_fkey FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES billing.custodians(merchant_id, id, kind) ON DELETE RESTRICT
   constraint payment_methods_custodian_identity_check CHECK (((custodian = 'psp'::text) = (custodian_id IS NULL)))
   constraint payment_methods_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
