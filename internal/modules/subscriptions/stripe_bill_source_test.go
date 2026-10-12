@@ -10,6 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStripeBillDraftDoesNotFailSubscriptionProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/v1/subscriptions/sub_1", r.URL.Path, "a draft has no finalized bill to fetch")
+		fmt.Fprint(w, `{"id":"sub_1","status":"active","customer":"cus_1","latest_invoice":{"id":"in_draft","status":"draft","attempt_count":0,"amount_due":999,"currency":"usd"}}`)
+	}))
+	defer srv.Close()
+	p := &HTTPStripeLivenessProber{SecretKey: "sk_test_fixture", BaseURL: srv.URL, HTTPClient: srv.Client()}
+	rec, err := p.ProbeSubscription(t.Context(), "sub_1")
+	require.NoError(t, err)
+	require.True(t, rec.Found)
+	require.Equal(t, "active", rec.Status)
+	require.Nil(t, rec.LatestBill)
+	require.False(t, rec.LatestInvoicePaid)
+	require.False(t, rec.LatestInvoiceCollectionFailed)
+}
+
 func TestStripeBillReadsEachActualPayment(t *testing.T) {
 	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

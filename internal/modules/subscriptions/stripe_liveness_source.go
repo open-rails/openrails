@@ -45,6 +45,7 @@ type StripeLivenessRecord struct {
 	LatestBill                 *StripeBill
 	LatestInvoicePaid          bool
 	LatestInvoiceID            string
+	LatestInvoiceStatus        string
 	LatestInvoiceTransactionID string
 	LatestInvoiceAmountPaid    int64
 	LatestInvoiceAmountDue     int64
@@ -191,6 +192,7 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		}
 		rec.LatestInvoicePaid = inv.Paid || strings.EqualFold(strings.TrimSpace(inv.Status), "paid")
 		rec.LatestInvoiceID = strings.TrimSpace(inv.ID)
+		rec.LatestInvoiceStatus = strings.ToLower(strings.TrimSpace(inv.Status))
 		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(charge, intent)
 		rec.LatestInvoiceAmountPaid = inv.AmountPaid
 		rec.LatestInvoiceAmountDue = inv.AmountDue
@@ -265,7 +267,7 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 		return StripeLivenessRecord{}, errors.New(msg)
 	}
 	rec, err := parseStripeLivenessSubscription(body)
-	if err != nil || rec.LatestInvoiceID == "" {
+	if err != nil || rec.LatestInvoiceID == "" || rec.LatestInvoiceStatus == "draft" {
 		return rec, err
 	}
 	bill, err := p.ReadBill(ctx, rec.LatestInvoiceID)
