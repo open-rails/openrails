@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"strings"
 	"time"
 
@@ -239,6 +240,24 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	// Actual cash is verified and recorded from each invoice payment.
 	if rec.LatestBill != nil {
 		snap.Transactions = append(snap.Transactions, stripeBillFact(*rec.LatestBill))
+	}
+	// Stripe's failed collection attempt on the latest invoice is decline
+	// evidence and the cycle's attempt history, dated by the invoice and named
+	// by its charge, else its invoice. It is never money. A dead
+	// subscription's failed invoice is no decline in progress, and an unpaid
+	// proration (a tier change) is no declined renewal.
+	attempt := normalize.FirstNonEmpty(rec.LatestInvoiceTransactionID, rec.LatestInvoiceID)
+	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 && sub.Status != SubscriptionStatusExpired &&
+		!strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") &&
+		attempt != "" && !rec.LatestInvoiceCreated.IsZero() {
+		snap.Transactions = append(snap.Transactions, RemoteTransaction{
+			TransactionID:  "failed:" + attempt,
+			SubscriptionID: railSubID,
+			Type:           TransactionTypeDecline,
+			AmountCents:    rec.LatestInvoiceAmountDue,
+			Currency:       rec.LatestInvoiceCurrency,
+			OccurredAt:     rec.LatestInvoiceCreated,
+		})
 	}
 
 	return snap

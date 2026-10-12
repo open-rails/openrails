@@ -319,6 +319,10 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			}
 			continue
 		}
+		// A Stripe decline is attempt history; its open invoice is the bill.
+		if t.StripeBill == nil && t.Type == TransactionTypeDecline && sub.Rail == models.RailStripe {
+			continue
+		}
 		var result observed.Result
 		err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			d := database.NewWithPgxTx(tx)

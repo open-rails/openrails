@@ -142,7 +142,7 @@ func TestStripeSnapshotFromLiveness(t *testing.T) {
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd}},
 		{name: "active with a stale remote period waits", want: TransitionNone,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "active", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd}},
-		{name: "a failed collection is the same unsettled bill", want: TransitionPastDue, txns: 1,
+		{name: "a failed collection is the same unsettled bill and dated decline evidence", want: TransitionPastDue, txns: 2,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
 				LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x", LatestInvoiceCreated: periodEnd.Add(time.Hour),
 				LatestBill: &subscriptions.StripeBill{ID: "in_x", SubscriptionID: "sub_1", Currency: "USD", Status: "open", Reason: "subscription_cycle",
@@ -152,6 +152,8 @@ func TestStripeSnapshotFromLiveness(t *testing.T) {
 				require.Equal(t, "in_x", fact.TransactionID, "a later success settles this obligation rather than opening another")
 				require.Equal(t, TransactionTypeSettlement, fact.Type)
 				require.False(t, fact.Success)
+				require.Equal(t, "failed:ch_x", snap.Transactions[1].TransactionID, "the executed failed charge is the attempt")
+				require.Equal(t, TransactionTypeDecline, snap.Transactions[1].Type)
 			}},
 		{name: "unpaid at Stripe grants nothing", want: TransitionCancel, gone: true,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "unpaid", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
