@@ -192,10 +192,10 @@ route_groups:
   metrics: true          # business metrics, read-only
   programmatic: true     # your backend's calls and SCIM user provisioning
 
-# Merchant admin console (staff dashboard), served at path. Off by default:
-# while enabled is false no console route exists. Needs console assets in the
-# binary: `task build` embeds server/web/console/dist after `task admin-build`; enabled
-# without them refuses boot. It signs in through the control plane's AuthKit.
+# The standalone staff console is always served at /admin. Release builds
+# include its assets; `task build` embeds server/web/console/dist after
+# `task admin-build`. A source build without assets serves build instructions
+# with status 503. Configure app issuers or local_sign_in for staff sign-in.
 admin_console:
   issuers: {} # /admin is always served; add one sign-in choice per merchant
   # issuers:

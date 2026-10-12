@@ -188,7 +188,6 @@ jobs:
           cid="$(docker run -d --network host \
             -e TEST_MODE=sandbox \
             -e PROVIDER_WRITE_MODE=readonly \
-            -e ADMIN_CONSOLE_ENABLED=true \
             -e ROUTE_GROUPS_ADMIN=true \
             -e LOCAL_SIGN_IN=true \
             -e PORT=3053 \

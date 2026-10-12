@@ -250,9 +250,8 @@ func New(deps Dependencies) (*Server, error) {
 	// hosts still mount it — a pinned merchant has no payload-derived identity
 	// to resolve — via internal/http/embedhttp.
 
-	// Merchant admin console SPA (#740/#754): mounted only when assets are
-	// present AND admin_console.enabled; enabled without assets refuses boot.
-	// Last, so it can refuse a path that overlaps any route above (#1127).
+	// The standalone console is always mounted at /admin; a source build
+	// without assets serves build instructions with status 503.
 	if err := s.registerAdminConsoleRoutes(mux); err != nil {
 		return nil, err
 	}
