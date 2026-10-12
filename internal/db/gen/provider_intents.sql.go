@@ -1438,7 +1438,7 @@ func (q *Queries) HasUnattributedPaymentAfterRebillBoundary(ctx context.Context,
 const listCompletedManualRebillPaymentCoverage = `-- name: ListCompletedManualRebillPaymentCoverage :many
 SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
        p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
-       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
 FROM billing.payments p
 JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id

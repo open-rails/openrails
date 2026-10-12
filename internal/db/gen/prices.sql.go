@@ -1262,7 +1262,6 @@ func (q *Queries) LookupPriceStorageID(ctx context.Context, arg LookupPriceStora
 const pricesHoldReferences = `-- name: PricesHoldReferences :one
 SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
-    OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND from_price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND to_price_id = ANY($2::uuid[]))
@@ -1278,7 +1277,7 @@ type PricesHoldReferencesParams struct {
 	PriceIds   []uuid.UUID
 }
 
-// Whether a record refers to any of the prices: a purchase line or payment,
+// Whether a record refers to any of the prices: a purchase line,
 // a subscription, a checkout, a price migration, a scheduled change, a
 // provider write or a PSP link.
 func (q *Queries) PricesHoldReferences(ctx context.Context, arg PricesHoldReferencesParams) (bool, error) {

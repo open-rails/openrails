@@ -266,8 +266,8 @@ func (q *Queries) GetProviderBill(ctx context.Context, arg GetProviderBillParams
 }
 
 const linkAcceptedRenewalPaymentOrder = `-- name: LinkAcceptedRenewalPaymentOrder :execrows
-UPDATE billing.payments p SET order_id = $1::uuid, price_id = NULL
-WHERE p.merchant_id = $2::uuid AND p.id = $3::uuid
+UPDATE billing.payments p SET order_id = $1::uuid
+WHERE p.merchant_id = $2::uuid AND p.id = $3::uuid AND p.deleted_at IS NULL
   AND (p.order_id IS NULL OR p.order_id = $1::uuid)
   AND EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id = p.merchant_id AND o.id = $1::uuid
     AND o.customer_id = p.customer_id AND o.currency = p.currency AND o.subscription_id = p.subscription_id
@@ -288,39 +288,49 @@ func (q *Queries) LinkAcceptedRenewalPaymentOrder(ctx context.Context, arg LinkA
 	return result.RowsAffected(), nil
 }
 
-const listProviderBillsForOrder = `-- name: ListProviderBillsForOrder :many
-SELECT merchant_id, psp_id, source_kind, source_key, order_id, customer_id, snapshot, provider_reference, settlement_source, non_cash_amount, settled_at, created_at FROM billing.provider_bills
-WHERE merchant_id = $1::uuid AND order_id = $2::uuid
-ORDER BY created_at, source_kind, source_key LIMIT 100
+const listProviderBillsForOrders = `-- name: ListProviderBillsForOrders :many
+SELECT b.order_id, b.psp_id, b.source_kind, b.provider_reference, b.settlement_source, b.non_cash_amount, b.settled_at
+FROM unnest($1::uuid[]) AS orders(id)
+CROSS JOIN LATERAL (
+    SELECT order_id, psp_id, source_kind, source_key, provider_reference, settlement_source, non_cash_amount, settled_at, created_at
+    FROM billing.provider_bills
+    WHERE merchant_id = $2::uuid AND order_id = orders.id
+    ORDER BY created_at, source_kind, source_key LIMIT 100
+) b
 `
 
-type ListProviderBillsForOrderParams struct {
+type ListProviderBillsForOrdersParams struct {
+	OrderIds   []uuid.UUID
 	MerchantID uuid.UUID
-	OrderID    uuid.UUID
 }
 
-func (q *Queries) ListProviderBillsForOrder(ctx context.Context, arg ListProviderBillsForOrderParams) ([]BillingProviderBill, error) {
-	rows, err := q.db.Query(ctx, listProviderBillsForOrder, arg.MerchantID, arg.OrderID)
+type ListProviderBillsForOrdersRow struct {
+	OrderID           uuid.UUID
+	PspID             uuid.UUID
+	SourceKind        string
+	ProviderReference string
+	SettlementSource  *string
+	NonCashAmount     int64
+	SettledAt         *time.Time
+}
+
+func (q *Queries) ListProviderBillsForOrders(ctx context.Context, arg ListProviderBillsForOrdersParams) ([]ListProviderBillsForOrdersRow, error) {
+	rows, err := q.db.Query(ctx, listProviderBillsForOrders, arg.OrderIds, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProviderBill
+	var items []ListProviderBillsForOrdersRow
 	for rows.Next() {
-		var i BillingProviderBill
+		var i ListProviderBillsForOrdersRow
 		if err := rows.Scan(
-			&i.MerchantID,
+			&i.OrderID,
 			&i.PspID,
 			&i.SourceKind,
-			&i.SourceKey,
-			&i.OrderID,
-			&i.CustomerID,
-			&i.Snapshot,
 			&i.ProviderReference,
 			&i.SettlementSource,
 			&i.NonCashAmount,
 			&i.SettledAt,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -374,7 +384,7 @@ func (q *Queries) ObservedOrderCaptured(ctx context.Context, arg ObservedOrderCa
 
 const paymentMatchesOrderPrice = `-- name: PaymentMatchesOrderPrice :one
 SELECT EXISTS (SELECT 1 FROM billing.payments p JOIN billing.order_lines l ON l.merchant_id = p.merchant_id AND l.order_id = p.order_id
- WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid AND l.price_id = $3::uuid)::boolean
+ WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid AND l.price_id = $3::uuid AND p.deleted_at IS NULL)::boolean
 `
 
 type PaymentMatchesOrderPriceParams struct {
