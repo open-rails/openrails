@@ -25,7 +25,8 @@ import (
 // that claims it, and back to owed when the funding payment is charged back.
 func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	f := newFixture(t)
-	client := f.localRuntime(t, "owed-"+uuid.NewString()[:8])
+	local := f.localRuntime(t, "owed-"+uuid.NewString()[:8])
+	client := local.Client
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
@@ -35,7 +36,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 20_000_000})
 	require.NoError(t, err)
-	psp, err := client.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
 	require.NoError(t, err)
 
 	newCustomer := func() billing.CustomerID {

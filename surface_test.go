@@ -56,7 +56,7 @@ var remoteMethods = map[string]string{
 	"Merchant": "a merchant's handle",
 }
 
-// embeddedMethods are operations only an in-process engine offers. Each one
+// embeddedMethods are operations only LocalClient offers. Each one
 // serves a hosted product or runs inside a transaction of the host's, so no
 // merchant route can carry it; the reason names the host that calls it. The
 // control plane's cross-merchant operations are package server's.

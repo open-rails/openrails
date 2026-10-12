@@ -28,7 +28,8 @@ import (
 // FIFO lot reversals and once-only posting all run against real PostgreSQL.
 func TestPurchasedCreditAccounting(t *testing.T) {
 	f := newFixture(t)
-	client := f.localRuntime(t, "credit-accounting-"+uuid.NewString()[:8])
+	local := f.localRuntime(t, "credit-accounting-"+uuid.NewString()[:8])
+	client := local.Client
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
@@ -37,7 +38,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 80_000_000})
 	require.NoError(t, err)
-	psp, err := client.DeclarePSP(ctx, billing.PSPDeclaration{Key: "credit-stripe", Rail: "stripe", AccountID: "acct_credit_test"})
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "credit-stripe", Rail: "stripe", AccountID: "acct_credit_test"})
 	require.NoError(t, err)
 	start := time.Now().UTC().Truncate(time.Microsecond)
 	expiry := start.Add(365 * 24 * time.Hour)
