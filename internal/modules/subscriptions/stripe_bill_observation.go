@@ -56,24 +56,27 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 		}
 		lineTotal += amount
 		frozen := observed.Line{Description: line.Description, Quantity: line.Quantity, Amount: amount,
-			UnitAmount: amount, Source: "provider", ProviderReference: line.ID}
+			UnitAmount: amount, Source: "provider_adjustment", ProviderReference: line.ID}
 		if line.Quantity != nil {
 			frozen.UnitAmount = amount / int64(*line.Quantity)
 		}
-		if line.PriceID != "" {
+		if line.PriceID != "" && amount >= 0 {
 			price, err := catalog.NewPriceService(d).GetByStripePriceID(ctx, line.PriceID)
 			if err != nil {
 				return bill, nil, fmt.Errorf("Stripe invoice %s line %s price %s is unresolved: %w", invoice.ID, line.ID, line.PriceID, err)
 			}
-			frozen.PriceID, frozen.ProductID = &price.ID, &price.ProductID
+			frozen.PriceID, frozen.ProductID, frozen.Source = &price.ID, &price.ProductID, ""
 			// This is a historical fact, not an instruction to grant today's
 			// product or to apply today's access duration.
+		}
+		if frozen.UnitAmount < 0 {
+			frozen.UnitAmount = 0
 		}
 		if frozen.Description == "" {
 			frozen.Description = "Stripe invoice line"
 		}
 		bill.Lines = append(bill.Lines, frozen)
-		if line.PriceID != "" && !line.PeriodStart.IsZero() && line.PeriodEnd.After(line.PeriodStart) {
+		if !line.PeriodStart.IsZero() && line.PeriodEnd.After(line.PeriodStart) {
 			if bill.PeriodStart.IsZero() || line.PeriodStart.Before(bill.PeriodStart) {
 				bill.PeriodStart = line.PeriodStart
 			}
@@ -93,8 +96,8 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 			return bill, nil, errors.New("Stripe invoice adjustment overflows")
 		}
 		adjustment := bill.Total - lineTotal
-		bill.Lines = append(bill.Lines, observed.Line{Source: "provider", Description: "Stripe invoice tax, discount and shipping adjustment",
-			Amount: adjustment, UnitAmount: adjustment, ProviderReference: invoice.ID + ":adjustment"})
+		bill.Lines = append(bill.Lines, observed.Line{Source: "provider_adjustment", Description: "Stripe invoice tax, discount and shipping adjustment",
+			Amount: adjustment, UnitAmount: max(int64(0), adjustment), ProviderReference: invoice.ID + ":adjustment"})
 	}
 	if bill.Kind != "adjustment" && (bill.PeriodStart.IsZero() || !bill.PeriodEnd.After(bill.PeriodStart)) {
 		return bill, nil, errors.New("Stripe subscription invoice has no verified service period")
@@ -154,7 +157,7 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 		case remaining == 0:
 			bill.SettlementSource = "cash"
 			if bill.Total == 0 {
-				bill.SettlementSource = "zero"
+				bill.SettlementSource = "cash"
 			}
 		case cash > 0 || invoice.AmountOffStripe > 0 && credit > 0:
 			bill.SettlementSource = "mixed"
@@ -192,6 +195,6 @@ func RecordStripeBill(ctx context.Context, d *db.DB, sub *models.Subscription, i
 			return result, err
 		}
 	}
-	bill.Payment, bill.Settled, bill.SettlementSource, bill.NonCashAmount = nil, settled, source, noncash
+	bill.Settled, bill.SettlementSource, bill.NonCashAmount = settled, source, noncash
 	return observed.Record(ctx, d, bill, now)
 }

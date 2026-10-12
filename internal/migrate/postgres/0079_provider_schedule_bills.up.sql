@@ -1,3 +1,5 @@
+-- parent: 78 sha256:b640ca9e608da82e28973a3399249b4e32f67c1b36c53549d7b71edf09faf87a
+-- Repair: none-needed New accepted schedules only; no historical reconstruction.
 -- Accepted provider schedule terms are recorded at enrollment, before future
 -- receipts arrive. They are not reconstructed from mutable subscription periods.
 CREATE TABLE billing.provider_schedules (
