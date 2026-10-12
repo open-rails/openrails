@@ -24,6 +24,7 @@ import type {
   PriceChangeDraft,
 } from "#orck/admin/lib/api/copilot"
 import { ApiError } from "#orck/admin/lib/api/client"
+import { useCatalogWrites } from "#orck/admin/lib/capabilities"
 import { formatNativeAmount } from "#orck/admin/lib/format"
 
 import { PriceChangeWizard } from "#orck/admin/pages/catalog/price-wizard"
@@ -167,7 +168,11 @@ export function CatalogCopilotPanel({
             )}
 
             {result.drafts?.map((draft, i) => (
-              <DraftCard key={i} draft={draft} />
+              <DraftCard
+                key={i}
+                draft={draft}
+                draftingEnabled={draftingEnabled}
+              />
             ))}
           </div>
         ) : null}
@@ -176,7 +181,14 @@ export function CatalogCopilotPanel({
   )
 }
 
-function DraftCard({ draft }: { draft: CatalogDraft }) {
+function DraftCard({
+  draft,
+  draftingEnabled,
+}: {
+  draft: CatalogDraft
+  draftingEnabled: boolean
+}) {
+  const canApply = useCatalogWrites() && draftingEnabled
   if (draft.kind === "refused" && draft.refusal) {
     return (
       <div className="rounded-lg border border-dashed p-3 text-xs">
@@ -192,22 +204,31 @@ function DraftCard({ draft }: { draft: CatalogDraft }) {
     )
   }
   if (draft.kind === "price_change" && draft.price_change) {
-    return <PriceChangeDraftCard draft={draft.price_change} />
+    return (
+      <PriceChangeDraftCard draft={draft.price_change} canApply={canApply} />
+    )
   }
   if (draft.kind === "new_price" && draft.new_price) {
-    return <NewPriceDraftCard draft={draft.new_price} />
+    return <NewPriceDraftCard draft={draft.new_price} canApply={canApply} />
   }
   return null
 }
 
 // PriceChangeDraftCard loads the live price, then opens the price-change
 // wizard pre-filled at step 3; a person confirms as for a typed change.
-function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
+function PriceChangeDraftCard({
+  draft,
+  canApply,
+}: {
+  draft: PriceChangeDraft
+  canApply: boolean
+}) {
   const { toastApiError, adminMutations } = useAdminServices()
 
   const loadDraft = useMutation(adminMutations.loadCatalogPriceDraft())
 
   const openWizard = async () => {
+    if (!canApply) return
     try {
       await loadDraft.mutateAsync({
         productKey: draft.product_key,
@@ -241,31 +262,38 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
         {draft.affected_count.toLocaleString()}
         <AdminMessage id={" affected · requires human confirm"} />
       </p>
-      {loadDraft.data ? (
-        <PriceChangeWizard
-          price={loadDraft.data.price}
-          productName={loadDraft.data.productName}
-          productKey={loadDraft.data.productKey}
-          draft={draft}
-          onDone={() => loadDraft.reset()}
-        />
-      ) : (
-        <Button
-          size="sm"
-          className="mt-2"
-          disabled={loadDraft.isPending}
-          onClick={openWizard}
-        >
-          {loadDraft.isPending ? "Loading…" : "Review in wizard"}
-        </Button>
-      )}
+      {canApply &&
+        (loadDraft.data ? (
+          <PriceChangeWizard
+            price={loadDraft.data.price}
+            productName={loadDraft.data.productName}
+            productKey={loadDraft.data.productKey}
+            draft={draft}
+            onDone={() => loadDraft.reset()}
+          />
+        ) : (
+          <Button
+            size="sm"
+            className="mt-2"
+            disabled={loadDraft.isPending}
+            onClick={openWizard}
+          >
+            {loadDraft.isPending ? "Loading…" : "Review in wizard"}
+          </Button>
+        ))}
     </div>
   )
 }
 
 // NewPriceDraftCard creates the price only on a person's click, with the same
 // createPrice the New Price form uses.
-function NewPriceDraftCard({ draft }: { draft: NewPriceDraft }) {
+function NewPriceDraftCard({
+  draft,
+  canApply,
+}: {
+  draft: NewPriceDraft
+  canApply: boolean
+}) {
   const { toastApiError, adminMutations } = useAdminServices()
 
   const queryClient = useQueryClient()
@@ -274,6 +302,7 @@ function NewPriceDraftCard({ draft }: { draft: NewPriceDraft }) {
   )
 
   const confirm = async () => {
+    if (!canApply) return
     try {
       await createDraftPrice.mutateAsync(draft.create_price)
     } catch (err) {
@@ -301,18 +330,20 @@ function NewPriceDraftCard({ draft }: { draft: NewPriceDraft }) {
           draft.create_price.currency
         )}
       </p>
-      <Button
-        size="sm"
-        className="mt-2"
-        disabled={createDraftPrice.isPending || createDraftPrice.isSuccess}
-        onClick={confirm}
-      >
-        {createDraftPrice.isSuccess
-          ? "Created"
-          : createDraftPrice.isPending
-            ? "Creating…"
-            : "Create this price"}
-      </Button>
+      {canApply && (
+        <Button
+          size="sm"
+          className="mt-2"
+          disabled={createDraftPrice.isPending || createDraftPrice.isSuccess}
+          onClick={confirm}
+        >
+          {createDraftPrice.isSuccess
+            ? "Created"
+            : createDraftPrice.isPending
+              ? "Creating…"
+              : "Create this price"}
+        </Button>
+      )}
     </div>
   )
 }

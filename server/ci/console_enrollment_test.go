@@ -46,7 +46,11 @@ func TestServerConsoleInvitedStaffEnrollment(t *testing.T) {
 
 	// A staff member may invite only a role within their own permissions.
 	created := call(t, handler, owner, http.MethodPost, groups+"/roles", map[string]any{
-		"name": "limited-inviter", "permissions": []string{"merchant:members:read", "merchant:members:manage", "merchant:customer:read"},
+		"name": "limited-inviter", "permissions": []string{
+			"merchant:members:read", "merchant:members:manage",
+			"merchant:customer:read", "merchant:catalog:read", "merchant:config:read",
+			"merchant:metrics:read", "merchant:usage:read",
+		},
 	})
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	role := decode[iam.GroupRole](t, created).Name
