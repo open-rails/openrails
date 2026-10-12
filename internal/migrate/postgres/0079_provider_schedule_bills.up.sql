@@ -41,3 +41,8 @@ CREATE TABLE billing.provider_cycle_receipts (
     FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
 );
 
+-- Resolve the latest approved cycle of one immutable schedule version without
+-- scanning every transaction on the merchant's provider account.
+CREATE INDEX provider_cycle_receipts_settled_schedule_idx
+    ON billing.provider_cycle_receipts (merchant_id, subscription_id, schedule_source_reference, due_at DESC)
+    WHERE approved;

@@ -55,8 +55,7 @@ describe("AccountBilling", () => {
       payments: [
         payment({
           subscription_id: "sub_1",
-          price: price(720, 720),
-          product: { id: "prod_1", display_name: "Pro" },
+          order_id: "ord_1",
         }),
         payment({
           id: "pay_2",
@@ -81,8 +80,8 @@ describe("AccountBilling", () => {
     expect(card).toHaveTextContent("Default for USD")
 
     const rows = await screen.findAllByTestId("payment-row")
-    expect(rows[0]).toHaveTextContent("Pro")
-    expect(rows[0]).toHaveTextContent("every 30 days")
+    expect(rows[0]).toHaveTextContent("Subscription")
+    expect(rows[0]).not.toHaveTextContent("every 30 days")
     expect(rows[0]).toHaveTextContent("Paid")
     expect(rows[0]).toHaveTextContent("$9.99")
     expect(rows[1]).toHaveTextContent("Refund")
