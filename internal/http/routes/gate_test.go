@@ -49,51 +49,12 @@ var openRoutes = []string{
 	"POST /v1/webhooks/{rail}/{account_id}",
 }
 
-// sensitiveRoutes are the routes that also ask a person for a recent sign-in:
-// those that move money or remove access. A change is reviewed.
-var sensitiveRoutes = []string{
-	"DELETE /v1/merchant/alert-webhooks/{id}",
-	"DELETE /v1/merchant/provisioning-tokens/{id}",
-	"GET /v1/merchant/billing-archive",
-	"PATCH /v1/admin/customers/{customer_id}",
-	"PATCH /v1/catalog/prices/{id}",
-	"PATCH /v1/catalog/products/{id}",
-	"PATCH /v1/merchant/alert-webhooks/{id}",
-	"PATCH /v1/merchant/configuration",
-	"PATCH /v1/merchant/psps/{id}",
-	"POST /v1/admin/credit-grants",
-	"POST /v1/admin/credit-grants/{id}/revoke",
-	"POST /v1/admin/orders/{id}/mark-uncollectible",
-	"POST /v1/admin/orders/{id}/retry-collection",
-	"POST /v1/admin/orders/{id}/void",
-	"POST /v1/admin/payments",
-	"POST /v1/admin/payments/{id}/refunds",
-	"POST /v1/admin/product-access",
-	"POST /v1/admin/product-access/{id}/revoke",
-	"POST /v1/admin/subscriptions/{id}/cancel",
-	"POST /v1/admin/subscriptions/{id}/change",
-	"POST /v1/admin/subscriptions/{id}/resume",
-	"POST /v1/catalog/apply",
-	"POST /v1/catalog/price-migrations",
-	"POST /v1/catalog/price-migrations/{id}/cancel",
-	"POST /v1/catalog/prices",
-	"POST /v1/catalog/products",
-	"POST /v1/merchant/alert-webhooks",
-	"POST /v1/merchant/billing-archive",
-	"POST /v1/merchant/billing-import",
-	"POST /v1/merchant/provisioning-tokens",
-	"POST /v1/merchant/psps",
-	"POST /v1/merchant/psps/refresh",
-	"PUT /v1/admin/subscriptions/{id}/payment-method",
-	"PUT /v1/catalog/meters/{key}",
-}
-
 // Every catalog route declares exactly one tier of the closed set, and what
 // that tier checks: a staff route its group's permission, a customer route
 // none, and no customer path names a customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
 	tiers := []Tier{AuthPublic, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning, AuthNetwork}
-	var open, sensitive []string
+	var open []string
 	names := map[string]string{}
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -101,10 +62,8 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		if slices.Contains(openTiers, r.Auth) {
 			open = append(open, key)
 		}
-		if Sensitive(r) {
-			sensitive = append(sensitive, key)
-		}
-		require.False(t, r.Sensitive && r.Auth != AuthMerchant && r.Auth != AuthNetwork, "%s: only a merchant or network route steps up", key)
+		require.False(t, r.Auth == AuthMerchant && r.Sensitive, "%s: admin operations never ask for a recent sign-in", key)
+		require.False(t, r.Sensitive && r.Auth != AuthNetwork, "%s: only a network route steps up", key)
 		if r.ClientMethod() {
 			require.NotEmpty(t, r.Name, "%s: a Client method calls it", key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
@@ -128,7 +87,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		switch r.Auth {
 		case AuthCustomer:
 			require.Equal(t, Customer, r.Group, key)
-			require.False(t, Sensitive(r), "%s: customer self-service never steps up", key)
+			require.False(t, r.Sensitive, "%s: customer self-service never steps up", key)
 			for _, param := range []string{"{customer_id}", "{subject}", "{user_id}"} {
 				require.NotContains(t, r.Path, param, "%s: a customer route takes its customer from the gate only", key)
 			}
@@ -143,8 +102,6 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 	want := slices.Clone(openRoutes)
 	sort.Strings(want)
 	require.Equal(t, want, open, "the routes no Auth gates")
-	sort.Strings(sensitive)
-	require.Equal(t, sensitiveRoutes, sensitive, "the routes that step up")
 }
 
 // everyGroup turns on every staff group and the programmatic routes.
@@ -286,9 +243,9 @@ func serveSafely(h http.Handler, r *http.Request) (code int) {
 // Each tier asks the host's auth exactly what it needs, once: who the
 // request is on every gated route; a staff route's permission, its
 // merchant: name at the merchant and then its root: name in the root scope,
-// and an application's on a programmatic route; a person's recent sign-in
-// on a route that moves money or removes access, never an application's;
-// the access read each mounted group's permission; nothing on an open route.
+// and an application's on a programmatic route. Admin routes never ask
+// for a recent sign-in; the access read asks each mounted group's permission;
+// an open route asks nothing.
 func TestGatesAskTheVerified(t *testing.T) {
 	for _, who := range []billingauth.Identity{authtest.User(userA), authtest.Application(userA)} {
 		rec := &recordingAuth{who: who}
@@ -298,7 +255,7 @@ func TestGatesAskTheVerified(t *testing.T) {
 		for _, key := range routeKeys(table) {
 			mounted[key] = true
 		}
-		checked, sensitive := 0, 0
+		checked := 0
 		for _, r := range Catalog() {
 			if !mounted[r.Key()] {
 				continue
@@ -319,10 +276,6 @@ func TestGatesAskTheVerified(t *testing.T) {
 				}
 			case AuthMerchant:
 				want = append([]string{"Authenticate"}, asks(r.Needs())...)
-				if Sensitive(r) && who.SubjectKind == billingauth.SubjectUser {
-					want = append(want, "CheckRecentSignIn")
-					sensitive++
-				}
 			}
 			req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
 			req.Header.Set("Authorization", "Bearer any")
@@ -331,9 +284,6 @@ func TestGatesAskTheVerified(t *testing.T) {
 			checked++
 		}
 		require.NotZero(t, checked)
-		if who.SubjectKind == billingauth.SubjectUser {
-			require.NotZero(t, sensitive)
-		}
 	}
 }
 
@@ -506,9 +456,8 @@ func runRoute(t *testing.T, rt *app.Runtime, a billingauth.Authenticator, key st
 const refund = "POST /v1/admin/payments/{id}/refunds"
 
 // The staff gate admits a person or an application holding the route's
-// permission, at the merchant its credential is bound to; a person on an
-// operation that moves money also proves a recent sign-in, whatever
-// credential it presents. An application passes on its permission alone.
+// permission at the merchant its credential is bound to. Both pass on
+// that permission without a recent sign-in, including a person's API key.
 func TestStaffGate(t *testing.T) {
 	rt := gatedRuntime(t)
 	person := authtest.User(userA)
@@ -535,34 +484,34 @@ func TestStaffGate(t *testing.T) {
 		code      string
 		challenge string
 	}{
-		"no credential":                       {authtest.Deny{}, map[string]string{"Authorization": ""}, 401, "authentication_required", "Bearer"},
-		"a refused credential":                {authtest.Deny{}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
-		"an expired credential":               {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)}, nil, 401, "credential_expired", `Bearer error="invalid_token"`},
-		"a revoked credential":                {&recordingAuth{authErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
-		"a missing sender proof":              {&recordingAuth{authErr: senderProof}, nil, 401, "authentication_required", auth.Refuse(presented, senderProof).Header.Get("WWW-Authenticate")},
-		"a provider's own challenge":          {&recordingAuth{authErr: &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`Proof error="use_nonce"`}, "Proof-Nonce": {"n1"}}}}, nil, 401, "authentication_required", `Proof error="use_nonce"`},
-		"a credential refused here":           {&recordingAuth{authErr: auth.ErrForbidden}, nil, 403, "permission_required", ""},
-		"auth unavailable":                    {&recordingAuth{authErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
-		"an unclassified error":               {&recordingAuth{authErr: errors.New("boom")}, nil, 503, "authentication_unavailable", ""},
-		"a panicking Authenticate":            {panicking{}, nil, 503, "authentication_unavailable", ""},
-		"a panicking Identity":                {panicking{identity: true}, nil, 503, "authentication_unavailable", ""},
-		"neither a Verified nor an error":     {nothing{}, nil, 503, "authentication_unavailable", ""},
-		"an unknown subject kind":             {&recordingAuth{who: withKind(person, "")}, nil, 403, "permission_required", ""},
-		"no invoker":                          {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
-		"a merchant that is not live":         {boundAuth{who: person, scope: authtest.MerchantScope(billing.MerchantID(uuid.New()))}, nil, 403, "merchant_unresolved", ""},
-		"a permission not held":               {&recordingAuth{who: person, allowed: map[billing.Permission]bool{}}, nil, 403, "permission_required", ""},
-		"a root scope that could not be read": {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{}, auth.ErrUnavailable }}, nil, 503, "authorization_unavailable", ""},
-		"a root scope that names none":        {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{Authority: "test"}, nil }}, nil, 503, "authorization_unavailable", ""},
-		"a panicking RootScope":               {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { panic("broken provider") }}, nil, 503, "authorization_unavailable", ""},
-		"a Can whose sign-in was revoked":     {&recordingAuth{who: person, canErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
-		"a Can that could not run":            {&recordingAuth{who: person, canErr: errors.New("db")}, nil, 503, "authorization_unavailable", ""},
-		"a Can that refuses with an error":    {&recordingAuth{who: person, canErr: auth.ErrForbidden}, nil, 503, "authorization_unavailable", ""},
-		"a stale sign-in":                     {&recordingAuth{who: person, signInErr: stepUp}, nil, 401, "step_up_required", `Bearer error="insufficient_user_authentication", max_age="900"`},
-		"no sign-in of its own":               {&recordingAuth{who: person, signInErr: auth.ErrForbidden}, nil, 403, "step_up_unavailable", ""},
-		"a person who cannot prove a sign-in": {&recordingAuth{who: person, noSignIn: true}, nil, 403, "step_up_unavailable", ""},
-		"a person's API key":                  {&recordingAuth{who: personalKey, noSignIn: true}, nil, 403, "step_up_unavailable", ""},
-		"a sign-in revoked since":             {&recordingAuth{who: person, signInErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
-		"a sign-in check that could not run":  {&recordingAuth{who: person, signInErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
+		"no credential":                              {authtest.Deny{}, map[string]string{"Authorization": ""}, 401, "authentication_required", "Bearer"},
+		"a refused credential":                       {authtest.Deny{}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
+		"an expired credential":                      {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)}, nil, 401, "credential_expired", `Bearer error="invalid_token"`},
+		"a revoked credential":                       {&recordingAuth{authErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
+		"a missing sender proof":                     {&recordingAuth{authErr: senderProof}, nil, 401, "authentication_required", auth.Refuse(presented, senderProof).Header.Get("WWW-Authenticate")},
+		"a provider's own challenge":                 {&recordingAuth{authErr: &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`Proof error="use_nonce"`}, "Proof-Nonce": {"n1"}}}}, nil, 401, "authentication_required", `Proof error="use_nonce"`},
+		"a credential refused here":                  {&recordingAuth{authErr: auth.ErrForbidden}, nil, 403, "permission_required", ""},
+		"auth unavailable":                           {&recordingAuth{authErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
+		"an unclassified error":                      {&recordingAuth{authErr: errors.New("boom")}, nil, 503, "authentication_unavailable", ""},
+		"a panicking Authenticate":                   {panicking{}, nil, 503, "authentication_unavailable", ""},
+		"a panicking Identity":                       {panicking{identity: true}, nil, 503, "authentication_unavailable", ""},
+		"neither a Verified nor an error":            {nothing{}, nil, 503, "authentication_unavailable", ""},
+		"an unknown subject kind":                    {&recordingAuth{who: withKind(person, "")}, nil, 403, "permission_required", ""},
+		"no invoker":                                 {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
+		"a merchant that is not live":                {boundAuth{who: person, scope: authtest.MerchantScope(billing.MerchantID(uuid.New()))}, nil, 403, "merchant_unresolved", ""},
+		"a permission not held":                      {&recordingAuth{who: person, allowed: map[billing.Permission]bool{}}, nil, 403, "permission_required", ""},
+		"a root scope that could not be read":        {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{}, auth.ErrUnavailable }}, nil, 503, "authorization_unavailable", ""},
+		"a root scope that names none":               {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { return billingauth.Scope{Authority: "test"}, nil }}, nil, 503, "authorization_unavailable", ""},
+		"a panicking RootScope":                      {rootAnswering{&recordingAuth{who: person}, func() (billingauth.Scope, error) { panic("broken provider") }}, nil, 503, "authorization_unavailable", ""},
+		"a Can whose sign-in was revoked":            {&recordingAuth{who: person, canErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
+		"a Can that could not run":                   {&recordingAuth{who: person, canErr: errors.New("db")}, nil, 503, "authorization_unavailable", ""},
+		"a Can that refuses with an error":           {&recordingAuth{who: person, canErr: auth.ErrForbidden}, nil, 503, "authorization_unavailable", ""},
+		"a stale sign-in":                            {&recordingAuth{who: person, signInErr: stepUp}, nil, 204, "", ""},
+		"no sign-in of its own":                      {&recordingAuth{who: person, signInErr: auth.ErrForbidden}, nil, 204, "", ""},
+		"a person who cannot prove a sign-in":        {&recordingAuth{who: person, noSignIn: true}, nil, 204, "", ""},
+		"a person's API key":                         {&recordingAuth{who: personalKey, noSignIn: true}, nil, 204, "", ""},
+		"an unused sign-in check reports revocation": {&recordingAuth{who: person, signInErr: revoked}, nil, 204, "", ""},
+		"a sign-in check that could not run":         {&recordingAuth{who: person, signInErr: auth.ErrUnavailable}, nil, 204, "", ""},
 	} {
 		got := runRoute(t, rt, tc.auth, refund, tc.header)
 		require.Equal(t, tc.status, got.status, "%s: %s", name, got.code)
@@ -570,7 +519,8 @@ func TestStaffGate(t *testing.T) {
 		require.Equal(t, tc.challenge, got.challenge, name)
 	}
 	got = runRoute(t, rt, &recordingAuth{who: person, signInErr: stepUp}, refund, nil)
-	require.Equal(t, map[string]any{"step_up_methods": []any{"password"}}, got.metadata, "the provider's challenge reaches its client")
+	require.Equal(t, http.StatusNoContent, got.status, "a stale staff sign-in passes on its permission")
+	require.Empty(t, got.metadata)
 	got = runRoute(t, rt, &recordingAuth{who: service, signInErr: stepUp, noSignIn: true}, refund, nil)
 	require.Equal(t, http.StatusNoContent, got.status, "an application has no sign-in to renew")
 	got = runRoute(t, rt, &recordingAuth{who: person, signInErr: stepUp}, "GET /v1/admin/payments", nil)

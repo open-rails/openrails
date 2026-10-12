@@ -245,9 +245,7 @@ reference: [api/routes.md](api/routes.md).
 | Metrics | `POST /v1/metrics/query`, `GET /v1/metrics/schema` | Dashboard |
 | Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/merchant/findings` (`?type=`), counted by `open_findings` in `POST /v1/metrics/query` | Ops, header bell |
 
-A person needs a recent sign-in on routes marked `sensitive` in the
-[route reference](api/routes.md), otherwise `401 step_up_required`.
-Applications do not step up, and findings resolutions do not request a recent
+Staff sessions and API keys pass on their permissions without a recent
 sign-in. A manual grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
 end.
 

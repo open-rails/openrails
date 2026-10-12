@@ -33,9 +33,9 @@ import (
 // Verified; then it pins the merchant the credential is bound to
 // (boundMerchant) and, by the route's tier, checks who the subject is, asks
 // the Verified's Can for the route's permission (its merchant: name in that
-// merchant's scope, else its root: name in the Authenticator's root scope)
-// and, for a person on a Sensitive route, its CheckRecentSignIn. Nothing in
-// the request names the merchant. It answers every refusal itself, as
+// merchant's scope, else its root: name in the Authenticator's root scope).
+// Nothing in the request names the merchant. Network routes marked
+// Sensitive also ask for CheckRecentSignIn. It answers every refusal itself, as
 // auth.Refuse says, and binds the verdict in its own context, where handlers
 // re-check it.
 
@@ -633,8 +633,7 @@ func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.Cus
 
 // staffGates gates a merchant-tier route: a person or an application holding
 // the route's permission at the merchant its credential is bound to, or in
-// the root scope, and, for a person on an operation that moves money or
-// removes access, a recent sign-in.
+// the root scope. Admin operations do not ask for a recent sign-in.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
@@ -645,12 +644,6 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 		panic(MountError{Route: route.Key(), Reason: "an admin route declares no permission"})
 	}
 	return []router.Middleware{verify(route, a), e.staffCheck(route, a, pair)}
-}
-
-// Sensitive reports a merchant route whose operation moves money or removes
-// access: a person needs a recent sign-in for it.
-func Sensitive(route Route) bool {
-	return route.Auth == AuthMerchant && route.Sensitive
 }
 
 // bindStaff binds the admitted staff member or application at target: the
@@ -665,15 +658,6 @@ func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) ro
 			v, c, target, ok := e.bound(r, route, a)
 			if !ok || !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
-			}
-			// An application has no sign-in to renew: its permission is the
-			// whole check. A person proves a recent one, whatever credential
-			// they present.
-			if Sensitive(route) && c.SubjectKind == billingauth.SubjectUser {
-				if err := recentSignIn(r.Request.Context(), v); err != nil {
-					refuse(r, route, a, stepRecentSignIn, err)
-					return
-				}
 			}
 			bindStaff(r, c, route, target)
 			next(r)

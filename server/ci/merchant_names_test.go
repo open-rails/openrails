@@ -107,8 +107,8 @@ func newUser(t *testing.T, cp *server.Server) (string, string) {
 	return u.ID, token.Value
 }
 
-// newOwner is a verified account signed in with its password: owner
-// operations need a recent sign-in, which a minted token is not.
+// newOwner is a verified account signed in with its password. AuthKit
+// credential and role grants retain their recent-sign-in requirement.
 func newOwner(t *testing.T, cp *server.Server) (string, string) {
 	t.Helper()
 	u := newAccount(t, cp)

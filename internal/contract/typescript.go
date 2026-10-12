@@ -128,7 +128,7 @@ export type OpenRailsRoute = {
   // merchant it acts on (null: a route about no one merchant), or root in
   // the root scope.
   permission: { merchant: string | null; root: string } | null
-  // A user in person also needs a recent sign-in.
+  // A customer-network operation also needs a recent sign-in.
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null

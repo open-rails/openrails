@@ -345,11 +345,10 @@ merchants:
   a token exchanged for it (RFC 8693 `group_id`, the `openrails-console`
   client the server declares), so the server needs its resource: `auth.resource.id`,
   which defaults to `public_billing_base_url`.
-- A sensitive operation (one that moves money or grants access) needs a
-  person's token's `auth_time` within 15 minutes; otherwise `401
-  step_up_required` (`WWW-Authenticate: Bearer
-  error="insufficient_user_authentication", max_age="900"`) asks the client to
-  re-authorize. A client acting for itself has no sign-in to renew.
+- OpenRails admin operations rely on the caller's permissions and do not
+  require a recent sign-in. AuthKit's own API-key creation and role grants
+  retain their step-up checks. Sensitive customer-network operations also
+  retain their recent-sign-in policy.
 - With AuthKit as the issuer, the browser gets these tokens by token exchange:
   register a public client with the token-exchange grant and the server as a
   resource, and give billing-ui a `fetch` that calls auth-ui's

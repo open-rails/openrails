@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-// A write refused with 401 step_up_required (RFC 9470) opens AuthKit's
+// An AuthKit write refused with 401 step_up_required (RFC 9470) opens its
 // step-up dialog (auth-ui) and runs again on the fresh session; cancelling
 // keeps the refusal. The real api client, auth-ui client and dialog run
 // against a stubbed server.
+import { AuthKitError } from "@openrails/auth-ui/client"
 import { afterEach, beforeEach, expect, it } from "vitest"
 
-import { api, ApiError } from "@/lib/api/client"
+import { api, ApiError, authKit } from "@/lib/api/client"
 import { ConsoleSession } from "@/lib/session"
 import { accessToken, server, session, type Recorded } from "@/test/harness"
 import { act, browserEnvironment, click, mount, unmount } from "@/test/mount"
@@ -30,17 +31,23 @@ const stepUpRequired = () =>
     }
   )
 
+let billingWrites: Recorded[]
 let grants: Recorded[]
 let stepUps: Recorded[]
 beforeEach(async () => {
   browserEnvironment()
+  billingWrites = []
   grants = []
   stepUps = []
   await server({
     "POST /admin/product-access": (request) => {
+      billingWrites.push(request)
+      return stepUpRequired()
+    },
+    "POST /groups/root/api-keys": (request) => {
       grants.push(request)
       return request.headers.get("Authorization") === `Bearer ${fresh}`
-        ? Response.json({ items: [{ id: "pa_1" }] }, { status: 201 })
+        ? Response.json({ id: "key_1" }, { status: 201 })
         : stepUpRequired()
     },
     "POST /me/step-up/password": (request) => {
@@ -74,9 +81,9 @@ beforeEach(async () => {
 afterEach(unmount)
 
 const grant = () =>
-  api("/admin/product-access", {
+  authKit("/groups/root/api-keys", {
     method: "POST",
-    body: { items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 24 }] },
+    body: { name: "integration" },
   })
 
 async function dialogOpens() {
@@ -96,7 +103,7 @@ async function dialogOpens() {
   return password!
 }
 
-it("re-authenticates in AuthKit's dialog and retries the write", async () => {
+it("re-authenticates for an AuthKit API-key grant and retries the write", async () => {
   const write = grant()
   const password = await dialogOpens()
   await act(async () => {
@@ -110,26 +117,24 @@ it("re-authenticates in AuthKit's dialog and retries the write", async () => {
   await click("Confirm")
 
   await act(async () => {
-    await expect(write).resolves.toEqual({ items: [{ id: "pa_1" }] })
+    await expect(write).resolves.toEqual({ id: "key_1" })
   })
   expect(stepUps.map((request) => request.body)).toEqual([
     { password: "Correct-horse-1" },
   ])
   expect(grants).toHaveLength(2)
-  expect(grants[1].body).toEqual({
-    items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 24 }],
-  })
+  expect(grants[1].body).toEqual({ name: "integration" })
   expect(session.getAccessToken()).toBe(fresh)
 })
 
-it("leaves OpenRails' refusal when the user cancels", async () => {
+it("reports AuthKit's cancellation without retrying the write", async () => {
   const write = grant().catch((error: unknown) => error)
   await dialogOpens()
   await click("Close")
 
   const refused = await write
-  expect(refused).toBeInstanceOf(ApiError)
-  expect((refused as ApiError).stepUpRequired).toBe(true)
+  expect(refused).toBeInstanceOf(AuthKitError)
+  expect((refused as AuthKitError).code).toBe("step_up_cancelled")
   expect(session.getAccessToken(), "a step-up is no sign-out").not.toBeNull()
   expect(stepUps).toHaveLength(0)
 })
@@ -137,4 +142,16 @@ it("leaves OpenRails' refusal when the user cancels", async () => {
 it("never asks a read to step up", async () => {
   await expect(api("/admin/customers/cus_1")).resolves.toEqual({})
   expect(document.querySelector('input[type="password"]')).toBeNull()
+})
+
+it("does not open a dialog or replay an OpenRails admin refusal", async () => {
+  const refused = await api("/admin/product-access", {
+    method: "POST",
+    body: {},
+  }).catch((error: unknown) => error)
+  expect(refused).toBeInstanceOf(ApiError)
+  expect((refused as ApiError).stepUpRequired).toBe(true)
+  expect(billingWrites).toHaveLength(1)
+  expect(document.querySelector('input[type="password"]')).toBeNull()
+  expect(stepUps).toHaveLength(0)
 })
