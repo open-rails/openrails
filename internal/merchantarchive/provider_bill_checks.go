@@ -39,7 +39,7 @@ var providerBillReferenceChecks = []rowCheck{
  WHERE NOT EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=provider_bills.order_id
  AND l.customer_id=provider_bills.customer_id AND l.position=x.position-1
  AND l.price_id::text IS NOT DISTINCT FROM x.line->>'PriceID' AND l.product_id::text IS NOT DISTINCT FROM x.line->>'ProductID'
- AND l.quantity::text IS NOT DISTINCT FROM x.line->>'Quantity' AND l.unit_amount::text=x.line->>'UnitAmount' AND l.amount::text=x.line->>'Amount'
+ AND COALESCE(l.quantity,1)::text=COALESCE(x.line->>'Quantity','1') AND l.unit_amount::text=x.line->>'UnitAmount' AND l.amount::text=x.line->>'Amount'
  AND COALESCE(l.source,'')=x.line->>'Source'))`},
 	{"provider_schedules", `NOT EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1
  AND s.id=provider_schedules.subscription_id AND s.customer_id=provider_schedules.customer_id AND s.psp_id=provider_schedules.psp_id)
