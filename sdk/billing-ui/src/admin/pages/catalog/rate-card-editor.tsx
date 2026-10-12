@@ -171,7 +171,11 @@ export function RateCardEditor({
                 {existing ? "Edit default rate" : "Add default rate"}
               </DialogTitle>
               <DialogDescription>
-                <AdminMessage id={"Set the price that charges every customer's usage as it is recorded. Money is entered in major currency units."} />
+                <AdminMessage
+                  id={
+                    "Set the price that charges every customer's usage as it is recorded. Money is entered in major currency units."
+                  }
+                />
               </DialogDescription>
             </DialogHeader>
 
@@ -549,9 +553,15 @@ function MatrixFields({ form, meter }: { form: MeteringForm; meter: Meter }) {
             <FieldIssue fieldId="matrix-add-cell" />
             {field.state.value.length > 0 && (
               <div className="hidden gap-2 px-0.5 text-xs text-muted-foreground sm:grid sm:grid-cols-[1fr_1fr_1fr_auto]">
-                <span><AdminMessage id="Value" /></span>
-                <span><AdminMessage id="Unit price" /></span>
-                <span><AdminMessage id="Maximum" /></span>
+                <span>
+                  <AdminMessage id="Value" />
+                </span>
+                <span>
+                  <AdminMessage id="Unit price" />
+                </span>
+                <span>
+                  <AdminMessage id="Maximum" />
+                </span>
                 <span className="size-8" aria-hidden="true" />
               </div>
             )}
@@ -878,8 +888,12 @@ function AllowanceFields({ form }: { form: MeteringForm }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none"><AdminMessage id="No allowance" /></SelectItem>
-                <SelectItem value="included"><AdminMessage id="Fixed included units" /></SelectItem>
+                <SelectItem value="none">
+                  <AdminMessage id="No allowance" />
+                </SelectItem>
+                <SelectItem value="included">
+                  <AdminMessage id="Fixed included units" />
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
