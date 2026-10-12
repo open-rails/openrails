@@ -26,3 +26,10 @@ func TestOriginKeepsNondefaultPortsDistinct(t *testing.T) {
 		t.Fatalf("origin=%s err=%v", origin, err)
 	}
 }
+
+func TestOriginPreservesIPv6AddressFamily(t *testing.T) {
+	origin, err := Origin("https://[::ffff:127.0.0.1]:443")
+	if err != nil || origin != "https://[::ffff:127.0.0.1]" {
+		t.Fatalf("origin=%s err=%v", origin, err)
+	}
+}

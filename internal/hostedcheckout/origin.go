@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"golang.org/x/net/idna"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -41,7 +42,7 @@ func Origin(raw string, forbidden ...string) (string, error) {
 // origin. Compare that identity before allowing a separate payment surface.
 func canonicalOrigin(u *url.URL) (string, error) {
 	scheme, host, port := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname()), u.Port()
-	if ip := net.ParseIP(host); ip != nil {
+	if ip, err := netip.ParseAddr(host); err == nil {
 		host = ip.String()
 	} else {
 		var err error
