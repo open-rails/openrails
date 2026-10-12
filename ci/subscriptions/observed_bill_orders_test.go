@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -14,8 +15,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // These are normalized, authenticated receipt fixtures, deliberately below
@@ -97,7 +100,7 @@ func TestObservedBillMoneyFidelity(t *testing.T) {
 	var payments, findings, events, grants int
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.payments WHERE order_id=$1`), order).Scan(&payments))
 	require.Equal(t, 3, payments)
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='provider_bill_overpaid' AND subject_key=$1`), "order:"+order.String()).Scan(&findings))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='pull.bill.overpaid' AND subject_key=$1`), "order:"+order.String()).Scan(&findings))
 	require.Equal(t, 1, findings)
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.host_outbox WHERE event_type='order.completed' AND subject_id=$1`), order).Scan(&events))
 	require.Equal(t, 1, events)
@@ -152,4 +155,41 @@ func TestObservedBillNonCashAndRollback(t *testing.T) {
 	require.Zero(t, count, "credit settlement must not manufacture a gateway capture")
 	_, err = observed.Record(ctx, d, b, w.clock.Now())
 	require.ErrorContains(t, err, "transaction-bound")
+}
+
+// Pull may commit accounting before a later webhook applies lifecycle. That
+// replay repairs the period once, even though the order is already complete.
+func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
+	w := newWorld(t)
+	l := importLegacy(t, w, "nmi", embedded)
+	d, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := db.WithPSPID(merchant.WithID(t.Context(), w.client[embedded].MerchantID()), w.psp["nmi"].UUID())
+	before := w.subscription(embedded, l.sub)
+	start := *before.CurrentPeriodEndsAt
+	end := start.Add(monthHours * time.Hour)
+	priceID, productID, subID := w.priceStorageID(l.price.ID), l.price.ProductID.UUID(), l.sub.UUID()
+	hours := monthHours
+	b := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "paid-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "credit", NonCashAmount: l.price.UnitAmount, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount, BillingIntervalHours: &hours, AccessDurationHours: &hours}}}
+	var done observed.Result
+	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		done, err = observed.Record(ctx, d.NewWithPgxTx(tx), b, w.clock.Now())
+		return err
+	}))
+	require.True(t, done.Completed)
+	require.True(t, w.subscription(embedded, l.sub).CurrentPeriodEndsAt.Equal(start))
+	lifecycle := engine.Graph(w.rt).Runtime.SubscriptionLifecycleService
+	params := &subscriptions.RenewMembershipParams{ProviderBill: &b, Rail: models.RailNMI, RailSubscriptionID: l.railSub, Amount: b.Total, AmountProvided: true, Currency: b.Currency}
+	require.NoError(t, lifecycle.RenewMembership(ctx, params))
+	require.True(t, w.subscription(embedded, l.sub).CurrentPeriodEndsAt.Equal(end))
+	var grants int
+	count := func() int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.grants WHERE customer_id=$1`), b.CustomerID).Scan(&n))
+		return n
+	}
+	grants = count()
+	require.NoError(t, lifecycle.RenewMembership(ctx, params))
+	require.Equal(t, grants, count(), "completed receipt replay repeats no access effects")
 }

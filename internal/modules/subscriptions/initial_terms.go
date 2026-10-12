@@ -16,6 +16,10 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
+	// RecurringIntervalHours freezes the ongoing cadence separately from an
+	// initial trial or prorated service period. Provider schedules require it.
+	RecurringIntervalHours *int `json:"recurring_interval_hours,omitempty"`
+
 	LegacyEntitlements  map[string]*int         `json:"legacy_entitlements,omitzero"`
 	CancelAfterInitial  bool                    `json:"cancel_after_initial,omitempty"`
 	AccessDurationHours *int                    `json:"access_duration_hours"`
@@ -78,6 +82,9 @@ type ReplacedMembership struct {
 }
 
 func (t InitialMembershipTerms) Validate() error {
+	if t.RecurringIntervalHours != nil && *t.RecurringIntervalHours <= 0 || t.CollectionPolicy != models.CollectionPolicyEngine && t.RecurringIntervalHours == nil {
+		return errors.New("accepted provider enrollment requires its recurring cadence")
+	}
 	if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
 		return err
 	}

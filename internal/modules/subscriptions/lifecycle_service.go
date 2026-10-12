@@ -828,9 +828,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				return err
 			}
 			// Money survives late, partial and duplicate observations. Only a
-			// newly settled renewal may advance the existing paid period.
+			// settled renewal newer than its locked paid period may advance it.
+			// A receipt committed by reconciliation before lifecycle completion
+			// remains repairable when a webhook later replays that same bill.
 			_, terminal := TerminalCancelReason(subscription)
-			if !recorded.Completed || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
+			if !bill.Settled || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
 				return nil
 			}
 			copy := *params

@@ -79,7 +79,7 @@ func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, t
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(),
 		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: target.ID, PaymentMethodID: *charged,
-		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: quote.ChargeNow, RecurringAmount: upgrade.New.Micros, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours,
+		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: quote.ChargeNow, RecurringAmount: upgrade.New.Micros, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours, RecurringIntervalHours: target.BillingIntervalHours,
 		AcceptedAt: quote.PeriodStart, PeriodStart: quote.PeriodStart, PeriodEnd: quote.PeriodEnd,
 		Replaces: &subscriptions.ReplacedMembership{SubscriptionID: sub.ID, PriceID: sub.PriceID, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(), Credit: quote.Credit},
 	}
@@ -118,7 +118,7 @@ func seatIncreaseQuote(sub *models.Subscription, charged *uuid.UUID, current *mo
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub.ID,
 		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: current.ID, PaymentMethodID: *charged,
-		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: charge, RecurringAmount: recurring, Currency: current.Currency, AccessDurationHours: sub.AccessDurationHoursSnapshot,
+		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: charge, RecurringAmount: recurring, Currency: current.Currency, AccessDurationHours: sub.AccessDurationHoursSnapshot, RecurringIntervalHours: current.BillingIntervalHours,
 		AcceptedAt: now, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		Adds: &subscriptions.AddedSeats{FromQuantity: *sub.Quantity},
 	}
