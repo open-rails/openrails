@@ -2157,7 +2157,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
