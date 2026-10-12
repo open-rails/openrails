@@ -124,6 +124,14 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 	if err != nil {
 		return nil, 0, err
 	}
+	if r.State.DestructiveAdmissions == nil {
+		return nil, 0, errors.New("destructive refund admission is not wired")
+	}
+	if prior, found, err := preparedRefundReplay(ctx, r, paymentID, idempotencyKey); err != nil {
+		return nil, 0, err
+	} else if found {
+		return issuePreparedAdminRefund(ctx, r, prior)
+	}
 	ctx, action, err := destructive.AdmitCommand(ctx, r.State.DestructiveAdmissions, command)
 	if err != nil {
 		return nil, 0, err
@@ -660,4 +668,28 @@ func adminRefundCommand(ctx context.Context, r *httprequest.Request, paymentID u
 		}
 	}
 	return destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+key, req)
+}
+
+// An existing reservation owns its accepted admission and provider operation,
+// including a terminal decline. Replaying it must not allocate a new receipt.
+func preparedRefundReplay(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, key string) (*adminRefundPrepared, bool, error) {
+	reservation, err := r.State.PaymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, key)
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	operation, err := r.State.DB.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: intents.RefundIdempotencyKey(paymentID, key)})
+	if err != nil {
+		return nil, false, err
+	}
+	if operation.PaymentID == nil || *operation.PaymentID != paymentID || operation.DestructiveActionID == nil {
+		return nil, false, errors.New("refund replay has no original destructive admission")
+	}
+	return &adminRefundPrepared{reservationID: reservation.ID, intentID: operation.ID}, true, nil
 }

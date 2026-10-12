@@ -300,7 +300,11 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 		if err != nil {
 			return err
 		}
-		commands = append(commands, command)
+		if _, found, err := preparedRefundReplay(r.Request.Context(), r, paymentID, findingRefundKey(finding.ID, paymentID)); err != nil {
+			return err
+		} else if !found {
+			commands = append(commands, command)
+		}
 	}
 	if len(commands) > 0 {
 		if r.State.DestructiveAdmissions == nil {
