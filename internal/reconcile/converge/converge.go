@@ -96,7 +96,10 @@ type ConvergeFinding struct {
 	// legitimate when a local terminal fact, not an absence in provider data,
 	// justifies the retraction (an already-terminated grant's effect, an
 	// abandoned checkout attempt). Every use must say why in a comment.
-	Ungated           bool
+	Ungated bool
+	// Retracts marks a repair of another shape that closes access, so the
+	// Retractions gate holds it as it holds every EXCESS repair.
+	Retracts          bool
 	Evidence          map[string]any
 	RecommendedAction string                          // prose; "" = none
 	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
@@ -416,7 +419,7 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retra
 	switch f.Class {
 	case ClassAuto:
 		if f.Repair != nil {
-			if f.Shape == ShapeExcess {
+			if f.Shape == ShapeExcess || f.Retracts {
 				if why := hold.why(ctx); why != "" {
 					return "reconcile_required", why, nil
 				}

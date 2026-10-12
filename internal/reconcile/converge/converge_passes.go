@@ -275,6 +275,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Type:       "derive.grant_effect.mismatch",
 			Shape:      ShapeMismatch,
 			Class:      ClassAuto,
+			Retracts:   true,
 			Severity:   "high",
 			SubjectKey: "subscription:" + d.ID.String(),
 			Provider:   "self",

@@ -156,8 +156,9 @@ func (w *world) sweep() {
 
 // The kill switch holds only the retractions the sweep would make on its own.
 // Off, the sweep still detects and notifies: a staff revoke's access-ended
-// notice is queued, and a revoke whose effect never reached its window is a
-// finding naming the switch, the window left open. On, the sweep retracts it.
+// notice is queued, while a revoke whose effect never reached its window and a
+// chargeback whose access never closed are findings naming the switch, access
+// left open. On, the sweep retracts both.
 func TestKillSwitchHoldsOnlySweepRetractions(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t) // a fresh deployment: the switch is off
@@ -172,29 +173,43 @@ func TestKillSwitchHoldsOnlySweepRetractions(t *testing.T) {
 		SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, 'revoke', g.id, $2, 'support'
 		FROM billing.grants g JOIN billing.product_access pa ON pa.merchant_id = g.merchant_id AND pa.grant_id = g.id WHERE pa.id = $1
 		RETURNING supersedes_id`), open.ID.UUID(), w.clock.Now()).Scan(&grant))
+	charged := enroll(t, w, "nmi", embedded)
+	w.decide(charged.sub, `status = 'canceled', cancel_type = 'chargeback', canceled_at = $2`, w.clock.Now())
 	w.advance(time.Minute)
-	excess := func() (status string, evidence map[string]any) {
+	finding := func(findingType, subject string) (status string, evidence map[string]any) {
 		t.Helper()
 		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status, evidence->'local' FROM billing.reconciliation_findings
-			WHERE finding_type = 'derive.grant_effect.excess' AND subject_key = $1`), "grant_effect:"+grant.String()).Scan(&status, &evidence))
+			WHERE finding_type = $1 AND subject_key = $2`), findingType, subject).Scan(&status, &evidence))
 		return status, evidence
+	}
+	excess := func() (string, map[string]any) {
+		return finding("derive.grant_effect.excess", "grant_effect:"+grant.String())
+	}
+	chargeback := func() (string, map[string]any) {
+		return finding("derive.grant_effect.mismatch", "subscription:"+charged.sub.UUID().String())
 	}
 
 	w.sweep()
 	require.Equal(t, 1, w.accessEndedNotices(revoked.id), "the revoke's notice is queued with the switch off")
-	status, evidence := excess()
-	require.Equal(t, "reconcile_required", status)
-	require.Equal(t, "kill_switch", evidence["held_by"])
-	require.Contains(t, evidence["held_reason"], "kill switch is OFF")
+	for _, held := range []func() (string, map[string]any){excess, chargeback} {
+		status, evidence := held()
+		require.Equal(t, "reconcile_required", status)
+		require.Equal(t, "kill_switch", evidence["held_by"])
+		require.Contains(t, evidence["held_reason"], "kill switch is OFF")
+	}
 	require.True(t, drifted.entitled(key), "the sweep retracted nothing")
+	require.True(t, charged.c.entitled(charged.ent), "nor closed the chargeback's access")
 	require.Zero(t, w.accessEndedNotices(drifted.id))
 
 	w.armDestructive()
 	w.sweep()
-	status, evidence = excess()
-	require.Equal(t, "auto_fixed", status)
-	require.NotContains(t, evidence, "held_by")
+	for _, fixed := range []func() (string, map[string]any){excess, chargeback} {
+		status, evidence := fixed()
+		require.Equal(t, "auto_fixed", status)
+		require.NotContains(t, evidence, "held_by")
+	}
 	require.False(t, drifted.entitled(key), "the switch on, the sweep retracts")
+	require.False(t, charged.c.entitled(charged.ent), "and bounds the chargeback's access")
 	require.Equal(t, 1, w.accessEndedNotices(drifted.id))
 	require.Equal(t, 1, w.accessEndedNotices(revoked.id))
 }
