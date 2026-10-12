@@ -827,6 +827,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			return nil
 		}
 
+		if _, terminal := subscriptions.TerminalCancelReason(subscription); terminal {
+			// Record retained money and its review finding without restoring
+			// canceled access or adopting the replacement collection agreement.
+			return nil
+		}
 		if err = subscription.ActivateWithPrice(newPrice); err != nil {
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}
@@ -836,7 +841,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		// start at the old subscription's mutable paid-through value.
 		subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = purchasedAt, periodEnd
 
-		if err = subscription.Validate(int64(billedAmountCents)); err != nil {
+		if err = subscription.Validate(int64(billedAmountCents), now); err != nil {
 			return fmt.Errorf("failed to validate subscription: %w", err)
 		}
 

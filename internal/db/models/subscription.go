@@ -169,8 +169,8 @@ func (s *Subscription) ClearRetrySchedule() {
 
 // Validate checks activation preconditions. amountCents is integer minor
 // units; money is never a float.
-func (s *Subscription) Validate(amountCents int64) error {
-	if s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Before(time.Now()) {
+func (s *Subscription) Validate(amountCents int64, now time.Time) error {
+	if s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Before(now) {
 		if s.Status == StatusActive {
 			return fmt.Errorf("cannot activate expired subscription without proper renewal")
 		}
