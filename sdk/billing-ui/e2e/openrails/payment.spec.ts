@@ -24,7 +24,7 @@ test("Solana pays a one-time order when configured", async ({
     }
   })
   await page.goto(
-    `/purchase.html#price=${catalog.crypto_pass_price_id}&token=${user.access_token}`
+    `/payment.html#price=${catalog.crypto_pass_price_id}&token=${user.access_token}`
   )
   const order = (await (
     await page.waitForFunction(

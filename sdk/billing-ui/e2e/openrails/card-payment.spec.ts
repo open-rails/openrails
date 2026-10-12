@@ -57,7 +57,7 @@ async function openPayment(
   )
   const theme = options.theme ? `&theme=${options.theme}` : ""
   await page.goto(
-    `/purchase.html#price=${price}&token=${user.access_token}${theme}`
+    `/payment.html#price=${price}&token=${user.access_token}${theme}`
   )
   const purchase = page.locator(":root")
   await purchase.getByLabel("Name on card").fill("Card Payer")

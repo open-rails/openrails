@@ -505,7 +505,7 @@ func stripeCheckoutIdempotencyKey(key string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(key))
-	return "openrails-payment-page-" + hex.EncodeToString(sum[:])
+	return "openrails-stripe-checkout-" + hex.EncodeToString(sum[:])
 }
 
 func parseStripeError(body []byte) string {

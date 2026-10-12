@@ -77,7 +77,7 @@ async function buildHostApp() {
         input: {
           account: path.join(root, "e2e/openrails/app/main.tsx"),
           admin: path.join(root, "e2e/openrails/app/admin.tsx"),
-          purchase: path.join(root, "e2e/openrails/app/purchase.tsx"),
+          payment: path.join(root, "e2e/openrails/app/payment.tsx"),
           purchase: path.join(root, "e2e/openrails/app/purchase.tsx"),
         },
         output: {
