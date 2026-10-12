@@ -454,7 +454,7 @@ func TestCatalogEditsCarryRevisions(t *testing.T) {
 	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "one", Currency: "USD", UnitAmount: 1_000_000})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, price.Revision)
-	require.EqualValues(t, 0, price.Version)
+	require.EqualValues(t, 1, price.Version)
 	_, err = c.UpdatePrice(t.Context(), price.ID, billing.UpdatePriceParams{Archived: catalog.Value(true), ExpectedRevision: new(int64(7))})
 	require.True(t, errors.As(err, &refused) && refused.Code == billing.CodeRevisionMismatch, "%v", err)
 	archived, err := c.UpdatePrice(t.Context(), price.ID, billing.UpdatePriceParams{Archived: catalog.Value(true), ExpectedRevision: new(price.Revision)})

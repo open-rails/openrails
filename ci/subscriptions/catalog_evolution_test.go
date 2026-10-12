@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
@@ -179,7 +180,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	boot(file(2_000_000))
 	second, err := priceByKey(t.Context(), c, "video", "purchase")
 	require.NoError(t, err)
-	require.EqualValues(t, 1, second.Version)
+	require.EqualValues(t, 2, second.Version)
 	boot(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"video": {DisplayName: catalog.Value("Updated display")}}})
 	for _, key := range []string{"video", "other-video"} {
 		product, err := productByKey(t.Context(), c, key)
@@ -401,10 +402,36 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	var archive bytes.Buffer
 	require.NoError(t, merchantarchive.Export(t.Context(), source, merchantID, &archive))
 
+	// Force the legacy stream to put the newest price first. UUID ordering is
+	// unrelated to financial-version ordering, and must never assign versions.
+	var newestFirst [][]*string
+	currentStorageID := w.priceStorageID(current.ID).String()
+	table := ""
+	_, err = archivewire.Read(bytes.NewReader(archive.Bytes()), nil, func(record archivewire.Record) error {
+		if record.Kind == "table" {
+			table = record.Table
+			return nil
+		}
+		if table == "prices" {
+			values := append([]*string(nil), record.Values...)
+			if *values[2] == currentStorageID {
+				newestFirst = append([][]*string{values}, newestFirst...)
+			} else {
+				newestFirst = append(newestFirst, values)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	legacyPriceIndex := 0
+
 	// The pre-revision row format omitted product and price revisions and
 	// ownership, and carried each product's keys on the product.
 	legacy := legacyArchive(t, archive.Bytes(), func(table string, values []*string) []*string {
 		switch table {
+		case "prices":
+			values = newestFirst[legacyPriceIndex]
+			legacyPriceIndex++
 		case "products":
 			keys := "[]"
 			values = values[:len(values)-1] // ownership, the last column
@@ -445,10 +472,10 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			}
 			for _, price := range versions.Items {
 				var revision int64
-				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision FROM "+name+".prices WHERE id=$1", w.priceStorageID(price.ID)).Scan(&revision))
-				if tc.name == "current" {
-					require.Equal(t, price.Version, revision+1, "the public version is the preserved storage revision plus one")
-				}
+				var publicID string
+				require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT revision,public_id FROM "+name+".prices WHERE id=$1", w.priceStorageID(price.ID)).Scan(&revision, &publicID))
+				require.Equal(t, price.Version, revision+1, "explicit or reconstructed versions follow the accepted chronology")
+				require.Equal(t, price.ID.String(), publicID, "public ID must be derived after the restored revision is known")
 			}
 			boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
 				t.Helper()
