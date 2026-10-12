@@ -184,7 +184,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Accepted operations carry their own durable River lifecycle job.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
-		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry,
+		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry, Admissions: r.DestructiveAdmissions,
 	}); err != nil {
 		return fmt.Errorf("add provider operation worker: %w", err)
 	}

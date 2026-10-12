@@ -105,6 +105,10 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 			r.configErr = fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
 			return
 		}
+		if err := r.MerchantConfig.SetDestructiveAdmissions(r.DestructiveAdmissions, key); err != nil {
+			r.configErr = fmt.Errorf("initialize configuration admission: %w", err)
+			return
+		}
 		fingerprints, err := merchants.NewCredentialFingerprinter(key)
 		if err != nil {
 			r.configErr = err

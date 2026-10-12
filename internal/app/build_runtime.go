@@ -359,7 +359,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
-	runtime.RailPaymentMethodService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtimeRef = runtime
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
