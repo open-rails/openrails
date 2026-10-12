@@ -63,7 +63,7 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
-	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at result",
+	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
 	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
