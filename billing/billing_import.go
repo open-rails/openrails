@@ -114,6 +114,8 @@ type DeclaredTransaction struct {
 	OccurredAt         time.Time `json:"occurred_at"`
 	// NextBillingAt is the verified provider boundary accompanying this receipt.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
+	// StripeInvoice is the complete verified bill, repeated identically for each receipt.
+	StripeInvoice *DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
 }
 
 // DeclaredSubscription is one subscription's facts, not classifications.
@@ -169,4 +171,46 @@ type BillingImportResult struct {
 	Skipped  []string          `json:"skipped"`
 	Blocked  []string          `json:"blocked"`
 	Reasons  map[string]string `json:"reasons"`
+}
+
+// DeclaredStripeInvoice is an operator-verified invoice snapshot. All amounts
+// use the currency's native units, like DeclaredTransaction; no amount is
+// inferred from the current catalog. At most 1000 lines/payments are accepted.
+type DeclaredStripeInvoice struct {
+	ID                string                         `json:"id"`
+	CustomerReference string                         `json:"customer_reference"`
+	Status            string                         `json:"status"`
+	Reason            string                         `json:"reason"`
+	Currency          string                         `json:"currency"`
+	Total             int64                          `json:"total,string"`
+	AmountDue         int64                          `json:"amount_due,string"`
+	AmountPaid        int64                          `json:"amount_paid,string"`
+	AmountRemaining   int64                          `json:"amount_remaining,string"`
+	AmountOffStripe   int64                          `json:"amount_off_stripe,string"`
+	StartingBalance   int64                          `json:"starting_balance,string"`
+	PrePaymentCredit  int64                          `json:"pre_payment_credit,string"`
+	DueAt             time.Time                      `json:"due_at"`
+	Lines             []DeclaredStripeInvoiceLine    `json:"lines"`
+	Payments          []DeclaredStripeInvoicePayment `json:"payments"`
+}
+
+// DeclaredStripeInvoiceLine preserves one finalized line and its service period.
+type DeclaredStripeInvoiceLine struct {
+	ID             string    `json:"id"`
+	PriceReference string    `json:"price_reference,omitempty"`
+	Description    string    `json:"description"`
+	Quantity       *int      `json:"quantity,omitempty"`
+	Amount         int64     `json:"amount,string"`
+	PeriodStart    time.Time `json:"period_start"`
+	PeriodEnd      time.Time `json:"period_end"`
+}
+
+// DeclaredStripeInvoicePayment is a verified actual invoice allocation. Credit
+// and out-of-band settlement belong on the invoice, never in this cash list.
+type DeclaredStripeInvoicePayment struct {
+	ID              string    `json:"id"`
+	ChargeID        string    `json:"charge_id"`
+	PaymentIntentID string    `json:"payment_intent_id,omitempty"`
+	Amount          int64     `json:"amount,string"`
+	PaidAt          time.Time `json:"paid_at"`
 }
