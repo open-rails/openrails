@@ -14,7 +14,7 @@ var usageQuery = params(text("currency"), text("from"), text("group_by"), pagePa
 // host settles against its own upstream costs.
 var meteringRoutes = []Route{
 	{Method: GET, Path: "/v1/app/admissions/{request_id}", Group: App, Auth: AuthApplication, Permission: needUsageRead, Name: "GetAdmission",
-		Responses: []Reply{{200, billing.Admission{}}}, Errors: withAdmission("invalid_param"), Handler: h(handlers.GetAdmission)},
+		Responses: []Reply{{200, billing.Admission{}}}, Errors: codes("invalid_param", "admission_not_found", "service_unavailable"), Handler: h(handlers.GetAdmission)},
 	{Method: GET, Path: "/v1/app/admissions", Group: App, Auth: AuthApplication, Permission: needUsageRead, Name: "ListAdmissions",
 		Query: params(cursorPage, text("customer_id"), text("currency"), text("state"), text("from"), text("to")), Responses: []Reply{{200, billing.ListPage[billing.Admission]{}}},
 		Errors: codes("invalid_cursor", "invalid_query", "currency_unsupported"), Handler: h(handlers.ListAdmissions)},
