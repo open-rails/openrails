@@ -367,21 +367,39 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			return err
 		})
 		if err != nil {
-			evidence, _ := json.Marshal(map[string]any{"transaction_id": t.TransactionID, "subscription_id": sub.ID, "error": err.Error()})
-			action := "Resolve the accepted provider bill or cycle evidence, then replay this observation. No collection or entitlement was inferred."
-			_, findingErr := database.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
-				PspID: &sub.PspID, FindingType: "pull.bill.unresolved", SubjectKey: "receipt:" + t.TransactionID,
-				Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
-			if findingErr != nil {
+			unresolved := &UnresolvedReceiptError{TransactionID: t.TransactionID, Err: err}
+			if findingErr := recordUnresolvedReceipt(ctx, database.Gen(ctx), sub, unresolved); findingErr != nil {
 				return inserted, fmt.Errorf("retain unresolved provider bill: %w", findingErr)
 			}
-			return inserted, fmt.Errorf("provider bill receipt %s unresolved: %w", t.TransactionID, err)
+			return inserted, unresolved
 		}
 		if result.PaymentCreated {
 			inserted++
 		}
 	}
 	return inserted, nil
+}
+
+// UnresolvedReceiptError is a provider receipt no accepted bill can hold. It
+// stays a durable finding; no collection or entitlement is inferred from it.
+type UnresolvedReceiptError struct {
+	TransactionID string
+	Err           error
+}
+
+func (e *UnresolvedReceiptError) Error() string {
+	return fmt.Sprintf("provider bill receipt %s unresolved: %v", e.TransactionID, e.Err)
+}
+
+func (e *UnresolvedReceiptError) Unwrap() error { return e.Err }
+
+func recordUnresolvedReceipt(ctx context.Context, q *gen.Queries, sub *models.Subscription, e *UnresolvedReceiptError) error {
+	evidence, _ := json.Marshal(map[string]any{"transaction_id": e.TransactionID, "subscription_id": billing.SubscriptionID(sub.ID).String(), "error": e.Err.Error()})
+	action := "Resolve the accepted provider bill or cycle evidence, then replay this observation. No collection or entitlement was inferred."
+	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
+		PspID: &sub.PspID, FindingType: "pull.bill.unresolved", SubjectKey: "receipt:" + e.TransactionID,
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
 }
 
 // chargeAttempt reports whether a mirrored transaction is a charge attempt

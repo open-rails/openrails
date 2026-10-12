@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"encoding/json"
 	"github.com/open-rails/openrails/internal/merchant"
 
 	"context"
@@ -231,9 +232,12 @@ func ImportDeclaredSubscriptions(
 			priceCache[f.PriceID] = p
 		}
 
+		// A live provider schedule freezes its accepted terms as enrollment
+		// does: declared, else proven by the book's own paid cycle. Unproven
+		// terms leave the schedule unresolved, never invented.
+		unprovenSchedule := ""
 		if (f.Rail == string(models.RailNMI) || f.Rail == string(models.RailCCBill)) && f.CancelKind == DeclaredCancelNone && f.AcceptedSchedule == nil {
-			block("live provider schedule requires explicit accepted_schedule terms; no historical reconstruction is performed")
-			continue
+			f.AcceptedSchedule, unprovenSchedule = derivedSchedule(f, price, txns)
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
 			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || (schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.IntervalMonths != 0) && (schedule.IntervalMonths <= 0 || schedule.IntervalMonths > 1200 || schedule.IntervalHours != 0) || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
@@ -338,10 +342,18 @@ func ImportDeclaredSubscriptions(
 				return out, fmt.Errorf("declared import accepted schedule %s: %w", f.SourceID, err)
 			}
 		}
+		if unprovenSchedule != "" {
+			if err := recordUnresolvedSchedule(ctx, database.Gen(ctx), sub, unprovenSchedule); err != nil {
+				return out, fmt.Errorf("declared import: retain unresolved schedule %s: %w", f.SourceID, err)
+			}
+		}
 		if f.CancelKind != DeclaredCancelNone && outcome == DeclaredImported {
 			// Fresh row from settled history: written faithfully above; no decider
 			// pass, but money truth still lands.
-			if _, err := backfillSubscriptionPayments(ctx, database, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
+			if err := retainingUnresolved(ctx, database, sub, subscriptionTxns(txns, f.RailSubscriptionID), func(kept []RemoteTransaction) error {
+				_, err := backfillSubscriptionPayments(ctx, database, sub, kept, asOf, declaredImportLookback)
+				return err
+			}); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
 			}
 			// Declared canceled but the provider-side schedule was not confirmed
@@ -373,20 +385,24 @@ func ImportDeclaredSubscriptions(
 			// A lifecycle conflict is an expected per-source block: a nested
 			// transaction (savepoint) keeps its constraint error from poisoning
 			// the book transaction. Any other error rolls back the whole book.
-			err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-				txdb := db.NewWithPgxTx(tx)
-				_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{})
-				if err != nil || outcome != DeclaredImported {
-					return err
-				}
-				// A retained unverified row may need no lifecycle transition.
-				// Give it the same explicit renewal-hold grace as native runtime
-				// subscriptions without extending its immutable paid grants.
-				locked, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, sub.ID)
-				if err != nil {
-					return err
-				}
-				return lc.EnsureRenewalGrace(ctx, txdb, locked)
+			err := retainingUnresolved(ctx, database, sub, snap.Transactions, func(kept []RemoteTransaction) error {
+				factSnap := *snap
+				factSnap.Transactions = kept
+				return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+					txdb := db.NewWithPgxTx(tx)
+					_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, &factSnap, asOf, 0, declaredImportLookback, time.Time{})
+					if err != nil || outcome != DeclaredImported {
+						return err
+					}
+					// A retained unverified row may need no lifecycle transition.
+					// Give it the same explicit renewal-hold grace as native runtime
+					// subscriptions without extending its immutable paid grants.
+					locked, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, sub.ID)
+					if err != nil {
+						return err
+					}
+					return lc.EnsureRenewalGrace(ctx, txdb, locked)
+				})
 			})
 			if err != nil {
 				var pgErr *pgconn.PgError
@@ -522,6 +538,82 @@ func nilIfEmptyBytes(b []byte) []byte {
 }
 
 // subscriptionTxns filters the batch transactions to one subscription.
+// retainingUnresolved runs one subscription's import, setting aside each
+// receipt no accepted bill can hold: it stays a durable finding and the rest
+// of the book lands. A failed attempt rolls back before the next.
+func retainingUnresolved(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, run func([]RemoteTransaction) error) error {
+	for {
+		err := run(txns)
+		var unresolved *UnresolvedReceiptError
+		if !errors.As(err, &unresolved) {
+			return err
+		}
+		kept := make([]RemoteTransaction, 0, len(txns))
+		for _, t := range txns {
+			if t.TransactionID != unresolved.TransactionID || t.SubscriptionID != sub.RailSubscriptionID {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == len(txns) {
+			return err
+		}
+		if err := recordUnresolvedReceipt(ctx, database.Gen(ctx), sub, unresolved); err != nil {
+			return err
+		}
+		txns = kept
+	}
+}
+
+// derivedSchedule proves a live provider schedule's accepted terms from the
+// imported book, as enrollment freezes them: the declared plan's cadence, a
+// first due one cycle before the paid-through, and the book's approved charge
+// of the plan's amount inside that cycle. A reason is returned when the book
+// does not prove them.
+func derivedSchedule(f *DeclaredSubscriptionFact, price gen.BillingPrice, txns []RemoteTransaction) (*billing.DeclaredProviderSchedule, string) {
+	if f.PaidThrough == nil || f.PaidThrough.IsZero() {
+		return nil, "the book states no paid-through boundary"
+	}
+	if price.BillingIntervalHours == nil || *price.BillingIntervalHours <= 0 || *price.BillingIntervalHours%24 != 0 {
+		return nil, "the declared price has no whole-day billing cadence"
+	}
+	hours := int(*price.BillingIntervalHours)
+	end := f.PaidThrough.UTC()
+	first := end.Add(-time.Duration(hours) * time.Hour)
+	var proof *RemoteTransaction
+	for i := range txns {
+		t := &txns[i]
+		day := t.OccurredAt.UTC().Truncate(24 * time.Hour)
+		if t.SubscriptionID != f.RailSubscriptionID || !t.Success || !chargeAttempt(t.Type) || t.StripeBill != nil ||
+			day.Before(first.Truncate(24*time.Hour)) || !day.Before(end.Truncate(24*time.Hour)) {
+			continue
+		}
+		if proof == nil || t.OccurredAt.After(proof.OccurredAt) {
+			proof = t
+		}
+	}
+	if proof == nil {
+		return nil, "the book holds no approved charge for the paid cycle"
+	}
+	currency := moneyutil.NormalizeCurrency(proof.Currency)
+	amount, err := proof.nativeIn(currency)
+	if err != nil || currency != price.Currency || amount != price.Amount {
+		return nil, "the paid cycle's charge differs from the declared price"
+	}
+	if proof.NextBillingAt != nil && !proof.NextBillingAt.UTC().Truncate(24*time.Hour).Equal(end.Truncate(24*time.Hour)) {
+		return nil, "the paid cycle's next billing date differs from the paid-through"
+	}
+	return &billing.DeclaredProviderSchedule{SourceReference: "import:" + f.SourceID, Amount: amount, Currency: currency, IntervalHours: hours, FirstDueAt: first}, ""
+}
+
+func recordUnresolvedSchedule(ctx context.Context, q *gen.Queries, sub *models.Subscription, reason string) error {
+	evidence, _ := json.Marshal(map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String(), "reason": reason})
+	action := "Declare this provider schedule's accepted terms (accepted_schedule) and import it again; until then its receipts stay unresolved and no renewal is inferred."
+	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
+		PspID: &sub.PspID, FindingType: "import.schedule.unresolved", SubjectKey: "subscription:" + sub.ID.String(),
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
+}
+
 func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransaction {
 	var out []RemoteTransaction
 	for i := range txns {
