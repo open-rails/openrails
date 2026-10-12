@@ -489,6 +489,10 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
 			w.stripe.SetClock(past)
 			w.start()
 			e := enroll(t, w, rail, embedded)
+			initialTransaction := e.providerLedger()[0].ID
+			if rail == "stripe" {
+				initialTransaction = e.providerLedger()[0].Charge
+			}
 			e.toFreshPeriodEnd()
 			sub := uuid.MustParse(subUUID(e.sub))
 			held, release := make(chan struct{}), make(chan struct{})
@@ -511,18 +515,48 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
 			case <-time.After(30 * time.Second):
 				t.Fatal("the renewal never reached the provider")
 			}
-			pull, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
-			require.NoError(t, err)
-			require.Eventually(t, func() bool {
+			pullNow := func() {
+				t.Helper()
+				pull, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
+				require.NoError(t, err)
+				require.Eventually(t, func() bool {
+					job, err := w.jobs.JobGet(t.Context(), pull)
+					return err == nil && (job.FinalizedAt != nil || job.State == rivertype.JobStateRetryable)
+				}, time.Minute, 50*time.Millisecond, "the pull runs while the collection records its charge")
 				job, err := w.jobs.JobGet(t.Context(), pull)
-				return err == nil && (job.FinalizedAt != nil || job.State == rivertype.JobStateRetryable)
-			}, time.Minute, 50*time.Millisecond, "the pull runs while the collection records its charge")
+				require.NoError(t, err)
+				require.Equal(t, rivertype.JobStateCompleted, job.State, "the pull must succeed: %v", job.Errors)
+			}
+			pullNow()
 			require.Empty(t, w.openFindings("pull.charge.missing"), "the charge is its operation's, not missing")
+
+			// A previously raised financial finding needs actual local payment
+			// evidence to resolve. A live lease alone cannot clear it.
+			var transaction string
+			for _, charge := range e.providerLedger() {
+				id := charge.ID
+				if rail == "stripe" {
+					id = charge.Charge
+				}
+				if id != initialTransaction {
+					transaction = id
+				}
+			}
+			require.NotEmpty(t, transaction)
+			_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings
+                (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
+                VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4)`),
+				w.client[embedded].MerchantID().UUID(), transaction, w.psp[rail].UUID(), rail)
+			require.NoError(t, err)
+			pullNow()
+			require.Contains(t, w.openFindings("pull.charge.missing"), transaction, "execution is not evidence of a recorded payment")
 
 			free()
 			w.settle()
 			require.Len(t, e.providerLedger(), 2, "one renewal charge")
 			require.Len(t, completed(w.payments(embedded, e.c.id)), 2, "the collection recorded it")
+			pullNow()
+			require.Empty(t, w.openFindings("pull.charge.missing"), "the recorded payment resolves its finding")
 			status, body := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
 			require.Equal(t, http.StatusOK, status, "%v", body)
 		})
