@@ -160,8 +160,9 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
-			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
+			StartedAt: start, PaidThrough: &end, PaymentMethod: method,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + railSub, Amount: 9_990_000, Currency: "USD", IntervalHours: hours, FirstDueAt: start}}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start, NextBillingAt: &end}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

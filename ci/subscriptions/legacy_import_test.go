@@ -99,9 +99,13 @@ func (b *legacyBook) add(r *bookRow) *bookRow {
 	}
 	b.book.Customers = append(b.book.Customers, billing.DeclaredCustomer{Customer: customerID})
 	paid := r.paid
+	accepted := &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + r.schedule, Amount: r.tier.cents * 10_000, Currency: "USD", FirstDueAt: start, IntervalHours: r.tier.days * 24}
+	if r.months > 0 {
+		accepted.IntervalHours, accepted.IntervalMonths = 0, r.months
+	}
 	b.book.Subscriptions = append(b.book.Subscriptions, billing.DeclaredSubscription{SourceID: r.source, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: r.schedule,
-		StartedAt: start.AddDate(-1, 0, 0), PaidThrough: &paid, Cancel: r.cancel, Dunning: r.dunning, PaymentMethod: method})
-	b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: r.schedule, TransactionID: sale.TransactionID, Success: true, Amount: r.tier.cents * 10_000, Currency: "USD", OccurredAt: start})
+		StartedAt: start.AddDate(-1, 0, 0), PaidThrough: &paid, Cancel: r.cancel, Dunning: r.dunning, PaymentMethod: method, AcceptedSchedule: accepted})
+	b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: r.schedule, TransactionID: sale.TransactionID, Success: true, Amount: r.tier.cents * 10_000, Currency: "USD", OccurredAt: start, NextBillingAt: &paid})
 	b.rows = append(b.rows, r)
 	return r
 }

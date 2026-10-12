@@ -58,8 +58,9 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 		Customers:      []billing.DeclaredCustomer{{Customer: customerID}},
 		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub,
-			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
+			StartedAt: start, PaidThrough: &end, PaymentMethod: method,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + l.railSub, Amount: 9_990_000, Currency: "USD", IntervalHours: hours, FirstDueAt: start}}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start, NextBillingAt: &end}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
