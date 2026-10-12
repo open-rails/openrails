@@ -317,7 +317,8 @@ func (q *Queries) CreateDestructiveHold(ctx context.Context, arg CreateDestructi
 }
 
 const destructiveActionProviderState = `-- name: DestructiveActionProviderState :one
-SELECT EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=$1::uuid AND destructive_action_id=$2::uuid AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))::boolean AS pending,
+SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=$1::uuid AND destructive_action_id=$2::uuid AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))
+ OR EXISTS(SELECT 1 FROM billing.price_migrations m JOIN billing.scheduled_changes s ON s.merchant_id=m.merchant_id AND s.price_migration_id=m.id WHERE m.merchant_id=$1::uuid AND m.destructive_action_id=$2::uuid AND s.status IN ('scheduled','blocked')))::boolean AS pending,
  EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=$1::uuid AND destructive_action_id=$2::uuid AND status='succeeded')::boolean AS succeeded
 `
 
@@ -671,7 +672,7 @@ func (q *Queries) GetDestructiveHold(ctx context.Context, arg GetDestructiveHold
 }
 
 const hasDestructiveArchiveBarrier = `-- name: HasDestructiveArchiveBarrier :one
-SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND admitted_at>$2::timestamptz)))
+SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND greatest(admitted_at,finished_at)>$2::timestamptz)))
  OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=$1::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=$1::uuid))))::boolean AS held
 `
 
