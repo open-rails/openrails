@@ -78,6 +78,15 @@ func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 	return shop
 }
 
+// localRuntime is the explicit extension for tests that need the embedded engine.
+func (f *fixture) localRuntime(t *testing.T, slug string) *openrails.LocalClient {
+	t.Helper()
+	bill, shop := f.runtimeWithStripe(t, slug, nil)
+	local, err := bill.LocalMerchant(shop.MerchantID())
+	require.NoError(t, err)
+	return local
+}
+
 // boot builds an engine, closed at cleanup, and the handle of the merchant
 // cfg declares. The test hosts' issuer (authtest.Issuer) binds that one
 // merchant, as a single-merchant host declares its own, unless cfg names

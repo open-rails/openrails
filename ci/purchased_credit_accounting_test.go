@@ -28,7 +28,7 @@ import (
 // FIFO lot reversals and once-only posting all run against real PostgreSQL.
 func TestPurchasedCreditAccounting(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "credit-accounting-"+uuid.NewString()[:8])
+	client := f.localRuntime(t, "credit-accounting-"+uuid.NewString()[:8])
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)

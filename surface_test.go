@@ -45,6 +45,7 @@ var engineMethods = map[string]string{
 	"Routes":         "the HTTP surface the host mounts",
 	"RiverJobs":      "the jobs a host-owned River fleet runs",
 	"Merchant":       "a merchant's handle",
+	"LocalMerchant":  "an embedded extension of a merchant's handle",
 	"MerchantBySlug": "the handle of a merchant Config declares",
 }
 
@@ -235,14 +236,6 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			continue
 		}
 		seen, err := p.call(p.client, m)
-		if _, ok := embeddedMethods[m.Name]; ok {
-			// An embedded-only method refuses a remote client.
-			require.Empty(t, seen, "%s is listed as embedded-only and calls a route", m.Name)
-			if m.Type.NumOut() > 0 && m.Type.Out(m.Type.NumOut()-1) == reflect.TypeFor[error]() {
-				require.ErrorIs(t, err, ErrRemoteClient, m.Name)
-			}
-			continue
-		}
 		if len(seen) != 1 {
 			t.Errorf("%s must call exactly one route, not %v (error: %v); otherwise list it with its reason", m.Name, seen, err)
 			continue
@@ -285,7 +278,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 		require.True(t, names[name], "handleMethods lists %s, which Client does not have", name)
 	}
 	for name := range embeddedMethods {
-		require.True(t, names[name], "embeddedMethods lists %s, which Client does not have", name)
+		require.False(t, names[name], "embeddedMethods lists %s, which must not be on Client", name)
 	}
 
 	for _, r := range routes.Catalog() {

@@ -6,15 +6,13 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/billing"
 )
 
 // A running charge bills a customer at a rate per hour until it is stopped
 // (see billing.StartRunningChargeParams). Start and stop commit in
 // OpenRails-owned transactions; an embedding host that must commit them with
-// its own rows uses StartRunningChargeTx and StopRunningChargeTx.
+// its own rows uses LocalClient.StartRunningChargeTx and LocalClient.StopRunningChargeTx.
 
 // runningChargePath keeps a host's reference one URL segment: PathEscape
 // leaves dot segments intact, which ServeMux would clean away.
@@ -83,29 +81,4 @@ func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningC
 		return nil, err
 	}
 	return &out, nil
-}
-
-// StartRunningChargeTx is StartRunningCharge inside tx, a transaction from the
-// host's pool on the engine's database, so a charge starts in the commit that
-// records the work as ready. OpenRails binds the handle's merchant and never
-// commits or rolls tx back; after an error the host rolls back. Embedded only:
-// a remote client returns ErrRemoteClient.
-func (c *Client) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	params.Currency = normalizeCurrency(params.Currency)
-	return e.StartRunningChargeTx(ctx, c.merchantID, tx, params)
-}
-
-// StopRunningChargeTx is StopRunningCharge inside tx (see
-// StartRunningChargeTx), so a charge stops in the commit that records the work
-// as released. Embedded only.
-func (c *Client) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.StopRunningChargeTx(ctx, c.merchantID, tx, reference, params)
 }

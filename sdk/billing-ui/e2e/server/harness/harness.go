@@ -120,7 +120,11 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, err
 	}
-	if _, err := client.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
+	local, err := engine.LocalMerchant(client.MerchantID())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
 		return nil, err
 	}
 	if workers {
