@@ -1224,6 +1224,7 @@ export type NotificationData = {
   to_state?: string
   amount_due?: string
   due_at?: string
+  collection_method?: "charge_automatically" | "send_invoice"
   failure_code?: string
   failure_reason?: string
   decline_outcome?: string

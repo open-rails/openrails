@@ -16017,6 +16017,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "collection_method": {
+            "type": "string",
+            "enum": [
+              "charge_automatically",
+              "send_invoice"
+            ]
+          },
           "failure_code": {
             "type": "string"
           },
