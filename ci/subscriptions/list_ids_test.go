@@ -325,10 +325,12 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	require.Equal(t, true, body["items"].([]any)[0].(map[string]any)["replayed"])
 
 	// A signed-in admin's batch counts every item against the grant limit.
-	items := many(9, func(int) any {
+	// Exceed the cap in this request alone: the preceding calls can fall in
+	// different wall-clock minutes.
+	items := many(11, func(int) any {
 		return map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1", "source": "support", "source_id": uuid.NewString()}
 	})
 	status, body = w.staffJSON(http.MethodPost, "/v1/admin/credit-grants", map[string]any{"items": items})
-	require.Equal(t, http.StatusTooManyRequests, status, "two grants and nine more pass ten a minute: %v", body)
+	require.Equal(t, http.StatusTooManyRequests, status, "eleven grants exceed ten a minute: %v", body)
 	require.Equal(t, "rate_limit_exceeded", body["error"].(map[string]any)["code"])
 }
