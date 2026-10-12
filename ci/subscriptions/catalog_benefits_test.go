@@ -169,6 +169,13 @@ func TestPendingSubscriptionAccessFollowsTheProduct(t *testing.T) {
 			pending, err := lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{Prepared: accepted, UserID: buyer.id, PriceID: w.priceStorageID(price.ID), Rail: models.RailNMI, RailSubscriptionID: &railSub})
 			require.NoError(t, err)
 			require.Equal(t, models.StatusPending, pending.Status)
+			var zeroDueOrders, payments int
+			require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.orders WHERE subscription_id=$1 AND total=0 AND status='complete'`), pending.ID).Scan(&zeroDueOrders))
+			require.Equal(t, 1, zeroDueOrders, "the accepted zero-due enrollment is an order")
+			require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1`), pending.ID).Scan(&payments))
+			require.Zero(t, payments, "pending enrollment does not manufacture a gateway payment")
+			pending, err = engine.Graph(w.rt).Runtime.SubscriptionService.GetByID(ctx, pending.ID)
+			require.NoError(t, err)
 			_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{editedCatalogBenefit})})
 			require.NoError(t, err)
 			w.advance(day)
