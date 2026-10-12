@@ -50,8 +50,20 @@ func ActionFromContext(ctx context.Context) (Action, bool) {
 	return action, ok && action.ID != uuid.Nil && action.MerchantID != uuid.Nil
 }
 
-// CommandFromContext binds safe command terms to the verified merchant invoker.
+// CommandFromContext binds an implicit command key to the verified invoker and
+// canonical terms. Commands without an API idempotency key must not let one
+// actor's no-effect/conflict poison another actor's later request.
 func CommandFromContext(ctx context.Context, kind Kind, target, key string, terms any) (Command, error) {
+	return commandFromContext(ctx, kind, target, key, terms, false)
+}
+
+// CommandFromContextExplicit preserves a caller-supplied idempotency key's
+// merchant-wide scope (refunds use this path).
+func CommandFromContextExplicit(ctx context.Context, kind Kind, target, key string, terms any) (Command, error) {
+	return commandFromContext(ctx, kind, target, key, terms, true)
+}
+
+func commandFromContext(ctx context.Context, kind Kind, target, key string, terms any, explicit bool) (Command, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return Command{}, err
@@ -60,7 +72,14 @@ func CommandFromContext(ctx context.Context, kind Kind, target, key string, term
 	if err != nil {
 		return Command{}, err
 	}
-	return Command{MerchantID: mid.UUID(), Kind: kind, Target: target, Key: key, Digest: Digest(terms), Units: 1, Actor: actor}, nil
+	digest := Digest(terms)
+	if digest == "" {
+		return Command{}, errors.New("destructive command terms cannot be digested")
+	}
+	if !explicit {
+		key += ":actor:" + actor.key() + ":terms:" + digest
+	}
+	return Command{MerchantID: mid.UUID(), Kind: kind, Target: target, Key: key, Digest: digest, Units: 1, Actor: actor}, nil
 }
 
 // AdmitCommand reserves one command before domain locks are acquired. An
