@@ -163,7 +163,7 @@ func TestObservedBillNonCashAndRollback(t *testing.T) {
 
 // Pull may commit accounting before a later webhook applies lifecycle. That
 // replay repairs the period once, even though the order is already complete.
-func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
+func TestObservedCompletedCalendarBillRepairsLifecycle(t *testing.T) {
 	w := newWorld(t)
 	l := importLegacy(t, w, "nmi", embedded)
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
@@ -171,10 +171,9 @@ func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
 	ctx := db.WithPSPID(merchant.WithID(t.Context(), w.client[embedded].MerchantID()), w.psp["nmi"].UUID())
 	before := w.subscription(embedded, l.sub)
 	start := *before.CurrentPeriodEndsAt
-	end := start.Add(monthHours * time.Hour)
+	end := start.AddDate(0, 1, 0)
 	priceID, productID, subID := w.priceStorageID(l.price.ID), l.price.ProductID.UUID(), l.sub.UUID()
-	hours := monthHours
-	b := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "paid-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "credit", NonCashAmount: l.price.UnitAmount, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount, BillingIntervalHours: &hours, AccessDurationHours: &hours}}}
+	b := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "paid-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "credit", NonCashAmount: l.price.UnitAmount, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount}}}
 	var done observed.Result
 	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
