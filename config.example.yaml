@@ -89,6 +89,9 @@ naming:
 # Sign-in to OpenRails' own accounts (password, passwordless, registration).
 # Off, the default: people sign in at a trusted issuer, and the console with it
 # (admin_console.issuers). Turn it on when you have no identity provider.
+# Invited enrollment needs a verification sender, such as email_smtp. For
+# existing or bootstrapped accounts only, set auth.registration.native_user_mode
+# to closed (AUTH_REGISTRATION_NATIVE_USER_MODE=closed).
 # local_sign_in: true
 
 # Declaring vault connects to it (VAULT_* env settings declare it too). Name a

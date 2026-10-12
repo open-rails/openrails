@@ -189,7 +189,6 @@ jobs:
             -e TEST_MODE=sandbox \
             -e PROVIDER_WRITE_MODE=readonly \
             -e ROUTE_GROUPS_ADMIN=true \
-            -e LOCAL_SIGN_IN=true \
             -e PORT=3053 \
             -e AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS=true \
             -e AUTH_REGISTRATION_ALLOW_MISSING_SENDERS=true \
