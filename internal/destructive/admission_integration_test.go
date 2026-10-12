@@ -18,6 +18,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -342,7 +343,7 @@ func TestDestructiveAdmissionAutomationAndUnsentFence(t *testing.T) {
 	require.Equal(t, "automation:"+mid.String(), h.ScopeKey)
 	staff, err := w.gate.Admit(t.Context(), command(mid, "operator"))
 	require.NoError(t, err, "automation spends no staff allowance")
-	ctx := billingauth.BindStaff(t.Context(), billingauth.Staff{Merchant: billing.MerchantID(mid)})
+	ctx := billingauth.BindStaff(t.Context(), billingauth.Staff{Merchant: billing.MerchantID(mid), Identity: authtest.User("staff")})
 	_, err = w.gate.AdmitAutonomous(ctx, command(mid, "operator"), "startup_catalog")
 	require.ErrorContains(t, err, "staff command")
 	_, err = w.gate.Start(t.Context(), mid, staff.ID)
