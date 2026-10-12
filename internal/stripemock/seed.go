@@ -114,31 +114,59 @@ func (m *Mock) AddSubscription(customer, method, price string, amount int64, sta
 	m.subs[id] = Object{"object": "subscription", "id": id, "customer": customer, "status": "active", "cancel_at_period_end": false, "canceled_at": nil, "livemode": false,
 		"default_payment_method": method, "metadata": map[string]string{}, "currency": "usd",
 		"items": Object{"object": "list", "data": []Object{{"id": m.id("si"), "price": Object{"id": price, "unit_amount": amount, "currency": "usd"}, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
-	m.invoiceLocked(id, amount, true)
+	m.invoiceLocked(id, amount, true)["billing_reason"] = "subscription_create"
 	return id
 }
 
 // invoiceLocked cuts the subscription's latest invoice; paid moves money.
 func (m *Mock) invoiceLocked(sub string, amount int64, paid bool) Object {
-	s := m.subs[sub]
-	price := s["items"].(Object)["data"].([]Object)[0]["price"].(Object)["id"]
-	inv := Object{"object": "invoice", "id": m.id("in"), "customer": s["customer"], "currency": "usd", "amount_due": amount, "created": m.now().Unix(), "billing_reason": "subscription_cycle",
-		"parent": Object{"type": "subscription_details", "subscription_details": Object{"subscription": sub}},
-		"lines":  Object{"object": "list", "data": []Object{{"object": "line_item", "amount": amount, "pricing": Object{"type": "price_details", "price_details": Object{"price": price}}}}}}
+	inv := m.newInvoiceLocked(sub, amount)
+	inv["status"], inv["attempt_count"] = "open", int64(1)
+	inv["status_transitions"].(Object)["finalized_at"] = m.now().Unix()
 	if paid {
-		pi := Object{"object": "payment_intent", "id": m.id("pi"), "amount": amount, "currency": "usd", "customer": s["customer"], "payment_method": s["default_payment_method"], "livemode": false, "metadata": map[string]string{}}
-		m.intents[pi["id"].(string)] = pi
-		m.order = append(m.order, pi["id"].(string))
-		ch := m.chargeLocked(pi)
-		inv["status"], inv["amount_paid"] = "paid", amount
-		inv["payments"] = Object{"object": "list", "data": []Object{{"object": "invoice_payment", "status": "paid", "payment": Object{"type": "payment_intent", "payment_intent": pi["id"], "charge": ch["id"]}}}}
+		m.payInvoiceLocked(inv)
 	} else {
-		inv["status"], inv["amount_paid"], inv["attempt_count"] = "open", int64(0), int64(1)
 		inv["next_payment_attempt"] = m.now().Add(72 * time.Hour).Unix()
-		inv["payments"] = Object{"object": "list", "data": []Object{}}
 	}
+	return inv
+}
+
+func (m *Mock) newInvoiceLocked(sub string, amount int64) Object {
+	s := m.subs[sub]
+	item := s["items"].(Object)["data"].([]Object)[0]
+	price := item["price"].(Object)["id"]
+	id := m.id("in")
+	inv := Object{"object": "invoice", "id": id, "customer": s["customer"], "currency": "usd", "total": amount, "amount_due": amount,
+		"amount_paid": int64(0), "amount_remaining": amount, "amount_paid_off_stripe": int64(0), "starting_balance": int64(0),
+		"pre_payment_credit_notes_amount": int64(0), "post_payment_credit_notes_amount": int64(0), "created": m.now().Unix(),
+		"billing_reason": "subscription_cycle", "status": "draft", "attempt_count": int64(0), "metadata": map[string]string{}, "livemode": false,
+		"status_transitions": Object{"finalized_at": nil, "paid_at": nil},
+		"parent":             Object{"type": "subscription_details", "subscription_details": Object{"subscription": sub}},
+		"lines": Object{"object": "list", "has_more": false, "url": "/v1/invoices/" + id + "/lines", "data": []Object{{"object": "line_item", "id": m.id("il"),
+			"invoice": id, "description": "Subscription " + fmt.Sprint(price), "currency": "usd", "amount": amount, "quantity": int64(1),
+			"period":  Object{"start": item["current_period_start"], "end": item["current_period_end"]},
+			"pricing": Object{"type": "price_details", "price_details": Object{"price": price}}}}},
+		"payments": Object{"object": "list", "data": []Object{}, "has_more": false, "url": "/v1/invoice_payments"}}
+	m.invoices[id] = inv
 	s["latest_invoice"] = inv
 	return inv
+}
+
+func (m *Mock) payInvoiceLocked(inv Object) {
+	sub := inv["parent"].(Object)["subscription_details"].(Object)["subscription"].(string)
+	s := m.subs[sub]
+	amount := inv["amount_remaining"].(int64)
+	if amount > 0 {
+		pi := Object{"object": "payment_intent", "id": m.id("pi"), "amount": amount, "currency": inv["currency"], "customer": s["customer"], "payment_method": s["default_payment_method"], "livemode": false, "metadata": map[string]string{}, "created": m.now().Unix()}
+		m.intents[pi["id"].(string)] = pi
+		m.order = append(m.order, pi["id"].(string))
+		m.chargeLocked(pi)["created"] = m.now().Unix()
+		inv["payments"] = Object{"object": "list", "has_more": false, "url": "/v1/invoice_payments", "data": []Object{{"object": "invoice_payment", "id": m.id("inpay"),
+			"invoice": inv["id"], "status": "paid", "currency": inv["currency"], "amount_paid": amount, "amount_requested": amount, "created": m.now().Unix(), "is_default": true, "livemode": false,
+			"status_transitions": Object{"paid_at": m.now().Unix(), "canceled_at": nil}, "payment": Object{"type": "payment_intent", "payment_intent": pi["id"]}}}}
+	}
+	inv["status"], inv["amount_paid"], inv["amount_remaining"], inv["next_payment_attempt"] = "paid", inv["amount_due"], int64(0), nil
+	inv["status_transitions"].(Object)["paid_at"] = m.now().Unix()
 }
 
 func (m *Mock) changePrice(sub, price string, amount, proration int64, paid bool) Object {
@@ -148,6 +176,10 @@ func (m *Mock) changePrice(sub, price string, amount, proration int64, paid bool
 	s["items"].(Object)["data"].([]Object)[0]["price"] = Object{"id": price, "unit_amount": amount, "currency": "usd"}
 	inv := m.invoiceLocked(sub, proration, paid)
 	inv["billing_reason"] = "subscription_update"
+	period := inv["lines"].(Object)["data"].([]Object)[0]["period"].(Object)
+	if now := m.now().Unix(); now > period["start"].(int64) && now < period["end"].(int64) {
+		period["start"] = now
+	}
 	return clone(s)
 }
 
@@ -190,9 +222,7 @@ func (m *Mock) DraftRenewal(sub string) Object {
 	item := s["items"].(Object)["data"].([]Object)[0]
 	start := item["current_period_end"].(int64)
 	item["current_period_start"], item["current_period_end"] = start, start+monthHours*3600
-	s["latest_invoice"] = Object{"object": "invoice", "id": m.id("in"), "customer": s["customer"], "currency": "usd", "status": "draft", "amount_due": item["price"].(Object)["unit_amount"], "amount_paid": int64(0),
-		"attempt_count": int64(0), "created": m.now().Unix(), "billing_reason": "subscription_cycle", "payments": Object{"object": "list", "data": []Object{}},
-		"parent": Object{"type": "subscription_details", "subscription_details": Object{"subscription": sub}}}
+	m.newInvoiceLocked(sub, item["price"].(Object)["unit_amount"].(int64))
 	return clone(s)
 }
 
@@ -200,8 +230,13 @@ func (m *Mock) DraftRenewal(sub string) Object {
 func (m *Mock) CollectDraft(sub string) Object {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	amount := m.subs[sub]["items"].(Object)["data"].([]Object)[0]["price"].(Object)["unit_amount"].(int64)
-	return clone(m.invoiceLocked(sub, amount, true))
+	inv := m.subs[sub]["latest_invoice"].(Object)
+	if inv["status"] == "draft" {
+		inv["status_transitions"].(Object)["finalized_at"] = m.now().Unix()
+		inv["attempt_count"] = int64(1)
+		m.payInvoiceLocked(inv)
+	}
+	return clone(inv)
 }
 
 // CancelSubscription is the subscription ended at Stripe (dashboard or

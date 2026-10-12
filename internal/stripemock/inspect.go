@@ -116,7 +116,8 @@ func (m *Mock) LatestCharge(subscription string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inv := m.subs[subscription]["latest_invoice"].(Object)
-	return inv["payments"].(Object)["data"].([]Object)[0]["payment"].(Object)["charge"].(string)
+	intent := inv["payments"].(Object)["data"].([]Object)[0]["payment"].(Object)["payment_intent"].(string)
+	return m.intents[intent]["latest_charge"].(string)
 }
 
 // Mutations are the executed writes whose path starts with prefix.
