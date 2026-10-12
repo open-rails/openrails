@@ -55,16 +55,6 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		id := billing.OrderID(*p.OrderID)
 		out.OrderID = &id
 	}
-	if p.Price != nil {
-		id := p.Price.PublicID
-		out.PriceID = &id
-	}
-	if p.Price != nil {
-		out.Price = p.Price.PublicView()
-		if p.Price.Product != nil {
-			out.Product = p.Price.Product.Summary()
-		}
-	}
 	if p.Channel == models.ChannelManual {
 		out.Channel = billing.ChannelManual
 	} else {
