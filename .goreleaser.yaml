@@ -55,8 +55,9 @@ sboms:
 release:
   prerelease: auto
   footer: |
+    **CLI:** the `openrails` archives below, or the Docker image
     **Docker:** `docker.io/openrails/openrails:{{ .Tag }}` · `ghcr.io/open-rails/openrails:{{ .Tag }}`
-    **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}` (embedded) · `go get github.com/open-rails/openrails/server@{{ .Tag }}` (standalone) · `go install github.com/open-rails/openrails/server/cmd/openrails@{{ .Tag }}`
+    **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}` (embedded) · `go get github.com/open-rails/openrails/server@{{ .Tag }}` (standalone)
     **Verify:** `gh attestation verify <file> --repo open-rails/openrails`
 
 # Entries are PR titles (squash merges); conventional prefixes pick the group.

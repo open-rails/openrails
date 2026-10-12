@@ -436,8 +436,11 @@ OpenRails' own accounts builds on the same package:
 
 ```bash
 go get github.com/open-rails/openrails/server@vX.Y.Z
-go install github.com/open-rails/openrails/server/cmd/openrails@vX.Y.Z   # the binary
 ```
+
+The `openrails` binary comes from the GitHub release or the Docker image, not
+`go install …@vX.Y.Z`: the server module builds against the root's source,
+including the embedded checkout page, so its tagged `go.mod` keeps a replace.
 
 ```go
 srv, err := server.New(ctx, server.Config{
