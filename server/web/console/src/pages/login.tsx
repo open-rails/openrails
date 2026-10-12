@@ -1,8 +1,9 @@
 import * as React from "react"
 import { SignInPanel } from "@openrails/auth-ui"
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
+import { useSearchParams } from "react-router-dom"
 
 import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
+import { Redirect, useRedirect } from "@/lib/redirect"
 
 // Sign-in is AuthKit's own form or, with a trusted issuer, a redirect there.
 // A tab re-authorizes at the issuer silently (prompt=none) once; after that,
@@ -11,7 +12,7 @@ export function LoginPage() {
   const { issuer, status } = useIdentity()
   const signedIn = status === "signed_in"
   const ready = status === "signed_out" || signedIn
-  const navigate = useNavigate()
+  const redirect = useRedirect()
   const [params] = useSearchParams()
   const requested = params.get("return_to") ?? "/"
   const returnTo =
@@ -32,7 +33,7 @@ export function LoginPage() {
   }
   if (signedIn) {
     sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
-    return <Navigate to={returnTo} replace />
+    return <Redirect to={returnTo} />
   }
   return (
     <div className="console-sign-in">
@@ -53,7 +54,7 @@ export function LoginPage() {
           <SignInPanel
             providers={[]}
             className="console-sign-in-action"
-            onSignedIn={() => navigate(returnTo, { replace: true })}
+            onSignedIn={() => redirect(returnTo)}
           />
         )}
       </div>

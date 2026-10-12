@@ -1,17 +1,12 @@
 import { useMemo, useState } from "react"
-import {
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-} from "react-router-dom"
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import {
   ConsoleSession,
   createConsoleSession,
   type ConsoleClient,
 } from "./lib/session"
 import { ISSUER_REDIRECT_KEY, useIdentity } from "./lib/identity"
+import { Redirect } from "./lib/redirect"
 import { LoginPage } from "./pages/login"
 import { CallbackPage } from "./pages/callback"
 import { AccountLinkPage, InvitationPage } from "./pages/account-links"
@@ -168,9 +163,8 @@ function SignedIn({
     )
   if (identity.status !== "signed_in")
     return (
-      <Navigate
+      <Redirect
         to={`/login?return_to=${encodeURIComponent(location.pathname + location.search)}`}
-        replace
       />
     )
   if (!identity.user)

@@ -1,12 +1,5 @@
 import { useState, type ReactNode } from "react"
-import {
-  Link,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-} from "react-router-dom"
+import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { AccountSecurity, StepUpProvider } from "@openrails/auth-ui"
 import { AuthUiProvider } from "@openrails/auth-ui/provider"
 import {
@@ -23,6 +16,7 @@ import { useIdentity } from "./lib/identity"
 import { useMerchantDirectory } from "./lib/directory"
 import { AccessPage } from "./pages/access"
 import { takeMerchantFromHash } from "./lib/merchant"
+import { Redirect, useRedirect } from "./lib/redirect"
 import type { BootstrapConfig } from "./config"
 
 const requestedMerchant = takeMerchantFromHash()
@@ -194,13 +188,16 @@ function Workspace({
 }: WorkspaceProps) {
   const identity = useIdentity()
   const location = useLocation(),
-    navigate = useNavigate()
+    navigate = useNavigate(),
+    redirect = useRedirect()
   const [theme, setTheme] = useState<"light" | "dark">("light")
   const navigation = {
     pathname: "/admin" + location.pathname,
     search: location.search,
     navigate(to: string, options?: { replace?: boolean }) {
-      void navigate(to.slice("/admin".length) || "/", options)
+      const path = to.slice("/admin".length) || "/"
+      if (options?.replace) redirect(path)
+      else void navigate(path)
     },
   }
   const hasAccess = session.kind === "issuer" || !!access?.any
@@ -252,7 +249,7 @@ function Workspace({
                     Loading console access…
                   </p>
                 ) : (
-                  <Navigate to={initial} replace />
+                  <Redirect to={initial} />
                 )
               }
             />

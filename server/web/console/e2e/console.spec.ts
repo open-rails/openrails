@@ -120,6 +120,45 @@ test("support sees its merchant and account, with no Access administration", asy
   ).toBeVisible()
 })
 
+test("a page opened as access loads is not replaced by the landing page", async ({
+  page,
+  request,
+}) => {
+  const operator = await staff(request, "support")
+  let release = () => {}
+  const released = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/v1/admin/access", async (route) => {
+    const response = await route.fetch()
+    if (response.ok()) await released
+    await route.fulfill({ response })
+  })
+  await login(page, operator.email)
+  await expect(page.getByText("Loading console access…")).toBeVisible()
+  // Account opens in the commit that ends loading, before its effects run:
+  // the landing redirect decided on the console root must not replace it.
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      if (document.body.textContent?.includes("Loading console access…")) return
+      observer.disconnect()
+      document
+        .querySelector<HTMLAnchorElement>(
+          'nav[aria-label="Console"] a[href$="/account"]'
+        )!
+        .click()
+    })
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    })
+  })
+  release()
+  await expect(
+    page.getByRole("heading", { name: "Account security", exact: true })
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/account$/)
+})
+
 for (const billingAccess of ["unavailable", "none", "missing"] as const) {
   test(`account security remains usable when billing permissions are ${billingAccess}`, async ({
     page,

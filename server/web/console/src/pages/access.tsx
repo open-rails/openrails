@@ -8,8 +8,9 @@ import {
 } from "@openrails/auth-ui/admin"
 import { useStepUpGuard } from "@openrails/auth-ui"
 import { billingPermissionHelp } from "@openrails/billing-ui/admin"
-import { Link, Navigate, Route, Routes } from "react-router-dom"
+import { Link, Route, Routes } from "react-router-dom"
 import type { AuthClient } from "@openrails/auth-ui/client"
+import { Redirect } from "@/lib/redirect"
 
 export function AccessPage({
   auth,
@@ -66,7 +67,7 @@ export function AccessPage({
         ))}
       </nav>
       <Routes>
-        <Route index element={<Navigate to={sections[0].key} replace />} />
+        <Route index element={<Redirect to={sections[0].key} />} />
         <Route
           path="members/*"
           element={
