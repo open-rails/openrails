@@ -8,6 +8,10 @@ pkg openrails, const ProviderWritesFull untyped string = "full"
 pkg openrails, const ProviderWritesLimited untyped string = "limited"
 pkg openrails, const ProviderWritesReadOnly untyped string = "readonly"
 pkg openrails, const QueueBilling untyped string = "billing"
+pkg openrails, const ReadCatalog config.Read = "catalog"
+pkg openrails, const ReadMerchantConfiguration config.Read = "merchant_configuration"
+pkg openrails, const ReadMeters config.Read = "meters"
+pkg openrails, const ReadPublicConfig config.Read = "public_config"
 pkg openrails, const Sandbox config.CredentialPosture = "sandbox"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
@@ -318,6 +322,7 @@ pkg openrails, type Config struct, ProviderWriteMode string `yaml:"provider_writ
 pkg openrails, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url" json:"public_billing_base_url"`
 pkg openrails, type Config struct, RateLimits *config.RateLimitsConfig `yaml:"rate_limits" json:"rate_limits"`
 pkg openrails, type Config struct, RateLimitsDisabled bool `yaml:"rate_limits_disabled" json:"rate_limits_disabled"`
+pkg openrails, type Config struct, ReadCache config.ReadCache `yaml:"read_cache" json:"read_cache"`
 pkg openrails, type Config struct, Redis *config.RedisConfig `yaml:"redis" json:"redis"`
 pkg openrails, type Config struct, ReturnOrigins []string `yaml:"return_origins" json:"return_origins"`
 pkg openrails, type Config struct, SMTP *config.SMTPConfig `yaml:"smtp" json:"smtp"`
@@ -451,6 +456,14 @@ pkg openrails, type RateLimit struct
 pkg openrails, type RateLimit struct, RequestsPerMinute int `yaml:"requests_per_minute" json:"requests_per_minute"`
 pkg openrails, type RateLimitsConfig = config.RateLimitsConfig
 pkg openrails, type RateLimitsConfig map[string]*config.RateLimit
+pkg openrails, type Read = config.Read
+pkg openrails, type Read string
+pkg openrails, type ReadCache = config.ReadCache
+pkg openrails, type ReadCache map[config.Read]config.ReadPolicy
+pkg openrails, type ReadPolicy = config.ReadPolicy
+pkg openrails, type ReadPolicy struct
+pkg openrails, type ReadPolicy struct, MaxStale time.Duration `yaml:"max_stale" json:"max_stale"`
+pkg openrails, type ReadPolicy struct, RefreshAfter time.Duration `yaml:"refresh_after" json:"refresh_after"`
 pkg openrails, type RedisConfig = config.RedisConfig
 pkg openrails, type RedisConfig struct
 pkg openrails, type RedisConfig struct, Addr string `yaml:"addr" json:"addr"`
@@ -467,10 +480,12 @@ pkg openrails, type RemoteCredential struct, Assertion *AssertionKey
 pkg openrails, type RemoteCredential struct, Token func(context.Context) (string, error)
 pkg openrails, type RemoteMerchantOptions struct
 pkg openrails, type RemoteMerchantOptions struct, HTTPClient *http.Client
+pkg openrails, type RemoteMerchantOptions struct, ReadCache ReadCache
 pkg openrails, type RemoteMerchantOptions struct, Timeout time.Duration
 pkg openrails, type RemoteOptions struct
 pkg openrails, type RemoteOptions struct, Credentials map[billing.MerchantID]RemoteCredential
 pkg openrails, type RemoteOptions struct, HTTPClient *http.Client
+pkg openrails, type RemoteOptions struct, ReadCache ReadCache
 pkg openrails, type RemoteOptions struct, Timeout time.Duration
 pkg openrails, type RequestOption func(*requestOptions)
 pkg openrails, type Route struct

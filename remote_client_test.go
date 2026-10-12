@@ -113,8 +113,8 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 	}))
 	defer server.Close()
 	client := remoteHandle(t, server.URL+"/", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: {APIKey: " sk-test "}}})
-	require.NoError(t, readConfiguration(client, t.Context()))
-	require.Equal(t, "GET /v1/merchant/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
+	require.NoError(t, readAccess(client, t.Context()))
+	require.Equal(t, "GET /v1/admin/access Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
 }
 
 // unsupportedSigner holds a key of no JWS family.
@@ -150,7 +150,7 @@ func TestRemoteHandlesSendTheirOwnCredential(t *testing.T) {
 		require.NoError(t, err)
 		require.Same(t, handle, again)
 		// An ambient merchant, as OpenRails' own middleware pins, selects nothing.
-		require.NoError(t, readConfiguration(handle, merchant.WithID(t.Context(), a)))
+		require.NoError(t, readAccess(handle, merchant.WithID(t.Context(), a)))
 		require.Equal(t, observed{auth: want}, <-seen)
 	}
 	for _, id := range []billing.MerchantID{billing.MerchantID(uuid.New()), {}} {
@@ -162,7 +162,7 @@ func TestRemoteHandlesSendTheirOwnCredential(t *testing.T) {
 	single, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "key-a"})
 	require.NoError(t, err)
 	require.True(t, single.MerchantID().IsZero())
-	require.NoError(t, readConfiguration(single, t.Context()))
+	require.NoError(t, readAccess(single, t.Context()))
 	require.Equal(t, observed{auth: "Bearer key-a"}, <-seen)
 
 	require.NoError(t, remote.Close(t.Context()))
@@ -198,7 +198,7 @@ func TestHandleRefusesAResponseBoundToAnotherMerchant(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/v1/merchant/configuration" {
+		if r.URL.Path != "/v1/admin/access" {
 			http.NotFound(w, r)
 			return
 		}
@@ -216,14 +216,14 @@ func TestHandleRefusesAResponseBoundToAnotherMerchant(t *testing.T) {
 	handle := remoteHandle(t, server.URL, RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{filed: {APIKey: "k"}}})
 
 	bound.Store([]string(nil))
-	require.NoError(t, readConfiguration(handle, t.Context()), "absent: a server that does not send the header")
+	require.NoError(t, readAccess(handle, t.Context()), "absent: a server that does not send the header")
 	bound.Store([]string{filed.String()})
-	require.NoError(t, readConfiguration(handle, t.Context()), "matching")
+	require.NoError(t, readAccess(handle, t.Context()), "matching")
 
 	bound.Store([]string{other.String()})
 	for _, code := range []int{http.StatusOK, http.StatusNotFound} {
 		status.Store(int64(code))
-		err := readConfiguration(handle, t.Context())
+		err := readAccess(handle, t.Context())
 		var mismatch *BoundMerchantError
 		require.ErrorAs(t, err, &mismatch, "differing, status %d", code)
 		require.Equal(t, BoundMerchantError{Merchant: filed, Bound: other}, *mismatch)
@@ -236,7 +236,7 @@ func TestHandleRefusesAResponseBoundToAnotherMerchant(t *testing.T) {
 	status.Store(http.StatusOK)
 	for name, values := range map[string][]string{"not an id": {"shop"}, "zero": {billing.MerchantID{}.String()}, "two": {filed.String(), filed.String()}} {
 		bound.Store(values)
-		err := readConfiguration(handle, t.Context())
+		err := readAccess(handle, t.Context())
 		require.ErrorIs(t, err, billing.ErrUnreachable, name)
 		require.ErrorContains(t, err, merchant.BoundHeader, name)
 	}
@@ -247,16 +247,16 @@ func TestHandleRefusesAResponseBoundToAnotherMerchant(t *testing.T) {
 	single, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "k"})
 	require.NoError(t, err)
 	bound.Store([]string(nil))
-	require.NoError(t, readConfiguration(single, t.Context()))
+	require.NoError(t, readAccess(single, t.Context()))
 	require.True(t, single.MerchantID().IsZero(), "nothing named a merchant yet")
 	bound.Store([]string{other.String()})
-	require.NoError(t, readConfiguration(single, t.Context()))
+	require.NoError(t, readAccess(single, t.Context()))
 	require.Equal(t, other, single.MerchantID())
 	bound.Store([]string(nil))
-	require.NoError(t, readConfiguration(single, t.Context()))
+	require.NoError(t, readAccess(single, t.Context()))
 	bound.Store([]string{filed.String()})
 	var mismatch *BoundMerchantError
-	require.ErrorAs(t, readConfiguration(single, t.Context()), &mismatch)
+	require.ErrorAs(t, readAccess(single, t.Context()), &mismatch)
 	require.Equal(t, BoundMerchantError{Merchant: other, Bound: filed}, *mismatch)
 	require.Equal(t, other, single.MerchantID(), "the adopted merchant stays")
 }
@@ -270,7 +270,7 @@ func TestCredentialFailureSendsNothing(t *testing.T) {
 		"blank": func(context.Context) (string, error) { return " ", nil },
 	} {
 		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("request sent without a minted credential") }))
-		err := readConfiguration(remoteHandle(t, server.URL, tokenCredential(token)), t.Context())
+		err := readAccess(remoteHandle(t, server.URL, tokenCredential(token)), t.Context())
 		server.Close()
 		require.Error(t, err, name)
 		if name == "error" {
@@ -294,9 +294,9 @@ func TestExtraHeadersCannotCarryACredential(t *testing.T) {
 	require.True(t, reflect.DeepEqual(extra, original), "request mutated the caller's header map")
 }
 
-// readConfiguration is one authenticated merchant read.
-func readConfiguration(c *Client, ctx context.Context, options ...RequestOption) error {
-	_, err := c.GetMerchantConfiguration(ctx, options...)
+// readAccess is one authenticated merchant read that is never cached.
+func readAccess(c *Client, ctx context.Context, options ...RequestOption) error {
+	_, err := c.GetAdminAccess(ctx, options...)
 	return err
 }
 
@@ -420,21 +420,21 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 	client := remoteHandle(t, unsent.URL, counting)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := readConfiguration(client, ctx)
+	err := readAccess(client, ctx)
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, err, billing.ErrUnreachable)
 	var status *billing.StatusError
 	require.False(t, errors.As(err, &status))
 	expired, cancelExpired := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancelExpired()
-	require.ErrorIs(t, readConfiguration(client, expired), context.DeadlineExceeded)
+	require.ErrorIs(t, readAccess(client, expired), context.DeadlineExceeded)
 	require.Zero(t, minted.Load(), "a finished context mints no credential")
 
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
 	closed, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "k"})
 	require.NoError(t, err)
-	require.ErrorIs(t, readConfiguration(closed, t.Context()), billing.ErrUnreachable)
+	require.ErrorIs(t, readAccess(closed, t.Context()), billing.ErrUnreachable)
 }
 
 func TestClientDeadlineOwnership(t *testing.T) {
@@ -486,7 +486,7 @@ func TestClientDeadlineOwnership(t *testing.T) {
 				Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: {APIKey: "k"}},
 				HTTPClient:  &http.Client{Transport: transport}, Timeout: tc.timeout,
 			})
-			err := readConfiguration(client, ctx)
+			err := readAccess(client, ctx)
 			require.True(t, called)
 			if tc.wantErr == nil {
 				require.NoError(t, err)

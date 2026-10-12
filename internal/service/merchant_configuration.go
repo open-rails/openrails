@@ -138,6 +138,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err != nil {
 			return nil, err
 		}
+		s.rt.MerchantChanged(mid)
 		return s.configurationState(ctx, mid, set)
 	}
 }

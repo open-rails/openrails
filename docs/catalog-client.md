@@ -72,6 +72,41 @@ exposes priced variants; OpenRails keeps its existing price records rather
 than introducing variants. Public browser lookups remain bounded to named
 product keys and redact provider-private price fields.
 
+## Reads served from memory
+
+A handle answers catalog and configuration reads from memory, so a page can
+read the same products many times a second without a query or a round trip.
+An answer is served as is until `RefreshAfter`, then reloaded in the
+background; while reloads fail (the server is down) the last good answer is
+served until `MaxStale`. The server's refusals (a 404, a deleted merchant) are
+answers too; customer and money reads (orders, payments, subscriptions,
+entitlements, balances, customers) always go to the server.
+
+| Read | Embedded | Remote |
+|---|---|---|
+| `ReadCatalog`: `GetProduct`, `ListProducts`, `GetPrice` (not `Verify`), `ListPrices` | 1m, stale ≤ 10m | 10m, stale ≤ 1h |
+| `ReadMeters`: `GetMeter`, `ListMeters` | 1m, stale ≤ 10m | 10m, stale ≤ 1h |
+| `ReadPublicConfig`: `GetPublicConfig` | live | 10m, stale ≤ 1h |
+| `ReadMerchantConfiguration`: `GetMerchantConfiguration` | live | 30s, stale ≤ 10m |
+
+`ListProducts` by keys (on one page) or by ids caches each product alone and
+loads the ones it lacks in one request. A handle's own catalog or
+configuration write drops what it holds for the merchant at once; so does any
+change the embedded engine commits (catalog edits and documents, merchant
+configuration, deleting or restoring the merchant). Another replica's or
+another client's write shows within `RefreshAfter`.
+
+`Config.ReadCache` (embedded) and `RemoteOptions.ReadCache` /
+`RemoteMerchantOptions.ReadCache` replace a read's policy; the zero policy
+reads it live:
+
+```go
+openrails.ReadCache{
+    openrails.ReadCatalog:               {RefreshAfter: 2 * time.Minute, MaxStale: 30 * time.Minute},
+    openrails.ReadMerchantConfiguration: {}, // live
+}
+```
+
 ## Access and checkout
 
 Check only the products already selected for a host page: `ListProductAccess`

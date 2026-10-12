@@ -1,7 +1,7 @@
 {
   "go_api": {
     ".": [
-      "const (\n\tSandbox = config.CredentialPostureSandbox\n\n\tLive = config.CredentialPostureLive\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n)",
+      "const (\n\tSandbox = config.CredentialPostureSandbox\n\n\tLive = config.CredentialPostureLive\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n\n\tReadCatalog = config.ReadCatalog\n\n\tReadMeters = config.ReadMeters\n\n\tReadPublicConfig = config.ReadPublicConfig\n\n\tReadMerchantConfiguration = config.ReadMerchantConfiguration\n)",
       "const QueueBilling = riverjobs.QueueBilling",
       "func (UsageSweepArgs) InsertOpts() river.InsertOpts",
       "func (UsageSweepArgs) Kind() string",
@@ -188,11 +188,14 @@
       "type ProviderSandboxConfig = config.ProviderSandboxConfig",
       "type RateLimit = config.RateLimit",
       "type RateLimitsConfig = config.RateLimitsConfig",
+      "type Read = config.Read",
+      "type ReadCache = config.ReadCache",
+      "type ReadPolicy = config.ReadPolicy",
       "type RedisConfig = config.RedisConfig",
       "type Remote struct {\n}",
       "type RemoteCredential struct {\n\tAPIKey string\n\n\tToken func(context.Context) (string, error)\n\n\tAssertion *AssertionKey\n}",
-      "type RemoteMerchantOptions struct {\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n}",
-      "type RemoteOptions struct {\n\tCredentials map[billing.MerchantID]RemoteCredential\n\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n}",
+      "type RemoteMerchantOptions struct {\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n\n\tReadCache ReadCache\n}",
+      "type RemoteOptions struct {\n\tCredentials map[billing.MerchantID]RemoteCredential\n\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n\n\tReadCache ReadCache\n}",
       "type RequestOption func(*requestOptions)",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
       "type RouteGroups = config.RouteGroups",
@@ -1072,7 +1075,7 @@
     "internal/config": [
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tTestMode CredentialPosture `yaml:\"test_mode\" json:\"test_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tTestMode CredentialPosture `yaml:\"test_mode\" json:\"test_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
@@ -1094,6 +1097,9 @@
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
       "type RateLimitsConfig map[string]*RateLimit",
+      "type Read string",
+      "type ReadCache map[Read]ReadPolicy",
+      "type ReadPolicy struct {\n\tRefreshAfter time.Duration `yaml:\"refresh_after\" json:\"refresh_after\"`\n\tMaxStale     time.Duration `yaml:\"max_stale\" json:\"max_stale\"`\n}",
       "type RedisConfig struct {\n\tAddr string `yaml:\"addr\" json:\"addr\"`\n\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\tDB       int    `yaml:\"db\" json:\"db\"`\n\n\tTLS bool `yaml:\"tls\" json:\"tls\"`\n\n\tCACert string `yaml:\"ca_cert\" json:\"ca_cert\"`\n}",
       "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
       "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n}",
@@ -1316,7 +1322,7 @@
     ],
     "internal/config": [
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tTestMode CredentialPosture `yaml:\"test_mode\" json:\"test_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tTestMode CredentialPosture `yaml:\"test_mode\" json:\"test_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
@@ -1325,6 +1331,7 @@
       "type LoggerConfig struct {\n\tLevel string `yaml:\"level\" json:\"level\"`\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
+      "type ReadPolicy struct {\n\tRefreshAfter time.Duration `yaml:\"refresh_after\" json:\"refresh_after\"`\n\tMaxStale     time.Duration `yaml:\"max_stale\" json:\"max_stale\"`\n}",
       "type RedisConfig struct {\n\tAddr string `yaml:\"addr\" json:\"addr\"`\n\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\tDB       int    `yaml:\"db\" json:\"db\"`\n\n\tTLS bool `yaml:\"tls\" json:\"tls\"`\n\n\tCACert string `yaml:\"ca_cert\" json:\"ca_cert\"`\n}",
       "type SMTPConfig struct {\n\tHost     string       `yaml:\"host\" json:\"host\"`\n\tPort     int          `yaml:\"port\" json:\"port\"`\n\tUsername string       `yaml:\"username\" json:\"username\"`\n\tPassword string       `yaml:\"password\" json:\"password\"`\n\tFrom     EmailAddress `yaml:\"from\" json:\"from\"`\n}",
       "type TokenConfig struct {\n\tMint string `json:\"mint\"`\n\tName string `json:\"name\"`\n}",
@@ -2133,6 +2140,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "engine": "github.com/open-rails/openrails/internal/engine",
+      "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
       "inprocess": "github.com/open-rails/openrails/internal/http/inprocess",
@@ -2231,6 +2239,9 @@
     },
     "internal/config/naming.go": {
       "fmt": "fmt",
+      "time": "time"
+    },
+    "internal/config/read_cache.go": {
       "time": "time"
     },
     "internal/config/redis.go": {
@@ -4608,8 +4619,7 @@
     },
     "public_config.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
+      "context": "context"
     },
     "refunds.go": {
       "billing": "github.com/open-rails/openrails/billing",

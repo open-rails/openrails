@@ -573,6 +573,7 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 	if s.config != nil {
 		s.config.Forget(id)
 	}
+	s.changed(id)
 	if cleanupPlan != nil {
 		return s.RetrySecretCleanup(ctx, id, runID)
 	}

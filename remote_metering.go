@@ -18,7 +18,7 @@ func meterPath(key string) (string, error) {
 // ListMeters returns one page of the merchant's meters, by key.
 func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.Meter], error) {
 	var out billing.ListPage[billing.Meter]
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/meters?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadMeters, "/v1/catalog/meters?"+pageValues(nil, page).Encode(), &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -31,7 +31,7 @@ func (c *Client) GetMeter(ctx context.Context, key string, requestOptions ...Req
 		return nil, err
 	}
 	var out billing.Meter
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadMeters, path, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

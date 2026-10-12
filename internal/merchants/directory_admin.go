@@ -90,6 +90,7 @@ func (s *Service) SoftDelete(ctx context.Context, id billing.MerchantID) (*billi
 	if err != nil {
 		return nil, directoryError(id, err)
 	}
+	s.changed(id)
 	m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 	m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 	return &m, nil
@@ -103,6 +104,7 @@ func (s *Service) Restore(ctx context.Context, id billing.MerchantID) (*billing.
 	if err != nil {
 		return nil, directoryError(id, err)
 	}
+	s.changed(id)
 	m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 	m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 	return &m, nil

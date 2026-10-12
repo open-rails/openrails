@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
@@ -62,6 +63,9 @@ vault:
   auth_mount: approle-billing
   kv_mount: kv
   transit_mount: transit-billing
+read_cache:
+  catalog: {refresh_after: 2m, max_stale: 30m}
+  meters: {}
 `), 0o600))
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -76,6 +80,7 @@ vault:
 		AuthMethod: "approle", RoleID: "role", SecretID: "secret", AuthMount: "approle-billing",
 		KVMount: "kv", TransitMount: "transit-billing",
 	}, cfg.Vault)
+	require.Equal(t, ReadCache{ReadCatalog: {RefreshAfter: 2 * time.Minute, MaxStale: 30 * time.Minute}, ReadMeters: {}}, cfg.ReadCache)
 }
 
 // Every field Config holds has a yaml and a json key, so none decodes by a

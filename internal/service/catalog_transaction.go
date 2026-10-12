@@ -127,6 +127,9 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		return nil
 	})
 	if err == nil {
+		if writes {
+			s.rt.MerchantChanged(mid)
+		}
 		if admission, _ := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission); admission != nil {
 			admission.finished = true
 		}

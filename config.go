@@ -106,6 +106,14 @@ type (
 	Credential = billingauth.Credential
 	// CredentialKind is Credential.Kind.
 	CredentialKind = billingauth.CredentialKind
+
+	// Read names a family of Client reads served from memory.
+	Read = config.Read
+	// ReadPolicy is how long a Read is served from memory.
+	ReadPolicy = config.ReadPolicy
+	// ReadCache is Config.ReadCache and RemoteOptions.ReadCache: the policy of
+	// each Read it names, replacing its default.
+	ReadCache = config.ReadCache
 )
 
 const (
@@ -139,6 +147,16 @@ const (
 	CredentialSignedToken = billingauth.CredentialSignedToken
 	// CredentialAccessToken is an authorization server's access token.
 	CredentialAccessToken = billingauth.CredentialAccessToken
+
+	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
+	// ListPrices.
+	ReadCatalog = config.ReadCatalog
+	// ReadMeters is GetMeter and ListMeters.
+	ReadMeters = config.ReadMeters
+	// ReadPublicConfig is GetPublicConfig.
+	ReadPublicConfig = config.ReadPublicConfig
+	// ReadMerchantConfiguration is GetMerchantConfiguration.
+	ReadMerchantConfiguration = config.ReadMerchantConfiguration
 )
 
 // ErrUnauthenticated refuses a request without a valid credential: the

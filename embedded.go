@@ -2,6 +2,7 @@ package openrails
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -46,6 +47,9 @@ type Engine struct {
 	// client calls the engine over its in-process transport; every handle
 	// shares it.
 	client *http.Client
+	// reads are the handles' cached reads, dropped for a merchant as soon as
+	// the engine commits a change to it.
+	reads *reads
 }
 
 // New runs the OpenRails engine in this process. Before anything else touches
@@ -63,11 +67,23 @@ type Engine struct {
 // and Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
-	e, err := engine.New(ctx, cfg, deps)
+	if _, err := readPoliciesFor(inProcess, cfg.ReadCache); err != nil {
+		return nil, err
+	}
+	inner, err := engine.New(ctx, cfg, deps)
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{engine: e, client: &http.Client{Transport: e.Transport()}}, nil
+	e := &Engine{engine: inner, client: &http.Client{Transport: inner.Transport()}}
+	if e.reads, err = newReads(inProcess, cfg.ReadCache, 0, e.handle); err != nil {
+		return nil, errors.Join(err, inner.Close(ctx))
+	}
+	inner.App.Runtime.OnMerchantChange(e.reads.forget)
+	return e, nil
+}
+
+func (e *Engine) handle(id billing.MerchantID) *Client {
+	return &Client{engine: e.engine, inprocess: true, baseURL: engine.InprocessBaseURL, client: e.client, merchantID: id, reads: e.reads}
 }
 
 // Merchant is the handle of merchant id: every merchant-scoped operation,
@@ -81,7 +97,7 @@ func (e *Engine) Merchant(id billing.MerchantID) (*Client, error) {
 	if id.IsZero() {
 		return nil, invalidErr("merchant id is required")
 	}
-	return &Client{engine: e.engine, inprocess: true, baseURL: engine.InprocessBaseURL, client: e.client, merchantID: id}, nil
+	return e.handle(id), nil
 }
 
 // MerchantBySlug is Merchant for the merchant Config.Merchants declares
@@ -148,6 +164,7 @@ func (e *Engine) Close(ctx context.Context) error {
 	if e == nil {
 		return nil
 	}
+	e.reads.close()
 	return e.engine.Close(ctx)
 }
 

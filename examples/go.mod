@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.24.0
-	github.com/open-rails/helpers v1.9.0
+	github.com/open-rails/helpers v1.12.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.37.0
@@ -70,6 +70,7 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/maypok86/otter/v2 v2.3.1-0.20261012174237-6b4979235160 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect

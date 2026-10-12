@@ -83,6 +83,8 @@ type Service struct {
 	StripeClients *stripeapi.Factory
 	pool          *db.Pool
 	database      *db.DB
+	// Changed hears each committed change to a merchant's directory entry.
+	Changed func(billing.MerchantID)
 	// config is the merchants' configuration: their documents in a file or
 	// Vault.
 	config *merchantdocs.Cache
@@ -226,6 +228,12 @@ func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merch
 		return nil, ErrMerchantRetired
 	}
 	return m, err
+}
+
+func (s *Service) changed(id billing.MerchantID) {
+	if s.Changed != nil {
+		s.Changed(id)
+	}
 }
 
 // Get returns the merchant directory row by id.

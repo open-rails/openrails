@@ -211,6 +211,7 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service) {
 		return
 	}
 	svc.StripeClients = r.StripeClients
+	svc.Changed = r.MerchantChanged
 	r.Merchants = svc
 	store := svc.Secrets()
 	if r.AlertService != nil {

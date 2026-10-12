@@ -38,7 +38,7 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 		return nil, err
 	}
 	var out billing.Product
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/products/"+path, nil, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadCatalog, "/v1/catalog/products/"+path, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -60,26 +60,33 @@ func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, reques
 // ListProducts returns one page of products, newest first, each with its
 // current prices. params.Keys reads products by key.
 func (c *Client) ListProducts(ctx context.Context, params billing.ProductListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {
-	q := pageValues(nil, params.PageRequest)
-	setBool(q, "archived", params.Archived)
-	if params.TierGroup != "" {
-		q.Set("tier_group", params.TierGroup)
-	}
 	if len(params.Keys) > billing.MaxBatchItems || len(params.Entitlements) > billing.MaxBatchItems {
 		return nil, invalidErr(fmt.Sprintf("keys and entitlements each name at most %d values", billing.MaxBatchItems))
+	}
+	filter := url.Values{}
+	setBool(filter, "archived", params.Archived)
+	if params.TierGroup != "" {
+		filter.Set("tier_group", params.TierGroup)
+	}
+	for _, key := range params.Entitlements {
+		filter.Add("entitlement", key)
+	}
+	setBool(filter, "for_sale", params.ForSale)
+	q := pageValues(url.Values{}, params.PageRequest)
+	for name, values := range filter {
+		q[name] = values
 	}
 	for _, key := range params.Keys {
 		q.Add("keys", key)
 	}
-	for _, key := range params.Entitlements {
-		q.Add("entitlement", key)
-	}
-	setBool(q, "for_sale", params.ForSale)
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}
+	if by, values, ok := productBatch(params); ok && c.reads != nil && c.reads.products != nil && ctx.Err() == nil {
+		return c.readProducts(ctx, filter.Encode(), by, values)
+	}
 	var out billing.ListPage[billing.Product]
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadCatalog, "/v1/catalog/products?"+q.Encode(), &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -125,11 +132,14 @@ func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billin
 	if err != nil {
 		return nil, err
 	}
-	if params.Verify {
-		path += "?verify=true"
-	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/prices/"+path, nil, &out, requestOptions...); err != nil {
+	if params.Verify {
+		// Verify reads each PSP's copy now: never from memory.
+		err = c.do(ctx, http.MethodGet, "/v1/catalog/prices/"+path+"?verify=true", nil, &out, requestOptions...)
+	} else {
+		err = c.read(ctx, ReadCatalog, "/v1/catalog/prices/"+path, &out, requestOptions...)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -156,7 +166,7 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 		return nil, err
 	}
 	var out billing.ListPage[billing.Price]
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadCatalog, "/v1/catalog/prices?"+q.Encode(), &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

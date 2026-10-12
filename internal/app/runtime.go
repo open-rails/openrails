@@ -286,6 +286,8 @@ type Runtime struct {
 	// Verifier reads unverified subscriptions from their provider as soon as
 	// they become unverified (#1094); started with the billing workers.
 	Verifier *reconcile.Verifier
+	// changes are the watchers of committed merchant changes (#1232).
+	changes merchantChanges
 }
 
 // MerchantConfigManageable reports whether merchant configuration can change at

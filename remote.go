@@ -45,6 +45,8 @@ type Client struct {
 	// credential; a mint failure fails the call.
 	token     func(context.Context) (string, error)
 	assertion *AssertionKey
+	// reads answers cached reads; nil reads everything live.
+	reads *reads
 }
 
 // MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
@@ -103,6 +105,9 @@ type RemoteOptions struct {
 	// through HTTPClient. Zero leaves the caller's context and the transport
 	// in charge.
 	Timeout time.Duration
+	// ReadCache overrides how long catalog and configuration reads are
+	// served from memory; nil keeps the defaults.
+	ReadCache ReadCache
 }
 
 // Remote is a standalone or hosted OpenRails server reached over HTTP, for
@@ -112,6 +117,7 @@ type Remote struct {
 	baseURL string
 	client  *http.Client
 	handles map[billing.MerchantID]*Client
+	reads   *reads
 }
 
 // NewRemote builds the client of a standalone or hosted server. It validates
@@ -128,6 +134,10 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	if r.client == nil {
 		r.client = &http.Client{}
 	}
+	var err error
+	if r.reads, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(id billing.MerchantID) *Client { return r.handles[id] }); err != nil {
+		return nil, err
+	}
 	for id, credential := range opts.Credentials {
 		if id.IsZero() {
 			return nil, fmt.Errorf("openrails: RemoteOptions.Credentials holds a credential under the zero merchant ID")
@@ -136,6 +146,7 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 		if err != nil {
 			return nil, fmt.Errorf("openrails: credential of merchant %s: %w", id, err)
 		}
+		handle.reads = r.reads
 		r.handles[id] = handle
 	}
 	return r, nil
@@ -148,6 +159,9 @@ type RemoteMerchantOptions struct {
 	// Timeout bounds each request, including token acquisition, without
 	// extending the caller's deadline. Zero leaves the caller in charge.
 	Timeout time.Duration
+	// ReadCache overrides how long catalog and configuration reads are
+	// served from memory; nil keeps the defaults.
+	ReadCache ReadCache
 }
 
 // NewRemoteMerchant is the handle of the one merchant credential is bound
@@ -177,6 +191,9 @@ func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...R
 	handle, err := newRemoteHandle(baseURL, client, opts.Timeout, billing.MerchantID{}, credential)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: credential: %w", err)
+	}
+	if handle.reads, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(billing.MerchantID) *Client { return handle }); err != nil {
+		return nil, err
 	}
 	return handle, nil
 }
@@ -226,10 +243,12 @@ func (r *Remote) Ready(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the transport's idle connections; handles stay usable.
+// Close releases the transport's idle connections and the read caches'
+// background work; handles stay usable.
 func (r *Remote) Close(context.Context) error {
 	if r != nil {
 		r.client.CloseIdleConnections()
+		r.reads.close()
 	}
 	return nil
 }
@@ -609,6 +628,10 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if c == nil || c.client == nil {
 		return fmt.Errorf("openrails: a Client comes from Engine.Merchant, Remote.Merchant or NewRemoteMerchant")
 	}
+	if changesReads(method, path) {
+		// Even a failed write may have landed, or found the cache stale.
+		defer c.reads.forget(c.merchantID)
+	}
 	// Enforce the per-call timeout via a context deadline so it holds even when
 	// the host injected its own http.Client (which may have no Timeout). Only
 	// shorten, never extend, an existing caller deadline.
@@ -680,21 +703,10 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any, req
 
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header, requestOptions ...RequestOption) error {
 	response, err := c.doResponse(ctx, method, path, body, headers, requestOptions...)
-	if err != nil {
+	if err != nil || out == nil {
 		return err
 	}
-	if out != nil {
-		decoder := json.NewDecoder(bytes.NewReader(response.body))
-		decoder.UseNumber()
-		if err := decoder.Decode(out); err != nil {
-			return fmt.Errorf("%w: decode response: %w", billing.ErrUnreachable, err)
-		}
-		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
-			return fmt.Errorf("%w: response must contain one JSON value", billing.ErrUnreachable)
-		}
-	}
-	return nil
+	return decodeJSON(response.body, out)
 }
 
 // doResponse preserves the complete typed error contract for operations whose

@@ -140,6 +140,10 @@ type Config struct {
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
+
+	// ReadCache overrides how long the engine's handles serve catalog and
+	// configuration reads from memory; nil keeps the defaults.
+	ReadCache ReadCache `yaml:"read_cache" json:"read_cache"`
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.

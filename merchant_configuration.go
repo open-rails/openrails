@@ -11,7 +11,7 @@ import (
 // credentials, and its revision.
 func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/configuration", nil, &out, options...); err != nil {
+	if err := c.read(ctx, ReadMerchantConfiguration, "/v1/merchant/configuration", &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

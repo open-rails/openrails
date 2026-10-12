@@ -61,6 +61,7 @@ func ImportBillingArchive(r *httprequest.Request) {
 		writeMerchantArchiveError(r, err)
 		return
 	}
+	r.State.MerchantChanged(mid)
 	r.JSON(http.StatusOK, billing.BillingArchiveImport{
 		MerchantID: mid, Digest: result.Digest, Rows: result.Rows, AlreadyImported: result.Replayed,
 	})
