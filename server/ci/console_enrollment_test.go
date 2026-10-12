@@ -45,8 +45,16 @@ func TestServerConsoleInvitedStaffEnrollment(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, call(t, handler, owner, http.MethodGet, api+"/admin/users", nil).Code, "enrollment adds no site-wide admin surface")
 
 	// A staff member may invite only a role within their own permissions.
+	viewer, ok := server.MerchantRole("viewer")
+	require.True(t, ok)
+	viewerPermissions, err := srv.AuthKit().RolePermissions(viewer)
+	require.NoError(t, err)
+	permissions := []string{"merchant:members:read", "merchant:members:manage"}
+	for _, permission := range viewerPermissions {
+		permissions = append(permissions, permission.String())
+	}
 	created := call(t, handler, owner, http.MethodPost, groups+"/roles", map[string]any{
-		"name": "limited-inviter", "permissions": []string{"merchant:members:read", "merchant:members:manage", "merchant:customer:read"},
+		"name": "limited-inviter", "permissions": permissions,
 	})
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	role := decode[iam.GroupRole](t, created).Name
