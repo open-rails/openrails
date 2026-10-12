@@ -79,8 +79,8 @@ migration 0075_operational_read_indexes.up.sql sha256:6cbd11779455b11eaa2de98927
 migration 0076_dynamic_pricing.up.sql sha256:713058c4a4763e204bf0bef0bb83923653b306c0f39d0615cdc91c611b2e9b73
 migration 0077_retire_checkout_creation.up.sql sha256:f0bcead17a892861ce5b19c7049b42c0897449aa7dd537af97982cb8ca15590b
 migration 0078_provider_bill_orders.up.sql sha256:41ddcf60ccbc6706d332a4a307f437264b9ecfe595e0df17356155f3af926e6f
-migration 0079_provider_schedule_bills.up.sql sha256:cdc322029dee8e833d292ec93ebbe268204db3c16f7f7e2e6b441170ba4d104e
-migration 0080_payment_order_identity.up.sql sha256:5d324ea8d6f888004f5cd4746bfe6dbeb47234b0c006368cec9109cad660fe3a
+migration 0079_provider_schedule_bills.up.sql sha256:07c1eb24ffd4b7406f56294d04b8c1a55334c7c2d6ed943c3bab6683cfdc4386
+migration 0080_payment_order_identity.up.sql sha256:e57eb221b1962b5df48b267247a0a733c78206ec32b8d52da8980017c7175724
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1870,6 +1870,7 @@ table billing.provider_cycle_receipts
   constraint provider_cycle_receipts_pkey PRIMARY KEY (merchant_id, psp_id, transaction_id)
   constraint provider_cycle_receipts_transaction_id_check CHECK ((transaction_id <> ''::text))
   index CREATE UNIQUE INDEX provider_cycle_receipts_pkey ON billing.provider_cycle_receipts USING btree (merchant_id, psp_id, transaction_id)
+  index CREATE INDEX provider_cycle_receipts_settled_schedule_idx ON billing.provider_cycle_receipts USING btree (merchant_id, subscription_id, schedule_source_reference, due_at DESC) WHERE approved
 
 table billing.provider_intents
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1973,10 +1974,10 @@ table billing.provider_schedules
   column source_reference text NOT NULL
   column provider_reference text NOT NULL
   column first_due_at timestamp with time zone NOT NULL
-  column cadence_hours integer NOT NULL DEFAULT 0
-  column cadence_months integer NOT NULL DEFAULT 0
+  column cadence_hours integer NOT NULL
+  column cadence_months integer NOT NULL
   column accepted_bill jsonb NOT NULL
-  column created_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
   constraint provider_schedules_accepted_version_check CHECK ((accepted_version > 0))
   constraint provider_schedules_cadence_hours_check CHECK ((cadence_hours >= 0))
   constraint provider_schedules_cadence_months_check CHECK (((cadence_months >= 0) AND (cadence_months <= 1200)))

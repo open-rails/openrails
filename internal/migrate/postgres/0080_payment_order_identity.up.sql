@@ -1,4 +1,4 @@
--- parent: 79 sha256:50cfe8c68302f1bb1a08871a93673236a0069fd1e052ca3efff5f9bd89453497
+-- parent: 79 sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
 -- Repair: none-needed Prelaunch cut: historical price-only payments are not reconstructed. Such a database must be reset or explicitly rebuilt before this schema is adopted; this migration never deletes financial rows.
 DO $$
 BEGIN

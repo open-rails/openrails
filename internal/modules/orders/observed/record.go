@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -114,7 +116,8 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		noncash = accepted.NonCashAmount
 		if bill.Settled {
 			if bill.NonCashAmount != accepted.NonCashAmount {
-				evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "accepted_non_cash_amount": accepted.NonCashAmount, "observed_non_cash_amount": bill.NonCashAmount})
+				evidence, _ := json.Marshal(map[string]any{"order_id": billing.OrderID(result.Order.ID).String(), "currency": bill.Currency,
+					"accepted_non_cash_amount": strconv.FormatInt(accepted.NonCashAmount, 10), "observed_non_cash_amount": strconv.FormatInt(bill.NonCashAmount, 10)})
 				action := "Review changed provider settlement evidence; the original settlement and every verified cash movement were retained."
 				if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.bill.settlement_conflict", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 					return result, err
@@ -127,7 +130,8 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		}
 	}
 	if captured > bill.Total || noncash > bill.Total-captured {
-		evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "billed_amount": bill.Total, "captured_amount": captured, "non_cash_amount": noncash})
+		evidence, _ := json.Marshal(map[string]any{"order_id": billing.OrderID(result.Order.ID).String(), "currency": bill.Currency,
+			"billed_amount": strconv.FormatInt(bill.Total, 10), "captured_amount": strconv.FormatInt(captured, 10), "non_cash_amount": strconv.FormatInt(noncash, 10)})
 		action := "Review the distinct captured payments and refund any excess; do not collect this order again."
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.bill.overpaid", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return result, err
@@ -140,7 +144,7 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		}
 		cancel := models.DerefStr(sub.CancelType)
 		if sub.Status == "canceled" && (bill.Owner == OwnerEngine || cancel == "user" || cancel == "merchant" || cancel == "chargeback") {
-			evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "payment_id": result.Payment.ID, "subscription_id": *bill.SubscriptionID})
+			evidence, _ := json.Marshal(map[string]any{"order_id": billing.OrderID(result.Order.ID).String(), "payment_id": billing.PaymentID(result.Payment.ID).String(), "subscription_id": billing.SubscriptionID(*bill.SubscriptionID).String()})
 			action := "Review this confirmed charge after cancellation and refund it if appropriate; billing and access remain canceled."
 			if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.charge.after_cancellation", SubjectKey: "payment:" + result.Payment.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 				return result, err

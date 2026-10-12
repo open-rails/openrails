@@ -12,11 +12,11 @@ CREATE TABLE billing.provider_schedules (
     source_reference text NOT NULL CHECK (octet_length(source_reference) BETWEEN 1 AND 512),
     provider_reference text NOT NULL CHECK (octet_length(provider_reference) BETWEEN 1 AND 512),
     first_due_at timestamptz NOT NULL,
-    cadence_hours integer NOT NULL DEFAULT 0 CHECK (cadence_hours >= 0),
-    cadence_months integer NOT NULL DEFAULT 0 CHECK (cadence_months BETWEEN 0 AND 1200),
+    cadence_hours integer NOT NULL CHECK (cadence_hours >= 0),
+    cadence_months integer NOT NULL CHECK (cadence_months BETWEEN 0 AND 1200),
     CHECK ((cadence_hours > 0) <> (cadence_months > 0)),
     accepted_bill jsonb NOT NULL,
-    created_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, subscription_id, source_reference),
     UNIQUE (merchant_id, subscription_id, accepted_version),
     FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id),
@@ -24,6 +24,7 @@ CREATE TABLE billing.provider_schedules (
     FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id),
     FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
 );
+COMMENT ON TABLE billing.provider_schedules IS 'Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.';
 
 CREATE TABLE billing.provider_cycle_receipts (
     merchant_id uuid NOT NULL,
@@ -40,6 +41,7 @@ CREATE TABLE billing.provider_cycle_receipts (
     FOREIGN KEY (merchant_id, subscription_id, schedule_source_reference) REFERENCES billing.provider_schedules(merchant_id, subscription_id, source_reference),
     FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
 );
+COMMENT ON TABLE billing.provider_cycle_receipts IS 'Verified provider transactions bound once to one due cycle of an accepted schedule version. Retention: permanent, never pruned.';
 
 -- Resolve the latest approved cycle of one immutable schedule version without
 -- scanning every transaction on the merchant's provider account.
