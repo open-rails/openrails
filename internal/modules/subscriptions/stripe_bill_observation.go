@@ -26,6 +26,10 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 	if sub == nil || sub.Rail != models.RailStripe || sub.CollectionPolicy != models.CollectionPolicyProvider || invoice.SubscriptionID != sub.RailSubscriptionID {
 		return bill, nil, errors.New("Stripe invoice does not belong to the provider-owned subscription")
 	}
+	if pinned := db.PSPIDFromContext(ctx); pinned != uuid.Nil && pinned != sub.PspID {
+		return bill, nil, errors.New("Stripe invoice PSP differs from the verified subscription")
+	}
+	ctx = db.WithPSPID(ctx, sub.PspID)
 	bill = observed.Bill{PSPID: sub.PspID, CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
 		Owner: observed.OwnerProvider, Kind: "renewal", SourceKind: "stripe_invoice", SourceKey: invoice.ID,
 		ProviderReference: invoice.ID, Currency: invoice.Currency, DueAt: invoice.DueAt}
