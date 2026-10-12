@@ -28,7 +28,23 @@ import (
 // included, with the balance events the host acknowledged, and a restore
 // watches every running one again: the watch is derived, not archived.
 func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
-	w := newWorld(t)
+	for _, at := range []struct {
+		name          string
+		sinceMidnight time.Duration
+	}{
+		{"after midnight", 2*time.Minute + 21*time.Second},
+		{"daytime", 12 * time.Hour},
+	} {
+		t.Run(at.name, func(t *testing.T) { runningChargesSurviveArchiveAt(t, at.sinceMidnight) })
+	}
+}
+
+func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
+	t.Helper()
+	w := prepareWorld(t, 12)
+	now := w.clock.Now().UTC()
+	w.clock.Advance(now.Truncate(24 * time.Hour).Add(sinceMidnight).Sub(now))
+	w.start()
 	c := w.client[embedded]
 	payer := w.newCustomer()
 	_, err := c.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
@@ -62,7 +78,12 @@ func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, broke.cid(), events.Items[0].Balance.CustomerID)
-	require.EqualValues(t, -3_600_000, events.Items[0].Balance.AvailableAmount)
+	// The midnight checkpoint moves the previous day's unfunded accrual to
+	// owed. The unposted remainder still reduces available; their difference
+	// is the same hour's exposure on either side of midnight.
+	balance := events.Items[0].Balance
+	fmt.Printf("archive balance at %s: available=%d owed=%d\n", balance.AsOf.UTC().Format(time.RFC3339), balance.AvailableAmount, balance.OwedAmount)
+	require.EqualValues(t, 3_600_000, balance.OwedAmount-balance.AvailableAmount)
 	_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{events.Items[0].ID})
 	require.NoError(t, err)
 
