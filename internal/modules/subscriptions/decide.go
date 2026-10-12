@@ -22,7 +22,6 @@ type Premise func(ctx context.Context, d *db.DB, sub *models.Subscription) (bool
 // is left alone and reports false: the next pass decides again.
 func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id uuid.UUID, ev lifecycle.Event, premise Premise) (bool, error) {
 	now := s.now()
-	var notices []*models.NotificationQueue
 	applied := false
 	err := d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := d.NewWithPgxTx(tx)
@@ -41,7 +40,7 @@ func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id 
 		if !sub.LifecycleChanged() && len(effects) == 0 {
 			return nil
 		}
-		if notices, err = s.ApplyEffects(ctx, txdb, sub, effects, now, EffectOptions{}); err != nil {
+		if _, err = s.ApplyEffects(ctx, txdb, sub, effects, now, EffectOptions{}); err != nil {
 			return err
 		}
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
@@ -56,6 +55,5 @@ func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id 
 	if err != nil {
 		return false, err
 	}
-	s.DispatchNotifications(ctx, notices)
 	return applied, nil
 }

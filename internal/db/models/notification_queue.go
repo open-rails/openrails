@@ -69,40 +69,20 @@ const (
 	NotificationSubscriptionChanged NotificationEventType = "subscription_changed"
 )
 
-// NotificationQueue is an in-app notification for a customer.
+// NotificationQueue is a customer billing fact written in the domain transaction.
 type NotificationQueue struct {
-	ID uuid.UUID
-	// CustomerID is the host's subject UUID within the merchant.
+	ID         uuid.UUID
+	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	EventType  NotificationEventType
-	// Data is the typed event payload; it is stored as JSONB and served verbatim.
-	Data      billing.NotificationData
-	Seen      bool
-	CreatedAt time.Time
+	Data       billing.NotificationData
+	CreatedAt  time.Time
 }
 
-// DataJSONB is the stored form of Data.
-func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(nq.Data) }
+func (n *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(n.Data) }
 
-// View is the wire shape of the row.
-func (nq *NotificationQueue) View() billing.Notification {
-	return billing.Notification{ID: billing.NotificationID(nq.ID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
-}
-
-// IsSeen checks if the notification has been seen by the user
-func (nq *NotificationQueue) IsSeen() bool {
-	return nq.Seen
-}
-
-// IsExpiredForCleanup checks if the notification is old enough to be cleaned up
-func (nq *NotificationQueue) IsExpiredForCleanup() bool {
-	now := time.Now()
-
-	// Seen notifications can be cleaned up after 90 days
-	if nq.IsSeen() {
-		return nq.CreatedAt.Before(now.Add(-90 * 24 * time.Hour))
-	}
-
-	// Unseen notifications are kept longer (180 days)
-	return nq.CreatedAt.Before(now.Add(-180 * 24 * time.Hour))
+func (n *NotificationQueue) View() billing.NotificationEvent {
+	data, _ := json.Marshal(n.Data)
+	return billing.NotificationEvent{ID: billing.NotificationID(n.ID), MerchantID: billing.MerchantID(n.MerchantID), CustomerID: billing.CustomerID(n.CustomerID),
+		EventType: string(n.EventType), Data: data, CreatedAt: n.CreatedAt, ActionRequested: billing.CustomerNotificationActionRequested(string(n.EventType)), Optional: billing.CustomerNotificationOptional(string(n.EventType), n.Data)}
 }

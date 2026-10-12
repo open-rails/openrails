@@ -149,7 +149,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 // transition applies one event to the locked row and carries out its
 // effects in the same transaction; notifications go out after commit.
 func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool) (bool, error) {
-	var notices []*models.NotificationQueue
+
 	applied := false
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
@@ -180,7 +180,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 				return err
 			}
 		}
-		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
+		if _, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
 			return err
 		}
 		if cur.Status == models.StatusPastDue && cur.GraceEndsAt == nil && !d.GraceEndsAt.IsZero() {
@@ -206,7 +206,6 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 	if err != nil {
 		return false, err
 	}
-	lc.DispatchNotifications(ctx, notices)
 	return applied, nil
 }
 

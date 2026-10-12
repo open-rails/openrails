@@ -91,7 +91,7 @@ func (s *CCBillWebhookService) deliver(ctx context.Context, notes []*models.Noti
 		return
 	}
 	for _, n := range notes {
-		if err := s.NotificationService.CreateAndDeliver(ctx, n); err != nil {
+		if err := s.NotificationService.Create(ctx, n); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"customer_id": n.CustomerID, "event": n.EventType}).Error("failed to deliver CCBill lifecycle notification")
 		}
 	}

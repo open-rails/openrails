@@ -628,7 +628,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 			}
-			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			if err := s.NotificationService.Create(ctx, notification); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to create and deliver new sale failure notification")
 			}
 		}
@@ -870,7 +870,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				CustomerID: subscription.CustomerID,
 				EventType:  models.NotificationPremiumRenewed, // Use renewed for upgrades
 			}
-			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			if err := s.NotificationService.Create(ctx, notification); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to create and deliver upgrade success notification")
 			}
 		}
@@ -979,7 +979,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 			}
-			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			if err := s.NotificationService.Create(ctx, notification); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to create and deliver upgrade failure notification")
 			}
 		}

@@ -217,16 +217,13 @@ func (s *CheckoutService) notifyStaffChange(ctx context.Context, c *changeTarget
 	if c.clears() && c.pending != nil {
 		key = "canceled:" + c.pending.ID.String()
 	}
-	notice, err := subscriptions.QueueStaffChangeNotice(ctx, s.SubscriptionService.Database(), c.sub, subscriptions.StaffChangeNotice{
+	_, err := subscriptions.QueueStaffChangeNotice(ctx, s.SubscriptionService.Database(), c.sub, subscriptions.StaffChangeNotice{
 		Key: key, PriceID: resp.PriceID.UUID(), ProductName: product, Quantity: resp.Quantity,
 		Currency: resp.Currency, NextAmount: resp.NextChargeAmount, EffectiveAt: at,
 	})
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", c.sub.ID).Error("queue staff change notice")
 		return
-	}
-	if s.Lifecycle != nil {
-		s.Lifecycle.DispatchNotifications(ctx, []*models.NotificationQueue{notice})
 	}
 }
 

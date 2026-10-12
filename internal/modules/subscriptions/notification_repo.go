@@ -3,22 +3,13 @@ package subscriptions
 import (
 	"context"
 	"errors"
-	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/query"
 )
-
-type NotificationFilters struct {
-	UserID    string
-	EventType models.NotificationEventType
-	Seen      *bool
-}
 
 type NotificationQueueRepo struct {
 	db *db.DB
@@ -26,7 +17,7 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationsFromGen(rows []gen.BillingNotification) ([]*models.NotificationQueue, error) {
+func notificationsFromGen(rows []gen.BillingNotificationEvent) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
 	for _, r := range rows {
 		m, err := models.NotificationFromGen(r)
@@ -67,7 +58,6 @@ func (r *NotificationQueueRepo) CreateIfAbsent(ctx context.Context, notification
 		CustomerID: params.CustomerID,
 		EventType:  params.EventType,
 		Data:       params.Data,
-		Seen:       params.Seen,
 		CreatedAt:  params.CreatedAt,
 	})
 }
@@ -90,7 +80,6 @@ func (r *NotificationQueueRepo) createParams(ctx context.Context, notification *
 		CustomerID: notification.CustomerID,
 		EventType:  string(notification.EventType),
 		Data:       data,
-		Seen:       notification.Seen,
 		CreatedAt:  notification.CreatedAt,
 	}, nil
 }
@@ -113,97 +102,4 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 		return nil, err
 	}
 	return notificationsFromGen(rows)
-}
-
-// MarkEmailed stamps emailed_at once; already-stamped rows are a no-op.
-func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := r.db.Gen(ctx).MarkNotificationEmailed(ctx, gen.MarkNotificationEmailedParams{ID: id, EmailedAt: at})
-	return err
-}
-
-// LeaseEmail claims an undelivered email for one sender for lease; false when
-// it was sent or another sender holds it.
-func (r *NotificationQueueRepo) LeaseEmail(ctx context.Context, id uuid.UUID, lease time.Duration) (bool, error) {
-	n, err := r.db.Gen(ctx).LeaseNotificationEmail(ctx, gen.LeaseNotificationEmailParams{ID: id, LeaseSeconds: lease.Seconds()})
-	return n == 1, err
-}
-
-// ReleaseEmail hands an unsent email back to the next sender.
-func (r *NotificationQueueRepo) ReleaseEmail(ctx context.Context, id uuid.UUID) error {
-	return r.db.Gen(ctx).ReleaseNotificationEmail(ctx, id)
-}
-
-func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	data, err := notification.DataJSONB()
-	if err != nil {
-		return err
-	}
-	rows, err := r.db.Gen(ctx).UpdateNotification(ctx, gen.UpdateNotificationParams{
-		ID:         notification.ID,
-		CustomerID: notification.CustomerID,
-		EventType:  string(notification.EventType),
-		Data:       data,
-		Seen:       notification.Seen,
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
-func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).DeleteNotification(ctx, id)
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
-func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query.QueryOptions[NotificationFilters]) ([]*models.NotificationQueue, int64, error) {
-	var tsid *uuid.UUID
-	if opts.Filters.UserID != "" {
-		id, err := db.ResolveCustomerID(opts.Filters.UserID)
-		if err != nil {
-			return nil, 0, err
-		}
-		tsid = &id
-	}
-	var eventType *string
-	if opts.Filters.EventType != "" {
-		et := string(opts.Filters.EventType)
-		eventType = &et
-	}
-
-	q := r.db.Gen(ctx)
-	total, err := q.CountNotificationsFiltered(ctx, gen.CountNotificationsFilteredParams{
-		CustomerID: tsid,
-		EventType:  eventType,
-		Seen:       opts.Filters.Seen,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	limit32, _ := safecast.Convert[int32](opts.GetLimit())
-	offset32, _ := safecast.Convert[int32](opts.GetOffset())
-	rows, err := q.ListNotificationsFiltered(ctx, gen.ListNotificationsFilteredParams{
-		CustomerID: tsid,
-		EventType:  eventType,
-		Seen:       opts.Filters.Seen,
-		PageLimit:  limit32,
-		PageOffset: offset32,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	notifications, err := notificationsFromGen(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return notifications, total, nil
 }

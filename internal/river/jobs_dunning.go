@@ -195,7 +195,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	priceSvc := catalog.NewPriceService(w.DB)
 	productSvc := catalog.NewProductService(w.DB)
 	entitlementSvc := entitlements.NewEntitlementService(w.DB, w.Clock)
-	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
+	notifSvc := subscriptions.NewNotificationService(w.DB)
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
 	lifecycle.SetConfig(w.Config)

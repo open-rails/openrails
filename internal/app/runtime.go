@@ -139,8 +139,6 @@ type Runtime struct {
 
 	UserSubscriptionService  *subscriptions.UserSubscriptionService
 	AdminSubscriptionService *subscriptions.AdminSubscriptionService
-
-	EmailService *subscriptions.EmailService
 	// EmailSender delivers all of OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
 

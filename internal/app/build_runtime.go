@@ -276,21 +276,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		}
 		sender = smtp
 	}
-	var emailService *subscriptions.EmailService
-	if sender != nil {
-		emailService = subscriptions.NewEmailService(sender, merchantconfig.NewStore(database), clock)
-		// Receipts and notices go to the email the merchant declared.
-		emailService.SetDomainServices(serviceInstances.SubscriptionService, serviceInstances.ProductService, serviceInstances.PriceService, customers)
-	}
-
-	// Set emailService on the NotificationService that was created in createServices
-	serviceInstances.NotificationService.SetEmailService(emailService)
-
-	// Immediate merchant notifications share the existing email service.
-	var alertEmailSender alerting.EmailSender
-	if emailService != nil {
-		alertEmailSender = emailService
-	}
+	// Operator alerts and AuthKit still use the deployment's sender.
+	alertEmailSender := alerting.NewMailSender(sender, merchantconfig.NewStore(database))
 	alertService := alerting.NewService(alerting.Deps{
 		DB:               database,
 		Email:            alertEmailSender,
@@ -346,11 +333,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		FXProvider:               serviceInstances.FXProvider,
 		FXRates:                  serviceInstances.FXRates,
 
-		UserSubscriptionService:  serviceInstances.UserSubscriptionService,
-		AdminSubscriptionService: serviceInstances.AdminSubscriptionService,
-		PriceMigrationService:    serviceInstances.PriceMigrationService,
-
-		EmailService:                 emailService,
+		UserSubscriptionService:      serviceInstances.UserSubscriptionService,
+		AdminSubscriptionService:     serviceInstances.AdminSubscriptionService,
+		PriceMigrationService:        serviceInstances.PriceMigrationService,
 		EmailSender:                  sender,
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
@@ -576,7 +561,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
-	notificationService := subscriptions.NewNotificationService(database, nil)
+	notificationService := subscriptions.NewNotificationService(database)
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)

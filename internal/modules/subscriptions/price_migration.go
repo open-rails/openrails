@@ -620,7 +620,7 @@ func (s *PriceMigrationService) notify(ctx context.Context, sub *models.Subscrip
 		data.ToProductID, data.ToProductName = billing.ProductID(toProduct.ID), toProduct.DisplayName
 	}
 	n := &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, EventType: event, Data: data}
-	if err := s.notifications.CreateAndDeliver(ctx, n); err != nil {
+	if err := s.notifications.Create(ctx, n); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warnf("failed to emit %s notification", event)
 	}
 }

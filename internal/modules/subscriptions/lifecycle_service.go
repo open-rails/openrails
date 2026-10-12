@@ -158,29 +158,10 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 	return time.Now()
 }
 
-// DispatchNotifications delivers notification rows after their surrounding
-// transaction commits. Transaction-aware lifecycle callers use this to avoid
-// sending messages for work that may still roll back.
-func (s *SubscriptionLifecycleService) DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
-	if s.NotificationService == nil {
-		return
-	}
-	for _, notification := range notifications {
-		if err := s.NotificationService.DeliverEmail(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"notification_id": notification.ID,
-				"event_type":      notification.EventType,
-				"user_id":         notification.CustomerID.String(),
-			}).Error("failed to deliver notification email")
-		}
-	}
-}
-
 // CreateMembership creates a new subscription and grants associated roles
 func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *CreateMembershipParams) (*models.Subscription, error) {
 	var (
-		subscription  *models.Subscription
-		notifications []*models.NotificationQueue
+		subscription *models.Subscription
 	)
 
 	procSubID := normalize.FromPtr(params.RailSubscriptionID)
@@ -197,14 +178,12 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		dbb := db.NewWithPgxTx(tx)
 		var err error
-		subscription, notifications, err = s.CreateMembershipTx(ctx, dbb, params)
+		subscription, _, err = s.CreateMembershipTx(ctx, dbb, params)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	s.DispatchNotifications(ctx, notifications)
 
 	return subscription, nil
 }
@@ -1048,8 +1027,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		return nil
 	}
 
-	s.DispatchNotifications(ctx, notifications)
-
 	return nil
 }
 
@@ -1260,7 +1237,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		return err
 	}
 
-	s.DispatchNotifications(ctx, result.Notifications)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id": result.SubscriptionID,
 		"user_id":         result.UserID,
@@ -1768,7 +1744,6 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		return err
 	}
 
-	s.DispatchNotifications(ctx, notifications)
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Membership expiration flow completed")
 
 	return nil
@@ -2160,8 +2135,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"user_id":         userID,
 		}).Info("scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)")
 	}
-
-	s.DispatchNotifications(ctx, notifications)
 
 	return nil
 }

@@ -20,7 +20,7 @@ import (
 // cancel is applied.
 func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, subID uuid.UUID, cancelType models.CancelType,
 	feedback func(*models.Subscription) string, after func(context.Context, *db.DB, *models.Subscription) error) error {
-	var notes []*models.NotificationQueue
+
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subID)
@@ -29,13 +29,12 @@ func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscripti
 		}
 		reason := feedback(sub)
 		rail := models.RailStripe
-		res, err := lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
+		_, err = lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &subID, Rail: &rail, CancelType: cancelType, CancelFeedback: &reason, RevokeAccess: true,
 		})
 		if err != nil {
 			return err
 		}
-		notes = res.Notifications
 		if err := intents.NewProviderCancelScheduler(d, nil, intents.OriginAdmin, reason).ScheduleProviderCancel(ctx, sub, timeutil.FirstClock(lc.Clock()).Now()); err != nil {
 			return fmt.Errorf("queue stripe cancel for %s: %w", subID, err)
 		}
@@ -47,6 +46,5 @@ func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscripti
 	if err != nil {
 		return err
 	}
-	lc.DispatchNotifications(ctx, notes)
 	return nil
 }

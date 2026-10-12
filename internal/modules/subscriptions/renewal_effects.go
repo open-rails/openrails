@@ -8,10 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 type renewalEffects struct {
@@ -69,8 +67,6 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStartsAt: &effects.PeriodStart, PeriodEndsAt: &effects.PeriodEnd}
 	if effects.Downgrade {
 		data.DowngradeApplied, data.NewProduct = true, effects.ProductName
-	} else if due, err := renewalReceiptDue(ctx, d, sub, effects.PeriodStart); err != nil || !due {
-		return nil, err
 	}
 	key := "renewed:" + effects.PeriodStart.UTC().Format(time.RFC3339Nano) + ":" + effects.PeriodEnd.UTC().Format(time.RFC3339Nano)
 	notification := &models.NotificationQueue{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}
@@ -78,35 +74,4 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		return nil, fmt.Errorf("queue renewed notification: %w", err)
 	}
 	return notification, nil
-}
-
-// DefaultRenewalReceiptMinIntervalHours spaces renewal receipts when the
-// merchant sets no policy: at most one per subscription per day, so every
-// renewal of a daily or longer cadence still gets its own.
-const DefaultRenewalReceiptMinIntervalHours = 24
-
-// renewalReceiptDue applies the merchant's receipt spacing: a renewal starting
-// less than the interval after the membership start or after the last
-// receipted renewal is not receipted. Downgrade notices bypass it.
-func renewalReceiptDue(ctx context.Context, d *db.DB, sub *models.Subscription, periodStart time.Time) (bool, error) {
-	cfg, _, err := merchantconfig.NewStore(d).Get(ctx)
-	if err != nil {
-		return false, fmt.Errorf("load renewal receipt policy: %w", err)
-	}
-	hours := DefaultRenewalReceiptMinIntervalHours
-	if cfg.RenewalReceiptMinIntervalHours != nil {
-		hours = *cfg.RenewalReceiptMinIntervalHours
-	}
-	if hours <= 0 {
-		return true, nil
-	}
-	since := periodStart.Add(-time.Duration(hours) * time.Hour)
-	if sub.StartedAt.After(since) {
-		return false, nil
-	}
-	recent, err := d.Gen(ctx).RenewalReceiptSince(ctx, gen.RenewalReceiptSinceParams{CustomerID: sub.CustomerID, SubscriptionID: billing.SubscriptionID(sub.ID).String(), Since: since})
-	if err != nil {
-		return false, fmt.Errorf("read last renewal receipt: %w", err)
-	}
-	return !recent, nil
 }

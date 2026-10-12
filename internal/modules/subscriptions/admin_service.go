@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -303,18 +302,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	}
 
 	return nil
-}
-
-// SendManualNotification sends a manual notification (admin)
-func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, userID string, eventType models.NotificationEventType, message string) error {
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
-		CustomerID: identity.CustomerIDFromString(userID).UUID(),
-		EventType:  eventType,
-		Data:       billing.NotificationData{Message: message, Source: "admin_manual"},
-	}
-
-	return s.NotificationService.Create(ctx, notification)
 }
 
 // NewAdminSubscriptionService creates a new AdminSubscriptionService

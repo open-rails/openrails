@@ -18,6 +18,9 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
+	"notification_consumers":    "deployment delivery subscriptions; hosts register at destination",
+	"notification_event_acks":   "deployment consumer processing receipts",
+	"notification_events":       "immutable source facts, drained before archive",
 	"catalog_restore_receipts":  "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
 	"merchants":                 "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":     "former names are directory identity, not billing history",
@@ -76,6 +79,9 @@ var excludedColumns = map[string]string{
 	"customer_contacts":             "merchant_id customer_id email display_name user_name active provisioned_at directory_updated_at created_at updated_at",
 	"provisioning_tokens":           "merchant_id id name declared token_sha256 last_used_at created_at",
 	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
+	"notification_consumers":        "id merchant_id owner name created_at",
+	"notification_event_acks":       "consumer_id merchant_id event_id acknowledged_at",
+	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at settled_at",
 	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
@@ -230,6 +236,7 @@ type rowCheck struct{ table, predicate string }
 
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
+	{"notification_events", `EXISTS (SELECT 1 FROM billing.notification_consumers c WHERE (c.merchant_id IS NULL OR c.merchant_id=notification_events.merchant_id) AND NOT EXISTS(SELECT 1 FROM billing.notification_event_acks a WHERE a.consumer_id=c.id AND a.merchant_id=notification_events.merchant_id AND a.event_id=notification_events.id))`},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
 	{"checkout_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive

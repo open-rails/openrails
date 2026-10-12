@@ -38,11 +38,6 @@ type MerchantConfiguration struct {
 	// Nil ⇒ DefaultPriceIncreaseNoticeDays; zero enforces none.
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 
-	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription.
-	// Nil ⇒ subscriptions.DefaultRenewalReceiptMinIntervalHours; zero sends
-	// one receipt per renewal.
-	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
-
 	// ProviderRefundAccess decides what a refund made at the provider (not
 	// through OpenRails) does to the refunded charge's access: revoke_on_full
 	// ("" default), revoke_on_any or keep.

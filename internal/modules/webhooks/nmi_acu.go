@@ -75,10 +75,10 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 		}
 	}
 	now := s.now()
-	var notices []*models.NotificationQueue
+
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.DB.NewWithPgxTx(tx)
-		notices = nil
+
 		for _, m := range methods {
 			ev := paymentmethods.CardEvent{MerchantID: mid.UUID(), PaymentMethodID: m.ID, Source: paymentmethods.SourceNMIACU, EventRef: s.Data.EventID, Advice: advice, At: now}
 			if !isAdvice {
@@ -88,18 +88,16 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 				}
 				ev.Card = paymentmethods.Card{Card: card}
 			}
-			_, asked, err := s.SubscriptionLifecycleService.ApplyCardLifecycle(ctx, d, ev)
+			_, _, err := s.SubscriptionLifecycleService.ApplyCardLifecycle(ctx, d, ev)
 			if err != nil {
 				return err
 			}
-			notices = append(notices, asked...)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
 	logger.Info("NMI account updater notice applied")
 	return nil
 }

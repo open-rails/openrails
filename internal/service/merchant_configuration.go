@@ -191,9 +191,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.RepriceNoticeWindowDays != nil {
 		current.RepriceNoticeWindowDays = patch.RepriceNoticeWindowDays
 	}
-	if patch.RenewalReceiptMinIntervalHours != nil {
-		current.RenewalReceiptMinIntervalHours = patch.RenewalReceiptMinIntervalHours
-	}
 	if patch.ProviderRefundAccess != nil {
 		current.ProviderRefundAccess = patch.ProviderRefundAccess
 	}

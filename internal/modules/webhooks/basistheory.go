@@ -428,16 +428,15 @@ func applyCardEvent(ctx context.Context, database *db.DB, life *subscriptions.Su
 		return paymentmethods.CardLifecycle{}, errors.New("card lifecycle: no lifecycle service wired")
 	}
 	var applied paymentmethods.CardLifecycle
-	var notices []*models.NotificationQueue
+
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		applied, notices, err = life.ApplyCardLifecycle(ctx, database.NewWithPgxTx(tx), ev)
+		applied, _, err = life.ApplyCardLifecycle(ctx, database.NewWithPgxTx(tx), ev)
 		return err
 	})
 	if err != nil {
 		return applied, err
 	}
-	life.DispatchNotifications(ctx, notices)
 	return applied, nil
 }
 

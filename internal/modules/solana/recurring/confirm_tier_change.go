@@ -26,7 +26,6 @@ import (
 type tierChangeLifecycle interface {
 	CancelMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error)
 	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error)
-	DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue)
 }
 
 type tierChangeTransactor interface {
@@ -348,7 +347,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if err != nil {
 		return nil, err
 	}
-	s.lifecycle.DispatchNotifications(ctx, notifications)
 
 	return result, nil
 }

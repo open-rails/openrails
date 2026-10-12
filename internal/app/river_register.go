@@ -172,21 +172,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
-	// Notification email sweep: delivers undelivered notifications rows
-	// (emailed_at NULL), including the converge pass's access-ended rows,
-	// which are created without inline delivery.
-	if err := addTrackedWorker(r, workers, &riverjobs.NotificationEmailSweepWorker{
-		DB:            r.DB,
-		Notifications: r.NotificationService,
-	}); err != nil {
-		return fmt.Errorf("add notification email sweep worker: %w", err)
-	}
-	if err := addTrackedWorker(r, workers, &riverjobs.NotificationEmailWorker{
-		DB:            r.DB,
-		Notifications: r.NotificationService,
-	}); err != nil {
-		return fmt.Errorf("add notification email worker: %w", err)
-	}
 	// Price-migration re-driver: retries failed provider pushes on time. A
 	// nil service (worker-only runtimes) skips inside the worker.
 	if err := addTrackedWorker(r, workers, &riverjobs.PriceMigrationRedriveWorker{
@@ -813,19 +798,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-
-	// Every 10 minutes: retry undelivered notification emails (emailed_at NULL).
-	// Cheap no-op when nothing is queued or no email service is armed.
-	jobs = append(jobs, r.healthPeriodic(
-		10*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.NotificationEmailSweepArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 10 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Daily: ledger integrity audit. The account counters are a trigger-

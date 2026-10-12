@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/notificationevents"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -130,6 +131,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
+	NotificationEvents      int64
 	CheckoutAttemptsExpired int64
 	Carts                   int64
 	NotificationsSeen       int64
@@ -201,6 +203,12 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+
+	if n, err := notificationevents.Prune(ctx, w.DB, now); err != nil {
+		cleanupErr = errors.Join(cleanupErr, err)
+	} else {
+		result.NotificationEvents = n
+	}
 
 	directory := w.DB.GenDirectory()
 

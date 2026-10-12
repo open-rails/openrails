@@ -6,24 +6,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 )
-
-// NotificationEmailKind is the job that emails one queued notification.
-const NotificationEmailKind = "openrails.notification_email"
-
-// NotificationEmailArgs names the notification a job emails.
-type NotificationEmailArgs struct {
-	MerchantID     uuid.UUID `json:"merchant_id"`
-	NotificationID uuid.UUID `json:"notification_id"`
-}
-
-func (NotificationEmailArgs) Kind() string { return NotificationEmailKind }
 
 // PurchaseReceipt is a paid one-off purchase: what was bought and what its
 // payment took.
@@ -50,10 +37,6 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	if r.PaymentID == uuid.Nil || r.Items == "" {
 		return fmt.Errorf("a receipt needs its payment and what was bought")
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
 	amount := r.Amount
 	n := &models.NotificationQueue{
 		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
@@ -64,8 +47,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue receipt of payment %s: %w", r.PaymentID, err)
 	}
-	return d.InsertRiverJob(ctx, NotificationEmailArgs{MerchantID: mid.UUID(), NotificationID: n.ID},
-		&river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true}})
+	return nil
 }
 
 // AuthenticationRequest is a renewal payment the bank wants the customer to
@@ -87,10 +69,6 @@ func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r Authent
 	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
 		return fmt.Errorf("an authentication notice needs its attempt and order")
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
 	amount := r.Amount
 	n := &models.NotificationQueue{
 		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
@@ -100,6 +78,5 @@ func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r Authent
 	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)
 	}
-	return d.InsertRiverJob(ctx, NotificationEmailArgs{MerchantID: mid.UUID(), NotificationID: n.ID},
-		&river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true}})
+	return nil
 }

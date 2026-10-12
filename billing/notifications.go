@@ -1,25 +1,63 @@
 package billing
 
 import (
+	"encoding/json"
 	"time"
 )
 
-// Notification is one of a customer's in-app billing notifications
-// (GET /v1/me/notifications).
-type Notification struct {
-	ID         NotificationID   `json:"id"`
-	CustomerID CustomerID       `json:"customer_id"`
-	EventType  string           `json:"event_type"`
-	Data       NotificationData `json:"data"`
-	Seen       bool             `json:"seen"`
-	CreatedAt  time.Time        `json:"created_at"`
+// NotificationEvent is an immutable billing fact. Applications own its delivery,
+// presentation and read state. Unknown kinds remain consumable.
+type NotificationEvent struct {
+	ID         NotificationID  `json:"id"`
+	MerchantID MerchantID      `json:"merchant_id"`
+	CustomerID CustomerID      `json:"customer_id"`
+	EventType  string          `json:"event_type"`
+	Data       json.RawMessage `json:"data"`
+	CreatedAt  time.Time       `json:"created_at"`
+	// ActionRequested describes the event when emitted, not current debt state.
+	ActionRequested bool `json:"action_requested,omitempty"`
+	// Optional marks ordinary successful-charge facts consumers skip by default.
+	Optional bool `json:"optional,omitempty"`
 }
 
-// CustomerNotificationLookup answers every notification a customer marked
-// read by id; one that is unknown or not theirs is null. Marking all read
-// names none.
-type CustomerNotificationLookup struct {
-	Notifications map[NotificationID]*Notification `json:"notifications"`
+// NotificationEventRef identifies an event across merchants.
+type NotificationEventRef struct {
+	MerchantID MerchantID     `json:"merchant_id"`
+	ID         NotificationID `json:"id"`
+}
+
+// NotificationEvents is one bounded batch of pending facts, with no watermark.
+type NotificationEvents struct {
+	Data []NotificationEvent `json:"data"`
+}
+
+// AcknowledgeNotificationEventsParams names source deliveries persisted or
+// deliberately skipped by this application's consumer, never read inbox items.
+type AcknowledgeNotificationEventsParams struct {
+	NotificationIDs []NotificationID `json:"notification_ids"`
+}
+
+// CustomerNotificationActionRequested classifies what the fact originally asked.
+func CustomerNotificationActionRequested(kind string) bool {
+	switch kind {
+	case "payment_method_failed", "payment_method_update_required", "payment_authentication_required",
+		"order_due", "order_overdue", "order_collection_stopped", "account_delinquent":
+		return true
+	default:
+		return false
+	}
+}
+
+// CustomerNotificationOptional identifies routine charge confirmations.
+func CustomerNotificationOptional(kind string, data NotificationData) bool {
+	switch kind {
+	case "premium_renewed":
+		return !data.DowngradeApplied
+	case "one_off_purchase_completed", "usage_charged":
+		return true
+	default:
+		return false
+	}
 }
 
 // NotificationData is the typed payload every notification event writes:
@@ -86,12 +124,10 @@ type NotificationData struct {
 
 	// One-off purchase receipt (one_off_purchase_completed): what was bought,
 	// the amount paid, the payment and, for an order, the order and its
-	// number. UserEmail is the address the purchase was made with, for buyers
-	// without a profile email.
+	// number. Delivery addresses belong to the consuming application.
 	Amount        *int64    `json:"amount,omitempty,string"`
 	ProductName   string    `json:"product_name,omitempty"`
 	PaymentMethod string    `json:"payment_method,omitempty"`
-	UserEmail     string    `json:"user_email,omitempty"`
 	PaymentID     PaymentID `json:"payment_id,omitzero"`
 	OrderID       OrderID   `json:"order_id,omitzero"`
 	OrderNumber   string    `json:"order_number,omitempty"`
