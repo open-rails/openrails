@@ -21,6 +21,12 @@ limits are at least 50/hour and 100/day. The limits count affected targets in a
 batch, not a single HTTP request. Replays and proven no-ops do not spend again.
 They are implementation constants rather than merchant configuration.
 
+Creating a new catalog object is additive and spends nothing; changing, archiving
+or removing an existing product, price or meter's billable, access or routing
+terms is counted per object. A catalog declared for startup, or a file applied
+with `openrails apply-catalog`, is admitted on the merchant's separate autonomous
+budget rather than an actor's.
+
 ## Review and clear
 
 The findings queue shows the incident. Inspect the compromised actor, revoke its
