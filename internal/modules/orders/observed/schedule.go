@@ -159,7 +159,9 @@ type ScheduleReceipt struct {
 	Amount                    int64
 	Currency                  string
 	OccurredAt, NextBillingAt time.Time
-	Approved                  bool
+	// DueAt is the billing day the provider says a declined attempt was for.
+	DueAt    time.Time
+	Approved bool
 }
 
 // ScheduleBill resolves a receipt to a previously accepted cycle. Replays use
@@ -204,7 +206,6 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 			if candidate.PspID != sub.PspID || candidate.CustomerID != sub.CustomerID || terms.SubscriptionID == nil || *terms.SubscriptionID != sub.ID || terms.Owner != string(sub.CollectionPolicy) || attempt.Amount != terms.Total || !strings.EqualFold(attempt.Currency, terms.Currency) {
 				continue
 			}
-			hours, months := int(candidate.CadenceHours), int(candidate.CadenceMonths)
 			unpaid, err := firstUnsettledCycle(ctx, q, sub, candidate)
 			if err != nil {
 				return Bill{}, err
@@ -213,10 +214,7 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 			if attempt.Approved {
 				candidateDue, err = approvedReceiptCycle(candidate, unpaid, attempt)
 			} else {
-				attempt.NextBillingAt = scheduleBoundary(candidate.FirstDueAt, hours, months, unpaid)
-				if candidateDue, err = scheduleReceiptCycle(candidate.FirstDueAt, hours, months, attempt); err != nil {
-					err = errNoCycle
-				}
+				candidateDue, err = declinedReceiptCycle(candidate, unpaid, attempt)
 			}
 			if err != nil {
 				if !errors.Is(err, errNoCycle) {
@@ -317,17 +315,18 @@ func cycleSourceKey(subscriptionID uuid.UUID, scheduleSource string, due time.Ti
 func approvedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, receipt ScheduleReceipt) (time.Time, error) {
 	first, hours, months := schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths)
 	day := receipt.OccurredAt.UTC().Truncate(24 * time.Hour)
-	if receipt.NextBillingAt.IsZero() {
-		// The provider no longer reports a boundary (its schedule ended): the
-		// charge settles the unpaid cycle only inside that cycle's own window.
+	next, err := scheduleBoundaryIndex(first, hours, months, receipt.NextBillingAt)
+	if err != nil {
+		// No boundary on the accepted cadence (the schedule ended, or the
+		// announced date is not one of its billing days): the charge settles
+		// the unpaid cycle only inside that cycle's own window.
 		due, end := scheduleBoundary(first, hours, months, unpaid), scheduleBoundary(first, hours, months, unpaid+1)
 		if day.Before(due.Truncate(24*time.Hour)) || !day.Before(end.Truncate(24*time.Hour)) {
 			return time.Time{}, errNoCycle
 		}
 		return due, nil
 	}
-	next, err := scheduleBoundaryIndex(first, hours, months, receipt.NextBillingAt)
-	if err != nil || next < 1 {
+	if next < 1 {
 		return time.Time{}, errNoCycle
 	}
 	if !day.Before(receipt.NextBillingAt.UTC().Truncate(24 * time.Hour)) {
@@ -342,6 +341,26 @@ func approvedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, rece
 		return newest, nil
 	}
 	return time.Time{}, errNoCycle
+}
+
+// declinedReceiptCycle is the unpaid cycle a decline attempted: the billing
+// day the provider names, when it is an unpaid day of the accepted cadence,
+// else the unpaid cycle whose window holds the attempt.
+func declinedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, receipt ScheduleReceipt) (time.Time, error) {
+	first, hours, months := schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths)
+	if !receipt.DueAt.IsZero() {
+		index, err := scheduleBoundaryIndex(first, hours, months, receipt.DueAt)
+		if err != nil || index < unpaid {
+			return time.Time{}, errNoCycle
+		}
+		return scheduleBoundary(first, hours, months, index), nil
+	}
+	receipt.NextBillingAt = scheduleBoundary(first, hours, months, unpaid)
+	due, err := scheduleReceiptCycle(first, hours, months, receipt)
+	if err != nil {
+		return time.Time{}, errNoCycle
+	}
+	return due, nil
 }
 
 // NMI and CCBill expose billing days. Match that declared boundary to the

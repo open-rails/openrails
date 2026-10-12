@@ -82,7 +82,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 			return observed.ErrConflict
 		}
 		txn := RemoteTransaction{TransactionID: a.TransactionID, SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true,
-			AmountCents: a.AmountCents, Currency: a.Currency, OccurredAt: a.PurchasedAt, StripeBill: a.StripeBill, NextBillingAt: a.NextBillingAt}
+			AmountCents: a.AmountCents, Currency: a.Currency, OccurredAt: a.PurchasedAt, StripeBill: a.StripeBill, NextBillingAt: a.NextBillingAt, PaymentMetadata: a.Metadata}
 		if a.AmountMicros != nil {
 			return errors.New("historical amount-only import requires explicit accepted bill evidence")
 		}

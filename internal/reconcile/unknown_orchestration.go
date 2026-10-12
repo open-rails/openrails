@@ -357,7 +357,7 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			if t.Success {
 				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
 					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
-					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now}
+					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
 				bill.Settled, bill.SettlementSource = true, "cash"
 			}
 			result, err = observed.Record(ctx, d, bill, now)

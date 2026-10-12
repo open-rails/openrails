@@ -171,7 +171,7 @@ func TestCCBillExpiryRacingRenewal(t *testing.T) {
 			}
 			sub := w.subscription(embedded, m.sub)
 			require.Equal(t, billing.SubscriptionActive, sub.Status, "the paid renewal wins")
-			require.True(t, sub.CurrentPeriodEndsAt.Equal(next), "paid through %v", sub.CurrentPeriodEndsAt)
+			require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
 			require.Equal(t, billing.PaymentSucceeded, m.payment(txn).Status)
 			require.True(t, m.c.entitled(m.ent))
 			require.Zero(t, w.engineCharges())

@@ -64,6 +64,7 @@ func TestApprovedReceiptsSettleTheOldestExecutedCycle(t *testing.T) {
 		{"at or after the provider's next boundary", 0, "2026-03-31", "2026-03-31", ""},
 		{"no executed cycle", 0, "2026-01-31", "2026-01-31", ""},
 		{"changed retry date", 0, "2026-03-02", "2026-03-01", ""},
+		{"an off-cadence date is no boundary", 1, "2076-03-02", "2026-03-01", "2026-02-28"},
 		{"ended schedule inside the unpaid cycle", 1, "", "2026-03-01", "2026-02-28"},
 		{"ended schedule after the unpaid cycle", 0, "", "2026-03-01", ""},
 	} {

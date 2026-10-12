@@ -133,6 +133,8 @@ type RemoteTransaction struct {
 	StripeBill                     *subscriptions.StripeBill `json:"stripe_bill,omitempty"`
 	NextBillingAt                  *time.Time                `json:"next_billing_at,omitempty"`
 	BillPeriodStart, BillPeriodEnd *time.Time                `json:"-"`
+	// PaymentMetadata annotates the payment a backfill records.
+	PaymentMetadata map[string]any `json:"-"`
 	// TransactionID is the rail transaction identifier (NMI
 	// transaction_id, CCBill transaction id, Stripe ch_/re_/dp_..., Solana tx
 	// signature).

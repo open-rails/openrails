@@ -832,7 +832,22 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if bill.SubscriptionID == nil || *bill.SubscriptionID != subscription.ID || bill.CustomerID != subscription.CustomerID || bill.PSPID != subscription.PspID {
 				return errors.New("provider bill belongs to another subscription")
 			}
-			recorded, err := renewalBill(ctx, db, params, subscription, nil, s.now().UTC())
+			_, terminal := TerminalCancelReason(subscription)
+			recordParams := params
+			if terminal && bill.Payment != nil {
+				// A charge on a canceled membership is kept for refund review.
+				reviewed, payment := *bill, *bill.Payment
+				payment.Metadata = make(map[string]any, len(bill.Payment.Metadata)+1)
+				for key, value := range bill.Payment.Metadata {
+					payment.Metadata[key] = value
+				}
+				payment.Metadata["refund_review"] = "confirmed charge on a canceled subscription"
+				reviewed.Payment = &payment
+				copy := *params
+				copy.ProviderBill = &reviewed
+				recordParams = &copy
+			}
+			recorded, err := renewalBill(ctx, db, recordParams, subscription, nil, s.now().UTC())
 			if err != nil {
 				return err
 			}
@@ -840,13 +855,19 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			// settled renewal newer than its locked paid period may advance it.
 			// A receipt committed by reconciliation before lifecycle completion
 			// remains repairable when a webhook later replays that same bill.
-			_, terminal := TerminalCancelReason(subscription)
 			if !bill.Settled || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
 				return nil
 			}
+			// The bill proves the payment; the paid-through is the provider's
+			// boundary when the caller states one.
 			copy := *params
 			copy.Amount, copy.Currency, copy.AmountProvided = bill.Total, bill.Currency, true
-			copy.CurrentPeriodStartsAt, copy.CurrentPeriodEndsAt = &bill.PeriodStart, &bill.PeriodEnd
+			if copy.CurrentPeriodStartsAt == nil {
+				copy.CurrentPeriodStartsAt = &bill.PeriodStart
+			}
+			if copy.CurrentPeriodEndsAt == nil {
+				copy.CurrentPeriodEndsAt = &bill.PeriodEnd
+			}
 			params = &copy
 			providerPayment = recorded.Payment
 		}

@@ -1638,8 +1638,16 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			TransactionID: transactionID, Amount: amount, ListAmount: amount, Currency: currencyValue,
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: *at, CreatedAt: s.now()}
 		bill.Settled, bill.SettlementSource = true, "cash"
+		// CCBill signs nothing: its announced date is the paid-through only
+		// within the verified cycle plus grace.
+		periodEnd := announced.UTC()
+		if limit := bill.PeriodEnd.Add(ccbillGraceCap); periodEnd.After(limit) {
+			log.WithFields(log.Fields{"subscription_id": sub.ID, "announced": periodEnd, "bounded": limit}).
+				Warn("CCBill announced a period end beyond the verified cycle; bounded")
+			periodEnd = limit
+		}
 		params := &subscriptions.RenewMembershipParams{ProviderBill: &bill,
-			Rail: models.RailCCBill, RailSubscriptionID: railSubID, CurrentPeriodStartsAt: &bill.PeriodStart, CurrentPeriodEndsAt: &bill.PeriodEnd,
+			Rail: models.RailCCBill, RailSubscriptionID: railSubID, CurrentPeriodStartsAt: &bill.PeriodStart, CurrentPeriodEndsAt: &periodEnd,
 			TransactionID: transactionID, Amount: amount, AmountProvided: true, Currency: currencyValue, PurchasedAt: at}
 		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
 			blocked = subscriptions.ErrTerminalTransitionBlocked
@@ -1687,7 +1695,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRetryDate '%s': %w", data.NextRetryDate, err)
 	}
-	_, err = parseCCBillDateUsingTimestamp(data.RenewalDate)
+	renewalAt, err := parseCCBillDateUsingTimestamp(data.RenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse renewalDate '%s': %w", data.RenewalDate, err)
 	}
@@ -1703,14 +1711,20 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		if at == nil {
 			return errors.New("CCBill decline requires its actual receipt time")
 		}
-		bill, err := observed.ScheduleBill(ctx, d, sub, observed.ScheduleReceipt{TransactionID: transactionID, OccurredAt: *at})
+		receipt := observed.ScheduleReceipt{TransactionID: transactionID, OccurredAt: *at}
+		if renewalAt != nil {
+			receipt.DueAt = *renewalAt
+		}
+		bill, err := observed.ScheduleBill(ctx, d, sub, receipt)
 		if err != nil {
 			return err
 		}
 		if _, err := observed.Record(ctx, d, bill, now); err != nil {
 			return err
 		}
-		period := bill.PeriodStart
+		// The paid-through is CCBill's day boundary; the declined bill's due
+		// day on or after it is the unpaid period.
+		period := ccbillDeclinedPeriod(sub, &bill.PeriodStart)
 		unpaid := lifecycle.Status(sub.Status).Live() && sub.CurrentPeriodEndsAt != nil && period.Equal(sub.CurrentPeriodEndsAt.UTC())
 		if _, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.RenewalDeclined{PeriodStart: period, Bucket: lifecycle.Retry, At: now}, ccbillNotice{suppressNotices: true}); err != nil {
 			return err
