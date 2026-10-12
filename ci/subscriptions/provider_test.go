@@ -573,8 +573,9 @@ func TestNMIProviderAcceptedCalendarRenewal(t *testing.T) {
 		w.advance(start.Sub(w.clock.Now()) + time.Hour)
 		event := l.providerRenewal(true)
 		require.Equal(t, http.StatusOK, w.deliver("nmi", event))
+		// Calendar months, paid through NMI's next billing date (a day).
 		next := start.AddDate(0, 1, 0)
-		require.True(t, l.periodEnd().Equal(next), "verified monthly boundary remains exact")
+		require.True(t, l.periodEnd().Equal(next.Truncate(24*time.Hour)), "verified monthly boundary remains exact: %v", l.periodEnd())
 		payments := len(completed(w.payments(embedded, l.c.id)))
 		require.Equal(t, http.StatusOK, w.deliver("nmi", event))
 		require.Len(t, completed(w.payments(embedded, l.c.id)), payments)
