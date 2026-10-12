@@ -80,7 +80,7 @@ migration 0076_dynamic_pricing.up.sql sha256:67d784d49e2ec82b305b55b9c903cd9de84
 migration 0077_retire_checkout_creation.up.sql sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
 migration 0078_provider_bill_orders.up.sql sha256:058bf95bc1449ae535d7c1234160e79b80d38f8e523169078595dcc31cd00592
 migration 0079_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
-migration 0080_payment_order_identity.up.sql sha256:4a27da2e8ccc1db14c6c53f1f1a6543e120ead00274cb39a4e4adfa52cf80464
+migration 0080_payment_order_identity.up.sql sha256:73afc94f11e610f641460ab741d9843504bc77b409323f4f2a8ad64a490fc574
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2818,16 +2818,23 @@ function billing.convert_entitlement_windows(uuid,regclass,timestamp with time z
           JOIN grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id AND g.id = e.grant_id
           WHERE e.merchant_id = %2$L AND e.deleted_at IS NULL
       ), purchases AS (
-          SELECT w.customer_id, pr.product_id, 'purchase'::text AS source_type, w.source_id, pay.id AS payment_id,
+          SELECT w.customer_id, line.product_id, 'purchase'::text AS source_type, w.source_id, pay.id AS payment_id,
                  min(w.starts_at) AS starts_at,
                  CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
                  bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
                  max(w.destructive_run_id) AS destructive_run_id
           FROM win w
           JOIN payments pay ON pay.merchant_id = %2$L AND pay.id = w.source_uuid AND pay.customer_id = w.customer_id
-          JOIN prices pr ON pr.merchant_id = %2$L AND pr.id = pay.price_id
+          CROSS JOIN LATERAL (
+              SELECT l.product_id FROM order_lines l
+              WHERE l.merchant_id = %2$L AND l.order_id = pay.order_id AND l.product_id IS NOT NULL
+              ORDER BY (SELECT count(*) FROM product_entitlements pe
+                        WHERE pe.merchant_id = %2$L AND pe.product_id = l.product_id AND pe.removed_at IS NULL
+                          AND pe.entitlement = w.entitlement) DESC, l.position
+              LIMIT 1
+          ) line
           WHERE w.source_type = 'purchase'
-          GROUP BY w.customer_id, pr.product_id, w.source_id, pay.id
+          GROUP BY w.customer_id, line.product_id, w.source_id, pay.id
       ), periods AS (
           SELECT w.customer_id, w.source_type, w.source_id, w.source_uuid, w.starts_at,
                  CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
@@ -2843,9 +2850,9 @@ function billing.convert_entitlement_windows(uuid,regclass,timestamp with time z
           CROSS JOIN LATERAL (
               SELECT c.product_id FROM (
                   SELECT s.product_id
-                  UNION SELECT pr.product_id FROM payments pay
-                  JOIN prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
-                  WHERE pay.merchant_id = %2$L AND pay.subscription_id = s.id
+                  UNION SELECT l.product_id FROM payments pay
+                  JOIN order_lines l ON l.merchant_id = pay.merchant_id AND l.order_id = pay.order_id
+                  WHERE pay.merchant_id = %2$L AND pay.subscription_id = s.id AND l.product_id IS NOT NULL
               ) c
               ORDER BY (SELECT count(*) FROM product_entitlements pe
                         WHERE pe.merchant_id = %2$L AND pe.product_id = c.product_id AND pe.removed_at IS NULL
