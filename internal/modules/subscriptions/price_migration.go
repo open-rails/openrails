@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -97,6 +98,7 @@ type PriceMigrationService struct {
 	stripe        StripePusher
 	nmi           NMIPusher
 	clock         clockwork.Clock
+	admissions    *destructive.Admissions
 }
 
 func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, config *merchantconfig.Store, stripe StripePusher, nmi NMIPusher, clock clockwork.Clock) *PriceMigrationService {
@@ -104,6 +106,13 @@ func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscripti
 }
 
 func (s *PriceMigrationService) now() time.Time { return s.clock.Now() }
+
+// WithDestructiveAdmissions binds the same command budget used by all staff
+// changes. Pending migration pushes retain their original reservation.
+func (s *PriceMigrationService) WithDestructiveAdmissions(a *destructive.Admissions) *PriceMigrationService {
+	s.admissions = a
+	return s
+}
 
 // migrationPlan is a resolved request.
 type migrationPlan struct {
@@ -407,11 +416,32 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 	if err != nil {
 		return nil, err
 	}
+	action, prior, err := s.admitMigration(ctx, p, plan, classes)
+	if err != nil {
+		return nil, err
+	}
+	if prior != nil {
+		return prior, nil
+	}
+	// Until every target is recorded, a partial creation is uncertain and cannot
+	// be replayed as a completed plan. The action/migration relation survives a
+	// lost insert response.
+	prepared := false
+	if action != nil {
+		defer func() {
+			if !prepared {
+				_ = s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "")
+			}
+		}()
+	}
 	params := gen.CreatePriceMigrationParams{MerchantID: mid.UUID(), ToPriceID: plan.target.ID, EffectiveAt: plan.effectiveAt, FallbackPolicy: string(plan.fallback), SubscriptionsMatched: int32(len(cohort))} // #nosec G115 -- a page of subscribers
 	if plan.fromPrice != nil {
 		params.FromPriceID = &plan.fromPrice.ID
 	} else {
 		params.FromProductID, params.FromPriceKey = &plan.product.ID, &plan.key
+	}
+	if action != nil {
+		params.DestructiveActionID = &action.ID
 	}
 	row, err := s.db.Gen(ctx).CreatePriceMigration(ctx, params)
 	if err != nil {
@@ -454,6 +484,12 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 		}
 	}
 	log.WithContext(ctx).WithFields(log.Fields{"price_migration_id": migration, "to_price_id": plan.target.ID, "effective_at": plan.effectiveAt, "matched": len(cohort), "skipped": skipped}).Info("price migration created")
+	if action != nil {
+		if err := s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "migration:"+migration.String()+":prepared"); err != nil {
+			return nil, err
+		}
+	}
+	prepared = true
 	return s.Get(ctx, billing.PriceMigrationID(migration))
 }
 
@@ -638,6 +674,11 @@ func (s *PriceMigrationService) Get(ctx context.Context, id billing.PriceMigrati
 		return nil, err
 	}
 	out := priceMigrationView(row.BillingPriceMigration, row.FromPricePublicID, row.ToPricePublicID, row.ProductKey, row.Scheduled, row.Applied, row.Canceled, row.Blocked)
+	if row.Scheduled == 0 && row.Blocked == 0 {
+		if err := s.finishSettledMigration(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	return &out, nil
 }
 
@@ -719,11 +760,23 @@ func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigr
 	if _, err := s.Get(ctx, id); err != nil {
 		return nil, err
 	}
-	if _, err := s.db.Gen(ctx).CancelPriceMigration(ctx, gen.CancelPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()}); err != nil {
-		return nil, err
-	}
 	rows, err := s.db.Gen(ctx).ListScheduledMigrationChanges(ctx, gen.ListScheduledMigrationChangesParams{MerchantID: mid.UUID(), PriceMigrationID: id.UUID()})
 	if err != nil {
+		return nil, err
+	}
+	action, err := s.admitMigrationCancel(ctx, id, len(rows))
+	if err != nil {
+		return nil, err
+	}
+	completed := false
+	if action != nil {
+		defer func() {
+			if !completed {
+				_ = s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "")
+			}
+		}()
+	}
+	if _, err = s.db.Gen(ctx).CancelPriceMigration(ctx, gen.CancelPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()}); err != nil {
 		return nil, err
 	}
 	out := &billing.PriceMigrationCancel{RailReleaseRequired: []billing.SubscriptionID{}}
@@ -756,5 +809,11 @@ func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigr
 		return nil, err
 	}
 	out.PriceMigration = *migration
+	if action != nil {
+		if err = s.finishMigrationAdmission(ctx, *action, destructive.OutcomeSucceeded, id.String()); err != nil {
+			return nil, err
+		}
+	}
+	completed = true
 	return out, nil
 }
