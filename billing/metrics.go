@@ -139,35 +139,3 @@ type DashboardGrid struct {
 type SetDashboardParams struct {
 	Widgets []DashboardWidget `json:"widgets"`
 }
-
-// AskMetricsParams is a question about the merchant's metrics.
-type AskMetricsParams struct {
-	Question string `json:"question"`
-}
-
-// MetricsAnswer is a model's answer to a metrics question, with every query
-// it ran and its result.
-type MetricsAnswer struct {
-	Answer   string            `json:"answer"`
-	Evidence []MetricsEvidence `json:"evidence"`
-}
-
-// MetricsEvidence is one query a metrics answer ran, and its result.
-type MetricsEvidence struct {
-	Query MetricsQuery `json:"query"`
-	MetricsResult
-}
-
-// GenerateDashboardWidgetParams describes a widget in words; BaseQuery, when set, is
-// an existing widget's query to refine.
-type GenerateDashboardWidgetParams struct {
-	Prompt    string        `json:"prompt"`
-	BaseQuery *MetricsQuery `json:"base_query"`
-}
-
-// GeneratedWidget is a validated widget a model wrote from a prompt.
-type GeneratedWidget struct {
-	Query MetricsQuery `json:"query"`
-	Title string       `json:"title"`
-	Viz   string       `json:"viz"`
-}

@@ -21,7 +21,6 @@ token-lean tables. No SDK.
 |---|---|
 | `GET /v1/metrics/schema` | The registry dump — the LLM context document |
 | `POST /v1/metrics/query` | Run one composable query |
-| `POST /v1/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
 
 **Schema first.** The `/schema` JSON is designed to ride in a system prompt: every measure
 carries description + formula + allowed dims; dimensions carry enum values; `query_shape`
@@ -87,13 +86,7 @@ loudly too. Feed the `errors` array back to the model verbatim and retry.
 
 Define one tool, `run_metrics_query`, whose input schema is the query body above; execute
 it by POSTing the arguments verbatim to `/query`, return a 400's `errors` array as the
-tool error, and put the `/schema` JSON in the system prompt. Suggested rules (what the
-hosted `/ask` uses): every number in an answer must come from a tool result; if the schema
+tool error, and put the `/schema` JSON in the system prompt. Suggested rules: every number in an answer must come from a tool result; if the schema
 can't answer, say what's missing; state money in whole currency units.
 
-`/ask` is the same loop operated server-side; its response carries the answer plus the
-verbatim result of every executed query as evidence. Because aggregate results are sent to
-the LLM provider, it is consent-gated (`LLM_ASK_ENABLED=true` + `LLM_API_KEY`; otherwise
-the route is not registered). Its `metrics-ask` HTTP bucket uses the shared
-per-IP and authenticated-user limits (429 + `Retry-After`); see
-[rate limiting](rate-limiting.md).
+OpenRails does not provide a built-in AI metrics question endpoint. Hosts may build their own agents over the query and schema API.

@@ -7,13 +7,14 @@
       "func (UsageSweepArgs) Kind() string",
       "func (c *Client) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEventID, options ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
+      "func (c *Client) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
       "func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error)",
       "func (c *Client) AskCatalog(ctx context.Context, params billing.AskCatalogParams, requestOptions ...RequestOption) (*billing.CatalogAnswer, error)",
-      "func (c *Client) AskMetrics(ctx context.Context, req billing.AskMetricsParams, options ...RequestOption) (*billing.MetricsAnswer, error)",
       "func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigrationID, requestOptions ...RequestOption) (*billing.PriceMigrationCancel, error)",
       "func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams, requestOptions ...RequestOption) (*billing.Subscription, error)",
-      "func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error)",
+      "func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams, requestOptions ...RequestOption) ([]billing.CaptureResult, error)",
+      "func (c *Client) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)",
       "func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
@@ -29,10 +30,10 @@
       "func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error)",
       "func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error)",
       "func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID, options ...RequestOption) error",
+      "func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) error",
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID, options ...RequestOption) error",
       "func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error",
       "func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
-      "func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
       "func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
@@ -89,6 +90,7 @@
       "func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOption) (*billing.PSPRefresh, error)",
       "func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params billing.RefundPaymentParams, requestOptions ...RequestOption) (*billing.Payment, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
+      "func (c *Client) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req billing.ResolveFindingParams, options ...RequestOption) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error)",
       "func (c *Client) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams, requestOptions ...RequestOption) (*billing.Order, error)",
@@ -221,7 +223,7 @@
       "const (\n\tCodeCardDeclined = \"card_declined\"\n\n\tCodePaymentMethodStale = \"payment_method_stale\"\n\n\tCodePaymentProviderRejected = \"payment_provider_rejected\"\n\n\tCodePaymentMethodRequired = \"payment_method_required\"\n)",
       "const (\n\tCodeCredentialExpired                    = \"credential_expired\"\n\tCodeCredentialRevoked                    = \"credential_revoked\"\n\tCodeServiceCredentialCustomerScopeDenied = \"service_credential_customer_scope_denied\"\n\tCodeHostPrincipalInvalid                 = \"host_principal_invalid\"\n\tCodePermissionRequired                   = \"permission_required\"\n\tCodeMerchantUnresolved                   = \"merchant_unresolved\"\n\tCodeCustomerIssuerMismatch               = \"customer_issuer_mismatch\"\n\tCodeInvokerScopedPrincipal               = \"invoker_scoped_principal\"\n\tCodeApplicationRequired                  = \"application_required\"\n\tCodeStepUpRequired                       = \"step_up_required\"\n\tCodeStepUpUnavailable                    = \"step_up_unavailable\"\n\tCodeAuthenticationUnavailable            = \"authentication_unavailable\"\n\tCodeAuthorizationUnavailable             = \"authorization_unavailable\"\n)",
       "const (\n\tCodeDefaultPaymentMethodRequired = \"default_payment_method_required\"\n\n\tCodeDefaultPaymentMethodInvalid = \"default_payment_method_invalid\"\n)",
-      "const (\n\tCodeInvalidParam           = \"invalid_param\"\n\tCodeAuthenticationRequired = \"authentication_required\"\n\tCodeResourceAccessDenied   = \"resource_access_denied\"\n\tCodeResourceNotFound       = \"resource_not_found\"\n\tCodeResourceConflict       = \"resource_conflict\"\n\tCodePaymentFailed          = \"payment_failed\"\n\tCodeRateLimitExceeded      = \"rate_limit_exceeded\"\n\tCodeInternalError          = \"internal_error\"\n\tCodeServiceUnavailable     = \"service_unavailable\"\n\tCodeIdempotencyKeyReused   = \"idempotency_key_reused\"\n\tCodeIdempotencyKeyInUse    = \"idempotency_key_in_use\"\n\tCodeInsufficientCredits    = \"insufficient_credits\"\n\tCodeInsufficientFunds      = \"insufficient_funds\"\n\n\tCodeAlreadyOwned             = \"already_owned\"\n\tCodeOrderLineUnavailable     = \"order_line_unavailable\"\n\tCodeQuantityNotAllowed       = \"quantity_not_allowed\"\n\tCodeOrderTotalChanged        = \"order_total_changed\"\n\tCodeOrderPaymentInProgress   = \"order_payment_in_progress\"\n\tCodeOrderNotPayable          = \"order_not_payable\"\n\tCodeOrderNotCancelable       = \"order_not_cancelable\"\n\tCodeOrderActionNotAllowed    = \"order_action_not_allowed\"\n\tCodePaymentOptionUnavailable = \"payment_option_unavailable\"\n\n\tCodePaymentExceedsDue     = \"payment_exceeds_due\"\n\tCodeOrderHasRecurringLine = \"order_has_recurring_line\"\n\n\tCodeModelUnavailable = \"model_unavailable\"\n)",
+      "const (\n\tCodeInvalidParam           = \"invalid_param\"\n\tCodeAuthenticationRequired = \"authentication_required\"\n\tCodeResourceAccessDenied   = \"resource_access_denied\"\n\tCodeResourceNotFound       = \"resource_not_found\"\n\tCodeResourceConflict       = \"resource_conflict\"\n\tCodePaymentFailed          = \"payment_failed\"\n\tCodeRateLimitExceeded      = \"rate_limit_exceeded\"\n\tCodeInternalError          = \"internal_error\"\n\tCodeServiceUnavailable     = \"service_unavailable\"\n\tCodeIdempotencyKeyReused   = \"idempotency_key_reused\"\n\tCodeIdempotencyKeyInUse    = \"idempotency_key_in_use\"\n\tCodeInsufficientCredits    = \"insufficient_credits\"\n\tCodeInsufficientFunds      = \"insufficient_funds\"\n\n\tCodeUsageNotPriced = \"usage_not_priced\"\n\n\tCodeAlreadyOwned             = \"already_owned\"\n\tCodeOrderLineUnavailable     = \"order_line_unavailable\"\n\tCodeQuantityNotAllowed       = \"quantity_not_allowed\"\n\tCodeOrderTotalChanged        = \"order_total_changed\"\n\tCodeOrderPaymentInProgress   = \"order_payment_in_progress\"\n\tCodeOrderNotPayable          = \"order_not_payable\"\n\tCodeOrderNotCancelable       = \"order_not_cancelable\"\n\tCodeOrderActionNotAllowed    = \"order_action_not_allowed\"\n\tCodePaymentOptionUnavailable = \"payment_option_unavailable\"\n\n\tCodePaymentExceedsDue     = \"payment_exceeds_due\"\n\tCodeOrderHasRecurringLine = \"order_has_recurring_line\"\n\n\tCodeModelUnavailable = \"model_unavailable\"\n)",
       "const (\n\tCodeNetworkLinkChallengeInvalid = \"network_link_challenge_invalid\"\n\tCodeNetworkLinkConflict         = \"network_link_conflict\"\n\tCodeNetworkAccountLinked        = \"network_account_linked\"\n\tCodeNetworkTermsRequired        = \"network_terms_required\"\n\tCodeNetworkLinkInUse            = \"network_link_in_use\"\n)",
       "const (\n\tCodeProviderCancelHeld = \"provider_cancel_held\"\n\n\tCodePaymentMethodSameVault = \"payment_method_same_vault\"\n\n\tCodePaymentDuplicateRefused = \"payment_duplicate_refused\"\n)",
       "const (\n\tCodeRequestBodyTooLarge = \"request_body_too_large\"\n\n\tCodeInvalidRequestBody = \"invalid_request_body\"\n)",
@@ -272,11 +274,12 @@
       "const (\n\tSubscriptionPending        SubscriptionStatus = \"pending\"\n\tSubscriptionActive         SubscriptionStatus = \"active\"\n\tSubscriptionPastDue        SubscriptionStatus = \"past_due\"\n\tSubscriptionAwaitingMethod SubscriptionStatus = \"awaiting_method\"\n\tSubscriptionCanceled       SubscriptionStatus = \"canceled\"\n\n\tSubscriptionUnverified SubscriptionStatus = \"unverified\"\n)",
       "const (\n\tSubscriptionSortCreatedAt SubscriptionSort = \"created_at\"\n\n\tSubscriptionSortCurrentPeriodEndsAt SubscriptionSort = \"current_period_ends_at\"\n\n\tSubscriptionSortCanceledAt SubscriptionSort = \"canceled_at\"\n)",
       "const (\n\tSyncStatusUnknown      SyncStatus = \"unknown\"\n\tSyncStatusInSync       SyncStatus = \"in_sync\"\n\tSyncStatusDrifted      SyncStatus = \"drifted\"\n\tSyncStatusMissing      SyncStatus = \"missing\"\n\tSyncStatusNeverSynced  SyncStatus = \"never_synced\"\n\tSyncStatusSyncDisabled SyncStatus = \"sync_disabled\"\n)",
-      "const (\n\tUsageByEventType UsageGroupBy = \"event_type\"\n\tUsageByResource  UsageGroupBy = \"resource\"\n\tUsageByInvoker   UsageGroupBy = \"invoker\"\n)",
+      "const (\n\tUsageByEventType UsageGroupBy = \"event_type\"\n\tUsageByResource  UsageGroupBy = \"resource\"\n\tUsageByInvoker   UsageGroupBy = \"invoker\"\n\n\tUsageByMeter UsageGroupBy = \"meter\"\n)",
       "const (\n\tUsageSucceeded UsageOutcome = \"succeeded\"\n\n\tUsageFailed UsageOutcome = \"failed\"\n)",
       "const CodeCatalogBenefitOverlap = \"catalog_benefit_overlap\"",
       "const CodeCustomerActionRequired = \"customer_action_required\"",
       "const CodePaymentMethodPSPMismatch = \"payment_method_psp_mismatch\"",
+      "const CodeProductInUse = \"product_in_use\"",
       "const CodeRevisionMismatch = \"revision_mismatch\"",
       "const CustomerLinkIDPrefix = \"lnk_\"",
       "const FindingIDPrefix = \"fnd_\"",
@@ -436,7 +439,6 @@
       "func (id UsageEventID) String() string",
       "func (id UsageEventID) UUID() uuid.UUID",
       "func (m CheckoutRoutingMatch) IsCatchAll() bool",
-      "func (p *CaptureAdmissionParams) UnmarshalJSON(raw []byte) error",
       "func (p *CreateProductParams) UnmarshalJSON(raw []byte) error",
       "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error",
       "func (p ListPage[T]) MarshalJSON() ([]byte, error)",
@@ -446,6 +448,7 @@
       "func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error)",
       "func (r AccessCutoverReport) Unapproved() int",
       "func (r AdmissionResult) Err() error",
+      "func (r CaptureResult) Err() error",
       "func (r DeclineReason) Failure() PaymentFailure",
       "func (r DeclineReason) FraudSignal() bool",
       "func (r PSPRef) IsZero() bool",
@@ -509,7 +512,7 @@
       "type AdmissionVerdict struct {\n\tStatus    int           `json:\"status\"`\n\tAdmission *Admission    `json:\"admission\"`\n\tError     *ErrorDetails `json:\"error\"`\n}",
       "type AdmitBatchParams struct {\n\tItems []AdmitParams `json:\"items\"`\n}",
       "type AdmitBatchResult struct {\n\tItems []AdmissionVerdict `json:\"items\"`\n}",
-      "type AdmitParams struct {\n\tRequestID   string      `json:\"request_id\"`\n\tCustomerID  CustomerID  `json:\"customer_id\"`\n\tInvoker     string      `json:\"invoker\"`\n\tInvokerType InvokerType `json:\"invoker_type\"`\n\n\tTrustLevel string `json:\"trust_level,omitempty\"`\n\n\tResource        string `json:\"resource,omitempty\"`\n\tCurrency        string `json:\"currency\"`\n\tEstimatedAmount int64  `json:\"estimated_amount,string\"`\n\n\tAccrualRateDeltaPerHour int64  `json:\"accrual_rate_delta_per_hour,omitempty,string\"`\n\tSource                  string `json:\"source,omitempty\"`\n\n\tExpiresAt *time.Time `json:\"expires_at,omitempty\"`\n\n\tRoles []uuid.UUID `json:\"roles,omitempty\"`\n}",
+      "type AdmitParams struct {\n\tRequestID   string      `json:\"request_id\"`\n\tCustomerID  CustomerID  `json:\"customer_id\"`\n\tInvoker     string      `json:\"invoker\"`\n\tInvokerType InvokerType `json:\"invoker_type\"`\n\n\tTrustLevel string `json:\"trust_level,omitempty\"`\n\n\tResource string `json:\"resource,omitempty\"`\n\tCurrency string `json:\"currency\"`\n\n\tEstimatedAmount int64          `json:\"estimated_amount,string\"`\n\tUsage           *UsageEstimate `json:\"usage,omitempty\"`\n\n\tAccrualRateDeltaPerHour int64  `json:\"accrual_rate_delta_per_hour,omitempty,string\"`\n\tSource                  string `json:\"source,omitempty\"`\n\n\tExpiresAt *time.Time `json:\"expires_at,omitempty\"`\n\n\tRoles []uuid.UUID `json:\"roles,omitempty\"`\n}",
       "type Agreement struct {\n\tID     MandateID     `json:\"id\"`\n\tKind   MandateKind   `json:\"kind\"`\n\tStatus MandateStatus `json:\"status\"`\n\n\tCurrency string `json:\"currency\"`\n\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\tCard            *CardDetails     `json:\"card\"`\n\n\tSubscription *AgreementSubscription `json:\"subscription\"`\n\tAcceptedAt   time.Time              `json:\"accepted_at\"`\n\tEndedAt      *time.Time             `json:\"ended_at\"`\n}",
       "type AgreementRevocation struct {\n\tAgreement    Agreement     `json:\"agreement\"`\n\tSubscription *Subscription `json:\"subscription\"`\n\tUsageOrder   *Order        `json:\"usage_order\"`\n}",
       "type AgreementSubscription struct {\n\tID                   SubscriptionID `json:\"id\"`\n\tProduct              string         `json:\"product\"`\n\tAmount               int64          `json:\"amount,string\"`\n\tBillingIntervalHours *int           `json:\"billing_interval_hours\"`\n\tNextChargeAt         *time.Time     `json:\"next_charge_at\"`\n}",
@@ -520,7 +523,6 @@
       "type AlertWebhookListParams struct {\n\tIDs []AlertWebhookID\n}",
       "type ApplyCatalogParams struct {\n\tForce bool\n}",
       "type AskCatalogParams struct {\n\tQuestion string `json:\"question\"`\n}",
-      "type AskMetricsParams struct {\n\tQuestion string `json:\"question\"`\n}",
       "type Balance struct {\n\tCustomerID         CustomerID  `json:\"customer_id\"`\n\tCurrency           string      `json:\"currency\"`\n\tBillingMode        BillingMode `json:\"billing_mode\"`\n\tBalanceAmount      int64       `json:\"balance_amount,string\"`\n\tHeldAmount         int64       `json:\"held_amount,string\"`\n\tAccruedAmount      int64       `json:\"accrued_amount,string\"`\n\tAvailableAmount    int64       `json:\"available_amount,string\"`\n\tOwedAmount         int64       `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64       `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time   `json:\"as_of\"`\n\tDepletesAt         *time.Time  `json:\"depletes_at\"`\n}",
       "type BalanceHostEvent struct {\n\tCustomerID         CustomerID `json:\"customer_id\"`\n\tCurrency           string     `json:\"currency\"`\n\tAvailableAmount    int64      `json:\"available_amount,string\"`\n\tOwedAmount         int64      `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64      `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time  `json:\"as_of\"`\n\tDepletesAt         time.Time  `json:\"depletes_at\"`\n}",
       "type BalanceTransaction struct {\n\tID            BalanceTransactionID   `json:\"id\"`\n\tCustomerID    CustomerID             `json:\"customer_id\"`\n\tCurrency      string                 `json:\"currency\"`\n\tType          BalanceTransactionType `json:\"type\"`\n\tAmount        int64                  `json:\"amount,string\"`\n\tCreditGrantID *CreditGrantID         `json:\"credit_grant_id\"`\n\tInvoker       *string                `json:\"invoker\"`\n\tResource      *string                `json:\"resource\"`\n\tSource        string                 `json:\"source\"`\n\tSourceID      string                 `json:\"source_id\"`\n\tCreatedAt     time.Time              `json:\"created_at\"`\n}",
@@ -539,8 +541,11 @@
       "type CancelSubscriptionParams struct {\n\tReason       string `json:\"reason\"`\n\tRevokeAccess bool   `json:\"revoke_access,omitempty\"`\n\n\tAccountDeletion bool `json:\"account_deletion,omitempty\"`\n}",
       "type Capabilities struct {\n\tRouteGroups map[string]bool `json:\"route_groups\"`\n\tFeatures    map[string]bool `json:\"features\"`\n}",
       "type CaptchaConfig struct {\n\tProvider    string `json:\"provider\"`\n\tSiteKey     string `json:\"site_key\"`\n\tScriptURL   string `json:\"script_url\"`\n\tAction      string `json:\"action\"`\n\tTokenHeader string `json:\"token_header\"`\n}",
-      "type CaptureAdmissionParams struct {\n\tAmount int64         `json:\"amount,string\"`\n\tUsage  *CaptureUsage `json:\"usage,omitempty\"`\n}",
-      "type CaptureReceipt struct {\n\tRequestID            string                `json:\"request_id\"`\n\tCustomerID           CustomerID            `json:\"customer_id\"`\n\tCurrency             string                `json:\"currency\"`\n\tAmount               int64                 `json:\"amount,string\"`\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
+      "type CaptureAdmissionBatchParams struct {\n\tItems []CaptureAdmissionParams `json:\"items\"`\n}",
+      "type CaptureAdmissionParams struct {\n\tRequestID string        `json:\"request_id\"`\n\tUsage     *CaptureUsage `json:\"usage,omitempty\"`\n\tAmount    *int64        `json:\"amount,omitempty,string\"`\n}",
+      "type CaptureBatchResult struct {\n\tItems []CaptureResult `json:\"items\"`\n}",
+      "type CaptureReceipt struct {\n\tRequestID            string                `json:\"request_id\"`\n\tCustomerID           CustomerID            `json:\"customer_id\"`\n\tCurrency             string                `json:\"currency\"`\n\tEstimatedAmount      int64                 `json:\"estimated_amount,string\"`\n\tAmount               int64                 `json:\"amount,string\"`\n\tCharges              []UsageCharge         `json:\"charges\"`\n\tUsageEventID         *UsageEventID         `json:\"usage_event_id\"`\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
+      "type CaptureResult struct {\n\tStatus  int             `json:\"status\"`\n\tReceipt *CaptureReceipt `json:\"receipt\"`\n\tError   *ErrorDetails   `json:\"error\"`\n}",
       "type CaptureUsage struct {\n\tEventType  string           `json:\"event_type\"`\n\tResource   string           `json:\"resource,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n\tSource     string           `json:\"source,omitempty\"`\n\tSourceID   string           `json:\"source_id,omitempty\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n}",
       "type Card = cardguard.Card",
       "type CardDetails struct {\n\tBrand    *string `json:\"brand\"`\n\tLast4    *string `json:\"last4\"`\n\tExpMonth *int    `json:\"exp_month\"`\n\tExpYear  *int    `json:\"exp_year\"`\n}",
@@ -645,8 +650,6 @@
       "type FleetSnapshot struct {\n\tWindowDays int                    `json:\"window_days\"`\n\tMerchants  FleetMerchantFunnel    `json:\"merchants\"`\n\tRevenue    []FleetCurrencyRevenue `json:\"revenue\"`\n\tRails      []FleetRailHealth      `json:\"rails\"`\n\tMRR        []FleetMRR             `json:\"mrr\"`\n}",
       "type FleetWeeklyPoint struct {\n\tWeekStart             time.Time `json:\"week_start\"`\n\tNewMerchants          int64     `json:\"new_merchants\"`\n\tActiveMerchants       int64     `json:\"active_merchants\"`\n\tCanceledSubscriptions int64     `json:\"canceled_subscriptions\"`\n}",
       "type FleetWeeklyVolume struct {\n\tWeekStart     time.Time `json:\"week_start\"`\n\tCurrency      string    `json:\"currency\"`\n\tPayments      int64     `json:\"payments\"`\n\tSettledAmount int64     `json:\"settled_amount,string\"`\n}",
-      "type GenerateDashboardWidgetParams struct {\n\tPrompt    string        `json:\"prompt\"`\n\tBaseQuery *MetricsQuery `json:\"base_query\"`\n}",
-      "type GeneratedWidget struct {\n\tQuery MetricsQuery `json:\"query\"`\n\tTitle string       `json:\"title\"`\n\tViz   string       `json:\"viz\"`\n}",
       "type GetPriceParams struct {\n\tVerify bool\n}",
       "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n\tPageRequest\n}",
       "type GrantReason string",
@@ -688,11 +691,9 @@
       "type Meter struct {\n\tKey           string              `json:\"key\"`\n\tEventType     string              `json:\"event_type\"`\n\tValueProperty string              `json:\"value_property\"`\n\tAggregation   catalog.Aggregation `json:\"aggregation\"`\n\tUnit          string              `json:\"unit\"`\n\tGroupBy       map[string]string   `json:\"group_by\"`\n\n\tBillingSupported bool           `json:\"billing_supported\"`\n\tRateCard         *MeterRateCard `json:\"rate_card\"`\n\n\tRevision    int64      `json:\"revision\"`\n\tHasActivity bool       `json:\"has_activity\"`\n\tLastEventAt *time.Time `json:\"last_event_at\"`\n\tCreatedAt   time.Time  `json:\"created_at\"`\n\tUpdatedAt   time.Time  `json:\"updated_at\"`\n}",
       "type MeterRateCard struct {\n\tProductID  ProductID           `json:\"product_id\"`\n\tProductKey string              `json:\"product_key\"`\n\tFilter     map[string][]string `json:\"filter\"`\n\tPrice      catalog.RatePrice   `json:\"price\"`\n\tAllowance  *catalog.Allowance  `json:\"allowance\"`\n\tCreatedAt  time.Time           `json:\"created_at\"`\n\tUpdatedAt  time.Time           `json:\"updated_at\"`\n}",
       "type MeterRateCardParams struct {\n\tProductID ProductID           `json:\"product_id\"`\n\tFilter    map[string][]string `json:\"filter,omitempty\"`\n\tPrice     catalog.RatePrice   `json:\"price\"`\n\tAllowance *catalog.Allowance  `json:\"allowance,omitempty\"`\n}",
-      "type MetricsAnswer struct {\n\tAnswer   string            `json:\"answer\"`\n\tEvidence []MetricsEvidence `json:\"evidence\"`\n}",
       "type MetricsClass string",
       "type MetricsColumn struct {\n\tName string `json:\"name\"`\n\tKind string `json:\"kind\"`\n\tUnit string `json:\"unit,omitempty\"`\n}",
       "type MetricsDimension struct {\n\tName        string   `json:\"name\"`\n\tDescription string   `json:\"description\"`\n\tValues      []string `json:\"values,omitempty\"`\n}",
-      "type MetricsEvidence struct {\n\tQuery MetricsQuery `json:\"query\"`\n\tMetricsResult\n}",
       "type MetricsExample struct {\n\tIntent string       `json:\"intent\"`\n\tQuery  MetricsQuery `json:\"query\"`\n}",
       "type MetricsLimits struct {\n\tMaxBuckets int `json:\"max_buckets\"`\n\tMaxLimit   int `json:\"max_limit\"`\n}",
       "type MetricsMeasure struct {\n\tName        string       `json:\"name\"`\n\tClass       MetricsClass `json:\"class\"`\n\tUnit        string       `json:\"unit\"`\n\tDescription string       `json:\"description\"`\n\tFormula     string       `json:\"formula\"`\n\tDims        []string     `json:\"dims\"`\n\tMoney       bool         `json:\"money,omitempty\"`\n}",
@@ -857,12 +858,14 @@
       "type UpdatePriceParams struct {\n\tArchived catalog.Field[bool]                         `json:\"archived,omitzero\"`\n\tPSPLinks map[string]catalog.Field[map[string]string] `json:\"psp_links,omitempty\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
       "type UpdateProductParams struct {\n\tDisplayName  catalog.Field[string]                  `json:\"display_name,omitzero\"`\n\tDescription  catalog.Field[string]                  `json:\"description,omitzero\"`\n\tEntitlements catalog.Field[[]string]                `json:\"entitlements,omitzero\"`\n\tCreditGrant  catalog.Field[catalog.CreditGrantSpec] `json:\"credit_grant,omitzero\"`\n\tTierGroup    catalog.Field[string]                  `json:\"tier_group,omitzero\"`\n\tTierRank     catalog.Field[int]                     `json:\"tier_rank,omitzero\"`\n\n\tOwnership catalog.Field[catalog.Ownership] `json:\"ownership,omitzero\"`\n\tArchived  catalog.Field[bool]              `json:\"archived,omitzero\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
       "type Usage struct {\n\tCustomerID CustomerID   `json:\"customer_id\"`\n\tCurrency   string       `json:\"currency\"`\n\tFrom       time.Time    `json:\"from\"`\n\tTo         time.Time    `json:\"to\"`\n\tGroupBy    UsageGroupBy `json:\"group_by\"`\n\tRows       []UsageRow   `json:\"rows\"`\n\tNextCursor *string      `json:\"next_cursor\"`\n}",
-      "type UsageEvent struct {\n\tID             UsageEventID     `json:\"id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tInvoker        string           `json:\"invoker\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tOutcome        UsageOutcome     `json:\"outcome\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tForgivenAmount int64            `json:\"forgiven_amount,string\"`\n\tResource       *string          `json:\"resource\"`\n\tMetadata       map[string]any   `json:\"metadata\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tOccurredAt           time.Time             `json:\"occurred_at\"`\n\tCreatedAt            time.Time             `json:\"created_at\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
+      "type UsageCharge struct {\n\tMeterKey string  `json:\"meter_key\"`\n\tCell     *string `json:\"cell\"`\n\tQuantity int64   `json:\"quantity\"`\n\tAmount   int64   `json:\"amount,string\"`\n}",
+      "type UsageEstimate struct {\n\tEventType  string           `json:\"event_type\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n}",
+      "type UsageEvent struct {\n\tID             UsageEventID     `json:\"id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tInvoker        string           `json:\"invoker\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tOutcome        UsageOutcome     `json:\"outcome\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tForgivenAmount int64            `json:\"forgiven_amount,string\"`\n\tResource       *string          `json:\"resource\"`\n\tMetadata       map[string]any   `json:\"metadata\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\n\tCharges []UsageCharge `json:\"charges\"`\n\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tOccurredAt           time.Time             `json:\"occurred_at\"`\n\tCreatedAt            time.Time             `json:\"created_at\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
       "type UsageEventID uuid.UUID",
       "type UsageEventResult struct {\n\tStatus int           `json:\"status\"`\n\tEvent  *UsageEvent   `json:\"event\"`\n\tError  *ErrorDetails `json:\"error\"`\n}",
       "type UsageGroupBy string",
       "type UsageOutcome string",
-      "type UsageRow struct {\n\tKey        string           `json:\"key\"`\n\tEventCount int64            `json:\"event_count\"`\n\tAmount     int64            `json:\"amount,string\"`\n\tDimensions map[string]int64 `json:\"dimensions\"`\n}",
+      "type UsageRow struct {\n\tKey        string           `json:\"key\"`\n\tCell       *string          `json:\"cell\"`\n\tEventCount int64            `json:\"event_count\"`\n\tAmount     int64            `json:\"amount,string\"`\n\tQuantity   *int64           `json:\"quantity\"`\n\tDimensions map[string]int64 `json:\"dimensions\"`\n}",
       "type UserMerchant struct {\n\tID          MerchantID `json:\"id\"`\n\tSlug        string     `json:\"slug\"`\n\tDisplayName string     `json:\"display_name\"`\n\tRole        string     `json:\"role\"`\n\tPermissions []string   `json:\"permissions\"`\n}",
       "type WorkerHealth struct {\n\tWorkerKind            string     `json:\"worker_kind\"`\n\tRegisteredAt          time.Time  `json:\"registered_at\"`\n\tExpectedPeriodSeconds *int64     `json:\"expected_period_seconds\"`\n\tLastSuccessAt         *time.Time `json:\"last_success_at\"`\n\tLastErrorAt           *time.Time `json:\"last_error_at\"`\n\tLastError             *string    `json:\"last_error\"`\n\tConsecutiveFailures   int32      `json:\"consecutive_failures\"`\n\tLastAlertedAt         *time.Time `json:\"last_alerted_at\"`\n\tUpdatedAt             time.Time  `json:\"updated_at\"`\n}",
       "var ErrCardDeclined error = newCodedError(CodeCardDeclined, ErrPaymentRefused)",
@@ -894,6 +897,7 @@
       "var ErrRequestBodyTooLarge error = newCodedError(CodeRequestBodyTooLarge, ErrInvalid)",
       "var ErrUnauthorized = errors.New(\"openrails: unauthorized\")",
       "var ErrUnreachable = errors.New(\"openrails: unreachable\")",
+      "var ErrUsageNotPriced error = newCodedError(CodeUsageNotPriced, ErrInvalid)",
       "var ReservedMerchantSlugs = []string{\n\t\"www\", \"api\", \"app\", \"admin\", \"auth\",\n\t\"billing\", \"platform\", \"openrails\", \"saas\",\n\t\"docs\", \"status\", \"support\", \"dev\", \"staging\",\n\t\"checkout\", \"pay\", \"root\", \"internal\",\n}"
     ],
     "catalog": [
@@ -931,7 +935,7 @@
       "func ReadFile(path string) (*Application, error)",
       "func Value[T any](v T) Field[T]",
       "type Aggregation string",
-      "type Allowance struct {\n\tIncluded   int64  `json:\"included,omitempty\"`\n\tAccrueFrom string `json:\"accrue_from,omitempty\"`\n\tCap        string `json:\"cap,omitempty\"`\n}",
+      "type Allowance struct {\n\tIncluded int64 `json:\"included,omitempty\"`\n}",
       "type Application struct {\n\tSchemaVersion int  `json:\"schema_version\"`\n\tPrune         bool `json:\"prune,omitempty\"`\n\n\tEntitlementReplacements []EntitlementReplacement `json:\"entitlement_replacements,omitempty\"`\n\tProducts                map[string]ApplyProduct  `json:\"products,omitempty\"`\n\tMeters                  map[string]ApplyMeter    `json:\"meters,omitempty\"`\n}",
       "type ApplyMeter struct {\n\tEventType     Field[string]            `json:\"event_type,omitzero\"`\n\tValueProperty Field[string]            `json:\"value_property,omitzero\"`\n\tAggregation   Field[Aggregation]       `json:\"aggregation,omitzero\"`\n\tUnit          Field[string]            `json:\"unit,omitzero\"`\n\tGroupBy       Field[map[string]string] `json:\"group_by,omitzero\"`\n}",
       "type ApplyPrice struct {\n\tID                   string                              `json:\"id,omitempty\"`\n\tCurrency             Field[string]                       `json:\"currency,omitzero\"`\n\tUnitAmount           Field[int64]                        `json:\"unit_amount,omitzero\"`\n\tAccessDurationHours  Field[int]                          `json:\"access_duration_hours,omitzero\"`\n\tBillingIntervalHours Field[int]                          `json:\"billing_interval_hours,omitzero\"`\n\tArchived             Field[bool]                         `json:\"archived,omitzero\"`\n\tTrialUnitAmount      Field[int64]                        `json:\"trial_unit_amount,omitzero\"`\n\tTrialDurationHours   Field[int]                          `json:\"trial_duration_hours,omitzero\"`\n\tCustomerAmount       Field[CustomerAmount]               `json:\"customer_amount,omitzero\"`\n\tQuantity             Field[Quantity]                     `json:\"quantity,omitzero\"`\n\tPSPs                 Field[[]string]                     `json:\"psps,omitzero\"`\n\tPSPLinks             Field[map[string]map[string]string] `json:\"psp_links,omitzero\"`\n}",
@@ -942,7 +946,7 @@
       "type Field[T any] struct {\n\tSet   bool\n\tNull  bool\n\tValue T\n}",
       "type FlatPrice struct {\n\tAmount int64 `json:\"amount,omitempty,string\"`\n}",
       "type Matrix struct {\n\tDimension string                `json:\"dimension\"`\n\tCells     map[string]MatrixCell `json:\"cells\"`\n}",
-      "type MatrixCell struct {\n\tUnitAmount    int64 `json:\"unit_amount,string\"`\n\tMaximumAmount int64 `json:\"maximum_amount,omitempty,string\"`\n\tIncluded      int64 `json:\"included,omitempty\"`\n}",
+      "type MatrixCell struct {\n\tUnitAmount    int64 `json:\"unit_amount,string\"`\n\tMaximumAmount int64 `json:\"maximum_amount,omitempty,string\"`\n}",
       "type Model string",
       "type Ownership string",
       "type OwnershipPrice struct {\n\tRecurring      bool\n\tAccessDuration bool\n}",
@@ -997,7 +1001,7 @@
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
       "type FormerNamesMode string",
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
-      "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
+      "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
       "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tIssuer string `yaml:\"-\"`\n\n\tCatalog     *catalog.Application `yaml:\"-\"`\n\tDisplayName string               `yaml:\"display_name\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
@@ -1191,7 +1195,6 @@
       "func (id RunningChargeID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id SubscriptionID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id UsageEventID) MarshalText() ([]byte, error) {\n\treturn []byte(id.String()), nil\n}",
-      "func (p *CaptureAdmissionParams) UnmarshalJSON(raw []byte) error {\n\tvar in struct {\n\t\tAmount *int64        `json:\"amount,string\"`\n\t\tUsage  *CaptureUsage `json:\"usage\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026in); err != nil {\n\t\treturn err\n\t}\n\tif in.Amount == nil {\n\t\treturn errors.New(\"amount is required\")\n\t}\n\tp.Amount, p.Usage = *in.Amount, in.Usage\n\treturn nil\n}",
       "func (p *CreateProductParams) UnmarshalJSON(raw []byte) error {\n\ttype product CreateProductParams\n\tvar value product\n\tdecoded := struct {\n\t\t*product\n\t\tEntitlements json.RawMessage `json:\"entitlements\"`\n\t}{product: \u0026value}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Entitlements != nil {\n\t\tif bytes.Equal(bytes.TrimSpace(decoded.Entitlements), []byte(\"null\")) {\n\t\t\treturn fmt.Errorf(\"entitlements must be a string list, not null; use [] for none\")\n\t\t}\n\t\tif err := json.Unmarshal(decoded.Entitlements, \u0026value.Entitlements); err != nil {\n\t\t\treturn fmt.Errorf(\"entitlements: %w\", err)\n\t\t}\n\t}\n\t*p = CreateProductParams(value)\n\treturn nil\n}",
       "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error {\n\tvar in listPageJSON[T]\n\tif err := json.Unmarshal(raw, \u0026in); err != nil {\n\t\treturn err\n\t}\n\tp.Items, p.Next = in.Data, \"\"\n\tif in.NextCursor != nil {\n\t\tp.Next = *in.NextCursor\n\t}\n\treturn nil\n}",
       "func (p ListPage[T]) MarshalJSON() ([]byte, error) {\n\tout := listPageJSON[T]{Data: p.Items}\n\tif out.Data == nil {\n\t\tout.Data = []T{}\n\t}\n\tif p.Next != \"\" {\n\t\tout.NextCursor = \u0026p.Next\n\t}\n\treturn json.Marshal(out)\n}",
@@ -1206,7 +1209,7 @@
       "func (q *Quantity) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMin int `json:\"min\"`\n\t\tMax int `json:\"max\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*q = Quantity(value)\n\treturn nil\n}"
     ],
     "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
@@ -1265,7 +1268,8 @@
       "type SolanaSubscription struct {\n\tID             uuid.UUID `json:\"id\"`\n\tMerchantID     uuid.UUID `json:\"merchant_id\"`\n\tSubscriptionID uuid.UUID `json:\"subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id,omitempty\"`\n\n\tSubscriberWallet string `json:\"subscriber_wallet\"`\n\tAuthorityPDA     string `json:\"authority_pda\"`\n\tSubscriptionPDA  string `json:\"subscription_pda\"`\n\tPlanPDA          string `json:\"plan_pda\"`\n\tMerchantAddress  string `json:\"merchant_address\"`\n\tMint             string `json:\"mint\"`\n\n\tPlanCreatedAtFingerprint int64 `json:\"plan_created_at_fingerprint\"`\n\n\tLastPulledPeriodStartsAt *time.Time `json:\"last_pulled_period_starts_at,omitempty\"`\n\tLastSignature            *string    `json:\"last_signature,omitempty\"`\n\tNextPullAt               time.Time  `json:\"next_pull_at\"`\n\n\tStatus string `json:\"status\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
       "type SolanaTierChangeReceipt struct {\n\tSignature        string    `json:\"signature\"`\n\tPriceID          uuid.UUID `json:\"price_id\"`\n\tSubscriptionID   uuid.UUID `json:\"subscription_id\"`\n\tAmountDueNow     int64     `json:\"amount_due_now\"`\n\tCurrency         string    `json:\"currency\"`\n\tNextChargeAmount int64     `json:\"next_charge_amount\"`\n\tNextChargeDate   time.Time `json:\"next_charge_date\"`\n\tIsUpgrade        bool      `json:\"is_upgrade\"`\n}",
       "type Subscription struct {\n\tCollectionPolicy CollectionPolicy `json:\"collection_policy\"`\n\tID               uuid.UUID        `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id,omitempty\"`\n\tProductID  uuid.UUID `json:\"product_id\"`\n\tPriceID    uuid.UUID `json:\"price_id\"`\n\n\tScheduledChange *ScheduledChange `json:\"-\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tAccessDurationHoursSnapshot *int `json:\"access_duration_hours_snapshot\"`\n\n\tStatus                SubscriptionStatus `json:\"status\"`\n\tStartedAt             time.Time          `json:\"started_at\"`\n\tEndedAt               *time.Time         `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time         `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time         `json:\"current_period_ends_at\"`\n\n\tRail               Rail   `json:\"rail\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id\"`\n\n\tPaymentMethodID *uuid.UUID `json:\"payment_method_id\"`\n\n\tLastRetryAt   *time.Time `json:\"last_retry_at\"`\n\tRetryAttempts *int       `json:\"retry_attempts\"`\n\n\tTransientRetries int        `json:\"transient_retries\"`\n\tNextRetryAt      *time.Time `json:\"next_retry_at\"`\n\tGraceEndsAt      *time.Time `json:\"grace_ends_at\"`\n\n\tCancelFeedback *string     `json:\"cancel_feedback\"`\n\tCancelType     *CancelType `json:\"cancel_type\"`\n\tCanceledAt     *time.Time  `json:\"canceled_at\"`\n\n\tDeletionScheduledAt *time.Time `json:\"deletion_scheduled_at,omitempty\"`\n\n\tLifecycleRev int64 `json:\"-\"`\n\n\tRowVersion int64 `json:\"-\"`\n\n\tDunningPolicy []byte `json:\"-\"`\n\n\tPrice         *Price         `json:\"price,omitempty\"`\n\tPaymentMethod *PaymentMethod `json:\"payment_method,omitempty\"`\n\n\tProduct *Product `json:\"product,omitempty\"`\n\n\tMetadata json.RawMessage `json:\"gateway_response,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
-      "type UsageEvent struct {\n\tID uuid.UUID `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\n\tInvoker string `json:\"invoker\"`\n\n\tCurrency string `json:\"currency\"`\n\n\tResource *string `json:\"resource,omitempty\"`\n\n\tEventType string `json:\"event_type\"`\n\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\n\tAmount int64 `json:\"amount\"`\n\n\tOutcome        string `json:\"outcome\"`\n\tForgivenAmount int64  `json:\"forgiven_amount\"`\n\n\tSource   string `json:\"source\"`\n\tSourceID string `json:\"source_id\"`\n\n\tLedgerTransferID *uuid.UUID `json:\"ledger_transfer_id,omitempty\"`\n\n\tPricingAuthority string         `json:\"-\"`\n\tMetadata         map[string]any `json:\"metadata,omitempty\"`\n\tOccurredAt       time.Time      `json:\"occurred_at\"`\n\tCreatedAt        time.Time      `json:\"created_at\"`\n\n\tReplayed bool `json:\"replayed,omitempty\"`\n}"
+      "type UsageCharge struct {\n\tMeterKey string `json:\"meter_key\"`\n\tCell     string `json:\"cell,omitempty\"`\n\tQuantity int64  `json:\"quantity\"`\n\tAmount   int64  `json:\"amount,string\"`\n}",
+      "type UsageEvent struct {\n\tID uuid.UUID `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\n\tInvoker string `json:\"invoker\"`\n\n\tCurrency string `json:\"currency\"`\n\n\tResource *string `json:\"resource,omitempty\"`\n\n\tEventType string `json:\"event_type\"`\n\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\n\tAmount int64 `json:\"amount\"`\n\n\tOutcome        string `json:\"outcome\"`\n\tForgivenAmount int64  `json:\"forgiven_amount\"`\n\n\tSource   string `json:\"source\"`\n\tSourceID string `json:\"source_id\"`\n\n\tLedgerTransferID *uuid.UUID `json:\"ledger_transfer_id,omitempty\"`\n\n\tPricingAuthority string `json:\"-\"`\n\n\tCharges    []UsageCharge  `json:\"charges\"`\n\tMetadata   map[string]any `json:\"metadata,omitempty\"`\n\tOccurredAt time.Time      `json:\"occurred_at\"`\n\tCreatedAt  time.Time      `json:\"created_at\"`\n\n\tReplayed bool `json:\"replayed,omitempty\"`\n}"
     ],
     "internal/db/sqlaudit": [
       "type explainRoot struct {\n\tPlan planNode `json:\"Plan\"`\n}",
@@ -1441,20 +1445,15 @@
       "type stripeTierChangeStep struct {\n\tSubmittedAt   time.Time                              `json:\"submitted_at\"`\n\tSubscription  *subscriptions.StripeSubscriptionState `json:\"subscription,omitempty\"`\n\tSchedule      *subscriptions.StripeScheduleState     `json:\"schedule,omitempty\"`\n\tRefusal       string                                 `json:\"refusal,omitempty\"`\n\tRefusalCode   string                                 `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int                                    `json:\"refusal_status,omitempty\"`\n\tResolution    map[string]any                         `json:\"resolution,omitempty\"`\n}"
     ],
     "internal/modules/copilot": [
-      "type draftCatalogDiffArgs struct {\n\tProductKey           string `json:\"product_key\"`\n\tNewPriceKey          string `json:\"new_price_key,omitempty\"`\n\tUnitAmount           int64  `json:\"unit_amount\"`\n\tCurrency             string `json:\"currency,omitempty\"`\n\tAccessDurationHours  *int   `json:\"access_duration_hours,omitempty\"`\n\tBillingIntervalHours *int   `json:\"billing_interval_hours,omitempty\"`\n}",
-      "type draftPriceChangeArgs struct {\n\tProductKey          string `json:\"product_key\"`\n\tMigrateToProductKey string `json:\"migrate_to_product_key,omitempty\"`\n\tPriceKey            string `json:\"price_key\"`\n\tNewAmount           int64  `json:\"new_amount\"`\n\tMigrationMode       string `json:\"migration_mode,omitempty\"`\n\tEffectiveDate       string `json:\"effective_date,omitempty\"`\n\tMigrateToPriceKey   string `json:\"migrate_to_price_key,omitempty\"`\n}",
-      "type getPriceArgs struct {\n\tProductKey string `json:\"product_key\"`\n\tPriceKey   string `json:\"price_key\"`\n}",
-      "type listCatalogArgs struct {\n\tProductKey string `json:\"product_key,omitempty\"`\n}"
-    ],
-    "internal/modules/dashboard": [
       "type anthropicBlock struct {\n\tType      string          `json:\"type\"`\n\tText      string          `json:\"text,omitempty\"`\n\tID        string          `json:\"id,omitempty\"`\n\tName      string          `json:\"name,omitempty\"`\n\tInput     json.RawMessage `json:\"input,omitempty\"`\n\tToolUseID string          `json:\"tool_use_id,omitempty\"`\n\tContent   string          `json:\"content,omitempty\"`\n\tIsError   bool            `json:\"is_error,omitempty\"`\n}",
       "type anthropicBlockMessage struct {\n\tRole    string           `json:\"role\"`\n\tContent []anthropicBlock `json:\"content\"`\n}",
-      "type anthropicMessage struct {\n\tRole    string `json:\"role\"`\n\tContent string `json:\"content\"`\n}",
-      "type anthropicRequest struct {\n\tModel     string             `json:\"model\"`\n\tMaxTokens int                `json:\"max_tokens\"`\n\tSystem    string             `json:\"system,omitempty\"`\n\tMessages  []anthropicMessage `json:\"messages\"`\n}",
       "type anthropicResponse struct {\n\tContent []struct {\n\t\tType  string          `json:\"type\"`\n\t\tText  string          `json:\"text\"`\n\t\tID    string          `json:\"id\"`\n\t\tName  string          `json:\"name\"`\n\t\tInput json.RawMessage `json:\"input\"`\n\t} `json:\"content\"`\n\tStopReason string `json:\"stop_reason\"`\n\tError      *struct {\n\t\tType    string `json:\"type\"`\n\t\tMessage string `json:\"message\"`\n\t} `json:\"error\"`\n}",
       "type anthropicToolDef struct {\n\tName        string          `json:\"name\"`\n\tDescription string          `json:\"description\"`\n\tInputSchema json.RawMessage `json:\"input_schema\"`\n}",
       "type anthropicToolsRequest struct {\n\tModel     string                  `json:\"model\"`\n\tMaxTokens int                     `json:\"max_tokens\"`\n\tSystem    string                  `json:\"system,omitempty\"`\n\tTools     []anthropicToolDef      `json:\"tools,omitempty\"`\n\tMessages  []anthropicBlockMessage `json:\"messages\"`\n}",
-      "type askFeedPayload struct {\n\tGrain        string            `json:\"grain,omitempty\"`\n\tRange        metrics.RangeOut  `json:\"range\"`\n\tColumns      []metrics.Column  `json:\"columns\"`\n\tRows         [][]any           `json:\"rows\"`\n\tCompareRange *metrics.RangeOut `json:\"compare_range,omitempty\"`\n\tCompareRows  [][]any           `json:\"compare_rows,omitempty\"`\n\tTruncated    bool              `json:\"truncated,omitempty\"`\n\tRowsTotal    int               `json:\"rows_total,omitempty\"`\n\tNote         string            `json:\"note,omitempty\"`\n}",
+      "type draftCatalogDiffArgs struct {\n\tProductKey           string `json:\"product_key\"`\n\tNewPriceKey          string `json:\"new_price_key,omitempty\"`\n\tUnitAmount           int64  `json:\"unit_amount\"`\n\tCurrency             string `json:\"currency,omitempty\"`\n\tAccessDurationHours  *int   `json:\"access_duration_hours,omitempty\"`\n\tBillingIntervalHours *int   `json:\"billing_interval_hours,omitempty\"`\n}",
+      "type draftPriceChangeArgs struct {\n\tProductKey          string `json:\"product_key\"`\n\tMigrateToProductKey string `json:\"migrate_to_product_key,omitempty\"`\n\tPriceKey            string `json:\"price_key\"`\n\tNewAmount           int64  `json:\"new_amount\"`\n\tMigrationMode       string `json:\"migration_mode,omitempty\"`\n\tEffectiveDate       string `json:\"effective_date,omitempty\"`\n\tMigrateToPriceKey   string `json:\"migrate_to_price_key,omitempty\"`\n}",
+      "type getPriceArgs struct {\n\tProductKey string `json:\"product_key\"`\n\tPriceKey   string `json:\"price_key\"`\n}",
+      "type listCatalogArgs struct {\n\tProductKey string `json:\"product_key,omitempty\"`\n}",
       "type openaiFunctionCall struct {\n\tName string `json:\"name\"`\n\n\tArguments string `json:\"arguments\"`\n}",
       "type openaiFunctionDef struct {\n\tName        string          `json:\"name\"`\n\tDescription string          `json:\"description\"`\n\tParameters  json.RawMessage `json:\"parameters\"`\n}",
       "type openaiMessage struct {\n\tRole       string           `json:\"role\"`\n\tContent    string           `json:\"content,omitempty\"`\n\tToolCalls  []openaiToolCall `json:\"tool_calls,omitempty\"`\n\tToolCallID string           `json:\"tool_call_id,omitempty\"`\n}",
@@ -1475,9 +1474,10 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
+      "type captureTerms struct {\n\tbilling.CaptureUsage\n\tAmount *int64 `json:\"amount,omitempty,string\"`\n}",
       "type meterKeyPosition struct {\n\tKey string `json:\"k\"`\n}",
-      "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}",
-      "type usageFilterRule struct {\n\tPropertyKey   string   `json:\"property_key\"`\n\tAllowedValues []string `json:\"allowed_values\"`\n}"
+      "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
+      "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
@@ -1699,8 +1699,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "http": "net/http",
-      "strings": "strings",
-      "url": "net/url"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "alerts.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -1710,9 +1709,6 @@
       "url": "net/url"
     },
     "billing/admissions.go": {
-      "bytes": "bytes",
-      "errors": "errors",
-      "json": "encoding/json",
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
@@ -2032,7 +2028,7 @@
       "sha256": "crypto/sha256"
     },
     "internal/billingauth/contract.go": {
-      "auth": "github.com/open-rails/helpers/auth",
+      "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context"
     },
@@ -2068,7 +2064,7 @@
       "fs": "io/fs",
       "http": "net/http",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
-      "userinfo": "github.com/open-rails/helpers/userinfo",
+      "userinfo": "github.com/open-rails/authkit/userinfo",
       "v9": "github.com/redis/go-redis/v9",
       "vaultapi": "github.com/hashicorp/vault/api"
     },
@@ -2958,6 +2954,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/admission/spendgate/gate.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "bytes": "bytes",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -3256,11 +3253,30 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/modules/copilot/llm.go": {
+      "bytes": "bytes",
+      "context": "context",
+      "fmt": "fmt",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "strings": "strings",
+      "time": "time"
+    },
+    "internal/modules/copilot/llm_openai.go": {
+      "bytes": "bytes",
+      "context": "context",
+      "fmt": "fmt",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "strings": "strings",
+      "time": "time"
+    },
     "internal/modules/copilot/tools_draft.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cadence": "github.com/open-rails/openrails/internal/shared/cadence",
       "context": "context",
-      "dashboard": "github.com/open-rails/openrails/internal/modules/dashboard",
       "fmt": "fmt",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
@@ -3274,7 +3290,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "cadence": "github.com/open-rails/openrails/internal/shared/cadence",
       "context": "context",
-      "dashboard": "github.com/open-rails/openrails/internal/modules/dashboard",
       "fmt": "fmt",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
@@ -3283,39 +3298,6 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/modules/dashboard/ask.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "metrics": "github.com/open-rails/openrails/internal/modules/metrics",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "strings": "strings",
-      "time": "time"
-    },
-    "internal/modules/dashboard/llm.go": {
-      "bytes": "bytes",
-      "context": "context",
-      "fmt": "fmt",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json",
-      "strings": "strings",
-      "time": "time"
-    },
-    "internal/modules/dashboard/llm_openai.go": {
-      "bytes": "bytes",
-      "context": "context",
-      "fmt": "fmt",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json",
-      "strings": "strings",
-      "time": "time"
     },
     "internal/modules/grants/grants.go": {
       "context": "context",
@@ -3354,6 +3336,25 @@
       "strings": "strings",
       "time": "time"
     },
+    "internal/modules/money/admission_capture.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "identity": "github.com/open-rails/openrails/internal/billingidentity",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "pgconn": "github.com/jackc/pgx/v5/pgconn",
+      "spendgate": "github.com/open-rails/openrails/internal/modules/admission/spendgate",
+      "strings": "strings",
+      "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/modules/money/invoice_profile.go": {
       "context": "context",
       "fmt": "fmt",
@@ -3372,21 +3373,6 @@
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "uuid": "github.com/google/uuid"
     },
-    "internal/modules/money/metered_rating.go": {
-      "catalog": "github.com/open-rails/openrails/catalog",
-      "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
-      "context": "context",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "identity": "github.com/open-rails/openrails/internal/billingidentity",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/modules/money/metering_catalog.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/catalog",
@@ -3402,6 +3388,28 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/money/rating.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "big": "math/big",
+      "billing": "github.com/open-rails/openrails/billing",
+      "catalog": "github.com/open-rails/openrails/catalog",
+      "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "identity": "github.com/open-rails/openrails/internal/billingidentity",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "retention": "github.com/open-rails/openrails/internal/retention",
+      "strconv": "strconv",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/running_charge.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -4331,7 +4339,9 @@
       "models": "github.com/open-rails/openrails/internal/db/models",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
-      "time": "time"
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/stripemock/inspect.go": {
       "fmt": "fmt",
@@ -4382,7 +4392,7 @@
       "http": "net/http"
     },
     "openrailstest/auth.go": {
-      "authtest": "github.com/open-rails/helpers/auth/authtest",
+      "authtest": "github.com/open-rails/authkit/auth/authtest",
       "http": "net/http",
       "httproutes": "github.com/open-rails/openrails/internal/http/routes",
       "openrails": "github.com/open-rails/openrails",
@@ -4406,7 +4416,7 @@
       "sort": "sort",
       "strings": "strings",
       "sync": "sync",
-      "userinfo": "github.com/open-rails/helpers/userinfo"
+      "userinfo": "github.com/open-rails/authkit/userinfo"
     },
     "operations.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4532,7 +4542,7 @@
       "uuid": "github.com/google/uuid"
     },
     "server/control_plane.go": {
-      "auth": "github.com/open-rails/helpers/auth",
+      "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
@@ -4632,7 +4642,7 @@
       "routebundle": "github.com/open-rails/openrails/internal/http/routebundle",
       "sync": "sync",
       "time": "time",
-      "userinfo": "github.com/open-rails/helpers/userinfo"
+      "userinfo": "github.com/open-rails/authkit/userinfo"
     },
     "web/admin/embed.go": {
       "embed": "embed",

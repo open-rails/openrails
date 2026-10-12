@@ -3,8 +3,6 @@
 // auth=/auth/v1, api=/v1; embedded hosts point at their own bases. The
 // session is auth-ui's: it holds the bearer, refreshes it, and steps up.
 import {
-  AuthKitError,
-  isAuthKitError,
   isOAuthError,
   readAuthKitError,
   type ResourceRequest,
@@ -19,12 +17,6 @@ import type { ListPage } from "./generated/wire"
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
-  // #741 fail-closed LLM gate: false hides the natural-language widget box
-  // entirely (the generate endpoint is not mounted).
-  nl_widgets_enabled: boolean
-  // #756 metrics Q&A gate (llm.ask_enabled AND an LLM key): false renders the
-  // Ask panel as a pointed empty-state (the ask endpoint is not mounted).
-  ask_enabled: boolean
   // #779 catalog copilot Q&A gate (llm.catalog_copilot_enabled AND an LLM
   // key): false renders the catalog copilot panel as a pointed empty-state.
   catalog_copilot_enabled: boolean
@@ -201,7 +193,7 @@ export function bindSession(client: ConsoleTransport) {
   session = client
 }
 
-// bindStepUp routes writes through auth-ui's step-up dialog: a 401
+// bindStepUp routes AuthKit writes through auth-ui's step-up dialog: a 401
 // step_up_required (RFC 9470) re-authenticates and the write is retried.
 export function bindStepUp(guard: Guard | null) {
   stepUp = guard ?? unguarded
@@ -321,7 +313,7 @@ async function send<T>(
     res = await session.authFetch(url, init)
   }
   // auth-ui already refreshed a stale bearer; this one is refused for good,
-  // unless it asks for a fresher sign-in, which the step-up dialog answers.
+  // except a host-issued sign-in challenge, which remains an API refusal.
   if (res.status === 401) {
     const error = await parseError(res)
     if (!error.stepUpRequired) void session.signOut()
@@ -333,8 +325,7 @@ async function send<T>(
 }
 
 // api calls the admin API (api_base_url-relative path, e.g.
-// "/admin/payments"). A write OpenRails refuses for a stale sign-in opens
-// auth-ui's step-up dialog and runs again once the user has confirmed.
+// "/admin/payments"). Admin operations do not request a recent sign-in.
 export const api = async <T>(path: string, opts: RequestOptions = {}) =>
   (await apiResponse<T>(path, opts)).body
 
@@ -344,27 +335,7 @@ export async function apiResponse<T>(
   path: string,
   opts: RequestOptions = {}
 ): Promise<ApiResponse<T>> {
-  const method = (opts.method ?? "GET").toUpperCase()
-  if (method === "GET" || method === "HEAD") return send<T>(path, opts)
-  let refusal: ApiError | undefined
-  try {
-    return await stepUp(() =>
-      send<T>(path, opts).catch((error: unknown) => {
-        if (!(error instanceof ApiError) || !error.stepUpRequired) throw error
-        refusal = error
-        throw new AuthKitError(error.status, {
-          type: error.type ?? "",
-          code: "step_up_required",
-          message: error.message,
-          metadata: error.metadata,
-        })
-      })
-    )
-  } catch (error) {
-    // Canceled, or no dialog to answer it: the console sees OpenRails' 401.
-    if (refusal && isAuthKitError(error)) throw refusal
-    throw error
-  }
+  return send<T>(path, opts)
 }
 
 // One cursor page request: cursor is the previous page's next_cursor.

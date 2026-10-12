@@ -3,9 +3,6 @@
 export type OpenRailsErrorCode =
   | "admission_captured"
   | "admission_not_found"
-  | "allowance_meter_not_found"
-  | "allowance_source_in_use"
-  | "allowance_source_invalid"
   | "already_owned"
   | "application_required"
   | "as_of_required"
@@ -124,6 +121,7 @@ export type OpenRailsErrorCode =
   | "price_migration_not_found"
   | "price_not_found"
   | "price_not_sellable"
+  | "product_in_use"
   | "product_not_found"
   | "product_tier_group_conflict"
   | "product_tier_group_in_use"
@@ -181,10 +179,10 @@ export type OpenRailsErrorCode =
   | "unsupported_media_type"
   | "usage_meter_invalid"
   | "usage_meter_not_found"
+  | "usage_not_priced"
   | "usage_rate_card_invalid"
   | "webhook_account_mismatch"
   | "webhook_invalid"
-  | "widget_generation_invalid"
 
 export type OpenRailsErrorType = "api_error" | "authentication_error" | "authorization_error" | "card_error" | "invalid_request_error" | "rate_limit_error"
 
@@ -195,9 +193,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
 > = {
   admission_captured: { status: 409, type: "invalid_request_error", meaning: "The admission was captured; it can no longer be released." },
   admission_not_found: { status: 404, type: "invalid_request_error", meaning: "No admission was made under this request id." },
-  allowance_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card's allowance meter does not exist." },
-  allowance_source_in_use: { status: 409, type: "invalid_request_error", meaning: "The allowance source is in use." },
-  allowance_source_invalid: { status: 409, type: "invalid_request_error", meaning: "The allowance source cannot back this rate card." },
   already_owned: { status: 409, type: "invalid_request_error", meaning: "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume." },
   application_required: { status: 403, type: "authorization_error", meaning: "The route is your backend's: it takes an application's credential, never a person's." },
   as_of_required: { status: 400, type: "invalid_request_error", meaning: "The import needs as_of, its RFC 3339 evidence horizon." },
@@ -316,6 +311,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   price_migration_not_found: { status: 404, type: "invalid_request_error", meaning: "The price migration does not exist." },
   price_not_found: { status: 404, type: "invalid_request_error", meaning: "The price does not exist." },
   price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "No PSP can sell this price." },
+  product_in_use: { status: 409, type: "invalid_request_error", meaning: "Records refer to the product; archive it instead." },
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
@@ -373,8 +369,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
   usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
+  usage_not_priced: { status: 422, type: "invalid_request_error", meaning: "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field." },
   usage_rate_card_invalid: { status: 400, type: "invalid_request_error", meaning: "The usage rate card is invalid." },
   webhook_account_mismatch: { status: 400, type: "invalid_request_error", meaning: "The webhook's account does not match its payload." },
   webhook_invalid: { status: 400, type: "invalid_request_error", meaning: "The outbound webhook is invalid." },
-  widget_generation_invalid: { status: 422, type: "invalid_request_error", meaning: "The model could not produce a valid query for the prompt." },
 }

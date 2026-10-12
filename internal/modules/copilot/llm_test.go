@@ -1,4 +1,4 @@
-package dashboard
+package copilot
 
 import (
 	"context"
@@ -62,12 +62,19 @@ func openaiToolCalls(calls ...[3]string) string {
 
 func jsonString(s string) string { b, _ := json.Marshal(s); return string(b) }
 
+const providerToolName = "lookup_catalog"
+const providerToolInputSchema = `{"type":"object","properties":{"fields":{"type":"array","items":{"type":"string"}}}}`
+
+func providerToolDef() ToolDef {
+	return ToolDef{Name: providerToolName, Description: "Read the catalog", InputSchema: json.RawMessage(providerToolInputSchema)}
+}
+
 // A conversation exercising every message kind: text, assistant tool calls, ok and error results.
 var toolConversation = []ToolMessage{
-	{Role: "user", Text: "how much revenue?"},
-	{Role: "assistant", Text: "let me check", ToolCalls: []ToolCall{{ID: "call_1", Name: askToolName, Input: json.RawMessage(`{"measures":["bogus"]}`)}}},
+	{Role: "user", Text: "which products?"},
+	{Role: "assistant", Text: "let me check", ToolCalls: []ToolCall{{ID: "call_1", Name: providerToolName, Input: json.RawMessage(`{"fields":["bogus"]}`)}}},
 	{Role: "user", ToolResults: []ToolResult{{ToolUseID: "call_1", Content: "query failed validation", IsError: true}}},
-	{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_2", Name: askToolName, Input: json.RawMessage(`{"measures":["net_revenue"]}`)}}},
+	{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_2", Name: providerToolName, Input: json.RawMessage(`{"fields":["product_count"]}`)}}},
 	{Role: "user", ToolResults: []ToolResult{{ToolUseID: "call_2", Content: `{"rows":[[42]]}`}}},
 }
 
@@ -75,9 +82,9 @@ func TestOpenAIWireShape(t *testing.T) {
 	stub, url := newProviderStub(t, openaiText("  {\"query\":{}}  "), openaiText("final answer"))
 	llm := NewOpenAILLM("sk-test", "gpt-test", url+"/openai/v1/") // nested base path, trailing slash
 
-	got, err := llm.Complete(context.Background(), "SYS", []LLMMessage{{Role: "user", Content: "make a widget"}, {Role: "assistant", Content: "bad"}})
+	got, err := llm.CompleteTools(context.Background(), "SYS", nil, []ToolMessage{{Role: "user", Text: "ask catalog"}, {Role: "assistant", Text: "checking"}}, 0)
 	require.NoError(t, err)
-	require.Equal(t, `{"query":{}}`, got)
+	require.Equal(t, `{"query":{}}`, got.Text)
 	require.Equal(t, "/openai/v1/chat/completions", stub.paths[0])
 	require.Equal(t, "Bearer sk-test", stub.headers[0].Get("Authorization"))
 	req := stub.bodies[0]
@@ -85,22 +92,22 @@ func TestOpenAIWireShape(t *testing.T) {
 	require.EqualValues(t, openaiMaxTokens, req["max_completion_tokens"])
 	require.NotContains(t, req, "max_tokens", "reasoning models reject legacy max_tokens")
 	require.NotContains(t, req, "temperature")
-	require.JSONEq(t, `[{"role":"system","content":"SYS"},{"role":"user","content":"make a widget"},{"role":"assistant","content":"bad"}]`, mustJSON(t, req["messages"]))
+	require.JSONEq(t, `[{"role":"system","content":"SYS"},{"role":"user","content":"ask catalog"},{"role":"assistant","content":"checking"}]`, mustJSON(t, req["messages"]))
 
-	turn, err := llm.CompleteTools(context.Background(), "", []ToolDef{askToolDef()}, toolConversation, 512)
+	turn, err := llm.CompleteTools(context.Background(), "", []ToolDef{providerToolDef()}, toolConversation, 512)
 	require.NoError(t, err)
 	require.Equal(t, &ToolTurn{Text: "final answer", StopReason: "stop"}, turn)
 	req = stub.bodies[1]
 	require.EqualValues(t, 512, req["max_completion_tokens"])
 	require.JSONEq(t, mustJSON(t, []map[string]any{{"type": "function", "function": map[string]any{
-		"name": askToolName, "description": askToolDef().Description, "parameters": json.RawMessage(askToolInputSchema),
+		"name": providerToolName, "description": providerToolDef().Description, "parameters": json.RawMessage(providerToolInputSchema),
 	}}}), mustJSON(t, req["tools"]))
 	// Arguments travel as a JSON-encoded string; results are role:"tool" messages; no is_error flag, so errors carry a marker.
 	require.JSONEq(t, `[
-		{"role":"user","content":"how much revenue?"},
-		{"role":"assistant","content":"let me check","tool_calls":[{"id":"call_1","type":"function","function":{"name":"run_metrics_query","arguments":"{\"measures\":[\"bogus\"]}"}}]},
+		{"role":"user","content":"which products?"},
+		{"role":"assistant","content":"let me check","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup_catalog","arguments":"{\"fields\":[\"bogus\"]}"}}]},
 		{"role":"tool","tool_call_id":"call_1","content":"ERROR: query failed validation"},
-		{"role":"assistant","tool_calls":[{"id":"call_2","type":"function","function":{"name":"run_metrics_query","arguments":"{\"measures\":[\"net_revenue\"]}"}}]},
+		{"role":"assistant","tool_calls":[{"id":"call_2","type":"function","function":{"name":"lookup_catalog","arguments":"{\"fields\":[\"product_count\"]}"}}]},
 		{"role":"tool","tool_call_id":"call_2","content":"{\"rows\":[[42]]}"}
 	]`, mustJSON(t, req["messages"]), "empty system prompt sends no system message")
 
@@ -108,31 +115,33 @@ func TestOpenAIWireShape(t *testing.T) {
 }
 
 func TestOpenAIResponseDecoding(t *testing.T) {
-	_, url := newProviderStub(t, openaiToolCalls([3]string{"call_a", askToolName, `{"measures":["net_revenue"]}`}, [3]string{"call_b", askToolName, ""}))
+	_, url := newProviderStub(t, openaiToolCalls([3]string{"call_a", providerToolName, `{"fields":["product_count"]}`}, [3]string{"call_b", providerToolName, ""}))
 	turn, err := NewOpenAILLM("k", "m", url).CompleteTools(context.Background(), "S", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
 	require.NoError(t, err)
 	require.Equal(t, "", turn.Text, "null content is empty text")
 	require.Equal(t, "tool_calls", turn.StopReason)
 	require.Len(t, turn.ToolCalls, 2)
-	require.Equal(t, ToolCall{ID: "call_a", Name: askToolName, Input: json.RawMessage(`{"measures":["net_revenue"]}`)}, turn.ToolCalls[0])
+	require.Equal(t, ToolCall{ID: "call_a", Name: providerToolName, Input: json.RawMessage(`{"fields":["product_count"]}`)}, turn.ToolCalls[0])
 	require.JSONEq(t, `{}`, string(turn.ToolCalls[1].Input), "empty arguments normalize to {}")
 
 	_, url = newProviderStub(t, openaiText("   "))
-	_, err = NewOpenAILLM("k", "m", url).Complete(context.Background(), "s", []LLMMessage{{Role: "user", Content: "q"}})
-	require.ErrorContains(t, err, `empty response (finish_reason "stop")`)
+	turn, err = NewOpenAILLM("k", "m", url).CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
+	require.NoError(t, err)
+	require.Empty(t, turn.Text, "the tool loop handles a turn without an answer")
+	require.Empty(t, turn.ToolCalls)
 }
 
 func TestAnthropicWireShape(t *testing.T) {
-	stub, url := newProviderStub(t, `{"content":[{"type":"text","text":"checking "},{"type":"tool_use","id":"tu_1","name":"run_metrics_query","input":{"measures":["mrr"]}}],"stop_reason":"tool_use"}`)
+	stub, url := newProviderStub(t, `{"content":[{"type":"text","text":"checking "},{"type":"tool_use","id":"tu_1","name":"lookup_catalog","input":{"fields":["active"]}}],"stop_reason":"tool_use"}`)
 	llm := NewAnthropicLLM("ak-test", "claude-test", url+"/")
 
-	turn, err := llm.CompleteTools(context.Background(), "SYS", []ToolDef{askToolDef()}, toolConversation, 0)
+	turn, err := llm.CompleteTools(context.Background(), "SYS", []ToolDef{providerToolDef()}, toolConversation, 0)
 	require.NoError(t, err)
 	require.Equal(t, "checking", turn.Text)
 	require.Equal(t, "tool_use", turn.StopReason)
 	require.Len(t, turn.ToolCalls, 1)
 	require.Equal(t, "tu_1", turn.ToolCalls[0].ID)
-	require.JSONEq(t, `{"measures":["mrr"]}`, string(turn.ToolCalls[0].Input))
+	require.JSONEq(t, `{"fields":["active"]}`, string(turn.ToolCalls[0].Input))
 
 	require.Equal(t, "/v1/messages", stub.paths[0])
 	require.Equal(t, "ak-test", stub.headers[0].Get("x-api-key"))
@@ -140,12 +149,12 @@ func TestAnthropicWireShape(t *testing.T) {
 	req := stub.bodies[0]
 	require.EqualValues(t, anthropicMaxTokens, req["max_tokens"], "maxTokens<=0 falls back to the default cap")
 	require.Equal(t, "SYS", req["system"])
-	require.JSONEq(t, mustJSON(t, []map[string]any{{"name": askToolName, "description": askToolDef().Description, "input_schema": json.RawMessage(askToolInputSchema)}}), mustJSON(t, req["tools"]))
+	require.JSONEq(t, mustJSON(t, []map[string]any{{"name": providerToolName, "description": providerToolDef().Description, "input_schema": json.RawMessage(providerToolInputSchema)}}), mustJSON(t, req["tools"]))
 	require.JSONEq(t, `[
-		{"role":"user","content":[{"type":"text","text":"how much revenue?"}]},
-		{"role":"assistant","content":[{"type":"text","text":"let me check"},{"type":"tool_use","id":"call_1","name":"run_metrics_query","input":{"measures":["bogus"]}}]},
+		{"role":"user","content":[{"type":"text","text":"which products?"}]},
+		{"role":"assistant","content":[{"type":"text","text":"let me check"},{"type":"tool_use","id":"call_1","name":"lookup_catalog","input":{"fields":["bogus"]}}]},
 		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"query failed validation","is_error":true}]},
-		{"role":"assistant","content":[{"type":"tool_use","id":"call_2","name":"run_metrics_query","input":{"measures":["net_revenue"]}}]},
+		{"role":"assistant","content":[{"type":"tool_use","id":"call_2","name":"lookup_catalog","input":{"fields":["product_count"]}}]},
 		{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_2","content":"{\"rows\":[[42]]}"}]}
 	]`, mustJSON(t, req["messages"]))
 }
@@ -154,30 +163,8 @@ func TestProviderErrorsAreSurfaced(t *testing.T) {
 	stub, url := newProviderStub(t, `{"error":{"type":"invalid_request_error","message":"model does not exist"}}`)
 	stub.status = http.StatusBadRequest
 	for name, llm := range map[string]LLM{"openai": NewOpenAILLM("k", "m", url), "anthropic": NewAnthropicLLM("k", "m", url)} {
-		_, err := llm.Complete(context.Background(), "s", []LLMMessage{{Role: "user", Content: "q"}})
+		_, err := llm.CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
 		require.ErrorContains(t, err, "status 400", name)
 		require.ErrorContains(t, err, "invalid_request_error: model does not exist", name)
-		_, err = llm.CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
-		require.ErrorContains(t, err, "status 400", name)
 	}
-}
-
-// The whole ask loop through the real OpenAI client: invalid call, corrective
-// ERROR-marked feedback on the wire, corrected call, answer.
-func TestAskOverOpenAIWire(t *testing.T) {
-	stub, url := newProviderStub(t,
-		openaiToolCalls([3]string{"call_1", askToolName, `{"measures":["no_such_measure"],"range":{"last":"7d"}}`}),
-		openaiToolCalls([3]string{"call_2", askToolName, askQ1}),
-		openaiText("Net revenue was 42."),
-	)
-	res, err := ask(t, NewOpenAILLM("k", "m", url), &fakeExecutor{value: 42})
-	require.NoError(t, err)
-	require.Equal(t, "Net revenue was 42.", res.Answer)
-	require.Len(t, res.Evidence, 1, "only the executed query is evidence")
-	require.Len(t, stub.bodies, 3)
-	turn2 := mustJSON(t, stub.bodies[1]["messages"])
-	require.Contains(t, turn2, `"tool_call_id":"call_1"`)
-	require.Contains(t, turn2, "ERROR: query failed validation")
-	require.Contains(t, turn2, "no_such_measure")
-	require.Contains(t, mustJSON(t, stub.bodies[2]["messages"]), `"tool_call_id":"call_2"`)
 }

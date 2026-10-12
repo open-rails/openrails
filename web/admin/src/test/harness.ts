@@ -51,8 +51,6 @@ export type Reply =
 const BOOTSTRAP = {
   api_base_url: "/v1",
   auth_base_url: "/auth/v1",
-  nl_widgets_enabled: true,
-  ask_enabled: true,
   catalog_copilot_enabled: true,
   catalog_drafting_enabled: false,
   extensions: {},

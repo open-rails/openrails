@@ -200,14 +200,12 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/cancel",
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/resume",
 		"customer_network PUT /v1/network/links/{link_id}/subscriptions/{id}/payment-method",
-		"dashboard_generation POST /v1/metrics/dashboard/widgets/generate",
 		"merchant_config_edits DELETE /v1/merchant/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/merchant/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/merchant/configuration",
 		"merchant_config_edits PATCH /v1/merchant/psps/{id}",
 		"merchant_config_edits POST /v1/merchant/alert-webhooks",
 		"merchant_config_edits POST /v1/merchant/psps",
-		"metrics_ask POST /v1/metrics/ask",
 	}, sorted(unmounted))
 
 	// The archive routes are also a surface of their own (the database-only

@@ -2,37 +2,25 @@
 -- a period. Pending charges wait in owed_items until an order bills them.
 
 -- name: ListUsagePayers :many
--- Every (payer, currency) active since active_since that the period sweep must
--- bill: payers with ledger money movement, and payers whose only activity is
--- catalog-priced usage the sweep still has to rate (no ledger row exists
--- before rating). A payer with no activity has nothing to bill, so the sweep
--- scales with activity, not with every payer on file. period_anchor is the
--- payer's first recorded activity: its first transfer or the opening of its
--- balance account, which the first metered event opens. Both are permanent,
--- so anniversary windows never move when old usage partitions are dropped.
+-- Every (payer, currency) with ledger money movement since active_since: usage
+-- is posted when it is recorded, so a payer with no movement has nothing to
+-- bill and the sweep scales with activity, not with every payer on file.
+-- period_anchor is the payer's first recorded activity (GetCustomerPeriodAnchor):
+-- its first transfer or the opening of its balance account. Both are
+-- permanent, so anniversary windows never move.
 WITH active AS (
-    SELECT lt.customer_id, lt.currency
+    SELECT DISTINCT lt.customer_id, lt.currency
     FROM billing.ledger_transfers lt
     WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id IS NOT NULL
       AND lt.created_at >= sqlc.arg(active_since)::timestamptz
-    UNION
-    SELECT ue.customer_id, ue.currency
-    FROM billing.usage_events ue
-    WHERE ue.merchant_id = sqlc.arg(merchant_id)::uuid AND ue.pricing_authority = 'catalog'
-      AND ue.occurred_at >= sqlc.arg(active_since)::timestamptz
 )
 SELECT p.customer_id::uuid AS customer_id, p.currency,
-       COALESCE(
-           LEAST(
-               (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
-                WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = p.customer_id AND lt.currency = p.currency),
-               (SELECT a.created_at FROM billing.ledger_accounts a
-                WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = p.customer_id
-                  AND a.currency = p.currency AND a.account_type = 'customer_balance')),
-           (SELECT MIN(ue.created_at) FROM billing.usage_events ue
-            WHERE ue.merchant_id = sqlc.arg(merchant_id)::uuid AND ue.customer_id = p.customer_id AND ue.currency = p.currency
-              AND ue.pricing_authority = 'catalog' AND ue.occurred_at >= sqlc.arg(active_since)::timestamptz)
-       )::timestamptz AS period_anchor
+       LEAST(
+           (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
+            WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = p.customer_id AND lt.currency = p.currency),
+           (SELECT a.created_at FROM billing.ledger_accounts a
+            WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = p.customer_id
+              AND a.currency = p.currency AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor
 FROM active p
 ORDER BY p.customer_id, p.currency;
 

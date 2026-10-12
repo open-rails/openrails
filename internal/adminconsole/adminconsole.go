@@ -28,15 +28,6 @@ type Config struct {
 	// APIBaseURL is the admin API base. Standalone default "/v1";
 	// embedded hosts typically "/billing/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// NLWidgetsEnabled mirrors the #741 fail-closed LLM gate: false hides the
-	// natural-language widget box entirely (the generate endpoint is not mounted).
-	// The manual widget builder is always available.
-	NLWidgetsEnabled bool `json:"nl_widgets_enabled"`
-	// AskEnabled mirrors the #756 metrics Q&A gate (llm.ask_enabled AND an LLM
-	// key): false renders the Ask panel as a pointed empty-state (the ask
-	// endpoint is not mounted). Distinct consent from NLWidgetsEnabled because /ask
-	// sends aggregate query results to the LLM provider.
-	AskEnabled bool `json:"ask_enabled"`
 	// CatalogCopilotEnabled mirrors the #779 catalog copilot Q&A gate
 	// (llm.catalog_copilot_enabled AND an LLM key): false renders the catalog
 	// copilot panel as a pointed empty-state.
@@ -72,9 +63,7 @@ type Exchange struct {
 
 // Assistants turns on the console's assistants the deployment has an LLM
 // for, each only where its route group is mounted.
-func (c *Config) Assistants(llm *config.LLMConfig, catalog, metrics bool) {
-	c.NLWidgetsEnabled = metrics && config.LLMConfigured(llm)
-	c.AskEnabled = metrics && config.LLMAskConfigured(llm)
+func (c *Config) Assistants(llm *config.LLMConfig, catalog bool) {
 	c.CatalogCopilotEnabled = catalog && config.LLMCatalogCopilotConfigured(llm)
 	c.CatalogDraftingEnabled = catalog && config.LLMCatalogDraftingConfigured(llm)
 }

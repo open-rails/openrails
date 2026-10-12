@@ -1,14 +1,11 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
@@ -44,32 +41,4 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 	}
 	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "metrics_query_invalid", verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
-}
-
-// MerchantMetricsAsk handles POST /v1/metrics/ask: an LLM answers by
-// running compiler-validated queries in the caller's merchant context. Unlike
-// widget generation it sees aggregate results, so the route mounts only with
-// llm.ask_enabled. The response carries every executed query's verbatim result.
-func MerchantMetricsAsk(r *httprequest.Request) {
-	svc := r.State.DashboardService
-	if !svc.AskConfigured() {
-		r.ErrorCode(billing.CodeServiceUnavailable, "metrics Q&A unavailable")
-		return
-	}
-	var body billing.AskMetricsParams
-	if !r.BindJSON(&body) {
-		return
-	}
-	if strings.TrimSpace(body.Question) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "question is required").WithParam("question"))
-		return
-	}
-	res, err := svc.Ask(r.Request.Context(), strings.TrimSpace(body.Question))
-	if err != nil {
-
-		var noAnswer *dashboard.AskNoAnswerError
-		modelFailure(r, err, errors.As(err, &noAnswer))
-		return
-	}
-	r.JSON(http.StatusOK, res)
 }

@@ -112,10 +112,10 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 	if err != nil {
 		return err
 	}
-	rows, err := s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
-		ID:          product.ID,
+	// The id is the key's: a deleted product of this key revives instead.
+	rows, err := s.db.Gen(ctx).ReviveProduct(ctx, gen.ReviveProductParams{
 		MerchantID:  product.MerchantID,
-		Key:         product.Key,
+		ID:          product.ID,
 		DisplayName: product.DisplayName,
 		Description: desc,
 		CreditGrant: credit,
@@ -123,11 +123,28 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 		TierRank:    tierRank32,
 		Ownership:   ownershipColumn(product.Ownership),
 		Archived:    product.Archived,
-		CreatedAt:   product.CreatedAt,
-		UpdatedAt:   product.UpdatedAt,
 	})
 	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		rows, err = s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
+			ID:          product.ID,
+			MerchantID:  product.MerchantID,
+			Key:         product.Key,
+			DisplayName: product.DisplayName,
+			Description: desc,
+			CreditGrant: credit,
+			TierGroup:   product.TierGroup,
+			TierRank:    tierRank32,
+			Ownership:   ownershipColumn(product.Ownership),
+			Archived:    product.Archived,
+			CreatedAt:   product.CreatedAt,
+			UpdatedAt:   product.UpdatedAt,
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if rows < 1 {
 		return errors.New("no rows affected")

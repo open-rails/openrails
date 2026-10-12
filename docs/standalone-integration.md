@@ -211,12 +211,14 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     Invoker:         userID,
     InvokerType:     billing.InvokerTypeDelegated,
     Currency:        "USD",
-    EstimatedAmount: 50_000,    // native units (USD: micros)
-    ExpiresAt:       &deadline, // required with a hold: the job's deadline
+    // the rate cards price the estimate into the hold
+    Usage:     &billing.UsageEstimate{EventType: "chat", Dimensions: map[string]int64{"input_tokens": prompt, "output_tokens": maxTokens}},
+    ExpiresAt: &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
-    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
-})
+receipts, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{
+    RequestID: requestID, // priced by the cards pinned at admission
+    Usage:     &billing.CaptureUsage{EventType: "chat", Dimensions: map[string]int64{"input_tokens": used.Input, "output_tokens": used.Output}},
+}})
 // or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
@@ -271,13 +273,14 @@ each write:
 # Pre-authorize + hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/app/admissions \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H "Idempotency-Key: admit-req-789" \
-  -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
-       "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
+  -d '{"items":[{"customer_id":"...","invoker":"user-123","request_id":"req-789",
+       "usage":{"event_type":"chat","dimensions":{"input_tokens":4000,"output_tokens":1000}},
+       "expires_at":"2026-09-16T12:00:00Z"}]}'
 
-# Settle at real cost…
-curl -X POST https://openrails.example/v1/app/admissions/req-789/capture \
+# Settle what the work used, at the admitted price…
+curl -X POST https://openrails.example/v1/app/admissions/capture \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H "Idempotency-Key: capture-req-789" \
-  -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
+  -d '{"items":[{"request_id":"req-789","usage":{"event_type":"chat","dimensions":{"input_tokens":4000,"output_tokens":620}}}]}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/app/admissions/release \
@@ -345,11 +348,10 @@ merchants:
   a token exchanged for it (RFC 8693 `group_id`, the `openrails-console`
   client the server declares), so the server needs its resource: `auth.resource.id`,
   which defaults to `public_billing_base_url`.
-- A sensitive operation (one that moves money or grants access) needs a
-  person's token's `auth_time` within 15 minutes; otherwise `401
-  step_up_required` (`WWW-Authenticate: Bearer
-  error="insufficient_user_authentication", max_age="900"`) asks the client to
-  re-authorize. A client acting for itself has no sign-in to renew.
+- OpenRails admin operations rely on the caller's permissions and do not
+  require a recent sign-in. AuthKit's own API-key creation and role grants
+  retain their step-up checks. Sensitive customer-network operations also
+  retain their recent-sign-in policy.
 - With AuthKit as the issuer, the browser gets these tokens by token exchange:
   register a public client with the token-exchange grant and the server as a
   resource, and give billing-ui a `fetch` that calls auth-ui's

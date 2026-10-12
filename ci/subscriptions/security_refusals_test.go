@@ -13,14 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The host's own Authenticator, through a real mount: OpenRails answers every
-// refusal itself, the same as for AuthKit. No token or a forged one is 401
-// with a Bearer challenge, a permission not held 403, a stale person RFC
-// 9470's 401 step-up on an operation that moves money, and a person's API
-// key, which has no sign-in of its own, 403 step_up_unavailable there, while
-// the backend's application key passes on its permission alone. /v1/app takes
-// that application and refuses a person. While the host's sessions are down,
-// 503.
+// The host's Authenticator, through a real mount: OpenRails answers missing
+// or forged credentials with 401, missing permissions with 403 and outages
+// with 503. Staff sessions and personal API keys need the same permission,
+// without a recent sign-in. /v1/app takes an application and refuses a person.
 func TestSecurityHostAuthRefusals(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -67,8 +63,8 @@ func TestSecurityHostAuthRefusals(t *testing.T) {
 		"a forged token":           {bearer(w.auth.token(t, "staff") + "x"), http.MethodGet, "/v1/admin/customers", 401, "authentication_required", `Bearer error="invalid_token"`},
 		"a permission not held":    {bearer(w.auth.token(t, "reader")), http.MethodPost, access, 403, "permission_required", ""},
 		"a customer on the admin":  {bearer(member.token), http.MethodGet, "/v1/admin/customers", 403, "permission_required", ""},
-		"a stale person":           {bearer(w.auth.staleToken(t, "staff")), http.MethodPost, access, 401, "step_up_required", `Bearer error="insufficient_user_authentication", max_age="900"`},
-		"a person's API key":       {bearer(w.auth.apiKeyToken(t, "staff")), http.MethodPost, access, 403, "step_up_unavailable", ""},
+		"a stale person":           {bearer(w.auth.staleToken(t, "staff")), http.MethodPost, access, 201, "", ""},
+		"a person's API key":       {bearer(w.auth.apiKeyToken(t, "staff")), http.MethodPost, access, 201, "", ""},
 		"a person on /v1/app":      {bearer(w.auth.token(t, "staff")), http.MethodGet, "/v1/app/host-events", 403, "application_required", ""},
 		"an application on /v1/me": {bearer(w.auth.hostToken(t)), http.MethodGet, "/v1/me", 403, "invoker_scoped_principal", ""},
 	} {
@@ -77,8 +73,6 @@ func TestSecurityHostAuthRefusals(t *testing.T) {
 		require.Equal(t, tc.code, got.code, name)
 		require.Equal(t, tc.challenge, got.challenge, name)
 	}
-	stale := send(bearer(w.auth.staleToken(t, "staff")), http.MethodPost, access, grant)
-	require.Equal(t, []any{"password"}, stale.metadata["step_up_methods"], "the host's challenge reaches its client")
 
 	got := send(bearer(w.auth.hostToken(t)), http.MethodPost, access, grant)
 	require.Equal(t, http.StatusCreated, got.status, "the backend's key passes on its permission alone: %+v", got)

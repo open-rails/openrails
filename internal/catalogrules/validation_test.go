@@ -2,7 +2,6 @@ package catalogrules
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -73,7 +72,7 @@ func TestValidateUsagePrice(t *testing.T) {
 		"maximum_amount must be >= 0":            perUnit(catalog.PerUnitPrice{UnitAmount: 1, MaximumAmount: -1}),
 		"matrix requires a dimension":            perUnit(catalog.PerUnitPrice{Matrix: &catalog.Matrix{Cells: map[string]catalog.MatrixCell{"s": {}}}}),
 		"matrix requires at least one cell":      perUnit(catalog.PerUnitPrice{Matrix: &catalog.Matrix{Dimension: "size"}}),
-		`matrix cell "s" amounts must be >= 0`:   perUnit(catalog.PerUnitPrice{Matrix: &catalog.Matrix{Dimension: "size", Cells: map[string]catalog.MatrixCell{"s": {Included: -1}}}}),
+		`matrix cell "s" amounts must be >= 0`:   perUnit(catalog.PerUnitPrice{Matrix: &catalog.Matrix{Dimension: "size", Cells: map[string]catalog.MatrixCell{"s": {MaximumAmount: -1}}}}),
 		"tiered mode must be":                    tiered("stairs", catalog.RateTier{UnitAmount: 1}),
 		"tiered price requires tiers":            tiered(catalog.TierModeVolume),
 		"the last tier must be unbounded":        tiered(catalog.TierModeVolume, catalog.RateTier{UpTo: i64(0), UnitAmount: 1}),
@@ -110,21 +109,8 @@ func TestValidateFilterAndDimensions(t *testing.T) {
 	require.ErrorContains(t, ValidateDimensions("rate card", nil, map[string][]string{"region": {"eu"}}, nil), "filter key")
 }
 
-func TestAllowanceAndDurationSpec(t *testing.T) {
-	for in, want := range map[string]time.Duration{"1h": time.Hour, " 30D ": 30 * 24 * time.Hour, "2 h": 2 * time.Hour} {
-		got, err := ParseDurationSpec(in)
-		require.NoError(t, err, in)
-		require.Equal(t, want, got, in)
-	}
-	for _, in := range []string{"", "0h", "-1d", "1w", "h", "1.5h"} {
-		_, err := ParseDurationSpec(in)
-		require.Error(t, err, in)
-	}
-
-	allowance := catalog.Allowance{Included: 5, AccrueFrom: " Runtime Hours ", Cap: "720h"}
-	require.NoError(t, ValidateAllowance("allowance", &allowance))
-	require.Equal(t, "runtime-hours", allowance.AccrueFrom)
+func TestValidateAllowance(t *testing.T) {
+	require.NoError(t, ValidateAllowance("allowance", &catalog.Allowance{Included: 5}))
 	require.NoError(t, ValidateAllowance("allowance", nil))
 	require.ErrorContains(t, ValidateAllowance("allowance", &catalog.Allowance{Included: -1}), "included must be >= 0")
-	require.ErrorContains(t, ValidateAllowance("allowance", &catalog.Allowance{Cap: "1w"}), "allowance.cap")
 }

@@ -58,8 +58,11 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-The module requires no AuthKit, so it never sets your AuthKit version. A host
-imports four kinds of package; everything else is `internal/`:
+The module versions its authentication and user-directory contracts with
+AuthKit, importing only `authkit/auth` and `authkit/userinfo`. Those packages
+use the standard library and link no AuthKit server or database implementation.
+A host may implement the contracts itself or opt into AuthKit. A host imports
+four kinds of OpenRails package; everything else is `internal/`:
 
 | Package | Holds |
 |---|---|
@@ -297,8 +300,8 @@ operation rather than replaying an already-applied document.
 
 Omitted products, prices and fields keep their stored values. Use `archived: true`
 to retire an entry and `archived: false` to restore it. `prune: true` explicitly
-opts into archiving omitted products/prices that only documents set; no catalog
-operation deletes them.
+opts into removing omitted products/prices that only documents set: deleted
+when nothing ever referred to them, archived otherwise.
 The apply makes no provider writes. It may read a provider to verify an explicit
 reference. `MerchantDeclaration.Catalog` can finish a temporarily unavailable provider check in
 the background, with `Ready` failing until that startup batch succeeds.
@@ -310,8 +313,8 @@ An engine's handle is the process owner and writes its catalog directly
 callers. YAML is decoded into the same `catalog.Application` as JSON
 (`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
-record, and `prune: true` archives omitted products and prices that only
-documents set. Price keys are unique within their product. Key lookups and checkout selections
+record, and `prune: true` removes omitted products and prices that only
+documents set (deleted when never referenced, archived otherwise). Price keys are unique within their product. Key lookups and checkout selections
 therefore carry both `product_key` and `price_key`; price IDs select one immutable
 record directly. Each product/key chain has automatic price revisions starting at
 zero. New financial terms create a new revision; repeating or reactivating old
@@ -324,7 +327,7 @@ the account in `Config.Merchants`; rotate by updating it and constructing a new 
 
 OpenRails has no logins of its own, and you write no middleware for it. You
 supply your auth only when you mount routes, as `Routes.Auth`: an
-`openrails.Authenticator` (helpers/auth's), which only says who a request is.
+`openrails.Authenticator` (authkit/auth's), which only says who a request is.
 OpenRails asks it once per request and builds every gate from its answer, a
 `Verified`:
 
@@ -334,14 +337,14 @@ OpenRails asks it once per request and builds every gate from its answer, a
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
 | `RootScope(ctx)` (`auth.Root`) | where your staff hold `root:` permissions; needed with any route group on |
 | `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff and programmatic route, with the route's permission: its `merchant:` name in the merchant's own scope (`{Authority: RootScope's, ID: the merchant's id}`), else its `root:` name in `RootScope`, checked live; without it the request holds nothing |
-| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | then, when a person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An application has no sign-in to renew; a person whose credential has none (a personal API key) is refused 403 `step_up_unavailable` |
+| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on customer-network routes marked `sensitive` in [routes](api/routes.md). Staff routes do not request a recent sign-in, including when called with a personal API key |
 
 OpenRails answers every refusal itself, with the status and challenge
 `auth.Refuse` gives every consumer: 401 with `WWW-Authenticate` for a missing,
 invalid, expired or revoked credential (your `auth.Challenge` headers win), 403
 for a permission not held, 503 `authentication_unavailable` or
-`authorization_unavailable` when your auth cannot answer, and RFC 9470's step-up
-for a stale sign-in: 401 `step_up_required` with `WWW-Authenticate: Bearer
+`authorization_unavailable` when your auth cannot answer. A sensitive
+customer-network route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age=...` and your challenge's
 metadata. An identity without a subject or invoker is refused, so an
 Authenticator that checks nothing admits no one. Each handler checks the
@@ -386,7 +389,7 @@ events, `root:orders:manage` for orders
 (`root:customers:read` finds a customer by openrails.dev account, only where
 the [customer network](customer-network.md) runs). Give a program a role
 holding only what its task needs.
-With any route group on, `Auth` is a helpers/auth `Root`, as
+With any route group on, `Auth` is a authkit/auth `Root`, as
 `ak.Authenticator()` is: its `RootScope` is AuthKit's root group, and a
 merchant's own scope is the AuthKit group whose id is the merchant's. `Mount`
 fails for a route neither of whose names your Authenticator knows
@@ -398,7 +401,7 @@ person `SubjectUser` and an application's credential `SubjectApplication`,
 since the programmatic routes refuse a person whatever it holds.
 `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
 checks an implementation in your CI with helpers' conformance kit
-(`github.com/open-rails/helpers/auth/authtest`): anonymous, refused, staff, a
+(`github.com/open-rails/authkit/auth/authtest`): anonymous, refused, staff, a
 user holding nothing, one-permission holders, a stale sign-in and your
 application, each of the route groups' `root:` permissions in exactly your
 `RootScope`, and staff signed out last; it fails on any acceptance or mix-up,
@@ -465,7 +468,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
+| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`; embedded, in the host's transaction: `AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
 | Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
@@ -484,12 +487,14 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     Invoker:         userID,
     InvokerType:     billing.InvokerTypeDelegated,
     Currency:        "USD",
-    EstimatedAmount: 50_000,    // native units (USD: micros)
-    ExpiresAt:       &deadline, // required with a hold: the job's deadline
+    // the rate cards price the estimate into the hold
+    Usage:     &billing.UsageEstimate{EventType: "chat", Dimensions: map[string]int64{"input_tokens": prompt, "output_tokens": maxTokens}},
+    ExpiresAt: &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
-    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
-})
+receipts, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{
+    RequestID: requestID, // priced by the cards pinned at admission
+    Usage:     &billing.CaptureUsage{EventType: "chat", Dimensions: map[string]int64{"input_tokens": used.Input, "output_tokens": used.Output}},
+}})
 held, err := client.ListEntitlements(ctx, billing.EntitlementListParams{
     CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}, Entitlements: []string{"premium"},
 }) // held.Items is empty when the key is not held

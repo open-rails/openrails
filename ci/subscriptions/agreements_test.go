@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/helpers/smtp/smtptest"
-	"github.com/open-rails/helpers/userinfo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -153,15 +153,24 @@ func TestRevokingAgreements(t *testing.T) {
 		map[string]any{"payment": map[string]any{"payment_method_id": card}, "expected_total": "30000000"})
 	require.Equal(t, "complete", paid["status"], "%v", paid)
 	require.Len(t, w.nmi.ledger(""), charged+1, "the customer's own payment")
-	err = use(10_000_000)
-	require.Error(t, err, "no credit without the agreement")
-	require.Contains(t, err.Error(), "insufficient")
+	// Admission is the gate: usage, once done, is recorded and owed.
+	admit := func(amount int64) *billing.Admission {
+		t.Helper()
+		expires := w.clock.Now().Add(time.Hour)
+		verdicts, err := client.Admit(ctx, []billing.AdmitParams{{RequestID: uuid.NewString(), CustomerID: c.cid(), Invoker: c.id,
+			InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: amount, ExpiresAt: &expires}})
+		require.NoError(t, err)
+		return verdicts[0].Admission
+	}
+	refused := admit(10_000_000)
+	require.False(t, refused.Allowed, "no credit without the agreement")
+	require.Contains(t, *refused.DenyCode, "insufficient")
 	_, err = createCreditGrant(ctx, client, c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 20_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
-	require.NoError(t, use(10_000_000), "the balance stays the customer's to spend")
-	require.Error(t, use(50_000_000), "but no more than it")
+	require.True(t, admit(10_000_000).Allowed, "the balance stays the customer's to spend")
+	require.False(t, admit(50_000_000).Allowed, "but no more than it")
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": card})
-	require.NoError(t, use(50_000_000), "a new agreement: credit again")
+	require.True(t, admit(50_000_000).Allowed, "a new agreement: credit again")
 
 	// Revoking the subscription's agreement cancels it at the period's end,
 	// confirmed by email; the next renewal never comes.

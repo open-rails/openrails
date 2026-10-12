@@ -43,7 +43,7 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 			}
 		}
 	}
-	require.True(t, allowance, "pooled egress allowance survives")
+	require.True(t, allowance, "an included allowance survives")
 	require.NotNil(t, matrix)
 	model, ok := catalogrules.ForCell(*matrix, "s-1vcpu-1gb")
 	require.True(t, ok)

@@ -115,7 +115,7 @@ export interface CursorOptions {
  */
 export interface UsageOptions extends CursorOptions {
   currency: string
-  groupBy?: "event_type" | "resource" | "invoker"
+  groupBy?: "event_type" | "resource" | "invoker" | "meter"
   from?: string
   to?: string
 }

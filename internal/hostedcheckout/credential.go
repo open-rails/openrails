@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"

@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -33,9 +33,9 @@ import (
 // Verified; then it pins the merchant the credential is bound to
 // (boundMerchant) and, by the route's tier, checks who the subject is, asks
 // the Verified's Can for the route's permission (its merchant: name in that
-// merchant's scope, else its root: name in the Authenticator's root scope)
-// and, for a person on a Sensitive route, its CheckRecentSignIn. Nothing in
-// the request names the merchant. It answers every refusal itself, as
+// merchant's scope, else its root: name in the Authenticator's root scope).
+// Nothing in the request names the merchant. Network routes marked
+// Sensitive also ask for CheckRecentSignIn. It answers every refusal itself, as
 // auth.Refuse says, and binds the verdict in its own context, where handlers
 // re-check it.
 
@@ -269,7 +269,7 @@ func pin(r *httprequest.Request, target billingauth.Target) {
 // boundMerchant is the one merchant v's credential is bound to, by the
 // first of three bindings, and nothing of the request:
 //
-//   - the scope it is bound to (helpers/auth Bound), which is a merchant's in
+//   - the scope it is bound to (authkit/auth Bound), which is a merchant's in
 //     the Authenticator's root authority, its id the merchant's; a scope that
 //     is not never falls through to the next binding;
 //   - the merchant that declares its issuer (MerchantDeclaration.Issuer);
@@ -353,7 +353,7 @@ func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Ver
 	return v, c, target, true
 }
 
-// rootScope is where a's root: permissions are held (helpers/auth Root). A
+// rootScope is where a's root: permissions are held (authkit/auth Root). A
 // panic, or a scope that is not whole, is the provider's fault.
 func rootScope(ctx context.Context, a any) (scope billingauth.Scope, err error) {
 	root, ok := a.(auth.Root)
@@ -403,7 +403,7 @@ func asked(a any, pair Pair) Pair {
 // root scope to ask in, or knows neither name.
 func needs(route Route, a billingauth.Authenticator) Pair {
 	if _, ok := a.(auth.Root); !ok {
-		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: staff and programmatic routes ask its RootScope"})
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a authkit/auth Root: staff and programmatic routes ask its RootScope"})
 	}
 	pair := route.Needs()
 	if pair == (Pair{}) {
@@ -518,8 +518,8 @@ type customerOf struct {
 // customers (issuer ""): a person whose credential is bound to no scope (the
 // user of the issuer the merchant declares), an account of the
 // Authenticator's own authority bound to the merchant, and the customer the
-// merchant's own backend names in an assertion (RFC 7523: the token's client
-// is the application that asserted it). Any other bound credential's user is
+// merchant's own backend names in an assertion (auth.Asserted). Any other
+// bound credential's user is
 // its issuer's, pinned to it. A token of the Authenticator's own authority
 // that carries scopes but not ScopeSelf, such as a console's, was not issued
 // to act as a customer; one that says nothing of its scopes is the host's
@@ -541,7 +541,7 @@ func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billin
 	case !bound:
 		return customerOf{self: true}, nil
 	}
-	if client, ok := v.(interface{ ClientID() string }); ok && client.ClientID() == c.Issuer {
+	if asserted, ok := v.(auth.Asserted); ok && asserted.Asserted() {
 		return customerOf{self: true}, nil
 	}
 	return customerOf{issuer: c.Issuer, self: true}, nil
@@ -555,7 +555,7 @@ func (e *Env) networkGates(route Route) []router.Middleware {
 		panic(MountError{Route: route.Key(), Reason: "a network route needs Routes.Auth"})
 	}
 	if _, ok := a.(auth.Root); !ok {
-		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: a network account is its root authority's own"})
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a authkit/auth Root: a network account is its root authority's own"})
 	}
 	return []router.Middleware{verify(route, a), e.networkCheck(route, a)}
 }
@@ -633,8 +633,7 @@ func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.Cus
 
 // staffGates gates a merchant-tier route: a person or an application holding
 // the route's permission at the merchant its credential is bound to, or in
-// the root scope, and, for a person on an operation that moves money or
-// removes access, a recent sign-in.
+// the root scope. Admin operations do not ask for a recent sign-in.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
@@ -645,12 +644,6 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 		panic(MountError{Route: route.Key(), Reason: "an admin route declares no permission"})
 	}
 	return []router.Middleware{verify(route, a), e.staffCheck(route, a, pair)}
-}
-
-// Sensitive reports a merchant route whose operation moves money or removes
-// access: a person needs a recent sign-in for it.
-func Sensitive(route Route) bool {
-	return route.Auth == AuthMerchant && route.Sensitive
 }
 
 // bindStaff binds the admitted staff member or application at target: the
@@ -665,15 +658,6 @@ func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) ro
 			v, c, target, ok := e.bound(r, route, a)
 			if !ok || !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
-			}
-			// An application has no sign-in to renew: its permission is the
-			// whole check. A person proves a recent one, whatever credential
-			// they present.
-			if Sensitive(route) && c.SubjectKind == billingauth.SubjectUser {
-				if err := recentSignIn(r.Request.Context(), v); err != nil {
-					refuse(r, route, a, stepRecentSignIn, err)
-					return
-				}
 			}
 			bindStaff(r, c, route, target)
 			next(r)

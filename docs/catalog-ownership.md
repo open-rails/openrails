@@ -63,8 +63,12 @@ product's keys owned as they were.
 ## Prune
 
 `prune: true` makes the document the whole catalog. An omitted product or price
-is archived only when documents alone set its fields; one an edit touched or
-created stays, and the file lets go of its fields.
+key that documents alone set is deleted when nothing ever referred to it, and
+archived otherwise (see [deleting a product](merchant-guide.md#deleting-a-product)).
+An omitted one an edit touched or created stays, and the file lets go of its
+fields. Without `prune`, an omitted product or price is never touched: a
+partial file deletes nothing. This holds for `MerchantDeclaration.Catalog` at
+start and for `POST /v1/catalog/apply` alike.
 
 ## Revisions and concurrent edits
 

@@ -3,9 +3,7 @@ package catalogrules
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/catalog"
 )
@@ -190,14 +188,18 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	return nil
 }
 
-// ValidateUsagePrice rejects flat prices, which are not meter-linked usage
-// prices, after applying the canonical charge-model validation.
+// ValidateUsagePrice validates a meter's price: no flat fee, and no volume
+// tiers, whose price for earlier units falls when a later event reaches a
+// cheaper band, so an event could owe a negative amount.
 func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 	if err := ValidateRatePrice(where, price); err != nil {
 		return err
 	}
 	if price.Model == catalog.ModelFlat {
 		return fmt.Errorf("%s: flat prices cannot be attached to a meter", where)
+	}
+	if price.Model == catalog.ModelTiered && price.Tiered.Mode == catalog.TierModeVolume {
+		return fmt.Errorf("%s: a metered price cannot use volume tiers; use graduated", where)
 	}
 	return nil
 }
@@ -209,12 +211,6 @@ func ValidateAllowance(where string, allowance *catalog.Allowance) error {
 	}
 	if allowance.Included < 0 {
 		return fmt.Errorf("%s: allowance.included must be >= 0", where)
-	}
-	allowance.AccrueFrom = NormalizeKey(allowance.AccrueFrom)
-	if allowance.Cap != "" {
-		if _, err := ParseDurationSpec(allowance.Cap); err != nil {
-			return fmt.Errorf("%s: allowance.cap: %w", where, err)
-		}
 	}
 	return nil
 }
@@ -278,29 +274,6 @@ func ValidateDimensions(
 	return nil
 }
 
-// ParseDurationSpec parses the catalog duration grammar used by usage windows,
-// allowances and metered gauge denominators: whole hours or whole days only.
-// "once" is accepted by callers that model non-recurring prices.
-func ParseDurationSpec(value string) (time.Duration, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return 0, fmt.Errorf("duration is required")
-	}
-	unit := value[len(value)-1:]
-	n, err := strconv.ParseInt(strings.TrimSpace(value[:len(value)-1]), 10, 64)
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("duration %q must be a positive whole h or d value", value)
-	}
-	switch unit {
-	case "h":
-		return time.Duration(n) * time.Hour, nil
-	case "d":
-		return time.Duration(n) * 24 * time.Hour, nil
-	default:
-		return 0, fmt.Errorf("duration %q must use h or d", value)
-	}
-}
-
 func validateTiers(where string, tiers []catalog.RateTier) error {
 	if len(tiers) == 0 {
 		return fmt.Errorf("%s: tiered price requires tiers", where)
@@ -341,7 +314,7 @@ func validateMatrix(where string, matrix *catalog.Matrix) error {
 		return fmt.Errorf("%s: matrix requires at least one cell", where)
 	}
 	for key, cell := range matrix.Cells {
-		if cell.UnitAmount < 0 || cell.MaximumAmount < 0 || cell.Included < 0 {
+		if cell.UnitAmount < 0 || cell.MaximumAmount < 0 {
 			return fmt.Errorf("%s: matrix cell %q amounts must be >= 0", where, key)
 		}
 	}
@@ -362,8 +335,8 @@ func validRateCurrency(value string) bool {
 }
 
 // ValidateRateCard normalizes and validates one rate card: a flat fee with no
-// meter, or a usage price on a meter. Meters are checked to exist by the
-// caller.
+// meter, or a usage price on a meter, which states no payment term. Meters
+// are checked to exist by the caller.
 func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	rc.Meter = NormalizeKey(rc.Meter)
 	rc.PaymentTerm = catalog.PaymentTerm(strings.ToLower(strings.TrimSpace(string(rc.PaymentTerm))))
@@ -386,6 +359,12 @@ func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	}
 	if rc.Meter == "" {
 		return fmt.Errorf("%s: a %s rate card requires a meter", where, rc.Price.Model)
+	}
+	if rc.PaymentTerm != "" {
+		return fmt.Errorf("%s: a metered rate card states no payment_term: its charges are posted when usage is recorded", where)
+	}
+	if err := ValidateUsagePrice(where, &rc.Price); err != nil {
+		return err
 	}
 	return ValidateAllowance(where, rc.Allowance)
 }

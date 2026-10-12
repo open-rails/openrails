@@ -24,8 +24,8 @@ func TestCapabilities(t *testing.T) {
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "merchant_config_edits": false,
-		"catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
-		"hosted_extra": true,
+		"catalog_copilot": false,
+		"hosted_extra":    true,
 	}, caps.Features)
 
 	// Merchant-config edits need the group and an editable source.
@@ -53,8 +53,8 @@ func TestRoutesValidation(t *testing.T) {
 		{"public, customer and webhooks, no root scope", config.Routes{Auth: rootless{auth}}, ""},
 		{"admin", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}}, ""},
 		{"every group", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}, ""},
-		{"a staff group, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Metrics: true}}, "helpers/auth Root"},
-		{"programmatic, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Programmatic: true}}, "helpers/auth Root"},
+		{"a staff group, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Metrics: true}}, "authkit/auth Root"},
+		{"programmatic, no root scope", config.Routes{Auth: rootless{auth}, RouteGroups: config.RouteGroups{Programmatic: true}}, "authkit/auth Root"},
 	} {
 		err := ValidateRoutes(tc.sel)
 		if tc.err == "" {
@@ -65,14 +65,14 @@ func TestRoutesValidation(t *testing.T) {
 	}
 }
 
-// rootless is an Authenticator that is no helpers/auth Root.
+// rootless is an Authenticator that is no authkit/auth Root.
 type rootless struct{ a *authtest.Fake }
 
 func (r rootless) Authenticate(req *http.Request) (billingauth.Verified, error) {
 	return r.a.Authenticate(req)
 }
 
-// catalogued knows only its own permissions (helpers/auth PermissionCatalog).
+// catalogued knows only its own permissions (authkit/auth PermissionCatalog).
 type catalogued struct {
 	*authtest.Fake
 	known []billing.Permission

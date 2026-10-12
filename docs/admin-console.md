@@ -283,7 +283,7 @@ the mount's `Auth` for its permission, at the merchant or in the root scope
 
 Browse to the console path, `https://<your-host>/admin/` by default (the bare
 path redirects). The SPA bootstraps from `config.json` beneath it:
-`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer, merchant}`.
+`{auth_base_url, api_base_url, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer, merchant}`.
 
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers
@@ -291,10 +291,10 @@ whose sign-in form offers password, the deployment's login-capable OIDC provider
 recovery and backup codes. auth-ui keeps the access token in memory and the
 rotating refresh token in the tab's `sessionStorage`, which restores the session
 across reloads of that tab; every API call carries the bearer, never a cookie.
-Every write runs through auth-ui's step-up dialog: when OpenRails answers
-`401 step_up_required` (RFC 9470's `insufficient_user_authentication`, an owner
-operation after a stale sign-in), the console stays signed in and the dialog
-asks the user to confirm it's them and the write is retried. Who can sign in
+OpenRails admin writes do not request a recent sign-in. AuthKit's own
+API-key creation and role grants retain auth-ui's step-up dialog: after
+`401 step_up_required`, the console asks the user to confirm it's them and
+retries that AuthKit operation. Who can sign in
 and what they may do: standalone, the server's merchant roles
 (`owner`/`support`/`viewer`, or the merchant's custom roles) or a trusted
 issuer's token; embedded, the host's `Routes.Auth`.
@@ -304,10 +304,10 @@ issuer's token; embedded, the host's `Routes.Auth`.
 completes the code flow with PKCE, the access token stays in memory and the
 rotating refresh token in IndexedDB. The server's AuthKit must trust the
 issuer for the merchant, and the console asks for tokens for
-`auth.resource.id`. A write OpenRails refuses with `step_up_required` (a
-sign-in older than 15 minutes) re-authorizes at the issuer with `max_age=0` in
-a popup and runs again. Sign-out revokes the refresh token and ends the
-issuer session.
+`auth.resource.id`. AuthKit operations that request step-up re-authorize
+at the issuer with `max_age=0` in a popup and run again. OpenRails admin
+writes use no step-up dialog. Sign-out revokes the refresh token and ends
+the issuer session.
 
 Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 `/admin/config.json` to `localhost:3053`).
@@ -316,7 +316,7 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 
 | Page | Route | What it does |
 |------|-------|--------------|
-| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant) + the Ask panel. A range picker (presets, or a custom start and end date) sets every widget's range and stays in the URL (`?range=7d`, `?from=2026-09-01&to=2026-09-30`); a widget with `fixed_range` keeps its own, as the default "today" row does (each tile against yesterday) |
+| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant). A range picker (presets, or a custom start and end date) sets every widget's range and stays in the URL (`?range=7d`, `?from=2026-09-01&to=2026-09-30`); a widget with `fixed_range` keeps its own, as the default "today" row does (each tile against yesterday) |
 | Reports | `/reports` | The daily subscription report (started, canceled, net change per UTC day) and the monthly renewal report (renewal payments, cancellations, churn per UTC month) over the dashboard's range, each with a CSV download |
 | Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access (1, 7, 30 or 365 days after any access the customer has, until a date, or never) |
 | Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view, and two views: Renewing soon (active, period ending within 7 days, soonest first) and Recently canceled (the last 30 days, latest first), as `?view=renewing_soon` / `?view=recently_canceled`; cancel (typed confirmation), resume, NMI payment-method change |
@@ -331,8 +331,6 @@ the UI shows a pointed empty-state instead of a broken button:
 
 | Assistant | Route group | Gate (config / env) |
 |---------|---------|--------------------|
-| Widget generation (proposes a widget; sees only the metrics schema; saving the layout is MerchantConfig's) | Metrics | `llm.api_key` / `LLM_API_KEY` |
-| Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | Metrics | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
 | Catalog copilot Q&A (read-only catalog/subscriber aggregates) | Catalog | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
 | Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | Catalog, with catalog updates | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
 

@@ -45,7 +45,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		APIBaseURL:  StandaloneV1Prefix,
 		Extensions:  s.adminConsole.Extensions,
 	}
-	cfg.Assistants(s.cfg.LLM, s.groups.Catalog, s.groups.Metrics)
+	cfg.Assistants(s.cfg.LLM, s.groups.Catalog)
 	issuer, err := consoleIssuer(s.consoleIssuer, s.resource)
 	if err != nil {
 		return err

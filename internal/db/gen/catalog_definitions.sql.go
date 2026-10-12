@@ -116,7 +116,7 @@ type ListCatalogProductRateCardsRow struct {
 	ProductID   uuid.UUID
 	Ordinal     int32
 	MeterKey    *string
-	PaymentTerm string
+	PaymentTerm *string
 	Filter      []byte
 	Allowance   []byte
 	Price       []byte
@@ -165,7 +165,7 @@ type ListDefaultCatalogRateCardsRow struct {
 	ProductKey  string
 	Ordinal     int32
 	MeterKey    string
-	PaymentTerm string
+	PaymentTerm *string
 	Filter      []byte
 	Allowance   []byte
 	Price       []byte
@@ -365,7 +365,7 @@ INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price, id, created_at)
 VALUES (
     $1::uuid, $2::uuid, $3::bigint,
-    NULLIF($4::text, ''), $5::text, $6::jsonb,
+    NULLIF($4::text, ''), NULLIF($5::text, ''), $6::jsonb,
     $7::jsonb, $8::jsonb,
     COALESCE($9::uuid, gen_random_uuid()), COALESCE($10::timestamptz, now())
 )

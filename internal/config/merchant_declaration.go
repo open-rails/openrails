@@ -36,7 +36,7 @@ type MerchantDeclaration struct {
 	// own code or configuration, per engine; a merchant file never carries
 	// it, since several hosts with their own issuers may share one. Empty
 	// binds by scope only: a credential must be bound to the merchant's
-	// group (helpers/auth Bound), whose id is the merchant's.
+	// group (authkit/auth Bound), whose id is the merchant's.
 	Issuer string `yaml:"-"`
 	// Catalog optionally applies the merchant's catalog document at startup,
 	// using the same permanent content-hash replay as Client.ApplyCatalog. A

@@ -1,5 +1,10 @@
 # Changelog
 
+## Usage priced when recorded
+
+- `getUsage({ groupBy: "meter" })` groups what each meter, and matrix cell,
+  charged: `UsageRow` gains `cell` and `quantity`.
+
 ## Public products and staff route groups
 
 - Breaking: public `listProducts()` now reads `GET /products`. Catalog

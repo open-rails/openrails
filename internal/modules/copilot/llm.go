@@ -1,4 +1,4 @@
-package dashboard
+package copilot
 
 import (
 	"bytes"
@@ -10,12 +10,6 @@ import (
 	"strings"
 	"time"
 )
-
-// LLMMessage is one conversation turn for the generator loop.
-type LLMMessage struct {
-	Role    string // "user" | "assistant"
-	Content string
-}
 
 // ToolDef declares one tool for a tool-use turn.
 type ToolDef struct {
@@ -55,18 +49,15 @@ type ToolTurn struct {
 	StopReason string
 }
 
-// LLM is the provider seam for model calls: text completion (widget
-// generation) and tool-use turns (Q&A). AnthropicLLM and OpenAILLM implement
-// it; tests inject stubs via Service.SetLLM.
+// LLM is the tool-use provider for the catalog copilot.
 type LLM interface {
-	Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error)
 	CompleteTools(ctx context.Context, system string, tools []ToolDef, msgs []ToolMessage, maxTokens int) (*ToolTurn, error)
 }
 
 const (
 	anthropicBaseURL    = "https://api.anthropic.com"
 	anthropicAPIVersion = "2023-06-01"
-	// generation output is one small JSON object; cap generously.
+	// Default cap for one tool-use turn.
 	anthropicMaxTokens = 2048
 )
 
@@ -91,18 +82,6 @@ func NewAnthropicLLM(apiKey, model, baseURL string) *AnthropicLLM {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: 60 * time.Second},
 	}
-}
-
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-}
-
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
 }
 
 type anthropicToolsRequest struct {
@@ -156,11 +135,11 @@ type anthropicResponse struct {
 func (a *AnthropicLLM) send(ctx context.Context, reqBody any) (*anthropicResponse, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: marshal request: %w", err)
+		return nil, fmt.Errorf("catalog llm: marshal request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: build request: %w", err)
+		return nil, fmt.Errorf("catalog llm: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", a.apiKey)
@@ -168,49 +147,25 @@ func (a *AnthropicLLM) send(ctx context.Context, reqBody any) (*anthropicRespons
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: request failed: %w", err)
+		return nil, fmt.Errorf("catalog llm: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: read response: %w", err)
+		return nil, fmt.Errorf("catalog llm: read response: %w", err)
 	}
 	var out anthropicResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("dashboard llm: non-JSON response (status %d)", resp.StatusCode)
+		return nil, fmt.Errorf("catalog llm: non-JSON response (status %d)", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		msg := "unknown error"
 		if out.Error != nil {
 			msg = fmt.Sprintf("%s: %s", out.Error.Type, out.Error.Message)
 		}
-		return nil, fmt.Errorf("dashboard llm: anthropic API error (status %d): %s", resp.StatusCode, msg)
+		return nil, fmt.Errorf("catalog llm: anthropic API error (status %d): %s", resp.StatusCode, msg)
 	}
 	return &out, nil
-}
-
-// Complete sends one Messages-API turn and returns the concatenated text
-// content.
-func (a *AnthropicLLM) Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error) {
-	req := anthropicRequest{Model: a.model, MaxTokens: anthropicMaxTokens, System: system}
-	for _, m := range msgs {
-		req.Messages = append(req.Messages, anthropicMessage(m))
-	}
-	out, err := a.send(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	for _, block := range out.Content {
-		if block.Type == "text" {
-			b.WriteString(block.Text)
-		}
-	}
-	text := strings.TrimSpace(b.String())
-	if text == "" {
-		return "", fmt.Errorf("dashboard llm: empty response (stop_reason %q)", out.StopReason)
-	}
-	return text, nil
 }
 
 // CompleteTools sends one tool-use turn: the conversation (with prior

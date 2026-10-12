@@ -126,18 +126,12 @@ func writeMeteringError(r *httprequest.Request, err error) {
 		status, code = http.StatusNotFound, "default_rate_card_not_found"
 	case errors.Is(err, billingservice.ErrRateCardProductNotFound):
 		status, code = http.StatusNotFound, "rate_card_product_not_found"
-	case errors.Is(err, billingservice.ErrAllowanceMeterNotFound):
-		status, code = http.StatusNotFound, "allowance_meter_not_found"
 	case errors.Is(err, billingservice.ErrUsageRateCardInvalid):
 		status, code = http.StatusBadRequest, "usage_rate_card_invalid"
 	case errors.Is(err, billingservice.ErrMeterInUse):
 		status, code = http.StatusConflict, "meter_in_use"
 	case errors.Is(err, billingservice.ErrMeterRateCardConflict):
 		status, code = http.StatusConflict, "meter_rate_card_conflict"
-	case errors.Is(err, billingservice.ErrAllowanceSourceInvalid):
-		status, code = http.StatusConflict, "allowance_source_invalid"
-	case errors.Is(err, billingservice.ErrAllowanceSourceInUse):
-		status, code = http.StatusConflict, "allowance_source_in_use"
 	default:
 		writeRefusal(r, err, "metering operation failed")
 		return

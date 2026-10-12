@@ -77,7 +77,7 @@ func (w *world) arrearsInvoice(c *customer) billing.OrderID {
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: c.cid(), Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
 	require.NoError(w.t, err)
 	require.True(w.t, admitted[0].Allowed(), "%+v", admitted)
-	_, err = client.CaptureAdmission(ctx, request, billing.CaptureAdmissionParams{Amount: owed})
+	_, err = captureAdmission(ctx, client, request, owed, nil)
 	require.NoError(w.t, err)
 	w.advance(time.Minute)
 	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

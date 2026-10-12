@@ -70,6 +70,9 @@ migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
+migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
+migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
+migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -145,10 +148,13 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   column captured_amount bigint
   column captured_at timestamp with time zone
   column released_at timestamp with time zone
+  column estimate_usage jsonb
+  column rate_cards jsonb
   constraint admission_operations_available_amount_check CHECK ((available_amount >= 0))
   constraint admission_operations_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
   constraint admission_operations_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint admission_operations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint admission_operations_estimate_usage_check CHECK ((((estimate_usage IS NULL) = (rate_cards IS NULL)) AND ((estimate_usage IS NULL) OR ((jsonb_typeof(estimate_usage) = 'object'::text) AND (octet_length((estimate_usage)::text) <= 65536))) AND ((rate_cards IS NULL) OR ((jsonb_typeof(rate_cards) = 'array'::text) AND (octet_length((rate_cards)::text) <= 262144)))))
   constraint admission_operations_estimated_amount_check CHECK ((estimated_amount >= 0))
   constraint admission_operations_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))
   constraint admission_operations_hold_lifetime_check CHECK (((expires_at IS NULL) OR (expires_at <= (admitted_at + '720:00:00'::interval))))
@@ -260,6 +266,7 @@ table billing.catalog_meters
   constraint catalog_meters_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_meters_pkey PRIMARY KEY (merchant_id, key)
   constraint catalog_meters_revision_check CHECK ((revision >= 1))
+  index CREATE INDEX catalog_meters_event_type_idx ON billing.catalog_meters USING btree (merchant_id, COALESCE(NULLIF(event_type, ''::text), key))
   index CREATE UNIQUE INDEX catalog_meters_pkey ON billing.catalog_meters USING btree (merchant_id, key)
   trigger CREATE TRIGGER catalog_authored_meter BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_meter_revision BEFORE INSERT OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
@@ -270,7 +277,7 @@ table billing.catalog_rate_cards
   column product_id uuid NOT NULL
   column ordinal integer NOT NULL
   column meter_key text
-  column payment_term text NOT NULL
+  column payment_term text
   column filter jsonb NOT NULL
   column allowance jsonb
   column price jsonb NOT NULL
@@ -280,6 +287,7 @@ table billing.catalog_rate_cards
   constraint catalog_rate_cards_meter_key_fkey FOREIGN KEY (merchant_id, meter_key) REFERENCES billing.catalog_meters(merchant_id, key) ON DELETE RESTRICT
   constraint catalog_rate_cards_ordinal_positive_check CHECK ((ordinal >= 1))
   constraint catalog_rate_cards_payment_term_check CHECK ((payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text])))
+  constraint catalog_rate_cards_payment_term_metered_check CHECK (((meter_key IS NULL) = (payment_term IS NOT NULL)))
   constraint catalog_rate_cards_pkey PRIMARY KEY (merchant_id, id)
   constraint catalog_rate_cards_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE CASCADE
   index CREATE UNIQUE INDEX catalog_rate_cards_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE (meter_key IS NOT NULL)
@@ -946,22 +954,24 @@ table billing.merchants
   trigger CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_restore()
   trigger CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_group_binding()
 
-table billing.metered_rating_watermarks
+table billing.meter_period_quantities
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column source text NOT NULL
+  column meter_key text NOT NULL
+  column cell text NOT NULL
   column period_starts_at timestamp with time zone NOT NULL
-  column rated_through_at timestamp with time zone NOT NULL
-  column accrued_amount bigint NOT NULL
+  column quantity bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint metered_rating_watermarks_accrued_nonneg_check CHECK ((accrued_amount >= 0))
-  constraint metered_rating_watermarks_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint metered_rating_watermarks_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint metered_rating_watermarks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint metered_rating_watermarks_pkey PRIMARY KEY (merchant_id, customer_id, currency, source, period_starts_at)
-  index CREATE UNIQUE INDEX metered_rating_watermarks_pkey ON billing.metered_rating_watermarks USING btree (merchant_id, customer_id, currency, source, period_starts_at)
+  constraint meter_period_quantities_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint meter_period_quantities_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint meter_period_quantities_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint meter_period_quantities_meter_key_check CHECK ((meter_key <> ''::text))
+  constraint meter_period_quantities_pkey PRIMARY KEY (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
+  constraint meter_period_quantities_quantity_check CHECK ((quantity >= 0))
+  index CREATE INDEX meter_period_quantities_period_starts_at_idx ON billing.meter_period_quantities USING btree (merchant_id, period_starts_at)
+  index CREATE UNIQUE INDEX meter_period_quantities_pkey ON billing.meter_period_quantities USING btree (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
 
 table billing.money_settings
   column merchant_id uuid NOT NULL
@@ -1620,11 +1630,13 @@ table billing.prices
   column customer_amount jsonb
   column billing_interval_hours integer
   column quantity jsonb
+  column deleted_at timestamp with time zone
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (billing_interval_hours IS NULL) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
+  constraint prices_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
   constraint prices_id_product_id_key UNIQUE (merchant_id, id, product_id)
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1647,7 +1659,7 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
-  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at')
+  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
@@ -1739,7 +1751,9 @@ table billing.products
   column revision bigint NOT NULL
   column credit_grant jsonb
   column ownership text
+  column deleted_at timestamp with time zone
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
+  constraint products_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_ownership_check CHECK ((ownership = ANY (ARRAY['unique'::text, 'consumable'::text, 'extend'::text])))
@@ -2343,7 +2357,9 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column outcome text NOT NULL
   column forgiven_amount bigint NOT NULL
+  column charges jsonb NOT NULL
   constraint usage_events_amount_check CHECK ((amount >= 0))
+  constraint usage_events_charges_check CHECK ((jsonb_typeof(charges) = 'array'::text))
   constraint usage_events_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_events_customer_id_currency_ledger_transfer_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES billing.ledger_transfers(merchant_id, customer_id, currency, id)
   constraint usage_events_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -2948,7 +2964,7 @@ function billing.guard_billing_restore_receipt()
                     'maintenance_runs',
                     'mandates',
                     'merchant_destructive_policy',
-                    'metered_rating_watermarks',
+                    'meter_period_quantities',
                     'money_settings',
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',

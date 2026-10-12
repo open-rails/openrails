@@ -1078,7 +1078,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "order_action_not_allowed",
@@ -1130,7 +1129,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "order_action_not_allowed",
@@ -1198,7 +1196,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "card_declined",
@@ -1558,7 +1555,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -1688,9 +1684,6 @@
           "root": "root:catalog:manage"
         },
         "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
           "default_rate_card_not_found",
           "meter_in_use",
           "meter_rate_card_conflict",
@@ -1752,12 +1745,8 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
           "default_rate_card_not_found",
           "meter_in_use",
           "meter_rate_card_conflict",
@@ -1864,7 +1853,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2117,7 +2105,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2130,6 +2117,48 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
+        "x-openrails-catalog-update": true,
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "product_in_use",
+          "product_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -2172,7 +2201,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2434,7 +2462,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2809,7 +2836,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
@@ -2867,7 +2893,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
           "subscription_not_found"
@@ -2943,7 +2968,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "card_declined",
@@ -3116,7 +3140,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "card_declined",
           "default_payment_method_required",
@@ -3176,7 +3199,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -3435,7 +3457,6 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -4388,7 +4409,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
@@ -4445,7 +4465,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
@@ -4736,7 +4755,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "billing_policy_not_found",
@@ -4801,7 +4819,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "currency_unsupported",
@@ -5021,7 +5038,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "credit_grant_held",
@@ -5365,20 +5381,12 @@
         ]
       }
     },
-    "/v1/app/admissions/{request_id}/capture": {
+    "/v1/app/admissions/capture": {
       "post": {
         "tags": [
           "app"
         ],
         "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -5391,7 +5399,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CaptureAdmissionParams"
+                "$ref": "#/components/schemas/CaptureAdmissionBatchParams"
               }
             }
           }
@@ -5402,7 +5410,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CaptureReceipt"
+                  "$ref": "#/components/schemas/CaptureBatchResult"
                 }
               }
             }
@@ -5422,11 +5430,7 @@
           "root": "root:usage:manage"
         },
         "x-openrails-errors": [
-          "admission_not_found",
-          "idempotency_key_reused",
-          "insufficient_credits",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
@@ -6018,7 +6022,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "idempotency_key_reused",
@@ -6286,7 +6289,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "idempotency_key_required",
@@ -7605,7 +7607,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
@@ -7719,7 +7720,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
@@ -7813,7 +7813,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -7964,7 +7963,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
@@ -8087,7 +8085,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "service_unavailable",
@@ -8132,7 +8129,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
@@ -8191,7 +8187,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
@@ -8235,7 +8230,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "billing_archive_unavailable",
           "billing_archive_unsupported_state"
@@ -8282,7 +8276,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "billing_archive_integrity",
           "billing_archive_invalid_artifact",
@@ -8337,7 +8330,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "as_of_required",
           "invalid_param",
@@ -8669,112 +8661,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
-        ]
-      }
-    },
-    "/v1/metrics/ask": {
-      "post": {
-        "tags": [
-          "metrics"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AskMetricsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MetricsAnswer"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:metrics:read",
-          "root": "root:metrics:read"
-        },
-        "x-openrails-mounted-when": "metrics_ask",
-        "x-openrails-errors": [
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/metrics/dashboard/widgets/generate": {
-      "post": {
-        "tags": [
-          "metrics"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenerateDashboardWidgetParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeneratedWidget"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:metrics:read",
-          "root": "root:metrics:read"
-        },
-        "x-openrails-mounted-when": "dashboard_generation",
-        "x-openrails-errors": [
-          "dashboard_invalid",
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable",
-          "widget_generation_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
         ]
       }
     },
@@ -9285,7 +9171,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -9328,7 +9213,6 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
-        "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -10852,6 +10736,9 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "usage": {
+            "$ref": "#/components/schemas/UsageEstimate"
+          },
           "accrual_rate_delta_per_hour": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -11085,12 +10972,6 @@
         "properties": {
           "included": {
             "type": "integer"
-          },
-          "accrue_from": {
-            "type": "string"
-          },
-          "cap": {
-            "type": "string"
           }
         }
       },
@@ -11513,14 +11394,6 @@
         }
       },
       "AskCatalogParams": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string"
-          }
-        }
-      },
-      "AskMetricsParams": {
         "type": "object",
         "properties": {
           "question": {
@@ -12096,17 +11969,45 @@
           "token_header"
         ]
       },
+      "CaptureAdmissionBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureAdmissionParams"
+            }
+          }
+        }
+      },
       "CaptureAdmissionParams": {
         "type": "object",
         "properties": {
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
+          "request_id": {
+            "type": "string"
           },
           "usage": {
             "$ref": "#/components/schemas/CaptureUsage"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
           }
         }
+      },
+      "CaptureBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureResult"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "CaptureReceipt": {
         "type": "object",
@@ -12120,9 +12021,29 @@
           "currency": {
             "type": "string"
           },
+          "estimated_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "charges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageCharge"
+            }
+          },
+          "usage_event_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "balance_transaction_id": {
             "oneOf": [
@@ -12142,9 +12063,45 @@
           "request_id",
           "customer_id",
           "currency",
+          "estimated_amount",
           "amount",
+          "charges",
+          "usage_event_id",
           "balance_transaction_id",
           "replayed"
+        ]
+      },
+      "CaptureResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "receipt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CaptureReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "receipt",
+          "error"
         ]
       },
       "CaptureUsage": {
@@ -14661,43 +14618,6 @@
           }
         }
       },
-      "GenerateDashboardWidgetParams": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string"
-          },
-          "base_query": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/MetricsQuery"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "GeneratedWidget": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
-          },
-          "title": {
-            "type": "string"
-          },
-          "viz": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "query",
-          "title",
-          "viz"
-        ]
-      },
       "Health": {
         "type": "object",
         "properties": {
@@ -15211,9 +15131,6 @@
           "maximum_amount": {
             "type": "string",
             "description": "A number as a decimal string."
-          },
-          "included": {
-            "type": "integer"
           }
         },
         "required": [
@@ -15512,24 +15429,6 @@
           }
         }
       },
-      "MetricsAnswer": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsEvidence"
-            }
-          }
-        },
-        "required": [
-          "answer",
-          "evidence"
-        ]
-      },
       "MetricsColumn": {
         "type": "object",
         "properties": {
@@ -15567,49 +15466,6 @@
         "required": [
           "name",
           "description"
-        ]
-      },
-      "MetricsEvidence": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "columns": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsColumn"
-            }
-          },
-          "rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          },
-          "compare_range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "compare_rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          }
-        },
-        "required": [
-          "query",
-          "range",
-          "columns",
-          "rows"
         ]
       },
       "MetricsExample": {
@@ -20891,6 +20747,7 @@
             "enum": [
               "event_type",
               "invoker",
+              "meter",
               "resource"
             ]
           },
@@ -20920,6 +20777,55 @@
           "rows",
           "next_cursor"
         ]
+      },
+      "UsageCharge": {
+        "type": "object",
+        "properties": {
+          "meter_key": {
+            "type": "string"
+          },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "meter_key",
+          "cell",
+          "quantity",
+          "amount"
+        ]
+      },
+      "UsageEstimate": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
       },
       "UsageEvent": {
         "type": "object",
@@ -20994,6 +20900,12 @@
           "source_id": {
             "type": "string"
           },
+          "charges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageCharge"
+            }
+          },
           "balance_transaction_id": {
             "oneOf": [
               {
@@ -21030,6 +20942,7 @@
           "metadata",
           "source",
           "source_id",
+          "charges",
           "balance_transaction_id",
           "occurred_at",
           "created_at",
@@ -21075,12 +20988,32 @@
           "key": {
             "type": "string"
           },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "event_count": {
             "type": "integer"
           },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "dimensions": {
             "oneOf": [
@@ -21098,8 +21031,10 @@
         },
         "required": [
           "key",
+          "cell",
           "event_count",
           "amount",
+          "quantity",
           "dimensions"
         ]
       },
@@ -21250,9 +21185,7 @@
       "internal_error",
       "merchant_unresolved",
       "permission_required",
-      "rate_limit_exceeded",
-      "step_up_required",
-      "step_up_unavailable"
+      "rate_limit_exceeded"
     ],
     "tier:network": [
       "authentication_required",
@@ -21312,21 +21245,6 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No admission was made under this request id."
-    },
-    "allowance_meter_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The rate card's allowance meter does not exist."
-    },
-    "allowance_source_in_use": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The allowance source is in use."
-    },
-    "allowance_source_invalid": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The allowance source cannot back this rate card."
     },
     "already_owned": {
       "status": 409,
@@ -21918,6 +21836,11 @@
       "type": "invalid_request_error",
       "meaning": "No PSP can sell this price."
     },
+    "product_in_use": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Records refer to the product; archive it instead."
+    },
     "product_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -22203,6 +22126,11 @@
       "type": "invalid_request_error",
       "meaning": "The usage meter does not exist."
     },
+    "usage_not_priced": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."
+    },
     "usage_rate_card_invalid": {
       "status": 400,
       "type": "invalid_request_error",
@@ -22217,11 +22145,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The outbound webhook is invalid."
-    },
-    "widget_generation_invalid": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The model could not produce a valid query for the prompt."
     }
   }
 }

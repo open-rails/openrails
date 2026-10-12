@@ -24,7 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -119,7 +119,7 @@ var (
 // rootScope is where the verifier's roles hold their root: permissions.
 var rootScope = auth.Scope{Authority: issuer, ID: "root"}
 
-// RootScope is rootScope (helpers/auth Root).
+// RootScope is rootScope (authkit/auth Root).
 func (*verifier) RootScope(context.Context) (auth.Scope, error) { return rootScope, nil }
 
 // heldIn is the role holding perm in the scope of this id alone.
@@ -1215,6 +1215,16 @@ func createCreditGrant(ctx context.Context, client *openrails.Client, customer b
 		return nil, err
 	}
 	return &grants[0], nil
+}
+
+// captureAdmission settles one admission at a host-stated amount: a batch of
+// one.
+func captureAdmission(ctx context.Context, client *openrails.Client, requestID string, amount int64, usage *billing.CaptureUsage) (*billing.CaptureReceipt, error) {
+	results, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{RequestID: requestID, Amount: &amount, Usage: usage}})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Receipt, results[0].Err()
 }
 
 // releaseAdmission releases one admission: a batch of one.

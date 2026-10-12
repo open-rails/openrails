@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,9 +38,9 @@ func usageKeyWindow(now time.Time) (from, to time.Time) {
 	return now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 }
 
-// RecordUsageParams is one metered, host-priced usage event. The host supplies
-// the final Amount (in the currency's internal precision); OpenRails records
-// the event and debits the ledger atomically.
+// RecordUsageParams is one metered usage event. A positive Amount is the
+// host's price; otherwise the rate cards of the event type's meters price it
+// when it is recorded.
 type RecordUsageParams struct {
 	// Payer is the merchant subject BILLED for this usage (the payer). When nil it is
 	// resolved from Invoker (self-hosted/personal case), never synthesized.
@@ -48,10 +49,10 @@ type RecordUsageParams struct {
 	Currency  string
 	EventType string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
-	// cached_input_tokens, requests, ...) for reporting and throughput.
+	// cached_input_tokens, requests, ...): the quantities sum meters read.
 	Dimensions map[string]int64
-	// Amount is the host-priced cost (>= 0). 0 records a free/zero-cost event
-	// (still metered for dimensions) without a ledger debit.
+	// Amount is the host-priced cost (>= 0). 0 leaves the event to its
+	// meters' rate cards; an event no priced meter consumes is metered only.
 	Amount int64
 	// Key is the idempotency coordinate; its operation must be
 	// UsageOperation(EventType), so two event types at one (source, source_id)
@@ -59,7 +60,8 @@ type RecordUsageParams struct {
 	Key      IdempotencyKey
 	Metadata map[string]any
 	// OccurredAt defaults to now when zero. It must lie within the ingest
-	// window (retention.UsageIngestWindow back, retention.UsageClockSkew ahead).
+	// window (retention.UsageIngestWindow back, retention.UsageClockSkew
+	// ahead), and places the event in its billing period's quantities.
 	OccurredAt time.Time
 	// Failed marks usage that failed; Amount is what the failure cost. The
 	// customer's own failure is forgiven up to FailedWindows (its grace) and
@@ -70,16 +72,16 @@ type RecordUsageParams struct {
 	FailedWindows []FailedUsageWindow
 }
 
-// RecordUsage durably records a metered usage event and debits the credit
-// ledger in one transaction. Idempotent on (merchant, payer, event_type,
-// source, source_id): a replay returns the existing event with Replayed set and
-// never double-charges; a changed amount gets ErrIdempotencyKeyReused. The
-// event's key is honoured for the ingest window after it occurred; a priced
-// event's ledger debit is idempotent for good. The balance row is locked before
-// the idempotency check, so concurrent identical records serialize.
-//
-// A zero Amount records the event (dimensions, a once-only claim) without
-// touching the ledger.
+// RecordUsage durably records a metered usage event and posts its charge in
+// one transaction: the host's Amount, or what each priced meter charges it
+// (rateUsageTx). Usage is a fact: its charge draws the prepaid balance first
+// and the rest is owed, never refused for money. Idempotent on (merchant,
+// payer, event_type, source, source_id): a replay returns the existing event
+// with Replayed set and never charges again, even after a price change; a
+// changed host amount gets ErrIdempotencyKeyReused. The event's key is
+// honoured for the ingest window after it occurred; a host-priced event's
+// ledger posting is idempotent for good. The balance row is locked before the
+// idempotency check, so concurrent identical records serialize.
 func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams) (*models.UsageEvent, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -132,7 +134,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return err
 		}
 
-		// A failed event's amount is final: it is never rated by the catalog.
+		// A failed event's amount is final: it is never rated.
 		pricingAuthority := "catalog"
 		if params.Amount > 0 || params.Failed {
 			pricingAuthority = "host"
@@ -160,9 +162,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 					Field: "pricing_authority", Committed: ev.PricingAuthority, Retried: pricingAuthority,
 				}
 			}
-			// A failed event charged what its grace left: the host reported
-			// its amount plus what was forgiven.
-			if reported := ev.Amount + ev.ForgivenAmount; reported != params.Amount {
+			// A host-priced event charged its amount, or for a failure what
+			// its grace left: the host reported its amount plus what was
+			// forgiven. A rated event answers its first charges.
+			if reported := ev.Amount + ev.ForgivenAmount; pricingAuthority == "host" && reported != params.Amount {
 				return &IdempotencyConflict{
 					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
 					Field: "amount", Committed: reported, Retried: params.Amount,
@@ -186,6 +189,19 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr
+		}
+
+		// What the event's meters take from it, before anything is written:
+		// a meter that cannot price it refuses it whole.
+		var quantities []usageQuantity
+		if pricingAuthority == "catalog" {
+			cards, cerr := usageCards(ctx, q, tenantID, params.EventType, cur)
+			if cerr != nil {
+				return cerr
+			}
+			if quantities, cerr = usageQuantities(cards, eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}); cerr != nil {
+				return cerr
+			}
 		}
 
 		// A failure is charged what its grace does not forgive, and counts
@@ -216,19 +232,26 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			}
 		}
 
-		// Debit the ledger for the host-priced amount (skip for zero-cost
-		// events): prepaid balance first, then owed up to the credit line.
-		// Prepay-only accounts deny when the amount exceeds available balance.
-		var debitID *uuid.UUID
-		if charge == 0 {
-			// A metered payer's first event opens its balance account: the
-			// permanent first-activity mark invoice periods are anchored on.
-			if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
-				return err
-			}
+		// A metered payer's first event opens its balance account: the
+		// permanent first-activity mark billing periods are anchored on.
+		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+			return err
 		}
-		if charge > 0 {
-			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, false)
+		eventID := uuidutil.NewV7()
+		charges := []models.UsageCharge{}
+		var debitID *uuid.UUID
+		if pricingAuthority == "catalog" {
+			var rerr error
+			if charges, debitID, rerr = s.rateUsageTx(ctx, q, payer, params.Invoker, cur, eventID, occurred, quantities); rerr != nil {
+				return rerr
+			}
+			charge = 0
+			for _, c := range charges {
+				charge += c.Amount
+			}
+		} else if charge > 0 {
+			// The host's price: prepaid balance first, the rest owed.
+			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, true)
 			if derr != nil {
 				return derr
 			}
@@ -261,7 +284,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		}
 
 		ev = &models.UsageEvent{
-			ID:               uuidutil.NewV7(),
+			ID:               eventID,
 			MerchantID:       tenantID,
 			CustomerID:       payerID,
 			Invoker:          params.Invoker,
@@ -275,6 +298,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			SourceID:         params.Key.SourceID(),
 			LedgerTransferID: debitID,
 			PricingAuthority: pricingAuthority,
+			Charges:          charges,
 			Metadata:         params.Metadata,
 			OccurredAt:       occurred,
 			CreatedAt:        now,
@@ -284,6 +308,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return jerr
 		}
 		meta, jerr := toJSONBC(ev.Metadata)
+		if jerr != nil {
+			return jerr
+		}
+		chargesJSON, jerr := json.Marshal(ev.Charges)
 		if jerr != nil {
 			return jerr
 		}
@@ -306,6 +334,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			CreatedAt:        ev.CreatedAt,
 			Outcome:          ev.Outcome,
 			ForgivenAmount:   ev.ForgivenAmount,
+			Charges:          chargesJSON,
 		})
 	})
 	if err != nil {

@@ -31,8 +31,7 @@ type UsageEvent struct {
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Host-defined.
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-	// Amount is the cost or meter input in Currency's internal precision (>= 0).
-	// PricingAuthority determines whether catalog rating may consume this event.
+	// Amount is what the event charged in Currency's internal precision (>= 0).
 	Amount int64 `json:"amount"`
 	// Outcome is succeeded or failed; ForgivenAmount is what a failed event's
 	// grace absorbed, so Amount + ForgivenAmount is what the host reported.
@@ -43,13 +42,26 @@ type UsageEvent struct {
 	SourceID string `json:"source_id"`
 	// LedgerTransferID links to the ledger debit transfer this event produced.
 	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id,omitempty"`
-	// PricingAuthority identifies whether amount is final host pricing or catalog input.
-	PricingAuthority string         `json:"-"`
-	Metadata         map[string]any `json:"metadata,omitempty"`
-	OccurredAt       time.Time      `json:"occurred_at"`
-	CreatedAt        time.Time      `json:"created_at"`
+	// PricingAuthority is host when Amount is the host's price, catalog when
+	// the meters' rate cards priced the event (Charges).
+	PricingAuthority string `json:"-"`
+	// Charges are what each priced meter charged the event when it was
+	// recorded; Amount is their sum.
+	Charges    []UsageCharge  `json:"charges"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	CreatedAt  time.Time      `json:"created_at"`
 	// Replayed reports that this event's idempotency coordinate was already
 	// recorded, so this call metered nothing and moved no money. Not
 	// persisted.
 	Replayed bool `json:"replayed,omitempty"`
+}
+
+// UsageCharge is what one meter charged one usage event: its quantity in the
+// meter's unit, in the matrix cell it was priced in (empty without a matrix).
+type UsageCharge struct {
+	MeterKey string `json:"meter_key"`
+	Cell     string `json:"cell,omitempty"`
+	Quantity int64  `json:"quantity"`
+	Amount   int64  `json:"amount,string"`
 }

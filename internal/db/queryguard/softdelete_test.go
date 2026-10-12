@@ -43,6 +43,8 @@ var allow = map[string]string{
 	"HasUnresolvedProductCheckout":            "a tombstone is not provider nonexecution; unknown checkout still excludes a second charge",
 	"PermanentBenefitsCovered":                "unresolved checkout reservations survive tombstones until the provider outcome resolves",
 	"MerchantHasActivity":                     "retirement is only for never-used merchants; tombstoned rows disqualify",
+	"ProductHoldsReferences":                  "a tombstoned subscription or access still referred to the product, which therefore is never deleted",
+	"PricesHoldReferences":                    "a tombstoned payment, subscription or checkout still referred to the price, which therefore is never deleted",
 	"ListHostEvents":                          "a settled event stays deliverable after its payment is tombstoned",
 	"ListHostEventsByIDs":                     "a settled event stays deliverable after its payment is tombstoned",
 	"RestoreSubscriptionsByDestructiveRun":    "prune rollback: finds soft-deleted rows",

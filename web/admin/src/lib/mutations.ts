@@ -60,13 +60,7 @@ import {
   type UsageMeterRequest,
   type SubscriptionFilters,
 } from "@/lib/api/endpoints"
-import {
-  askMetrics,
-  generateWidget,
-  type MetricsQuery,
-  putDashboard,
-  type Widget,
-} from "@/lib/api/metrics"
+import { putDashboard, type Widget } from "@/lib/api/metrics"
 import type {
   ChangeSubscriptionParams,
   Customer,
@@ -131,28 +125,6 @@ export const adminMutations = {
       mutationKey: [...dashboardKey, "save"],
       mutationFn: (widgets: Widget[]) => putDashboard(widgets),
       onSuccess: (saved) => queryClient.setQueryData(dashboardKey, saved),
-    })
-  },
-  askMetrics: () => {
-    const keys = merchantQueryKeys()
-    const dashboardKey = keys.dashboard()
-    return mutationOptions({
-      mutationKey: [...dashboardKey, "metrics", "ask"],
-      mutationFn: (question: string) => askMetrics(question),
-    })
-  },
-  generateDashboardWidget: () => {
-    const keys = merchantQueryKeys()
-    const dashboardKey = keys.dashboard()
-    return mutationOptions({
-      mutationKey: [...dashboardKey, "widgets", "generate"],
-      mutationFn: ({
-        prompt,
-        baseQuery,
-      }: {
-        prompt: string
-        baseQuery?: MetricsQuery
-      }) => generateWidget(prompt, baseQuery),
     })
   },
   findCustomer: () => {

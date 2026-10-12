@@ -81,8 +81,8 @@ const (
 	AuthCustomer Tier = "customer"
 	// AuthMerchant: a person or an application holding the route's
 	// permission (Needs): its merchant: name in the request's merchant's
-	// scope, or its root: name in the root scope (Can); a person also signed
-	// in recently (CheckRecentSignIn) on a Sensitive route.
+	// scope, or its root: name in the root scope (Can). Admin changes do not
+	// require a recent sign-in.
 	AuthMerchant Tier = "merchant"
 	// AuthSignedIn: a person or an application at the request's merchant; no
 	// permission.
@@ -120,10 +120,6 @@ const (
 	FeatureMerchantConfigManages Feature = "merchant_config_edits"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
 	FeatureCatalogCopilot Feature = "catalog_copilot"
-	// FeatureMetricsAsk: llm.api_key and llm.ask_enabled.
-	FeatureMetricsAsk Feature = "metrics_ask"
-	// FeatureDashboardGeneration: llm.api_key.
-	FeatureDashboardGeneration Feature = "dashboard_generation"
 	// FeatureCustomerNetwork: the deployment runs the customer network
 	// (openrails.dev).
 	FeatureCustomerNetwork Feature = "customer_network"
@@ -301,8 +297,8 @@ type Route struct {
 	// Permission is a programmatic route's: the pair its caller holds one
 	// of. A staff route's follows from its Group and Level (Needs).
 	Permission Pair
-	// Sensitive: the route moves money or removes access; a person needs a
-	// recent sign-in for it.
+	// Sensitive: a customer or network operation needs a recent sign-in.
+	// Never set on an AuthMerchant route.
 	Sensitive bool
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
@@ -403,6 +399,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if (r.Group == App) != (r.Auth == AuthApplication || r.Auth == AuthProvisioning) {
 			panic("routes: " + r.Key() + ": a programmatic route, and only one, takes an application or a provisioning token")
 		}
+		if r.Auth == AuthMerchant && r.Sensitive {
+			panic("routes: " + r.Key() + ": admin operations never require a recent sign-in")
+		}
 		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
 			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
 		}
@@ -468,7 +467,7 @@ func TierErrors(tier Tier) []string {
 		// the merchant, where the customer network runs.
 		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeNetworkAccountLinked}, authenticated...)
 	case AuthMerchant:
-		own = append(append([]string{billing.CodeStepUpRequired, billing.CodeStepUpUnavailable}, staff...), authenticated...)
+		own = append(staff, authenticated...)
 	case AuthSignedIn:
 		own = append(slices.Clone(staff), authenticated...)
 	case AuthApplication:

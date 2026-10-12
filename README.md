@@ -277,8 +277,9 @@ Metrics reads stay independently grantable. The old operator URLs under
 `/v1/admin/` and the old `billing` permission names are not aliases; update
 custom roles and trusted-issuer grants when upgrading.
 
-Routes marked `sensitive` in the [route reference](docs/api/routes.md) also ask
-a person for a recent sign-in; findings resolutions do not.
+Admin and operator changes do not require a recent sign-in. Applications can require 2FA
+and DPoP for their admin credentials; destructive-operation ceilings provide
+an additional limit on destructive actions.
 
 #### Customer contact info
 
@@ -378,11 +379,11 @@ func (v session) CheckRecentSignIn(context.Context) error {
 }
 ```
 
-The types are `github.com/open-rails/helpers/auth`. Mount with
+The types are `github.com/open-rails/authkit/auth`. Mount with
 `Routes{Auth: shopAuth{sessions}, ...}`, build your roles from
 `billing.Permissions()`, and check your auth in CI with
 `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
-(`github.com/open-rails/helpers/auth/authtest`). Serving one merchant, set
+(`github.com/open-rails/authkit/auth/authtest`). Serving one merchant, set
 `MerchantDeclaration.Issuer` to your issuer and return a zero `BoundScope`.
 
 If your app already loads its own configuration (koanf, kong, flags), build the
@@ -538,16 +539,14 @@ until `RouteGroups` turns it on:
 
 - `Auth`: your auth, which only says who a request is (`Authenticate`). Customer
   routes take a person acting for themself; staff routes ask the answer's
-  `Can` for the route's permission and, for a person on a write that
-  is marked `sensitive`, its recent sign-in (helpers/auth
-  `RecentSignInChecker`). OpenRails answers
-  every refusal: 401 with a `WWW-Authenticate` challenge (a stale sign-in is
-  RFC 9470's `insufficient_user_authentication`, code `step_up_required`), 403,
-  or 503 when your auth cannot answer.
+  `Can` for the route's permission, without a recent-sign-in check. OpenRails
+  answers every refusal: 401 with a `WWW-Authenticate` challenge, 403, or
+  503 when your auth cannot answer. Customer-network operations marked
+  `sensitive` retain their recent-sign-in check.
 - Permissions are OpenRails' own (`billing.Permissions()`), each named
   `persona:resource:action` in two personas. A route acting on a merchant
   admits a caller holding its `root:` name in your auth's root scope
-  (helpers/auth `Root`: AuthKit's root group) or its `merchant:` name in that
+  (authkit/auth `Root`: AuthKit's root group) or its `merchant:` name in that
   merchant's own scope (the AuthKit group whose id is the merchant's). With a
   route group on, `Auth` must be a `Root`, and `Mount` fails for a route
   neither of whose names it knows.
@@ -843,7 +842,7 @@ get a token from your issuer; that token opens nothing else.
 | `POST /billing/v1/app/entitlements/check` | which entitlements a user holds now, up to 100 keys and 10 prefixes at once: gate your content with it (a read; no `Idempotency-Key`) |
 | `POST /billing/v1/app/usage-events` | record metered usage, failed work included |
 | `POST /billing/v1/app/admissions` | admit requests against a customer's budget, holding funds |
-| `POST /billing/v1/app/admissions/{request_id}/capture` | settle one at its actual cost |
+| `POST /billing/v1/app/admissions/capture` | settle them at what the work used, priced by the rate cards |
 | `POST /billing/v1/app/admissions/release`, `/extend` | free holds; move their deadlines |
 | `POST /billing/v1/app/running-charges` | charge a customer at a rate per hour until you stop it |
 | `POST /billing/v1/app/running-charges/{reference}/stop` | stop it and post what it charged |
@@ -1100,8 +1099,9 @@ apply with `ApplyCatalogParams{Force: true}`, `?force=true` or
 the field. `MerchantDeclaration.Catalog` never forces, and a conflict never fails `New`.
 
 All these examples preserve omitted entries. `prune: true` makes a document the
-whole catalog: an omitted product or price is archived only when no edit set any
-of its fields; otherwise the file lets it go. Nothing is deleted.
+whole catalog: an omitted product or price that no edit set is deleted when
+nothing ever referred to it and archived otherwise; one an edit set, the file
+lets go. A purchased product is never deleted.
 Changing existing subscribers' accepted prices requires an explicit scheduled
 reprice operation. A product's keys are not part of the accepted terms:
 editing a product's `entitlements` changes what every buyer and subscriber of
@@ -1382,7 +1382,7 @@ More in [products and prices through the Client](docs/catalog-client.md).
   merchants.
 - **Merchant console** — an optional admin UI for your team: customers, subscriptions,
   refunds, catalog, API keys, and a metrics dashboard you can customize with your own
-  key-metric widgets (plus an optional LLM analytics copilot).
+  key-metric widgets.
 
 ---
 

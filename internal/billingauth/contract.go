@@ -1,29 +1,29 @@
 // Package billingauth is OpenRails' auth contract: the host's Auth
-// (helpers/auth), the identities the route gate binds, its refusals, and the
+// (authkit/auth), the identities the route gate binds, its refusals, and the
 // cookie admission every mount shares. It imports no auth provider.
 package billingauth
 
 import (
 	"context"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// Authenticator is the host's auth (helpers/auth): it says who a request is.
+// Authenticator is the host's auth (authkit/auth): it says who a request is.
 // OpenRails builds every gate from the Verified it returns, asking its Can
-// for a permission in a Scope and its CheckRecentSignIn for a person's recent
-// sign-in, and answers every refusal itself.
+// for a permission in a Scope. Sensitive customer-network operations also
+// ask CheckRecentSignIn; admin operations do not. It answers every refusal itself.
 type Authenticator = auth.Authenticator
 
-// Verified is one request's verified credential (helpers/auth).
+// Verified is one request's verified credential (authkit/auth).
 type Verified = auth.Verified
 
-// Scope is where a permission is held (helpers/auth): a group of an issuer.
+// Scope is where a permission is held (authkit/auth): a group of an issuer.
 type Scope = auth.Scope
 
-// Identity is who the Authenticator says a request is (helpers/auth):
+// Identity is who the Authenticator says a request is (authkit/auth):
 // Subject, the native account whose authority and money are used; Invoker,
 // who actually acts (the subject itself, or a party acting on its behalf);
 // Credential, how it was proven. Balances and authority are the subject's, limits key on the
@@ -141,7 +141,7 @@ func VerifiedFrom(ctx context.Context) (Verified, bool) {
 // credential is bound to the merchant of one row: a checkout URL's secret,
 // a provisioning token, the in-process host. Its method is unexported, so no
 // host's Verified can claim a merchant, and such a type reports no bound
-// scope (helpers/auth Bound).
+// scope (authkit/auth Bound).
 type MerchantBinding struct{ target Target }
 
 // BindsMerchant is a MerchantBinding naming target.

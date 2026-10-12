@@ -21,7 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/helpers/auth/authtest"
+	"github.com/open-rails/authkit/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -114,14 +114,14 @@ func TestOwnAuthGates(t *testing.T) {
 		requireCode(t, s.call(t, support, http.MethodPost, "/billing/v1/catalog/apply", map[string]any{}), http.StatusForbidden, "permission_required")
 	})
 
-	t.Run("a stale sign-in reads but cannot refund", func(t *testing.T) {
+	t.Run("a stale sign-in passes the refund permission gate", func(t *testing.T) {
 		stale := s.signIn(t, s.user(t, "stale@shop.example", "admin"), "acme")
 		s.age(t, stale, time.Hour)
 		s.customers(t, stale, acme)
 		refund := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 		got := s.call(t, stale, http.MethodPost, refund, map[string]any{})
-		requireCode(t, got, http.StatusUnauthorized, "step_up_required")
-		require.Equal(t, `Bearer error="insufficient_user_authentication", max_age="900"`, got.header.Get("WWW-Authenticate"))
+		requireCode(t, got, http.StatusBadRequest, "invalid_param")
+		require.Empty(t, got.header.Get("WWW-Authenticate"), "the refund handler validates the request without step-up")
 	})
 
 	t.Run("a signed-out session reaches nothing", func(t *testing.T) {

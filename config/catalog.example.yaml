@@ -65,8 +65,7 @@ meters:
 products:
   # Droplets — one meter, priced per SKU by matrix. Per-second (divide_by
   # 3600), each SKU capped at its monthly price (maximum_amount). No floor:
-  # a droplet alive 30s bills ~$0.0005. The cell's `included` feeds the
-  # pooled egress allowance in the next card.
+  # a droplet alive 30s bills ~$0.0005.
   droplet:
     display_name: Droplet
     rate_cards:
@@ -80,17 +79,14 @@ products:
             matrix:
               dimension: size_slug
               cells:
-                s-1vcpu-512mb-10gb: { unit_amount: "5950",  maximum_amount: "4000000",  included: 500 }
-                s-1vcpu-1gb:        { unit_amount: "8930",  maximum_amount: "6000000",  included: 1_000 }
-                s-1vcpu-2gb:        { unit_amount: "17860", maximum_amount: "12000000", included: 2_000 }
-                s-2vcpu-4gb:        { unit_amount: "35710", maximum_amount: "24000000", included: 4_000 }
+                s-1vcpu-512mb-10gb: { unit_amount: "5950",  maximum_amount: "4000000" }
+                s-1vcpu-1gb:        { unit_amount: "8930",  maximum_amount: "6000000" }
+                s-1vcpu-2gb:        { unit_amount: "17860", maximum_amount: "12000000" }
+                s-2vcpu-4gb:        { unit_amount: "35710", maximum_amount: "24000000" }
       - meter: public-egress
-        # Each running droplet contributes its SKU's monthly included egress
-        # (the droplet-runtime matrix cell's `included`), accrued per-second,
-        # capped at 28 days, pooled across the team.
+        # The first GiB of each period is included ($0.01 per GiB after).
         allowance:
-          accrue_from: droplet-runtime
-          cap: 28d
+          included: 1
         price:
           model: per_unit
           currency: usd

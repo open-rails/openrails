@@ -104,7 +104,8 @@ a fresh build of it). Wipe it:
 Three Go modules, each checked on its own (`GOWORK=off`):
 
 - `.` — `github.com/open-rails/openrails`, the embedded library. Its go.mod
-  requires no AuthKit (`scripts/check-embedded-auth-boundary.sh`).
+  imports only AuthKit's standard-library-only contract packages;
+  `scripts/check-embedded-auth-boundary.sh` rejects its runtime implementation.
 - `server/` — `github.com/open-rails/openrails/server`: package `server`, the
   binary `server/cmd/openrails` and the AuthKit-backed packages under
   `server/internal/` (control plane, operator, host configuration). Released

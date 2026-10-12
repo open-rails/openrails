@@ -9,16 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The example, its tests included, builds on helpers/auth alone: no AuthKit
-// package is among its dependencies.
-func TestOwnAuthImportsNoAuthKit(t *testing.T) {
+// The example, its tests included, uses AuthKit's contracts without its runtime.
+func TestOwnAuthImportsOnlyAuthKitContracts(t *testing.T) {
 	list := exec.Command("go", "list", "-deps", "-test", "-tags", "e2e,integration", "-f", "{{.ImportPath}}", ".")
 	list.Env = append(os.Environ(), "GOWORK=off")
 	out, err := list.CombinedOutput()
 	require.NoError(t, err, string(out))
 	deps := strings.Fields(string(out))
-	require.Contains(t, deps, "github.com/open-rails/helpers/auth")
+	require.Contains(t, deps, "github.com/open-rails/authkit/auth")
 	for _, dep := range deps {
-		require.False(t, strings.HasPrefix(dep, "github.com/open-rails/authkit"), "own-auth depends on %s", dep)
+		if strings.HasPrefix(dep, "github.com/open-rails/authkit") {
+			require.Contains(t, []string{"github.com/open-rails/authkit/auth", "github.com/open-rails/authkit/auth/authtest", "github.com/open-rails/authkit/userinfo", "github.com/open-rails/authkit/userinfo/userinfotest"}, dep, "own-auth imports AuthKit implementation %s", dep)
+		}
 	}
 }

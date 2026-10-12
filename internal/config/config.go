@@ -99,8 +99,8 @@ type Config struct {
 	// mounts: a KV mount makes Vault hold merchant configuration.
 	Vault *VaultConfig
 
-	// LLM is the model behind the console's natural-language widgets and
-	// questions. Without an API key those features are off.
+	// LLM is the model behind the console's catalog questions.
+	// Without an API key those features are off.
 	LLM *LLMConfig
 
 	// CatalogReconciliationInterval schedules the alert-only catalog
@@ -338,9 +338,7 @@ const (
 )
 
 // Per-provider default models when llm.model is unset.
-// Cheapest-capable-first (Paul): query generation is designed to need no model
-// cleverness — /schema + corrective errors carry the intelligence. Configure a
-// bigger model only if generation quality measurably demands it.
+// Catalog tool definitions and corrective validation keep requests constrained.
 const (
 	LLMDefaultModelAnthropic = "claude-haiku-4-5-20251001"
 	// gpt-5.4-nano is the cheapest current-generation tool-capable OpenAI
@@ -349,8 +347,8 @@ const (
 	LLMDefaultModelOpenAI = "gpt-5.4-nano"
 )
 
-// LLMConfig configures the model behind the console's natural-language
-// widgets and questions.
+// LLMConfig configures the model behind the console's catalog
+// questions.
 type LLMConfig struct {
 	// Provider selects the API dialect: "anthropic" (the default) or
 	// "openai". Any other value is refused.
@@ -363,9 +361,6 @@ type LLMConfig struct {
 	BaseURL string
 	// APIKey is the provider credential. Empty turns the features off.
 	APIKey string
-	// AskEnabled turns on questions about metrics, which send aggregate query
-	// results to the provider (widget generation sends only the schema).
-	AskEnabled bool
 	// CatalogCopilotEnabled turns on read-only questions about the catalog,
 	// which send aggregate catalog and subscriber counts to the provider.
 	CatalogCopilotEnabled bool
@@ -374,13 +369,9 @@ type LLMConfig struct {
 	CatalogDraftingEnabled bool
 }
 
-// LLMConfigured reports whether NL widget generation can run (fail-closed on a
+// LLMConfigured reports whether a model backend is configured (fail-closed on a
 // missing key).
 func LLMConfigured(c *LLMConfig) bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
-
-// LLMAskConfigured reports whether metrics Q&A can run: a key AND the explicit
-// ask_enabled consent (results flow to the provider — never implied by the key).
-func LLMAskConfigured(c *LLMConfig) bool { return LLMConfigured(c) && c.AskEnabled }
 
 // LLMCatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
 // run: a key AND the explicit catalog_copilot_enabled consent.
@@ -917,7 +908,7 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 type RateLimitsConfig map[string]*RateLimit
 
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
-var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "metrics-ask", "catalog-ask", "dashboard-generate"}
+var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "catalog-ask"}
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
 // mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
@@ -1598,11 +1589,9 @@ func DefaultRateLimits() *RateLimitsConfig {
 		// IPs), so this must absorb rebill runs without refusing legitimate
 		// payment events. Webhooks are already authenticated; this is a DoS
 		// floor, not the primary control.
-		"webhook":            &RateLimit{RequestsPerMinute: 1200},
-		"payment":            &RateLimit{RequestsPerMinute: 40},
-		"metrics-ask":        &RateLimit{RequestsPerMinute: 10},
-		"catalog-ask":        &RateLimit{RequestsPerMinute: 10},
-		"dashboard-generate": &RateLimit{RequestsPerMinute: 10},
+		"webhook":     &RateLimit{RequestsPerMinute: 1200},
+		"payment":     &RateLimit{RequestsPerMinute: 40},
+		"catalog-ask": &RateLimit{RequestsPerMinute: 10},
 	}
 }
 

@@ -16,19 +16,14 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
+	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
-type featureLimitLLM struct{ asks, generations int }
+type featureLimitLLM struct{ asks int }
 
-func (l *featureLimitLLM) Complete(context.Context, string, []dashboard.LLMMessage) (string, error) {
-	l.generations++
-	return `{"query":{"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations per day","viz":"line"}`, nil
-}
-
-func (l *featureLimitLLM) CompleteTools(context.Context, string, []dashboard.ToolDef, []dashboard.ToolMessage, int) (*dashboard.ToolTurn, error) {
+func (l *featureLimitLLM) CompleteTools(context.Context, string, []copilot.ToolDef, []copilot.ToolMessage, int) (*copilot.ToolTurn, error) {
 	l.asks++
-	return &dashboard.ToolTurn{Text: "No further lookups needed."}, nil
+	return &copilot.ToolTurn{Text: "No further lookups needed."}, nil
 }
 
 // Real feature handlers accept two requests in total across host mounts,
@@ -40,16 +35,13 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"feature-limits-" + uuid.NewString()[:8]: {}}
 	cfg.RateLimits = &openrails.RateLimitsConfig{
-		"metrics-ask":        {RequestsPerMinute: 2},
-		"catalog-ask":        {RequestsPerMinute: 2},
-		"dashboard-generate": {RequestsPerMinute: 2},
+		"catalog-ask": {RequestsPerMinute: 2},
 	}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "test-site", SecretKey: "test-secret"}
-	cfg.LLM = &openrails.LLMConfig{APIKey: "test", AskEnabled: true, CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
+	cfg.LLM = &openrails.LLMConfig{APIKey: "test", CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	dashboardLLM, catalogLLM := &featureLimitLLM{}, &featureLimitLLM{}
+	catalogLLM := &featureLimitLLM{}
 	graph := engine.Graph(bill)
-	graph.Runtime.DashboardService.SetLLM(dashboardLLM)
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
@@ -62,21 +54,19 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		return mux
 	}
 	first, second := mount("/first"), mount("/second")
+	for _, removedPath := range []string{"/v1/admin/dashboard/widgets/generate", "/v1/metrics/dashboard/widgets/generate", "/v1/admin/metrics/ask", "/v1/metrics/ask"} {
+		removed := httptest.NewRecorder()
+		first.ServeHTTP(removed, httptest.NewRequest(http.MethodPost, "/first"+removedPath, strings.NewReader(`{"question":"Summarize","prompt":"Add a chart"}`)))
+		require.Equal(t, http.StatusNotFound, removed.Code, "AI metrics and dashboard endpoints stay absent even with an LLM configured: %s", removedPath)
+	}
+	require.Zero(t, catalogLLM.asks, "removed features never call the model")
 	for _, feature := range []struct {
 		path, body string
 		calls      *int
 		trusted    func() error
 	}{
-		{"/v1/metrics/ask", `{"question":"Summarize"}`, &dashboardLLM.asks, func() error {
-			_, err := client.AskMetrics(t.Context(), billing.AskMetricsParams{Question: "Summarize"})
-			return err
-		}},
 		{"/v1/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
 			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
-			return err
-		}},
-		{"/v1/metrics/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
-			_, err := client.GenerateDashboardWidget(t.Context(), billing.GenerateDashboardWidgetParams{Prompt: "Cancellations per day"})
 			return err
 		}},
 	} {

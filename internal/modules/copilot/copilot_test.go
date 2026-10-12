@@ -3,7 +3,6 @@ package copilot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,22 +10,17 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
 // Catalog reads and proposals run against PostgreSQL elsewhere; these are the
 // consent, budget and tool-gating guards that sit before any reader.
 type scriptLLM struct {
-	turns []*dashboard.ToolTurn
-	convs [][]dashboard.ToolMessage
+	turns []*ToolTurn
+	convs [][]ToolMessage
 }
 
-func (f *scriptLLM) Complete(context.Context, string, []dashboard.LLMMessage) (string, error) {
-	return "", errors.New("not scripted")
-}
-
-func (f *scriptLLM) CompleteTools(_ context.Context, _ string, _ []dashboard.ToolDef, msgs []dashboard.ToolMessage, _ int) (*dashboard.ToolTurn, error) {
-	f.convs = append(f.convs, append([]dashboard.ToolMessage(nil), msgs...))
+func (f *scriptLLM) CompleteTools(_ context.Context, _ string, _ []ToolDef, msgs []ToolMessage, _ int) (*ToolTurn, error) {
+	f.convs = append(f.convs, append([]ToolMessage(nil), msgs...))
 	return f.turns[min(len(f.convs), len(f.turns))-1], nil
 }
 
@@ -35,7 +29,7 @@ func merchantCtx() context.Context {
 }
 
 func TestAskRequiresConsent(t *testing.T) {
-	llm := &scriptLLM{turns: []*dashboard.ToolTurn{{Text: "never reached"}}}
+	llm := &scriptLLM{turns: []*ToolTurn{{Text: "never reached"}}}
 	for name, d := range map[string]Deps{"no LLM": {Enabled: true}, "LLM without consent flag": {LLM: llm}} {
 		_, err := NewService(d).Ask(merchantCtx(), "q")
 		require.ErrorIs(t, err, ErrNotConfigured, name)
@@ -62,8 +56,8 @@ func TestDraftToolsOnlyWhenArmed(t *testing.T) {
 
 func TestAskToolLoopRefusals(t *testing.T) {
 	for _, name := range []string{"delete_everything", toolDraftPriceChange} {
-		llm := &scriptLLM{turns: []*dashboard.ToolTurn{
-			{ToolCalls: []dashboard.ToolCall{{ID: "x", Name: name, Input: json.RawMessage(`{}`)}}},
+		llm := &scriptLLM{turns: []*ToolTurn{
+			{ToolCalls: []ToolCall{{ID: "x", Name: name, Input: json.RawMessage(`{}`)}}},
 			{Text: "ok"},
 		}}
 		res, err := NewService(Deps{LLM: llm, Enabled: true}).Ask(merchantCtx(), "inspect")
@@ -76,7 +70,7 @@ func TestAskToolLoopRefusals(t *testing.T) {
 	}
 
 	// A model that never stops calling tools is cut off at the budget and turn ceiling.
-	llm := &scriptLLM{turns: []*dashboard.ToolTurn{{ToolCalls: []dashboard.ToolCall{{ID: "x", Name: toolListCatalog, Input: json.RawMessage(`{}`)}}}}}
+	llm := &scriptLLM{turns: []*ToolTurn{{ToolCalls: []ToolCall{{ID: "x", Name: toolListCatalog, Input: json.RawMessage(`{}`)}}}}}
 	_, err := NewService(Deps{LLM: llm, Enabled: true}).Ask(merchantCtx(), "inspect")
 	var noAnswer *NoAnswerError
 	require.ErrorAs(t, err, &noAnswer)

@@ -22,7 +22,8 @@ document skips what an edit set ([catalog ownership](catalog-ownership.md)).
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
 later API edits. Omission preserves records and fields; explicit `archived: true`
-retires an entry, and `prune: true` opts into archiving omitted products and prices.
+retires an entry, and `prune: true` removes omitted products and prices that
+only documents set: deleted when nothing ever referred to them, archived otherwise.
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
@@ -122,17 +123,17 @@ bounds, or metered rate-card fields.
 |---|---|---|
 | `flat` | fixed amount | base fees ("$5/mo includes…") |
 | `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); `round: up\|down\|half_up` (default `half_up`) picks the mode, declared inside `per_unit` — the one place it is read; optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
-| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; prefer graduated — volume has price cliffs and doesn't invert |
+| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; a metered card takes `graduated` only |
 | `package` | `ceil((qty − free_units)/package_size) × amount` | block pricing, round-up-to-next-unit |
 
 **Metered usage** — declare `meters:` (event_type, value_property, aggregation,
 group_by) and attach `rate_cards:` to a product: each card binds one meter to a charge
-model, with optional `allowance` (included usage netted off first, poolable and
-accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
-products declare no billing cadence — the billing period is the window: the daily
-pass rates reported usage through the cards and bills each customer's owed usage as a
-usage order, including a customer whose only activity is metered usage.
-See the metering API documentation for complete rate-card contracts.
+model, with an optional `allowance` (`included` usage netted off first, per period).
+Usage products declare no billing cadence — the billing period is the window. Each
+usage event is priced through the cards when it is recorded and draws the prepaid
+balance or is owed at once; the daily pass bills each customer's owed usage as a
+usage order. A metered card states no `payment_term`. See
+[usage pricing](usage-pricing.md).
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
 Supplied links are validated against the provider (object exists + money terms match)
@@ -245,9 +246,7 @@ reference: [api/routes.md](api/routes.md).
 | Metrics | `POST /v1/metrics/query`, `GET /v1/metrics/schema` | Dashboard |
 | Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/merchant/findings` (`?type=`), counted by `open_findings` in `POST /v1/metrics/query` | Ops, header bell |
 
-A person needs a recent sign-in on routes marked `sensitive` in the
-[route reference](api/routes.md), otherwise `401 step_up_required`.
-Applications do not step up, and findings resolutions do not request a recent
+Staff sessions and API keys pass on their permissions without a recent
 sign-in. A manual grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
 end.
 
@@ -288,6 +287,18 @@ orders and subscriptions keep naming it. Subscriptions on its prices stay
 grandfathered and keep renewing. Archiving refunds nobody; a refund is its own
 decision (`Client.RefundPayment`).
 
+### Deleting a product
+
+`DELETE /v1/catalog/products/{id}` (`Client.DeleteProduct`) deletes a
+product nothing ever referred to, with its prices, and answers 204. Reads and
+catalog listings leave it out. Creating its key again revives it with the new
+definition, since a product's id is its key's. A product an order line,
+payment, subscription, grant, product access, checkout, price migration,
+scheduled change, provider write, PSP link or meter rate card refers to is
+never deleted: the request answers `409 product_in_use`, and you archive it
+instead. A purchase therefore always names a product that exists. OpenRails
+deletes only its own product, never the host's content behind it.
+
 Granting credits is money-in, an admin change (`billing.MerchantCustomerManage`). Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
@@ -309,10 +320,8 @@ view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
 pages, such as the team and API keys. Each area shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).
-- **Dashboard**: a widget grid over the metrics API. Widget queries are written by a
-  server-side LLM from natural language ("count of cancels per day, past 7 days") —
-  requires `llm.api_key`; without it everything else still works and the add-widget
-  button explains the fix.
+- **Dashboard**: a widget grid over the metrics API. Saved and default dashboards remain available. Operators can move, resize, rename and remove existing widgets, choose their chart type and change whether they follow the dashboard's date range. Built-in AI metrics questions, widget creation and refinement are not available.
+
 - **Decline metrics**, all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
   (`psp`):
   - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)
@@ -328,9 +337,6 @@ route group's permission (`GET /v1/admin/access`).
   are NMI's own transaction history, read daily and kept 25 months, including the months
   before OpenRails recorded attempts. `one_off_sale` cannot separate initial sales from
   retries of declined rebills.
-- **Ask your metrics** (opt-in `llm.ask_enabled`): free-form Q&A where the model runs
-  validated, merchant-scoped aggregate queries and shows every result as evidence tables —
-  numbers come from the API, never model prose.
 - **Catalog copilot** (opt-in `llm.catalog_copilot_enabled`): Q&A over products,
   prices, subscriber counts, and pending migrations. With
   `llm.catalog_drafting_enabled`, it can additionally *draft* a price change or new

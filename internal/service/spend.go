@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -81,9 +83,9 @@ func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usage
 	}
 	out := usageReport{currency: currency, groupBy: cmp.Or(params.GroupBy, billing.UsageByEventType), from: params.From.UTC(), to: params.To.UTC()}
 	switch out.groupBy {
-	case billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker:
+	case billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker, billing.UsageByMeter:
 	default:
-		return usageReport{}, apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "group_by must be event_type, resource or invoker").WithParam("group_by")
+		return usageReport{}, apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "group_by must be event_type, resource, invoker or meter").WithParam("group_by")
 	}
 	if out.limit, err = UsagePage.Limit(params.PageRequest); err != nil {
 		return usageReport{}, err
@@ -133,6 +135,9 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 			return err
 		}
 		q := s.rt.DB.Gen(ctx)
+		if report.groupBy == billing.UsageByMeter {
+			return usageByMeter(ctx, q, mid.UUID(), customer, report, out)
+		}
 		arg := gen.UsageReportParams{GroupBy: string(report.groupBy), MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: report.currency,
 			FromAt: report.from, ToAt: report.to, RowLimit: UsagePage.Fetch(report.limit)}
 		if report.after != nil {
@@ -175,6 +180,36 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 		return nil, err
 	}
 	return out, nil
+}
+
+// usageByMeter is a usage report page grouped by what each meter and matrix
+// cell charged.
+func usageByMeter(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, report usageReport, out *billing.Usage) error {
+	arg := gen.UsageReportByMeterParams{MerchantID: merchantID, CustomerID: customer.UUID(), Currency: report.currency,
+		FromAt: report.from, ToAt: report.to, RowLimit: UsagePage.Fetch(report.limit)}
+	if report.after != nil {
+		arg.AfterAmount, arg.AfterKey = &report.after.Amount, &report.after.Key
+	}
+	rows, err := q.UsageReportByMeter(ctx, arg)
+	if err != nil {
+		return err
+	}
+	page := pagination.Cut(rows, report.limit, func(r gen.UsageReportByMeterRow) any {
+		return usageCursor{Amount: r.TotalAmount, Key: r.Key, Currency: report.currency, GroupBy: report.groupBy, From: report.from, To: report.to}
+	})
+	if page.Next != "" {
+		out.NextCursor = &page.Next
+	}
+	for _, r := range page.Items {
+		meter, cell, _ := strings.Cut(r.Key, "\x1f")
+		quantity := r.Quantity
+		row := billing.UsageRow{Key: meter, EventCount: r.EventCount, Amount: r.TotalAmount, Quantity: &quantity}
+		if cell != "" {
+			row.Cell = &cell
+		}
+		out.Rows = append(out.Rows, row)
+	}
+	return nil
 }
 
 // SetCreditAccountSettings upserts a payer's spend policy in one currency.

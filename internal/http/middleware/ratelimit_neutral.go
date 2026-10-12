@@ -464,7 +464,7 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 		return (*cfg)["checkout"], bucket
 	case "payment-methods":
 		return (*cfg)["payment"], bucket
-	case "metrics-ask", "catalog-ask", "dashboard-generate":
+	case "catalog-ask":
 		return (*cfg)[bucket], bucket
 	}
 	// Generic per-address ceilings belong to the proxy in front of OpenRails.
@@ -484,12 +484,8 @@ func ClassifyBucket(path, method string) string {
 
 	method = strings.ToUpper(method)
 	switch {
-	case method == http.MethodPost && path == "/v1/metrics/ask":
-		return "metrics-ask"
 	case method == http.MethodPost && path == "/v1/catalog/ask":
 		return "catalog-ask"
-	case method == http.MethodPost && path == "/v1/metrics/dashboard/widgets/generate":
-		return "dashboard-generate"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
 	case strings.HasPrefix(path, "/v1/me/payment-methods"):

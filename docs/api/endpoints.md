@@ -56,8 +56,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   configuration (see [below](#public-configuration)). Its `capabilities` list
   the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
-  `merchant_config_edits`, `catalog_copilot`, `metrics_ask`,
-  `dashboard_generation`). Its route groups are `admin`
+  `merchant_config_edits`, `catalog_copilot`). Its route groups are `admin`
   (customer support), `catalog`, `merchant_config` (the merchant's own
   configuration and findings), `metrics` (business metrics) and `app` (the host backend's
   programmatic routes); `merchant_config_edits` says that configuration can
@@ -92,11 +91,9 @@ pair is in [routes.md](routes.md)), whatever the credential: the `merchant:`
 name held at the merchant, or the `root:` name held in the root scope
 ([auth](../auth.md#permissions)). On the standalone server an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
-role in the merchant's group. A person also needs a recent sign-in on a
-`sensitive` route: otherwise `401 step_up_required` (RFC 9470: `WWW-Authenticate:
-Bearer error="insufficient_user_authentication", max_age="900"`), with the
-step-up methods in `metadata`, or `403 step_up_unavailable` for a credential
-with no sign-in of its own; an application never steps up. A `/v1/app` route refuses a person
+role in the merchant's group. Admin operations do not require a recent
+sign-in. Customer-network routes marked `sensitive` retain their
+recent-sign-in policy. A `/v1/app` route refuses a person
 (`403 application_required`), and answers a retried write's `Idempotency-Key`
 with the first response; the key sent with another request is
 `422 idempotency_key_reused`.
@@ -223,8 +220,8 @@ subscription to another price of its tier group, to other seats, or both:
 - **A change back** to the subscription's current price and seats cancels its
   pending change and charges nothing.
 - **Staff** change a subscription at the customer's request through
-  `POST /v1/admin/subscriptions/{id}/change`, which needs a recent sign-in and
-  a `reason`. It behaves as the customer's own change: an upgrade or more
+  `POST /v1/admin/subscriptions/{id}/change`, which needs the staff write
+  permission and a `reason`. It behaves as the customer's own change: an upgrade or more
   seats is charged now, merchant-initiated under the card's recurring
   agreement (`409 stored_credential_required` when the card has none
   active), and fewer seats or a downgrade wait for the renewal. The reason and
@@ -317,7 +314,11 @@ or retries a past-due subscription the PSP schedules
   nothing written in between. See [running charges](../running-charges.md).
 - **Usage events** (`POST /v1/app/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
-  up to 35 days old. An item with `outcome: failed` is work that cost and did
+  up to 35 days old. An event without an `amount` is priced by its meters'
+  rate cards when it is recorded (`charges`; see
+  [usage pricing](../usage-pricing.md)); a priced meter that cannot price it
+  refuses the item `422 usage_not_priced`. A charge draws the prepaid balance
+  and the rest is owed: usage is never refused for money. An item with `outcome: failed` is work that cost and did
   not deliver: the customer's own failures are forgiven up to its policy's
   `bad_spend_windows` and charged past them (`amount` is what was charged,
   `forgiven_amount` what grace absorbed); a delegated invoker's

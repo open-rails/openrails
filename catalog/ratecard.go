@@ -35,7 +35,8 @@ const (
 	RoundDown   Round = "down"
 )
 
-// PaymentTerm is when a rate card's charge is collected.
+// PaymentTerm is when a flat fee is collected. A metered card states none:
+// its charges are posted when usage is recorded.
 type PaymentTerm string
 
 const (
@@ -84,7 +85,8 @@ type PerUnitPrice struct {
 	Matrix        *Matrix `json:"matrix,omitempty"`
 }
 
-// TieredPrice prices usage in ascending bands; the last band is unbounded.
+// TieredPrice prices usage in ascending bands; the last band is unbounded. A
+// metered card takes graduated tiers only.
 type TieredPrice struct {
 	Mode  TierMode   `json:"mode,omitempty"`
 	Tiers []RateTier `json:"tiers,omitempty"`
@@ -110,21 +112,17 @@ type Matrix struct {
 	Cells     map[string]MatrixCell `json:"cells"`
 }
 
-// MatrixCell is one dimension value's per-unit amount, its cap, and the units
-// it includes for other cards' accrued allowances.
+// MatrixCell is one dimension value's per-unit amount and its cap.
 type MatrixCell struct {
 	UnitAmount    int64 `json:"unit_amount,string"`
 	MaximumAmount int64 `json:"maximum_amount,omitempty,string"`
-	Included      int64 `json:"included,omitempty"`
 }
 
 // Allowance is usage included before the price applies: Included units per
-// period, or units accrued from another meter's matrix cells (AccrueFrom),
-// bounded by Cap ("28d", "720h").
+// period (and per matrix cell), in the price's units: units of divide_by for
+// a per-unit price.
 type Allowance struct {
-	Included   int64  `json:"included,omitempty"`
-	AccrueFrom string `json:"accrue_from,omitempty"`
-	Cap        string `json:"cap,omitempty"`
+	Included int64 `json:"included,omitempty"`
 }
 
 // RateCard binds a meter's usage (or, with no meter, a flat fee) to a price

@@ -9,10 +9,6 @@ import type {
 } from "@/lib/api/metrics"
 import { formatNativeAmount } from "@/lib/format"
 
-export function newWidgetId(): string {
-  return crypto.randomUUID()
-}
-
 // formatMeasure renders one measure cell by its column unit.
 export function formatMeasure(
   value: MetricsCell,

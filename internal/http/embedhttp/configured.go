@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
@@ -14,7 +14,7 @@ import (
 
 // ValidateRoutes refuses a selection without the Auth its routes need,
 // before anything mounts: nothing is ever mounted open. A staff or
-// programmatic group needs an Auth with a root scope (helpers/auth Root),
+// programmatic group needs an Auth with a root scope (authkit/auth Root),
 // where its routes' root: permissions are held. The mount itself refuses a
 // route whose permissions the Auth knows none of.
 func ValidateRoutes(sel config.Routes) error {
@@ -25,7 +25,7 @@ func ValidateRoutes(sel config.Routes) error {
 		return nil
 	}
 	if _, ok := sel.Auth.(auth.Root); !ok {
-		return fmt.Errorf("openrails: RouteGroups need a Routes.Auth that is a helpers/auth Root (its RootScope is where root: permissions are held); %T is not", sel.Auth)
+		return fmt.Errorf("openrails: RouteGroups need a Routes.Auth that is a authkit/auth Root (its RootScope is where root: permissions are held); %T is not", sel.Auth)
 	}
 	return nil
 }

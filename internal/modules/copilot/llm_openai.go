@@ -1,4 +1,4 @@
-package dashboard
+package copilot
 
 import (
 	"bytes"
@@ -102,59 +102,39 @@ type openaiResponse struct {
 func (o *OpenAILLM) send(ctx context.Context, reqBody any) (*openaiResponse, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: marshal request: %w", err)
+		return nil, fmt.Errorf("catalog llm: marshal request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: build request: %w", err)
+		return nil, fmt.Errorf("catalog llm: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
 
 	resp, err := o.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: request failed: %w", err)
+		return nil, fmt.Errorf("catalog llm: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("dashboard llm: read response: %w", err)
+		return nil, fmt.Errorf("catalog llm: read response: %w", err)
 	}
 	var out openaiResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("dashboard llm: non-JSON response (status %d)", resp.StatusCode)
+		return nil, fmt.Errorf("catalog llm: non-JSON response (status %d)", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		msg := "unknown error"
 		if out.Error != nil {
 			msg = fmt.Sprintf("%s: %s", out.Error.Type, out.Error.Message)
 		}
-		return nil, fmt.Errorf("dashboard llm: openai API error (status %d): %s", resp.StatusCode, msg)
+		return nil, fmt.Errorf("catalog llm: openai API error (status %d): %s", resp.StatusCode, msg)
 	}
 	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("dashboard llm: response has no choices")
+		return nil, fmt.Errorf("catalog llm: response has no choices")
 	}
 	return &out, nil
-}
-
-// Complete sends one chat turn and returns the assistant text.
-func (o *OpenAILLM) Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error) {
-	req := openaiRequest{Model: o.model, MaxCompletionTokens: openaiMaxTokens}
-	if system != "" {
-		req.Messages = append(req.Messages, openaiMessage{Role: "system", Content: system})
-	}
-	for _, m := range msgs {
-		req.Messages = append(req.Messages, openaiMessage{Role: m.Role, Content: m.Content})
-	}
-	out, err := o.send(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	text := strings.TrimSpace(out.Choices[0].Message.Content)
-	if text == "" {
-		return "", fmt.Errorf("dashboard llm: empty response (finish_reason %q)", out.Choices[0].FinishReason)
-	}
-	return text, nil
 }
 
 // CompleteTools sends one tool-use turn. Mapping notes vs the Anthropic wire:

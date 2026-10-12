@@ -36,7 +36,6 @@ var Tables = map[string]Table{
 	"usage_collection_cadence":      {Permanent, permanent},
 	"owed_items":                    {Permanent, permanent},
 	"running_charges":               {Permanent, permanent},
-	"metered_rating_watermarks":     {Permanent, permanent},
 	"solana_pay_receipts":           {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
 	"catalog_applications":          {Permanent, permanent},
 	"catalog_restore_receipts":      {Permanent, permanent},
@@ -71,6 +70,7 @@ var Tables = map[string]Table{
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
+	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"customer_links":                  {Rows, "revoked links are deleted 24 months (731 days) after revoked_at; an active link is kept while it lasts."},
 

@@ -81,7 +81,7 @@ type Operation string
 
 const (
 	OpSpend    Operation = "spend"    // MoneyService.SpendCredits
-	OpCapture  Operation = "capture"  // MoneyService.CaptureAuthorized
+	OpCapture  Operation = "capture"  // an admission captured at a host-stated amount
 	OpWithdraw Operation = "withdraw" // MoneyService.Withdraw
 	OpDeposit  Operation = "deposit"  // credit grant / top-up
 
@@ -90,7 +90,7 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpMeteredRating  Operation = "metered_rating"  // rate-card sweep accrual
+	OpMeteredRating  Operation = "metered_rating"  // a meter's charge for one usage event
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.
 	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge

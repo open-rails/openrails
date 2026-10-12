@@ -108,15 +108,14 @@ func TestCustomerSettingsRefusals(t *testing.T) {
 	require.Empty(t, read.Settings.CreditLimits, "a refused write changes nothing")
 }
 
-// Every settings field can change a customer's spending authority, so every
-// settings write needs a person's recent sign-in. A read does not, and
-// machines carry no sign-in and are never asked.
-func TestCustomerSettingsStepUp(t *testing.T) {
+// Staff can update every customer settings field on their permission
+// without a recent sign-in, as can the host's application key.
+func TestCustomerSettingsNeedNoRecentSignIn(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
 	declareBillingPolicy(t, w, "enterprise")
 	c := w.newCustomer()
-	stale, fresh := w.auth.staleToken(t, "staff"), w.auth.token(t, "staff")
+	stale := w.auth.staleToken(t, "staff")
 	for _, item := range []map[string]any{
 		{"credit_limits": []any{map[string]any{"currency": "USD", "amount": "1000000"}}},
 		{"trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}},
@@ -126,10 +125,7 @@ func TestCustomerSettingsStepUp(t *testing.T) {
 		{},
 	} {
 		body := item
-		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
-		require.Equal(t, http.StatusUnauthorized, status, "%v: %v", item, refused)
-		require.Equal(t, "step_up_required", refused["error"].(map[string]any)["code"], "%v: %v", item, refused)
-		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
+		status, answered := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
 		require.Equal(t, http.StatusOK, status, "%v: %v", item, answered)
 	}
 	status, body := w.merchantJSON(stale, http.MethodGet, "/v1/admin/customers/"+c.id, nil)

@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/helpers/auth"
-	"github.com/open-rails/helpers/userinfo"
+	"github.com/open-rails/authkit/auth"
+	"github.com/open-rails/authkit/userinfo"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -44,7 +44,7 @@ var roles = map[string][]billing.Permission{
 	"reader":  {billing.MerchantCustomerRead, billing.RootCustomerRead},
 }
 
-// shopAuth is the shop's own auth as OpenRails takes it (helpers/auth): it
+// shopAuth is the shop's own auth as OpenRails takes it (authkit/auth): it
 // says who a request is from shop.sessions, and what they hold from
 // shop.roles, read live on every request.
 type shopAuth struct{ db *pgxpool.Pool }
@@ -218,7 +218,7 @@ func (a shopAuth) signOut(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// refuse answers err as every helpers/auth consumer does.
+// refuse answers err as every authkit/auth consumer does.
 func refuse(w http.ResponseWriter, r *http.Request, err error) {
 	refusal := auth.Refuse(r, err)
 	for name, values := range refusal.Header {

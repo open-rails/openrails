@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/helpers/userinfo"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"

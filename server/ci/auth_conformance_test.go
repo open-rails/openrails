@@ -16,9 +16,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	helpersauthtest "github.com/open-rails/authkit/auth/authtest"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
-	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -177,9 +177,8 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 // Each admin route checks its permission by its level, each catalog and
 // merchant-config route its group's: the root: name (root:customer:read) in
 // AuthKit's root group or the merchant: name (merchant:customer:read) in the
-// merchant's own. A group that is off is not mounted. A write that moves
-// money still needs a recent sign-in, and the machine checkout-attempt
-// routes are gone.
+// merchant's own. A group that is off is not mounted. Admin writes need
+// no recent sign-in, and the machine checkout-attempt routes are gone.
 func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
@@ -194,7 +193,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusMethodNotAllowed}, got.status, "%s %s: %s", method, path, got.body)
 		require.NotContains(t, got.body, "page not found", "%s %s is mounted", method, path)
 	}
-	// OpenRails answers every refusal: permission_required, or a step-up.
+	// OpenRails answers a permission refusal itself.
 	forbidden := func(t *testing.T, mux http.Handler, token, method, path string) {
 		t.Helper()
 		got := ask(t, mux, token, method, path, map[string]any{})
@@ -220,9 +219,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 
 		stale := authtest.StaleSession(t, h.ak, h.support)
 		passes(t, mux, stale, http.MethodGet, "/billing/v1/admin/payments")
-		got := ask(t, mux, stale, http.MethodPost, payment, map[string]any{})
-		require.Equal(t, http.StatusUnauthorized, got.status, got.body)
-		require.Contains(t, got.body, `"code":"step_up_required"`)
+		passes(t, mux, stale, http.MethodPost, payment)
 
 		for _, route := range []struct{ method, path string }{
 			{http.MethodPost, "/billing/v1/admin/checkout-attempts"},
@@ -282,10 +279,8 @@ func TestRouteGroupPermissions(t *testing.T) {
 
 // Through a real mount guarded by AuthKit's Authenticator, OpenRails answers
 // every refusal itself: 401 with its challenge (none presented, forged,
-// signed out), 403 for a permission not held, RFC 9470's 401 step-up for a
-// stale person on an operation that moves money, which the backend's API key
-// passes on its permission alone, and 503 while AuthKit cannot reach its
-// database. /v1/app takes the API key, an application, and refuses a person.
+// signed out), 403 for a permission not held, and 503 while AuthKit cannot
+// reach its database. A stale staff session passes on its permission. /v1/app takes the API key, an application, and refuses a person.
 func TestAuthKitRefusals(t *testing.T) {
 	f := newFixture(t)
 	var down atomic.Bool
@@ -320,7 +315,6 @@ func TestAuthKitRefusals(t *testing.T) {
 		"forged":                {h.customer + "x", http.MethodGet, "/billing/v1/admin/payments", 401, "authentication_required", `Bearer error="invalid_token"`},
 		"signed out":            {h.gone, http.MethodGet, "/billing/v1/admin/payments", 401, "credential_revoked", `Bearer error="invalid_token"`},
 		"a permission not held": {h.customer, http.MethodGet, "/billing/v1/admin/payments", 403, "permission_required", ""},
-		"a stale person":        {authtest.StaleSession(t, h.ak, h.support), http.MethodPost, refund, 401, "step_up_required", `Bearer error="insufficient_user_authentication", max_age="900"`},
 		"a person on /v1/app":   {h.owner, http.MethodGet, "/billing/v1/app/host-events", 403, "application_required", ""},
 		"a customer on /v1/app": {h.customer, http.MethodPost, "/billing/v1/app/entitlements/check", 403, "application_required", ""},
 	} {
@@ -330,7 +324,8 @@ func TestAuthKitRefusals(t *testing.T) {
 		require.Equal(t, tc.challenge, got.challenge, name)
 	}
 	stale := ask(t, mux, authtest.StaleSession(t, h.ak, h.support), http.MethodPost, refund, map[string]any{})
-	require.Contains(t, stale.body, `"step_up_methods":[`, "AuthKit's challenge reaches its client: %s", stale.body)
+	require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, stale.status, "a stale staff session reaches the refund handler: %s", stale.body)
+	require.Empty(t, stale.challenge)
 
 	for _, path := range []string{refund, "/billing/v1/app/host-events"} {
 		method := http.MethodPost

@@ -81,7 +81,7 @@ can only ever act on itself. In embedded mode, prepend the mount prefix to every
 ```
 GET  /v1/me                               balances, default cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
-GET  /v1/me/usage?currency=USD            metered usage by event type (or ?group_by=), largest first (cursor page)
+GET  /v1/me/usage?currency=USD            metered usage by event type (or ?group_by= resource, invoker, meter), largest first (cursor page)
 GET  /v1/me/orders[/{id}]                 purchases, renewals and usage orders (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements

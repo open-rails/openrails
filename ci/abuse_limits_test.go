@@ -3,13 +3,16 @@
 package ci_test
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/helpers/auth"
+	"github.com/open-rails/authkit/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -189,13 +192,19 @@ func TestInstancesWithRedisShareAbuseLimits(t *testing.T) {
 	in.noPostgres(t)
 }
 
-// A configured Redis that does not answer costs sharing, not service: every
-// instance is ready with Redis degraded, serves requests and enforces each
-// limit in its own memory, counting the fallbacks. PostgreSQL holds none of it.
+// A configured Redis that does not answer costs sharing, not service.
+// Construction asks it nothing but the background health probe (it reads
+// commands and answers none, so a caller that waited would wait); then it is
+// down and refuses. Every instance is ready with Redis degraded, serves
+// requests and enforces each limit in its own memory, counting the fallbacks.
+// PostgreSQL holds none of it.
 func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
-	start := time.Now()
-	in := newAbuseInstances(t, 2, &openrails.RedisConfig{Addr: "127.0.0.1:1"})
-	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on Redis")
+	silent := newSilentRedis(t)
+	in := newAbuseInstances(t, 2, &openrails.RedisConfig{Addr: silent.addr()})
+	for _, command := range silent.commands() {
+		require.Contains(t, []string{"HELLO", "CLIENT", "PING"}, command, "construction asks Redis nothing but its background health probe")
+	}
+	silent.close()
 	for i, bill := range in.engines {
 		require.NoError(t, bill.Start(t.Context()))
 		require.Eventually(t, func() bool { return degraded(t, bill) }, 15*time.Second, 50*time.Millisecond, "instance %d is ready with Redis degraded", i)
@@ -205,4 +214,95 @@ func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
 	for i, bill := range in.engines {
 		require.Positive(t, engine.Graph(bill).Runtime.AbuseState.Fallbacks(), "instance %d counts what memory took", i)
 	}
+}
+
+// silentRedis accepts connections and completes a client's handshake, then
+// reads commands and answers none, as a Redis that hangs would; close makes it
+// refuse, as a stopped one does.
+type silentRedis struct {
+	listener net.Listener
+	mu       sync.Mutex
+	seen     []string
+	conns    []net.Conn
+}
+
+func newSilentRedis(t *testing.T) *silentRedis {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	r := &silentRedis{listener: listener}
+	t.Cleanup(r.close)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			r.mu.Lock()
+			r.conns = append(r.conns, conn)
+			r.mu.Unlock()
+			go r.read(conn)
+		}
+	}()
+	return r
+}
+
+func (r *silentRedis) addr() string { return r.listener.Addr().String() }
+
+// read records each command's name: a RESP array's first bulk string.
+func (r *silentRedis) read(conn net.Conn) {
+	in := bufio.NewReader(conn)
+	for {
+		line, err := in.ReadString('\n')
+		if err != nil {
+			return
+		}
+		if !strings.HasPrefix(line, "*") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(line[1:]))
+		if err != nil {
+			continue
+		}
+		var args []string
+		for range n {
+			if _, err := in.ReadString('\n'); err != nil { // $<len>
+				return
+			}
+			arg, err := in.ReadString('\n')
+			if err != nil {
+				return
+			}
+			args = append(args, strings.TrimSpace(arg))
+		}
+		if len(args) == 0 {
+			continue
+		}
+		command := strings.ToUpper(args[0])
+		r.mu.Lock()
+		r.seen = append(r.seen, command)
+		r.mu.Unlock()
+		switch command {
+		case "HELLO": // the client falls back to RESP2
+			_, _ = conn.Write([]byte("-ERR unknown command 'HELLO'\r\n"))
+		case "CLIENT":
+			_, _ = conn.Write([]byte("+OK\r\n"))
+		}
+	}
+}
+
+func (r *silentRedis) commands() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.seen...)
+}
+
+func (r *silentRedis) close() {
+	_ = r.listener.Close()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, conn := range r.conns {
+		_ = conn.Close()
+	}
+	r.conns = nil
 }

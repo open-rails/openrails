@@ -346,6 +346,16 @@ func createCreditGrant(ctx context.Context, client *openrails.Client, customer b
 	return &grants[0], nil
 }
 
+// captureAdmission settles one admission at a host-stated amount: a batch of
+// one.
+func captureAdmission(ctx context.Context, client *openrails.Client, requestID string, amount int64, usage *billing.CaptureUsage) (*billing.CaptureReceipt, error) {
+	results, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{RequestID: requestID, Amount: &amount, Usage: usage}})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Receipt, results[0].Err()
+}
+
 // releaseAdmission releases one admission: a batch of one.
 func releaseAdmission(ctx context.Context, client *openrails.Client, requestID string) (*billing.Admission, error) {
 	results, err := client.ReleaseAdmissions(ctx, []string{requestID})

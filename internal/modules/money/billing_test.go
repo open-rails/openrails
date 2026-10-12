@@ -8,8 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
@@ -62,58 +60,4 @@ func TestPendingOwedItemGuards(t *testing.T) {
 		"owed item source_type and source_id required")
 	require.EqualError(t, insertPendingOwedItemTx(ctx, nil, merchantID, customerID, "USD", "usage", "r-1", 100, time.Time{}, nil),
 		"owed item timestamp required")
-}
-
-func TestRateCardFilterRules(t *testing.T) {
-	rules, err := rateCardFilterRules(catalogRateCardRow{
-		ID:      uuid.New(),
-		GroupBy: map[string]string{"region": "metadata.region", "plan": "$.plan", "tier": "dimensions.tier"},
-		Filter:  map[string][]string{"region": {"eu"}, "plan": {"pro", "team"}, "tier": {"gold"}},
-	})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []usageFilterRule{
-		{PropertyKey: "region", AllowedValues: []string{"eu"}},
-		{PropertyKey: "plan", AllowedValues: []string{"pro", "team"}},
-		{PropertyKey: "tier", AllowedValues: []string{"gold"}},
-	}, rules)
-
-	_, err = rateCardFilterRules(catalogRateCardRow{ID: uuid.New(), Filter: map[string][]string{"region": {"eu"}}})
-	require.ErrorContains(t, err, `filter dimension "region" has no meter property`)
-}
-
-func TestAllowanceSourcePrice(t *testing.T) {
-	meter := catalogrules.Meter{
-		Key: "runtime", Aggregation: catalog.AggregationSum,
-		GroupBy: map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"},
-	}
-	matrix := func(cells map[string]catalog.MatrixCell) catalog.RatePrice {
-		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{
-			Matrix: &catalog.Matrix{Dimension: "size", Cells: cells},
-		}}
-	}
-	valid := matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000, Included: 100}, "large": {UnitAmount: 1}})
-	require.NoError(t, validateAllowanceSourcePrice(meter, valid, "USD"))
-
-	withMeter := func(edit func(*catalogrules.Meter)) catalogrules.Meter {
-		m := meter
-		m.GroupBy = map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"}
-		edit(&m)
-		return m
-	}
-	for name, tt := range map[string]struct {
-		meter    catalogrules.Meter
-		price    catalog.RatePrice
-		currency string
-	}{
-		"unsupported aggregation": {withMeter(func(m *catalogrules.Meter) { m.Aggregation = catalog.AggregationMax }), valid, "USD"},
-		"currency mismatch":       {meter, valid, "EUR"},
-		"non-matrix price": {meter, catalog.RatePrice{
-			Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10_000},
-		}, "USD"},
-		"missing resource dimension": {withMeter(func(m *catalogrules.Meter) { delete(m.GroupBy, "resource_id") }), valid, "USD"},
-		"missing matrix dimension":   {withMeter(func(m *catalogrules.Meter) { delete(m.GroupBy, "size") }), valid, "USD"},
-		"no included cells":          {meter, matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000}}), "USD"},
-	} {
-		require.ErrorIs(t, validateAllowanceSourcePrice(tt.meter, tt.price, tt.currency), ErrAllowanceSourceInvalid, name)
-	}
 }

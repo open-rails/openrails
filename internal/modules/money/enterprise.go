@@ -10,22 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// Enterprise arrears seams (#798): host-driven sweep, past-due marking,
-// pending-charge visibility and host-owned usage meters / rate cards.
-
-// SweepUsage rates a payer's reported usage over [from, to) through the
-// catalog rate cards into pending owed items — the same watermarked sweep
-// FinalizeUsage runs, without billing. Hosts call it to keep
-// arrears exposure (GetOutstandingOwed) fresh mid-period.
-func (s *MoneyService) SweepUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
-	return s.sweepCatalogRateCardUsage(ctx, payer, currency, from, to)
-}
+// Enterprise arrears seams: past-due marking and host-owned usage meters /
+// rate cards.
 
 // NotifyOverdueUsageOrders queues one overdue notice per usage order still
 // owed past its due date. Returns the number of new notices.
@@ -200,12 +191,6 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
 			return invalidUsageRateCard(err)
 		}
-		if err := ensureAllowanceSource(ctx, tx, tid.UUID(), meterKey, in.Price.Currency, in.Allowance); err != nil {
-			return err
-		}
-		if err := validateRateCardAsAllowanceSource(ctx, queries, tid.UUID(), meter, in.Price); err != nil {
-			return err
-		}
 		if err := ensureActiveProduct(ctx, tx, tid.UUID(), *in.ProductID); err != nil {
 			return err
 		}
@@ -233,8 +218,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	})
 }
 
-// DeleteDefaultUsageRateCard removes a meter's rate card unless another
-// meter's allowance accrues from it.
+// DeleteDefaultUsageRateCard removes a meter's rate card.
 func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -264,19 +248,6 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 		}
 		if !exists {
 			return ErrDefaultRateCardNotFound
-		}
-		dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
-			ctx,
-			gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{
-				MerchantID: tid.UUID(),
-				MeterKey:   meterKey,
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("load allowance dependencies: %w", err)
-		}
-		if len(dependencyCurrencies) > 0 {
-			return ErrAllowanceSourceInUse
 		}
 		if err := queries.DeleteDefaultUsageRateCard(ctx, gen.DeleteDefaultUsageRateCardParams{
 			MerchantID: tid.UUID(),

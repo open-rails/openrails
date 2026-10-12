@@ -95,7 +95,7 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 		billing.Admission{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64, CapturedAmount: &max},
 		billing.RecordUsageParams{Amount: math.MaxInt64, Outcome: billing.UsageFailed},
 		billing.UsageEvent{Amount: 9007199254740993, ForgivenAmount: math.MaxInt64, Outcome: billing.UsageFailed},
-		billing.CaptureAdmissionParams{Amount: math.MaxInt64},
+		billing.CaptureAdmissionParams{RequestID: "r", Amount: &max},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -120,10 +120,11 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 			}
 		}
 	}
-	// A capture that names no amount is refused, never read as free.
+	// A capture that names no amount is priced by its usage: absent is not
+	// zero.
 	var capture billing.CaptureAdmissionParams
-	if err := json.Unmarshal([]byte(`{"usage":{"event_type":"inference"}}`), &capture); err == nil {
-		t.Fatal("capture without an amount decoded")
+	if err := json.Unmarshal([]byte(`{"request_id":"r","usage":{"event_type":"inference"}}`), &capture); err != nil || capture.Amount != nil {
+		t.Fatalf("capture without an amount decoded as %+v: %v", capture, err)
 	}
 }
 

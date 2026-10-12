@@ -15,6 +15,7 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -111,7 +112,9 @@ func (g *Gate) SetClock(now func() time.Time) {
 func (g *Gate) Now() time.Time { return g.now().UTC().Truncate(time.Microsecond) }
 
 type Decision struct {
-	Allowed         bool
+	Allowed bool
+	// EstimatedAmount is what the admission holds: the stored one on a replay.
+	EstimatedAmount int64
 	BlockedBalance  bool
 	BlockedWindow   *Window
 	RetryAfter      time.Duration
@@ -132,6 +135,10 @@ type AdmitInput struct {
 	CreditLimit    int64
 	Policy         Policy
 	Request        Request
+	// EstimateUsage is the usage estimate Cost was priced from, and RateCards
+	// the cards that priced it; both nil for a host-stated estimate.
+	EstimateUsage []byte
+	RateCards     []byte
 }
 
 // Admit runs inside the transaction that owns the payer money lock.
@@ -178,7 +185,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		capacity += in.CreditLimit
 	}
 	if in.Cost > capacity {
-		return Decision{BlockedBalance: true}, nil
+		return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
 	}
 	windows := in.Policy.EffectiveWindows(in.Request)
 	keys := make([]string, 0, len(windows))
@@ -196,7 +203,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		}
 		if in.Cost > w.Limit || usage.Used > w.Limit-in.Cost {
 			blocked := w.Window
-			return Decision{BlockedWindow: &blocked, RetryAfter: end.Sub(now)}, nil
+			return Decision{BlockedWindow: &blocked, RetryAfter: end.Sub(now), EstimatedAmount: in.Cost}, nil
 		}
 		keys = append(keys, key)
 	}
@@ -209,6 +216,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		Currency: in.Currency, EstimatedAmount: in.Cost, Terms: body,
 		AvailableAmount:    capacity - in.Cost,
 		RequestedExpiresAt: expiry, AdmittedAt: now, WindowKeys: keys,
+		EstimateUsage: in.EstimateUsage, RateCards: in.RateCards,
 	})
 	if err != nil {
 		return Decision{}, err
@@ -217,7 +225,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	if err := q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: mid.UUID(), CustomerID: in.Customer, Currency: in.Currency}); err != nil {
 		return Decision{}, err
 	}
-	return Decision{Allowed: true, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil
+	return Decision{Allowed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil
 }
 
 // CheckIdentity refuses key reuse before current policy evaluation can mask a conflict.
@@ -239,12 +247,16 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 
 func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decision, error) {
 	field := ""
+	estimated := len(row.EstimateUsage) > 0 || len(in.EstimateUsage) > 0
 	switch {
 	case row.CustomerID != in.Customer:
 		field = "payer"
 	case row.Currency != in.Currency:
 		field = "currency"
-	case row.EstimatedAmount != in.Cost:
+	// A usage estimate is the term: its price is what admitting it answered.
+	case estimated && !sameUsageEstimate(row.EstimateUsage, in.EstimateUsage):
+		field = "usage"
+	case !estimated && row.EstimatedAmount != in.Cost:
 		field = "estimated_amount"
 	case !sameDeadline(row.RequestedExpiresAt, deadline(in.ExpiresAt)):
 		field = "expires_at"
@@ -272,7 +284,22 @@ func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decisio
 	if state == "open" && row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
 		state = "expired"
 	}
-	return Decision{Allowed: true, Replayed: true, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
+	return Decision{Allowed: true, Replayed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
+}
+
+// sameUsageEstimate compares stored jsonb by value while keeping dimensions
+// as int64: decoding them into any would round quantities above 2^53.
+func sameUsageEstimate(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	var x, y billing.UsageEstimate
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	ja, err1 := json.Marshal(x)
+	jb, err2 := json.Marshal(y)
+	return err1 == nil && err2 == nil && bytes.Equal(ja, jb)
 }
 
 func deadline(t time.Time) *time.Time {

@@ -5,7 +5,7 @@ SELECT id, key, display_name, COALESCE(description, '')::text AS description,
        COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = products.merchant_id AND pe.product_id = products.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements,
        credit_grant, tier_group, tier_rank, ownership, archived, revision
 FROM billing.products
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
 ORDER BY key;
 
 -- name: ListCatalogStatePrices :many
@@ -24,7 +24,7 @@ SELECT p.id, p.product_id, p.key, p.revision AS version, p.amount, p.currency, p
        COALESCE(k.revision, 1)::bigint AS key_revision
 FROM billing.prices p
 LEFT JOIN billing.price_keys k ON k.merchant_id = p.merchant_id AND k.product_id = p.product_id AND k.key = p.key
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.deleted_at IS NULL
 ORDER BY p.product_id, p.key, p.revision;
 
 -- name: ListCatalogMeterRevisions :many

@@ -7,8 +7,10 @@
   "rows": [
     {
       "key": "gpu",
+      "cell": null,
       "event_count": 3,
       "amount": "9223372036854775807",
+      "quantity": null,
       "dimensions": {
         "seconds": 90
       }

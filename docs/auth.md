@@ -11,10 +11,11 @@ OpenRails authenticates nobody itself, and the host writes no middleware for
 it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 `Routes.Auth`, who the request is (`Authenticate`, once per request), and
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
-for a staff or programmatic route's permission, and its recent sign-in
-(helpers/auth `RecentSignInChecker`) for a person. The host names no
+for a staff or programmatic route's permission. Admin operations require no
+recent sign-in; sensitive customer-network operations retain that check
+(authkit/auth `RecentSignInChecker`). The host names no
 permission and no scope: the names are OpenRails' own ([below](#permissions)),
-and the scopes come from the Authenticator's `RootScope` (helpers/auth `Root`).
+and the scopes come from the Authenticator's `RootScope` (authkit/auth `Root`).
 AuthKit provides one as `ak.Authenticator()`; a host without AuthKit writes
 its own ([below](#your-own-auth)). The standalone server mounts its routes
 with its own AuthKit's, exactly like an embedded host, and the in-process Go
@@ -24,7 +25,7 @@ client brings its own host authority.
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`, `/v1/merchant`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope), then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
+| merchant (`/v1/admin`, `/v1/catalog`, `/v1/merchant`, `/v1/metrics`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope) | a person or an application holding that permission, without a recent-sign-in check |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
@@ -43,17 +44,19 @@ status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
 (`authentication_required`, `credential_expired`, `credential_revoked`, with
 the provider's own challenge headers passed through unread), 403
 (`permission_required`, `application_required`, `invoker_scoped_principal`,
-`step_up_unavailable` for a person whose credential has no sign-in of its own),
+`step_up_unavailable` on sensitive customer-network routes for a credential
+without a sign-in of its own),
 503 when the host's auth cannot answer (`authentication_unavailable`,
-`authorization_unavailable`, or a panic). A stale sign-in is RFC 9470's step-up:
+`authorization_unavailable`, or a panic). On sensitive customer-network
+routes a stale sign-in is RFC 9470's step-up:
 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age="900"` and the provider's
 challenge as the error's metadata. A Verified without `Can` holds nothing; an
 identity without a subject or invoker is refused, so an Authenticator that
 checks nothing admits no one; each handler checks the verdict again before it
 runs. A route group never mounts without `Auth`, behind an `Auth` that is not
-a helpers/auth `Root`, or with a route neither of whose permissions the `Auth`
-knows (helpers/auth `PermissionCatalog`); a name it does not know is never
+a authkit/auth `Root`, or with a route neither of whose permissions the `Auth`
+knows (authkit/auth `PermissionCatalog`); a name it does not know is never
 asked. `openrailstest.CheckAuth` checks an Authenticator against this contract
 in the host's CI, with the route groups' `root:` permissions.
 
@@ -158,7 +161,9 @@ for its merchant, and the page shows the root group alone.
 
 A host without AuthKit implements the same contract over its own users and
 roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
-helpers/auth names no provider, so nothing in it is AuthKit's:
+`authkit/auth` defines the contract and uses only the standard library. It is
+versioned with AuthKit but imports no AuthKit runtime, so a host implements it
+without running AuthKit:
 
 - `Authenticate(r)` reads the request's credential, live: `ErrUnauthenticated`
   for none or an unknown one (joined with `ErrRevoked` once signed out),
@@ -178,9 +183,10 @@ helpers/auth names no provider, so nothing in it is AuthKit's:
   merchant's scope, a root role's `root:` names in the root scope. A
   credential bound to one merchant holds nothing at another; a person keeps
   their root roles.
-- The recent sign-in check (helpers/auth `RecentSignInChecker`) is nil
-  within your step-up window, else an `auth.Challenge` with
-  `ErrStepUpRequired` and the window as `MaxAge`.
+- Customer-network operations marked `sensitive` ask the recent-sign-in
+  check (authkit/auth `RecentSignInChecker`): nil within your step-up window,
+  else an `auth.Challenge` with `ErrStepUpRequired` and the window as
+  `MaxAge`. Admin operations never ask it.
 - `KnownPermission` knows `billing.Permissions()`, so `Mount` checks every
   route's names.
 
@@ -202,7 +208,8 @@ An identity has three parts:
   it: its id, as `issuer|id` when another issuer vouches for it.
 - the **credential**: how it was proven (session, device key, API key, signed
   token or access token). Only a user acting in person pays with their own
-  saved card, and only one is asked for a recent sign-in.
+  saved card. A recent-sign-in check is limited to the customer-network
+  operations marked `sensitive`.
 
 Provider writes record all three: the subject, the invoker and the
 credential (`kind:id`).

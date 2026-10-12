@@ -27,7 +27,6 @@ internal/modules/checkout/attempt_service.go|return time.Now()|business_time_bou
 internal/modules/copilot/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/copilot/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/dashboard/dashboard.go|return validateWidgetsAt(widgets, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
-internal/modules/dashboard/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/delinquency/service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/grants/grants.go|now = func() time.Time { return time.Now().UTC() }|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

@@ -28,7 +28,7 @@ OpenRails emails a customer only at an address they proved, so the
 standalone and hosted apps make AuthKit verify each sign-up's email. Each
 folder's README says how to run it and its tests.
 
-[`own-auth`](own-auth) stands apart: a backend with no AuthKit and no web
+[`own-auth`](own-auth) stands apart: a backend with custom authentication and no web
 app, two merchants on one engine, whose own users, sessions and roles tables
-answer OpenRails through helpers/auth's `Authenticator`. Its tests run
+answer OpenRails through authkit/auth's `Authenticator`. Its tests run
 OpenRails' conformance check and its gates against them.
