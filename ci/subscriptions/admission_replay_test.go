@@ -37,7 +37,7 @@ func TestAdmissionRetryReturnsCurrentHold(t *testing.T) {
 				case billing.AdmissionReleased:
 					_, err = client.ReleaseAdmissions(t.Context(), []string{params[0].RequestID})
 				case billing.AdmissionCaptured:
-					_, err = client.CaptureAdmission(t.Context(), params[0].RequestID, billing.CaptureAdmissionParams{Amount: 50_000})
+					_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
 				case billing.AdmissionExpired:
 					w.clock.Advance(2 * time.Hour)
 				}
@@ -99,18 +99,17 @@ func TestAdmissionAndCaptureRecoverAfterLostResponses(t *testing.T) {
 	require.True(t, again[0].Admission.Replayed)
 	require.True(t, again[0].Allowed())
 
-	capture := billing.CaptureAdmissionParams{Amount: 50_000}
 	transport.drop.Store(true)
-	_, err = client.CaptureAdmission(t.Context(), params[0].RequestID, capture)
+	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
 	require.ErrorIs(t, err, billing.ErrUnreachable)
-	receipt, err := client.CaptureAdmission(t.Context(), params[0].RequestID, capture)
+	receipt, err := captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
 	require.NoError(t, err)
 	require.True(t, receipt.Replayed)
 	require.NotNil(t, receipt.BalanceTransactionID)
-	replayed, err := w.client[embedded].CaptureAdmission(t.Context(), params[0].RequestID, capture)
+	replayed, err := captureAdmission(t.Context(), w.client[embedded], params[0].RequestID, 50_000, nil)
 	require.NoError(t, err)
 	require.Equal(t, receipt.BalanceTransactionID, replayed.BalanceTransactionID)
-	_, err = client.CaptureAdmission(t.Context(), params[0].RequestID, billing.CaptureAdmissionParams{Amount: 50_001})
+	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_001, nil)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	balance, err := client.GetBalance(t.Context(), c.cid(), "USD")
 	require.NoError(t, err)
