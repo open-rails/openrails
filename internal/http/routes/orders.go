@@ -18,7 +18,7 @@ var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
 	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
-	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "checkout_embed_origins_required", "customer_session_required", "embed_origin_not_registered", "hosted_checkout_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
+	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "checkout_embed_origins_required", "customer_session_required", "hosted_checkout_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
 )
 

@@ -70,12 +70,14 @@ export function App({ orderId, secret }: { orderId: string; secret: string | nul
   const [finished, setFinished] = useState<Order>()
   const done = (order: Order) => {
     if (!order.checkout) return
-    if (!embedded) {
-      window.location.replace(order.checkout.success_url)
+    if (embedded) {
+      setFinished(order)
+      tellFrame(origins, { type: CHECKOUT_COMPLETE_MESSAGE, order_id: order.id, success_url: order.checkout.success_url ?? null })
       return
     }
-    setFinished(order)
-    tellFrame(origins, { type: CHECKOUT_COMPLETE_MESSAGE, order_id: order.id, success_url: order.checkout.success_url })
+    // A customer's own checkout returns nowhere: the page says it is paid.
+    if (order.checkout.success_url) window.location.replace(order.checkout.success_url)
+    else setFinished(order)
   }
   useEffect(() => {
     if (state.kind === "ready" && settled(state.order.status)) done(state.order)
@@ -94,6 +96,7 @@ export function App({ orderId, secret }: { orderId: string; secret: string | nul
   if (state.kind === "ended") return <Shell><Notice reason={state.reason} /></Shell>
 
   const { config: loaded, merchant, order } = state
+  const leaving = !embedded && !!order.checkout?.success_url
   return (
     <Shell
       merchant={merchant.display_name}
@@ -105,7 +108,7 @@ export function App({ orderId, secret }: { orderId: string; secret: string | nul
         <Notice reason={order.status === "expired" ? "expired" : "canceled"} />
       ) : settled(order.status) || finished ? (
         <p className="muted" role="status">
-          {!embedded
+          {leaving
             ? `Returning you to ${merchant.display_name || "the merchant"}…`
             : (finished ?? order).status === "processing"
               ? "Your payment is processing."

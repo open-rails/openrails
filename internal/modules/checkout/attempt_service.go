@@ -107,6 +107,15 @@ type CheckoutAttemptService struct {
 
 	// orders settles the orders checkout attempts pay (#1168).
 	orders *orders.Service
+
+	// checkoutOrigin is the hosted checkout's origin, "" without one: its
+	// pages are return URLs too.
+	checkoutOrigin func() string
+}
+
+// SetCheckoutOrigin wires the hosted checkout's origin, set once it is served.
+func (s *CheckoutAttemptService) SetCheckoutOrigin(origin func() string) {
+	s.checkoutOrigin = origin
 }
 
 // SetPSPPosture wires the verdict checkout consults before offering a PSP.

@@ -85,6 +85,7 @@ migration 0081_provider_bill_orders.up.sql sha256:9f078e9bbbe589bd3991ce13ee40db
 migration 0082_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
 migration 0083_payment_order_identity.up.sql sha256:7757d34110d14ad4a3a1793d1f474ef1fd6f10e499164da351bcc530fd8a66e9
 migration 0084_destructive_staff_counts.up.sql sha256:bc91316e0ba297ddb4b371ef499766e7bede845fdb9d5cdb6a881dfaff4439b3
+migration 0085_customer_orders.up.sql sha256:94bbf045913ab00e55207f571519836578cdc26264f8eb87c06dc3a1f38c6258
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1315,11 +1316,12 @@ table billing.orders
   column next_collection_attempt_at timestamp with time zone
   column collection_owner text NOT NULL DEFAULT 'engine'::text
   column subscription_bill_kind text
+  column lines_digest bytea
   constraint orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_billing_contacts_check CHECK ((jsonb_typeof(billing_contacts) = 'array'::text))
   constraint orders_canceled_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint orders_checkout_cancel_url_check CHECK ((checkout_cancel_url <> ''::text))
-  constraint orders_checkout_check CHECK ((((checkout_secret_hash IS NULL) = (checkout_expires_at IS NULL)) AND ((checkout_secret_hash IS NULL) = (checkout_success_url IS NULL)) AND ((checkout_secret_hash IS NULL) = (checkout_saved_payment_methods IS NULL)) AND ((checkout_cancel_url IS NULL) OR (checkout_secret_hash IS NOT NULL)) AND ((checkout_secret_hash IS NULL) OR ((origin = 'merchant'::text) AND (octet_length(checkout_secret_hash) = 32) AND (checkout_expires_at <= expires_at)))))
+  constraint orders_checkout_check CHECK ((((checkout_secret_hash IS NULL) = (checkout_expires_at IS NULL)) AND ((checkout_secret_hash IS NULL) = (checkout_saved_payment_methods IS NULL)) AND ((checkout_success_url IS NULL) OR (checkout_secret_hash IS NOT NULL)) AND ((checkout_cancel_url IS NULL) OR (checkout_secret_hash IS NOT NULL)) AND ((checkout_secret_hash IS NULL) OR ((octet_length(checkout_secret_hash) = 32) AND (checkout_expires_at <= expires_at) AND (((origin = 'merchant'::text) AND (checkout_success_url IS NOT NULL)) OR ((origin = 'customer'::text) AND (checkout_success_url IS NULL) AND (checkout_cancel_url IS NULL) AND (checkout_ui_mode = 'embedded'::text)))))))
   constraint orders_checkout_success_url_check CHECK ((checkout_success_url <> ''::text))
   constraint orders_checkout_ui_mode_check CHECK ((((checkout_ui_mode = ANY (ARRAY['hosted'::text, 'embedded'::text])) AND (checkout_secret_hash IS NOT NULL)) OR ((checkout_ui_mode IS NULL) AND (checkout_secret_hash IS NULL))))
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
@@ -1331,6 +1333,7 @@ table billing.orders
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
   constraint orders_expired_check CHECK (((status <> 'expired'::text) OR (expired_at IS NOT NULL)))
   constraint orders_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
+  constraint orders_lines_digest_check CHECK (((lines_digest IS NULL) OR ((origin = 'customer'::text) AND (octet_length(lines_digest) = 32))))
   constraint orders_memo_check CHECK ((memo <> ''::text))
   constraint orders_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint orders_number_check CHECK ((number <> ''::text))
@@ -1363,6 +1366,7 @@ table billing.orders
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
   index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
   index CREATE UNIQUE INDEX orders_number_key ON billing.orders USING btree (merchant_id, number) WHERE (number IS NOT NULL)
+  index CREATE UNIQUE INDEX orders_open_lines_key ON billing.orders USING btree (merchant_id, customer_id, lines_digest) WHERE ((status = 'open'::text) AND (lines_digest IS NOT NULL))
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))

@@ -99,7 +99,7 @@ test("a signed-in customer orders the host's price and pays it on the page", asy
   expect(reads.filter((r) => r.includes("/products"))).toEqual([])
 })
 
-test("a reload resumes the customer's unpaid order", async ({
+test("a reload answers the customer's open order, storing nothing", async ({
   page,
   request,
 }) => {
@@ -113,17 +113,17 @@ test("a reload resumes the customer's unpaid order", async ({
       ),
       page.getByRole("button", { name: "$4.99 every 30 days" }).click(),
     ])
-    const order = (await res.json()) as { id: string; status: string }
-    return { id: order.id, key: res.request().headers()["idempotency-key"] }
+    expect(res.request().headers()["idempotency-key"]).toBeUndefined()
+    return ((await res.json()) as { id: string }).id
   }
   await page.goto(`/purchase.html#keys=e2e-card&token=${user.access_token}`)
   const first = await placed()
   await expect(page.getByRole("dialog")).toBeVisible()
 
   await page.reload()
-  const again = await placed()
-  expect(again).toEqual(first)
+  expect(await placed()).toBe(first)
   await expect(page.getByRole("dialog")).toBeVisible()
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0)
 })
 
 test("no public route reads the catalog", async ({ request }) => {

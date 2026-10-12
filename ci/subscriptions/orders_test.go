@@ -360,9 +360,8 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	require.Equal(t, "requires_payment_method", paymentOf(open)["status"])
 	require.NotEmpty(t, open.body["payment_options"])
 	held := c.order(http.MethodPost, "/orders", "held-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}})
-	require.Equal(t, "already_owned", orderError(held), "an unpaid order holds its claim")
-	require.Contains(t, errorMeta(held, "owned_by"), billing.OrderIDPrefix)
-	require.Equal(t, "resume", errorMeta(held, "hint"))
+	require.Equal(t, http.StatusOK, held.status, "asking again answers the open order: %v", held.body)
+	require.Equal(t, open.body["id"], held.body["id"])
 	canceled := c.order(http.MethodPost, "/orders/"+open.body["id"].(string)+"/cancel", "", nil)
 	require.Equal(t, "canceled", canceled.body["status"])
 	require.Equal(t, "order_not_cancelable", orderError(c.order(http.MethodPost, "/orders/"+open.body["id"].(string)+"/cancel", "", nil)))
@@ -453,8 +452,7 @@ func TestOrderExpiresWhileAwaitingAuthentication(t *testing.T) {
 	require.Equal(t, http.StatusCreated, again.status, "the expired order released its claim: %v", again.body)
 }
 
-// Two concurrent buys of one product: one order claims it, the other is
-// already_owned naming that order.
+// Concurrent asks for one product make one order: the rest answer it.
 func TestOrderConcurrentBuys(t *testing.T) {
 	t.Parallel()
 	w := orderWorld(t)
@@ -481,7 +479,7 @@ func TestOrderConcurrentBuys(t *testing.T) {
 	wg.Wait()
 	created := 0
 	for _, s := range statuses {
-		require.Contains(t, []int{http.StatusCreated, http.StatusConflict}, s)
+		require.Contains(t, []int{http.StatusCreated, http.StatusOK}, s)
 		if s == http.StatusCreated {
 			created++
 		}

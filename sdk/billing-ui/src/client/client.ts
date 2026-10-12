@@ -558,11 +558,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     /**
      * Creates an order from `lines` or the cart (`cart: true`), and with
      * `payment` pays it in the same call; `expectedTotal` is the total the
-     * customer saw. A failed payment resolves as payOrder's does. With
-     * `checkout` instead the order answers its embedded checkout,
-     * `order.checkout.url` on the checkout host, for `<EmbeddedCheckout>`: the
-     * merchant's own signed-in person only. A retry with the key answers the
-     * same order with a fresh URL, replacing the last.
+     * customer saw; `idempotencyKey`, required with `payment`, names the
+     * payment attempt. A failed payment resolves as payOrder's does. Without
+     * `payment` the customer's open order of the same lines is answered when
+     * there is one. With `checkout` the order answers its embedded checkout,
+     * `order.checkout.url` on the checkout host, for `<EmbeddedCheckout>`,
+     * fresh on every answer: the merchant's own signed-in person only.
      */
     createOrder(input: {
       lines?: { price_id: string; quantity?: number; amount?: string }[]
@@ -571,7 +572,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       payment?: OrderPaymentInput
       reusable?: boolean
       checkout?: wire.MyOrderCheckoutParams
-      idempotencyKey: string
+      idempotencyKey?: string
     }): Promise<OrderResult> {
       return orderResult("/me/orders", {
         method: "POST",
@@ -584,7 +585,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
           ...(input.checkout === undefined ? {} : { checkout: input.checkout }),
         },
-        headers: { "Idempotency-Key": input.idempotencyKey },
+        headers: input.idempotencyKey
+          ? { "Idempotency-Key": input.idempotencyKey }
+          : undefined,
       })
     },
 

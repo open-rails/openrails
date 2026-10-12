@@ -2,9 +2,14 @@ package orders
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -45,20 +51,83 @@ type CreateInput struct {
 	// Attach runs in the order's transaction once the order exists, before a
 	// zero total completes it: the hosted checkout is written with it.
 	Attach func(ctx context.Context, q *gen.Queries, order uuid.UUID) error
+	// LinesDigest names a customer order's lines (LinesDigest): FindOrCreate
+	// answers the customer's open order of the same lines instead.
+	LinesDigest []byte
 }
+
+// LineKey is one line as LinesDigest names it: its price (by storage id),
+// quantity and customer-chosen amount.
+type LineKey struct {
+	Price    uuid.UUID
+	Quantity *int
+	Amount   *int64
+}
+
+// LinesDigest names a set of lines, in any order.
+func LinesDigest(lines []LineKey) []byte {
+	keys := make([]string, len(lines))
+	for i, l := range lines {
+		quantity, amount := "-", "-"
+		if l.Quantity != nil {
+			quantity = strconv.Itoa(*l.Quantity)
+		}
+		if l.Amount != nil {
+			amount = strconv.FormatInt(*l.Amount, 10)
+		}
+		keys[i] = l.Price.String() + "|" + quantity + "|" + amount
+	}
+	slices.Sort(keys)
+	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
+	return sum[:]
+}
+
+// staleOpenOrder is an open order of the lines past its expiry, which
+// FindOrCreate expires before it creates another.
+type staleOpenOrder struct{ id uuid.UUID }
+
+func (e *staleOpenOrder) Error() string { return "orders: the open order of these lines expired" }
+
+// FindOrCreate answers the customer's open, unexpired order of
+// in.LinesDigest's lines (found), else creates it as Create does. One
+// customer's orders are made one at a time, so two requests make one order.
+func (s *Service) FindOrCreate(ctx context.Context, in CreateInput) (*Order, bool, error) {
+	if len(in.LinesDigest) == 0 {
+		return nil, false, errors.New("orders: find-or-create needs the lines' digest")
+	}
+	for range 2 {
+		order, found, err := s.create(ctx, in)
+		var stale *staleOpenOrder
+		if !errors.As(err, &stale) {
+			return order, found, err
+		}
+		if err := s.close(ctx, in.CustomerID, stale.id, billing.OrderExpired); err != nil {
+			return nil, false, err
+		}
+	}
+	return nil, false, errOpenOrderClosing
+}
+
+var errOpenOrderClosing = apperr.New(http.StatusConflict, billing.CodeResourceConflict, "The customer's open order of these lines is closing; try again.")
 
 // Create freezes lines into an order and claims what its unique lines buy.
 // A refused line is a LineError; a total other than ExpectedTotal is
 // ErrTotalChanged. An order with nothing to pay is paid at once.
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
+	order, _, err := s.create(ctx, in)
+	return order, err
+}
+
+func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if in.CustomerID == uuid.Nil || in.TTL <= 0 || (in.IdempotencyKey == "") != (len(in.RequestDigest) == 0) {
-		return nil, errors.New("order needs a customer, a lifetime and a keyed digest")
+		return nil, false, errors.New("order needs a customer, a lifetime and a keyed digest")
 	}
 	id := uuidutil.NewV7()
+	found := false
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.DB.NewWithPgxTx(tx)
 		q := d.Gen(ctx)
@@ -68,6 +137,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 		// One customer's purchases settle one at a time.
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: in.CustomerID}); err != nil {
 			return err
+		}
+		if len(in.LinesDigest) > 0 {
+			open, err := q.GetOpenOrderByLines(ctx, gen.GetOpenOrderByLinesParams{MerchantID: mid.UUID(), CustomerID: in.CustomerID, LinesDigest: in.LinesDigest})
+			switch {
+			case err == nil && open.ExpiresAt != nil && !open.ExpiresAt.After(s.now()):
+				return &staleOpenOrder{id: open.ID}
+			case err == nil:
+				id, found = open.ID, true
+				return nil
+			case !errors.Is(err, pgx.ErrNoRows):
+				return err
+			}
 		}
 		lines := in.Lines
 		if in.FromCart {
@@ -93,7 +174,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 			key = &in.IdempotencyKey
 		}
 		if err := q.CreateOrder(ctx, gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
-			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: in.RequestDigest,
+			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: in.RequestDigest, LinesDigest: in.LinesDigest,
 			ExpiresAt: now.Add(in.TTL), Now: now}); err != nil {
 			return err
 		}
@@ -159,9 +240,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return s.Get(ctx, id)
+	order, err := s.Get(ctx, id)
+	return order, found, err
 }
 
 // Get reads an order of the context's merchant.

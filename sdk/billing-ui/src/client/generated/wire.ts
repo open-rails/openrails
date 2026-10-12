@@ -1384,7 +1384,7 @@ export type OrderCheckout = {
   url: string | null
   ui_mode: "embedded" | "hosted"
   expires_at: string
-  success_url: string
+  success_url: string | null
   cancel_url: string | null
   saved_payment_methods: boolean
 }

@@ -2448,7 +2448,7 @@ pkg openrails/billing, type OrderCheckout struct
 pkg openrails/billing, type OrderCheckout struct, CancelURL *string `json:"cancel_url"`
 pkg openrails/billing, type OrderCheckout struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type OrderCheckout struct, SavedPaymentMethods bool `json:"saved_payment_methods"`
-pkg openrails/billing, type OrderCheckout struct, SuccessURL string `json:"success_url"`
+pkg openrails/billing, type OrderCheckout struct, SuccessURL *string `json:"success_url"`
 pkg openrails/billing, type OrderCheckout struct, UIMode CheckoutUIMode `json:"ui_mode"`
 pkg openrails/billing, type OrderCheckout struct, URL *string `json:"url"`
 pkg openrails/billing, type OrderCheckoutParams struct

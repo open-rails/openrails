@@ -34,12 +34,13 @@ var (
 // Checkout is a hosted checkout as stored on its order: the merchant's, or
 // the customer's own.
 type Checkout struct {
-	MerchantID          billing.MerchantID
-	OrderID             billing.OrderID
-	CustomerID          billing.CustomerID
-	UIMode              billing.CheckoutUIMode
-	ExpiresAt           time.Time
-	SuccessURL          string
+	MerchantID billing.MerchantID
+	OrderID    billing.OrderID
+	CustomerID billing.CustomerID
+	UIMode     billing.CheckoutUIMode
+	ExpiresAt  time.Time
+	// SuccessURL is a merchant checkout's return; nil on a customer's.
+	SuccessURL          *string
 	CancelURL           *string
 	SavedPaymentMethods bool
 }
@@ -82,7 +83,7 @@ func Plan(p billing.OrderCheckoutParams, order billing.OrderID, now time.Time, o
 	if err != nil {
 		return Checkout{}, err
 	}
-	c := Checkout{OrderID: order, UIMode: mode, ExpiresAt: expires, SuccessURL: success, SavedPaymentMethods: p.SavedPaymentMethods}
+	c := Checkout{OrderID: order, UIMode: mode, ExpiresAt: expires, SuccessURL: &success, SavedPaymentMethods: p.SavedPaymentMethods}
 	if p.CancelURL != nil {
 		cancel, err := returnURL("checkout.cancel_url", *p.CancelURL, order)
 		if err != nil {

@@ -225,8 +225,12 @@ A browser buys through an **order**: one purchase of priced lines, read and
 paid by its own customer (`/v1/me/orders`). `POST /v1/me/orders/preview` prices lines and lists the
 `payment_options`. `POST /v1/me/orders` creates the order and, with a `payment`
 and `expected_total`, pays it in the same call; without one the order is `open`
-for `POST /v1/me/orders/{id}/pay`. Both take an `Idempotency-Key`; a retry with
-it answers exactly what the first request answered.
+for `POST /v1/me/orders/{id}/pay`. Without a payment it takes no key: asked
+again for the same lines (prices, quantities, amounts), it answers the
+customer's open order of them (200), so a second click, a reload or another tab
+makes no second order; a paid, canceled or expired one does not count. A
+payment, here and on `/pay`, takes an `Idempotency-Key` naming its attempt; a
+retry with it answers exactly what the first request answered.
 
 `payment` is a saved card, `{payment_method_id}`, or a card just entered,
 `{token, psp_id?, billing_details?}`: the single-use output of the PSP's own

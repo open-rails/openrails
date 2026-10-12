@@ -123,6 +123,8 @@ var omittedColumns = map[string]string{
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
 	"provider_intents":  "destructive_run_class destructive_action_id",
 	"price_migrations":  "destructive_action_id",
+	// Derived from the lines: a restored open order is not found by it.
+	"orders": "lines_digest",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {

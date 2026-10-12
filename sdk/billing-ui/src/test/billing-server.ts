@@ -218,9 +218,7 @@ export interface FakeBilling {
   currencies: Record<string, unknown>[]
   /** The status `GET /me/orders/{id}` answers; "complete" pays it. */
   orderStatus: string
-  /** The signed-in customer `GET /me` answers. */
-  customer: string
-  /** The orders `POST /me/orders` made, one per customer and key. */
+  /** The open orders `POST /me/orders` made, one per lines; clear it to pay them. */
   created: Map<string, Row>
   /** Next response override per "METHOD /path". */
   fail: Record<string, Response>
@@ -253,7 +251,6 @@ export function fakeBilling(
     psps: seed.psps ?? [],
     currencies: seed.currencies ?? currenciesFixture,
     orderStatus: "open",
-    customer: "cus_a",
     created: new Map(),
     fail: {},
     calls: [],
@@ -442,17 +439,10 @@ export function fakeBilling(
           : state.orders
         return json(200, cursorPage(rows, limit, cursor))
       }
-      if (key === "GET /me")
-        return json(200, {
-          id: state.customer,
-          balances: [],
-          default_payment_methods: [],
-          low_balance_lines: [],
-        })
       if (key === "POST /me/orders") {
-        // Like OpenRails: one order per customer and key; a retry answers it,
-        // with a fresh checkout URL when it asks for one.
-        const slot = `${state.customer}:${new Headers(init.headers).get("Idempotency-Key")}`
+        // Like OpenRails: the customer's open order of the same lines is
+        // answered, with a fresh checkout URL when it asks for one.
+        const slot = JSON.stringify(body?.lines ?? "cart")
         const line = (body?.lines as Row[] | undefined)?.[0]
         const base = `ord_${line?.price_id ?? "cart"}`
         const made = state.created.get(slot) ?? {
@@ -462,6 +452,7 @@ export function fakeBilling(
             ? `${base}_${state.created.size + 1}`
             : base,
         }
+        const found = state.created.has(slot)
         state.created.set(slot, made)
         const id = String(made.id)
         const checkout = body?.checkout
@@ -474,7 +465,7 @@ export function fakeBilling(
               saved_payment_methods: true,
             }
           : null
-        return json(201, order({ id, checkout }))
+        return json(found ? 200 : 201, order({ id, checkout }))
       }
       if ((m = key.match(/^GET \/me\/orders\/([^/]+)$/))) {
         const paid = state.orderStatus === "complete"

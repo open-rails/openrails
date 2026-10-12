@@ -221,7 +221,43 @@ describe("BuyButton", () => {
     expect(modals.at(-1)!.orderId).toBe("ord_open")
   })
 
-  it("answers a second click with the same order", async () => {
+  it("asks again for the customer's open order, storing nothing and sending no key", async () => {
+    modals.length = 0
+    const server = fakeBilling()
+    const button = (
+      <BuyButton
+        price={rent()}
+        label="Rent"
+        onPaid={vi.fn()}
+        onSignInRequired={vi.fn()}
+      />
+    )
+    const first = mount(server)
+    first.rerender(first.tree(button))
+    fireEvent.click(await enabled("Rent"))
+    await screen.findByRole("dialog")
+    const made = modals.at(-1)!.orderId
+    modals.at(-1)!.onOpenChange(false)
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    // A reopened dialog, then the page again: the same order.
+    fireEvent.click(await enabled("Rent"))
+    await screen.findByRole("dialog")
+    expect(modals.at(-1)!.orderId).toBe(made)
+    first.unmount()
+    const again = mount(server)
+    again.rerender(again.tree(button))
+    fireEvent.click(await enabled("Rent"))
+    await waitFor(() => expect(modals.at(-1)!.orderId).toBe(made))
+    const posts = server.fetch.mock.calls.filter(
+      ([, init]) => init?.method === "POST"
+    )
+    expect(posts).toHaveLength(3)
+    for (const [, init] of posts)
+      expect(new Headers(init!.headers).get("Idempotency-Key")).toBeNull()
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it("sends one request at a time", async () => {
     const server = fakeBilling()
     const { tree, rerender } = mount(server)
     rerender(
@@ -234,17 +270,13 @@ describe("BuyButton", () => {
         />
       )
     )
-    fireEvent.click(await enabled("Rent"))
+    const button = await enabled("Rent")
+    fireEvent.click(button)
+    fireEvent.click(button)
     await screen.findByRole("dialog")
-    modals.at(-1)!.onOpenChange(false)
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-    fireEvent.click(await enabled("Rent"))
-    await screen.findByRole("dialog")
-    const keys = server.fetch.mock.calls
-      .filter(([, init]) => init?.method === "POST")
-      .map(([, init]) => new Headers(init!.headers).get("Idempotency-Key"))
-    expect(keys).toHaveLength(2)
-    expect(keys[0]).toBe(keys[1])
+    expect(
+      server.fetch.mock.calls.filter(([, init]) => init?.method === "POST")
+    ).toHaveLength(1)
   })
 
   it("frames the checkout host on a site the merchant registered to frame it", async () => {
@@ -317,87 +349,7 @@ describe("BuyButton", () => {
     )!
     expect(JSON.parse(String(create[1]!.body))).not.toHaveProperty("checkout")
   })
-
-  it("resumes the same unpaid order after a reload, per customer", async () => {
-    modals.length = 0
-    const server = fakeBilling()
-    server.customer = `cus_${crypto.randomUUID()}`
-    const button = (
-      <BuyButton
-        price={rent()}
-        label="Rent"
-        onPaid={vi.fn()}
-        onSignInRequired={vi.fn()}
-      />
-    )
-    const first = mount(server)
-    first.rerender(first.tree(button))
-    fireEvent.click(await enabled("Rent"))
-    await screen.findByRole("dialog")
-    const made = modals.at(-1)!.orderId
-    first.unmount()
-
-    // The page again: the same customer's purchase answers the same order.
-    const again = mount(server)
-    again.rerender(again.tree(button))
-    fireEvent.click(await enabled("Rent"))
-    await waitFor(() => expect(modals.at(-1)!.orderId).toBe(made))
-    const keys = postedKeys(server)
-    expect(keys).toHaveLength(2)
-    expect(keys[1]).toBe(keys[0])
-    again.unmount()
-
-    // Another account in the same tab never reuses its key.
-    server.customer = `cus_${crypto.randomUUID()}`
-    const other = mount(server)
-    other.rerender(other.tree(button))
-    fireEvent.click(await enabled("Rent"))
-    await waitFor(() => expect(postedKeys(server)).toHaveLength(3))
-    expect(postedKeys(server)[2]).not.toBe(keys[0])
-  })
-
-  it("frees the key once paid, and starts again from a closed order", async () => {
-    modals.length = 0
-    const server = fakeBilling()
-    server.customer = `cus_${crypto.randomUUID()}`
-    const onPaid = vi.fn()
-    const { tree, rerender } = mount(server)
-    rerender(
-      tree(
-        <BuyButton
-          price={rent()}
-          label="Rent"
-          onPaid={onPaid}
-          onSignInRequired={vi.fn()}
-        />
-      )
-    )
-    fireEvent.click(await enabled("Rent"))
-    await screen.findByRole("dialog")
-    modals.at(-1)!.onSettled!(order({ status: "complete" }) as unknown as Order)
-    expect(onPaid).toHaveBeenCalledOnce()
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-
-    // The server says the order the key made is closed: a new purchase.
-    server.fail["POST /me/orders"] = json(
-      201,
-      order({ id: "ord_closed", status: "expired" })
-    )
-    fireEvent.click(await enabled("Rent"))
-    await screen.findByRole("dialog")
-    const keys = postedKeys(server)
-    expect(keys).toHaveLength(3)
-    expect(keys[1]).not.toBe(keys[0])
-    expect(keys[2]).not.toBe(keys[1])
-    expect(modals.at(-1)!.orderId).not.toBe("ord_closed")
-  })
 })
-
-// The Idempotency-Keys of the orders the button posted, in order.
-const postedKeys = (server: FakeBilling) =>
-  server.fetch.mock.calls
-    .filter(([, init]) => init?.method === "POST")
-    .map(([, init]) => new Headers(init!.headers).get("Idempotency-Key"))
 
 // The button, once enabled.
 async function enabled(name: string) {

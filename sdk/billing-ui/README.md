@@ -78,12 +78,12 @@ merchant registered to frame its checkout (`merchant.embed_origins` in
 `GET /me/config`), it creates the order with its embedded checkout in the same
 call (`createOrder({ lines, checkout: { ui_mode: "embedded" } })`) and frames
 `order.checkout.url` from the checkout host (`<EmbeddedCheckout>`); anywhere
-else it pays on the page (`<OrderCheckout>`). The purchase's Idempotency-Key is
-kept in `sessionStorage` per customer and price (in memory when storage is
-off) until the order is paid or closed, so a reopened dialog or a reload
-answers the same unpaid order, with a fresh URL; another account in the tab
-never reuses it.
-A second click before it is paid opens the same order. Signing in is the
+else it pays on the page (`<OrderCheckout>`). The embedded checkout returns
+nowhere: the frame says it is paid and tells the page (`onPaid`), and a
+redirect PSP comes back inside it. Nothing is stored: OpenRails answers the
+customer's open order of the same lines, so a second click, a reopened dialog
+or a reload pays the same order (with a fresh URL), and a paid or expired one
+is bought again as a new order. Signing in is the
 host's: with `signedIn={false}`, or when OpenRails answers 401, they call
 `onSignInRequired` instead. `onPaid` receives the completed order; it is a
 hint, so confirm access from your own API (your gate) before granting

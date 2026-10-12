@@ -234,7 +234,6 @@ var errorCodes = []ErrorCode{
 	{"hosted_checkout_unavailable", 400, invalid, "This deployment serves no hosted checkout, or the order cannot take one."},
 	{"checkout_attempts_exhausted", 409, invalid, "The checkout took its most card attempts; the merchant creates a new order."},
 	{"checkout_embed_origins_required", 400, invalid, "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
-	{"embed_origin_not_registered", 400, invalid, "The request's Origin is not one of the merchant's registered embed origins (settings checkout.embed_origins), which a customer's checkout returns to."},
 	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
 	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},
 

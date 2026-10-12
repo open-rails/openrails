@@ -107,9 +107,10 @@ type PreviewMyOrderParams struct {
 // a different total refuses the order with order_total_changed. Reusable
 // keeps a new card for one-click buys where that needs the customer's opt-in
 // (billing or card country in the EEA or the UK); elsewhere every new card is
-// kept. Without Payment the order is open for POST /v1/me/orders/{id}/pay.
-// Cart true buys the customer's cart instead of Lines: the order takes the
-// cart's lines in the transaction that creates it.
+// kept. Without Payment the order is open for POST /v1/me/orders/{id}/pay,
+// and asking again for the same Lines answers the customer's open order of
+// them instead of a second one. Cart true buys the customer's cart instead of
+// Lines: the order takes the cart's lines in the transaction that creates it.
 type CreateMyOrderParams struct {
 	Lines         []OrderLineParams   `json:"lines,omitempty"`
 	Cart          bool                `json:"cart,omitempty"`
@@ -117,9 +118,8 @@ type CreateMyOrderParams struct {
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`
 	// Checkout asks, instead of Payment, for the order's embedded checkout:
-	// Order.Checkout.URL on the checkout host. It is not part of the order:
-	// a retry answers the same order with a fresh URL, replacing the
-	// customer's last.
+	// Order.Checkout.URL on the checkout host, fresh on every answer (the
+	// last one stops working).
 	Checkout *MyOrderCheckoutParams `json:"checkout,omitempty"`
 }
 

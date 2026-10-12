@@ -253,7 +253,7 @@ These are OpenRails' routes that you just mounted. In this example, the full rou
 | `DELETE /v1/me/cart` | empty their cart |
 | `PUT /v1/me/cart/lines/{price_id}` | set a line's quantity (0 removes it) |
 | `POST /v1/me/orders/preview` | the total and the ways it can be paid; changes nothing |
-| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next, with its embedded checkout on the checkout host when asked (`checkout`: 15 minutes, framed by the merchant's registered origins) |
+| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next, with its embedded checkout on the checkout host when asked (`checkout`: framed by the merchant's registered origins, as long as the order is open); asked again for the same lines, it answers the customer's open order |
 | `GET /v1/me/orders` | their orders: purchases, subscription renewals and usage periods |
 | `GET /v1/me/orders/{id}` | one order |
 | `POST /v1/me/orders/{id}/pay` | pay an open order (a failed renewal or a usage period included), with a saved or new card |

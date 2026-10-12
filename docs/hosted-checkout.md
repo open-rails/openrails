@@ -175,22 +175,25 @@ A customer creates its own order with its embedded checkout in one call, as
 billing-ui's `<BuyButton>` does on a registered origin:
 
 ```
-POST /v1/me/orders  {"lines": [{"price_id": "…"}], "checkout": {"ui_mode": "embedded"}}  (Idempotency-Key)
-→ 201 the order, with checkout {url, expires_at, ui_mode: "embedded", success_url, …}
+POST /v1/me/orders  {"lines": [{"price_id": "…"}], "checkout": {"ui_mode": "embedded"}}
+→ 201 the order, with checkout {url, expires_at, ui_mode: "embedded", success_url: null, …}
 ```
 
 - Only the merchant's own person signed in asks for one: a user of the issuer
   the merchant declares, acting itself in a session or with a device key, its
   credential bound to no scope. Anyone else is `403 customer_session_required`.
-- The checkout is the order's own, as on a merchant order. It lasts 15 minutes
-  (less when the order expires sooner), offers the customer's saved cards and
-  takes no payment beside it.
-- It returns to the page's site: the request's `Origin`, which must be one of
-  the merchant's registered origins (each site of one merchant gets its own),
-  else `400 embed_origin_not_registered`. The request names no URL.
-- The order is idempotent; its URL is a fresh credential on every answer: a
-  retry with the key answers the same order with a new URL, and the last one
-  stops working. A paid or closed order answers without one.
+- The checkout is the order's own, framed by the merchant's registered
+  origins. It offers the customer's saved cards, takes no payment beside it
+  and lasts as long as the order is open (24 hours).
+- It returns nowhere: the request names no URL, and the order's checkout has
+  no `success_url` or `cancel_url`. Once paid the frame says so and posts
+  `openrails.checkout.complete` to the page; a redirect PSP or a bank's
+  challenge comes back to the frame's own page on the checkout host.
+- Asked again for the same lines, it answers the customer's open order (200)
+  with a fresh URL, and the last one stops working; the order's expiry does not
+  move. A reload, a reopened dialog or two clicks pay one order. A paid,
+  canceled or expired order does not count; a product the customer already
+  owns is `409 already_owned`.
 - Without registered origins it is `400 checkout_embed_origins_required`,
   without a checkout host `400 hosted_checkout_unavailable`; neither makes an
   order.

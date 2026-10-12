@@ -236,7 +236,6 @@
           "checkout_embed_origins_required",
           "customer_action_required",
           "customer_session_required",
-          "embed_origin_not_registered",
           "hosted_checkout_unavailable",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -18190,7 +18189,14 @@
             "format": "date-time"
           },
           "success_url": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cancel_url": {
             "oneOf": [
@@ -23467,11 +23473,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The kill switch holds changes that end access or write to a provider; the proposal stays open."
-    },
-    "embed_origin_not_registered": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The request's Origin is not one of the merchant's registered embed origins (settings checkout.embed_origins), which a customer's checkout returns to."
     },
     "finding_action_failed": {
       "status": 502,

@@ -49,9 +49,6 @@ type OrderActor struct {
 	Customer  billing.CustomerID
 	Principal billingauth.Payer
 	ClientIP  string
-	// Origin is the page the request came from (its Origin header): a
-	// customer's checkout returns there when the merchant registered it.
-	Origin string
 }
 
 const (
@@ -154,10 +151,11 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 	return orderPayment{card: card}, nil
 }
 
-// CreateOrder freezes lines into an order and, with a payment, pays it in the
-// same call, or, with a checkout, answers the URL where the customer pays it.
-// key is the request's Idempotency-Key: a later request with it answers what
-// the first did, with a fresh checkout URL.
+// CreateOrder answers the customer's open order of the lines, or freezes them
+// into a new one, and, with a payment, pays it in the same call, or, with a
+// checkout, answers a fresh URL where the customer pays it. key, required
+// with a payment, names its attempt: a later request with it answers what
+// the first did.
 func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateMyOrderParams, key string) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -171,7 +169,7 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if params.Checkout == nil {
 		return s.createOrder(ctx, rt, actor, params, key)
 	}
-	origin, successURL, err := s.orderCheckout(ctx, actor, params)
+	origin, err := s.orderCheckout(ctx, params)
 	if err != nil {
 		return OrderAnswer{}, err
 	}
@@ -180,7 +178,7 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	return s.attachCheckout(ctx, rt, actor, answer, origin, successURL)
+	return s.attachCheckout(ctx, rt, actor, answer, origin)
 }
 
 // createOrder is CreateOrder's order, under its key.
@@ -197,6 +195,23 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	}
 	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
 		return OrderAnswer{}, err
+	}
+	if params.Payment == nil {
+		// The customer's open order of these lines is answered: asking again,
+		// from any tab or reload, makes no second order.
+		order, found, err := s.placeOrder(ctx, rt, actor, params)
+		if err != nil {
+			return OrderAnswer{}, err
+		}
+		status := http.StatusCreated
+		if found {
+			status = http.StatusOK
+		}
+		return s.orderAnswer(ctx, rt, actor, order.ID, status, checkout.OrderCharge{}, false, nil)
+	}
+	// A one-call buy's key names its payment attempt.
+	if strings.TrimSpace(key) == "" {
+		return OrderAnswer{}, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required with a payment")
 	}
 	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
 	if err != nil {
@@ -216,7 +231,7 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
-	id, replayed, charged, err := s.createClaimed(work, rt, actor, params, pay, key, digest)
+	id, replayed, charged, err := s.createClaimed(work, rt, actor, params, pay, key)
 	stop() // before settling: a renewal never races the final state
 	if errors.Is(context.Cause(work), idempotency.ErrClaimLost) || errors.Is(err, idempotency.ErrClaimLost) {
 		return OrderAnswer{}, ErrIdempotencyKeyInUse
@@ -230,21 +245,10 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	return answer, err
 }
 
-// createClaimed runs a create under its key's claim: a key the order table
-// already maps (its claim long gone) answers that order.
-func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, pay orderPayment, key string, digest []byte) (uuid.UUID, bool, checkout.OrderCharge, error) {
+// createClaimed runs a one-call buy under its key's claim: the customer's
+// open order of the lines (or a new one), paid under the key's attempt.
+func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, pay orderPayment, key string) (uuid.UUID, bool, checkout.OrderCharge, error) {
 	customer := actor.Customer.UUID()
-	existing, err := rt.Orders.ByIdempotencyKey(ctx, customer, key)
-	if err != nil {
-		return uuid.Nil, false, checkout.OrderCharge{}, err
-	}
-	if existing != nil {
-		if string(existing.RequestDigest) != string(digest) {
-			return uuid.Nil, false, checkout.OrderCharge{}, errOrderKeyReused
-		}
-		charged, err := s.resumePayment(ctx, rt, actor, existing.ID, pay, "create:"+key)
-		return existing.ID, true, charged, err
-	}
 	if params.Payment != nil {
 		// A payment that cannot be made refuses the order before it exists.
 		lines, err := orderLinesOf(ctx, rt, actor.Customer, params.Lines, params.Cart)
@@ -259,16 +263,33 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 			return uuid.Nil, false, checkout.OrderCharge{}, err
 		}
 	}
-	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: customer, Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
-		ExpectedTotal: params.ExpectedTotal, IdempotencyKey: key, RequestDigest: digest, TTL: orders.CustomerTTL})
+	order, found, err := s.placeOrder(ctx, rt, actor, params)
 	if err != nil {
 		return uuid.Nil, false, checkout.OrderCharge{}, err
 	}
 	var charged checkout.OrderCharge
-	if params.Payment != nil && order.Status == string(billing.OrderOpen) {
+	if order.Status == string(billing.OrderOpen) {
 		charged, err = s.payOrder(ctx, rt, actor, order, pay, "create:"+key)
 	}
-	return order.ID, false, charged, err
+	return order.ID, found, charged, err
+}
+
+// placeOrder answers the customer's open order of params' lines (found), or
+// creates it. A cart's order is always a new one: buying the cart empties it.
+func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams) (*orders.Order, bool, error) {
+	in := orders.CreateInput{CustomerID: actor.Customer.UUID(), Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
+		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL}
+	if !params.Cart {
+		digest, err := s.orderLinesDigest(ctx, params.Lines)
+		if err != nil {
+			return nil, false, err
+		}
+		if in.LinesDigest = digest; digest != nil {
+			return rt.Orders.FindOrCreate(ctx, in)
+		}
+	}
+	order, err := rt.Orders.Create(ctx, in)
+	return order, false, err
 }
 
 // resumePayment runs a one-call buy's payment again under its key: the same
@@ -933,45 +954,30 @@ func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "checkout_embed_origins_required",
 	"an embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins")
 
-// orderCheckout is what a customer's order checkout needs before the order
-// exists: the checkout host and the URL it returns to, the merchant's
-// registered origin the request came from. The request names no URL.
-func (s *Service) orderCheckout(ctx context.Context, actor OrderActor, params billing.CreateMyOrderParams) (origin, successURL string, err error) {
+// orderCheckout is the checkout host a customer's order checkout is on,
+// checked before the order exists: the merchant registered the origins that
+// frame it. The request names no URL.
+func (s *Service) orderCheckout(ctx context.Context, params billing.CreateMyOrderParams) (string, error) {
 	switch {
 	case params.Payment != nil:
-		return "", "", apperr.Invalidf("checkout and payment are exclusive: the checkout takes the payment").WithParam("checkout")
+		return "", apperr.Invalidf("checkout and payment are exclusive: the checkout takes the payment").WithParam("checkout")
 	case params.Checkout.UIMode != "" && params.Checkout.UIMode != billing.CheckoutEmbedded:
-		return "", "", apperr.Invalidf("checkout.ui_mode is embedded: a customer's checkout is framed by the merchant's registered origins").WithParam("checkout.ui_mode")
+		return "", apperr.Invalidf("checkout.ui_mode is embedded: a customer's checkout is framed by the merchant's registered origins").WithParam("checkout.ui_mode")
 	}
-	origin = s.rt.HostedCheckoutOrigin()
+	origin := s.rt.HostedCheckoutOrigin()
 	if origin == "" {
-		return "", "", apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
+		return "", apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return "", "", err
+	if _, err := s.embedOrigins(ctx); err != nil {
+		return "", err
 	}
-	if s.rt.Merchants == nil {
-		return "", "", errEmbedOriginsRequired
-	}
-	_, settings, err := s.rt.Merchants.MerchantSettings(ctx, mid)
-	if err != nil {
-		return "", "", err
-	}
-	if len(merchantconfig.EmbedOrigins(settings)) == 0 {
-		return "", "", errEmbedOriginsRequired
-	}
-	page, ok := merchantconfig.RegisteredEmbedOrigin(settings, actor.Origin)
-	if !ok {
-		return "", "", apperr.New(http.StatusBadRequest, "embed_origin_not_registered", "the request's Origin is not one of the merchant's registered embed origins").WithParam("Origin")
-	}
-	return origin, page + "/", nil
+	return origin, nil
 }
 
 // attachCheckout gives the answer's order, read as it is now (a retry's
 // answer is the first's), its embedded checkout in place of the one it had:
 // a fresh URL on every answer. A paid or closed order takes none.
-func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor OrderActor, answer OrderAnswer, origin, successURL string) (OrderAnswer, error) {
+func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor OrderActor, answer OrderAnswer, origin string) (OrderAnswer, error) {
 	live, err := s.orderView(ctx, rt, actor, answer.Order.ID.UUID())
 	if err != nil {
 		return OrderAnswer{}, err
@@ -985,7 +991,7 @@ func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor Or
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	c, ok, err := hostedcheckout.AttachMine(ctx, rt.DB.Gen(ctx), origin, mid, actor.Customer, order.ID, successURL, order.ExpiresAt, s.now())
+	c, ok, err := hostedcheckout.AttachMine(ctx, rt.DB.Gen(ctx), origin, mid, actor.Customer, order.ID, order.ExpiresAt, s.now())
 	switch {
 	case err != nil:
 		return OrderAnswer{}, err

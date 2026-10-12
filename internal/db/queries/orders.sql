@@ -3,13 +3,19 @@
 -- name: CreateOrder :exec
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
-    idempotency_key, request_digest, expires_at, created_at, updated_at
+    idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
-    sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.arg(expires_at)::timestamptz,
-    sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+    sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
+    sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );
+
+-- name: GetOpenOrderByLines :one
+-- The customer's open order of these lines, expired or not.
+SELECT id, expires_at FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND lines_digest = sqlc.arg(lines_digest)::bytea AND status = 'open';
 
 -- name: CreateRenewalOrder :execrows
 -- A renewal's order, once per subscription and period: zero rows when it

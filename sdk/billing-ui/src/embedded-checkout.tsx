@@ -13,7 +13,10 @@ export const CHECKOUT_RESIZE_MESSAGE = "openrails.checkout.resize"
 
 export interface EmbeddedCheckoutCompletion {
   orderId: string
-  /** The checkout's success_url, with the order id filled in. */
+  /**
+   * The checkout's success_url, with the order id filled in; "" for a
+   * customer's own checkout, which returns nowhere (the frame says it is paid).
+   */
   successUrl: string
 }
 
@@ -22,7 +25,7 @@ export interface EmbeddedCheckoutProps {
   url: string
   /**
    * Called once the order completes. Without it the page goes to the
-   * checkout's success_url.
+   * checkout's success_url, if it has one.
    */
   onComplete?: (completion: EmbeddedCheckoutCompletion) => void
   title?: string

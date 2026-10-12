@@ -358,7 +358,8 @@ export const orderSchema = z.object({
       /** `hosted`, or `embedded` in the merchant's registered origins. */
       ui_mode: z.enum(["hosted", "embedded"]).catch("hosted"),
       expires_at: time,
-      success_url: z.string(),
+      /** A merchant checkout's return; none on a customer's embedded one. */
+      success_url: z.string().nullish(),
       cancel_url: z.string().nullish(),
       saved_payment_methods: z.boolean(),
     })

@@ -33,7 +33,7 @@ func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.Merc
 		return "", err
 	}
 	n, err := q.SetOrderCheckout(ctx, gen.SetOrderCheckoutParams{
-		SecretHash: hash, ExpiresAt: c.ExpiresAt, SuccessUrl: c.SuccessURL, CancelUrl: c.CancelURL,
+		SecretHash: hash, ExpiresAt: c.ExpiresAt, SuccessUrl: *c.SuccessURL, CancelUrl: c.CancelURL,
 		SavedPaymentMethods: c.SavedPaymentMethods, UiMode: string(c.UIMode), Now: now, MerchantID: mid.UUID(), ID: c.OrderID.UUID(),
 	})
 	switch {
@@ -106,12 +106,12 @@ func (s *Store) Resolve(ctx context.Context, secret string, now time.Time) (Chec
 	if err != nil {
 		return Checkout{}, err
 	}
-	if row.CheckoutExpiresAt == nil || row.CheckoutSuccessUrl == nil || row.CheckoutSavedPaymentMethods == nil || row.CheckoutUiMode == nil {
+	if row.CheckoutExpiresAt == nil || row.CheckoutSavedPaymentMethods == nil || row.CheckoutUiMode == nil {
 		return Checkout{}, ErrNotFound
 	}
 	c := Checkout{
 		MerchantID: mid, OrderID: billing.OrderID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), UIMode: billing.CheckoutUIMode(*row.CheckoutUiMode),
-		ExpiresAt: *row.CheckoutExpiresAt, SuccessURL: *row.CheckoutSuccessUrl, CancelURL: row.CheckoutCancelUrl,
+		ExpiresAt: *row.CheckoutExpiresAt, SuccessURL: row.CheckoutSuccessUrl, CancelURL: row.CheckoutCancelUrl,
 		SavedPaymentMethods: *row.CheckoutSavedPaymentMethods,
 	}
 	if c.Expired(now) {

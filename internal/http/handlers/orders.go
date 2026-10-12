@@ -156,7 +156,8 @@ func PreviewMyOrder(r *httprequest.Request) {
 
 // CreateMyOrder handles POST /v1/me/orders: the one-call buy when a payment
 // is named, the order and its embedded checkout when a checkout is, an open
-// order to pay later otherwise. A checkout offers the customer's saved cards,
+// order to pay later otherwise. Asked again for the same lines, it answers
+// the customer's open order of them. A checkout offers the customer's saved cards,
 // so only the merchant's own signed-in person asks for one.
 func CreateMyOrder(r *httprequest.Request) {
 	var body billing.CreateMyOrderParams
@@ -170,10 +171,16 @@ func CreateMyOrder(r *httprequest.Request) {
 	if actor == nil {
 		return
 	}
-	actor.Origin = r.Request.Header.Get("Origin")
-	key := orderKey(r)
+	// Only a one-call buy takes a key, naming its payment attempt; the
+	// order is the customer's open order of the same lines.
+	var key string
+	if body.Payment != nil {
+		if key = orderKey(r); key == "" {
+			return
+		}
+	}
 	svc := orderService(r)
-	if key == "" || svc == nil {
+	if svc == nil {
 		return
 	}
 	answer, err := svc.CreateOrder(r.Request.Context(), *actor, body, key)

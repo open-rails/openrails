@@ -853,7 +853,8 @@ type BillingOrder struct {
 	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once on a merchant order; on a customer's own order, again each time the customer asks for its checkout, which ends the last.
 	CheckoutSecretHash []byte
 	// When the checkout URL stops working; no later than the order's own expiry.
-	CheckoutExpiresAt           *time.Time
+	CheckoutExpiresAt *time.Time
+	// Where a merchant order's checkout returns once paid. NULL on a customer's own embedded checkout, which returns nowhere: the frame tells its page.
 	CheckoutSuccessUrl          *string
 	CheckoutCancelUrl           *string
 	CheckoutSavedPaymentMethods *bool
@@ -883,6 +884,8 @@ type BillingOrder struct {
 	CollectionOwner string
 	// Initial observed enrollment, renewal, or a separate adjustment bill. Provider bills use scoped provider identity rather than period timestamps as document identity.
 	SubscriptionBillKind *string
+	// sha256 of a customer order's lines (prices, quantities, amounts), which POST /v1/me/orders finds its open order by. NULL on a cart's order and every other origin.
+	LinesDigest []byte
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.

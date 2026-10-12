@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -64,6 +65,18 @@ func cardAttemptFailed(err error) bool {
 	return false
 }
 
+// checkoutPage reports an order page of the hosted checkout (/c/...): a
+// redirect PSP or bank challenge started there comes back inside it, framed
+// or not.
+func (s *CheckoutAttemptService) checkoutPage(raw string) bool {
+	if s.checkoutOrigin == nil {
+		return false
+	}
+	origin, ok := config.URLOrigin(raw)
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return ok && err == nil && u.User == nil && origin != "" && origin == s.checkoutOrigin() && strings.HasPrefix(u.Path, "/c/")
+}
+
 // validateReturnURLs refuses redirect targets outside the host's allowed
 // return origins.
 func (s *CheckoutAttemptService) validateReturnURLs(urls ...string) error {
@@ -71,7 +84,7 @@ func (s *CheckoutAttemptService) validateReturnURLs(urls ...string) error {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		if s == nil || !config.ReturnURLAllowed(s.config, raw) {
+		if s == nil || !config.ReturnURLAllowed(s.config, raw) && !s.checkoutPage(raw) {
 			return fmt.Errorf("%w: return URL origin is not allowed", ErrCheckoutAttemptValidation)
 		}
 	}

@@ -37,11 +37,10 @@ type OrderCheckoutParams struct {
 
 // MyOrderCheckoutParams asks POST /v1/me/orders for the order's checkout:
 // embedded (the default, and the only mode a customer asks for), framed by
-// the merchant's registered origins and returning to the one the request
-// came from (its Origin header; another is embed_origin_not_registered). Its
-// URLs are the merchant's; the request names none. Only the merchant's own
-// person, signed in, asks for one: it offers their saved cards. It lasts 15
-// minutes, or until the order expires when sooner.
+// the merchant's registered origins. It returns nowhere: the frame tells its
+// page when the order completes, and redirect PSPs come back inside it. Only
+// the merchant's own person, signed in, asks for one: it offers their saved
+// cards. It lasts as long as the order is open.
 type MyOrderCheckoutParams struct {
 	UIMode CheckoutUIMode `json:"ui_mode,omitempty"`
 }
@@ -50,10 +49,12 @@ type MyOrderCheckoutParams struct {
 type OrderCheckout struct {
 	// URL is the checkout URL. Creation and an authenticated retry while the
 	// order and checkout remain open can return it; ordinary reads are null.
-	URL                 *string        `json:"url"`
-	UIMode              CheckoutUIMode `json:"ui_mode"`
-	ExpiresAt           time.Time      `json:"expires_at"`
-	SuccessURL          string         `json:"success_url"`
-	CancelURL           *string        `json:"cancel_url"`
-	SavedPaymentMethods bool           `json:"saved_payment_methods"`
+	URL       *string        `json:"url"`
+	UIMode    CheckoutUIMode `json:"ui_mode"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	// SuccessURL is where a merchant's checkout returns; a customer's
+	// embedded one has none.
+	SuccessURL          *string `json:"success_url"`
+	CancelURL           *string `json:"cancel_url"`
+	SavedPaymentMethods bool    `json:"saved_payment_methods"`
 }

@@ -51,7 +51,6 @@ export type OpenRailsErrorCode =
   | "default_payment_method_required"
   | "default_rate_card_not_found"
   | "destructive_actions_held"
-  | "embed_origin_not_registered"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "finding_requires_merchant_config"
@@ -245,7 +244,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   destructive_actions_held: { status: 409, type: "invalid_request_error", meaning: "The kill switch holds changes that end access or write to a provider; the proposal stays open." },
-  embed_origin_not_registered: { status: 400, type: "invalid_request_error", meaning: "The request's Origin is not one of the merchant's registered embed origins (settings checkout.embed_origins), which a customer's checkout returns to." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },

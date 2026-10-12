@@ -11,13 +11,14 @@
   `product` or price key). `Purchase` is folded into `BuyButton`.
 - `createOrder({ checkout: { ui_mode: "embedded" } })` creates the order with
   its embedded checkout in one call: `order.checkout.url` on the checkout host,
-  15 minutes, for the merchant's own signed-in person. A retry with the key
-  answers the same order with a fresh URL.
+  as long as the order is open, returning nowhere (`success_url` null), for the
+  merchant's own signed-in person. Without `payment` it
+  answers the customer's open order of the same lines when there is one (with
+  a fresh URL); `idempotencyKey` is needed only with `payment`.
 - On a site the merchant registered to frame its checkout, `BuyButton` creates
   the order that way and frames it (`<EmbeddedCheckout>`); elsewhere it pays on
-  the page as before. Its purchase key is kept in `sessionStorage` per customer
-  (`GET /me`) and price until the order is paid or closed: a reload answers
-  the same unpaid order.
+  the page as before. It stores nothing and sends no key: a reload or a
+  reopened dialog answers the same open order.
 
 ## Entitlements read
 

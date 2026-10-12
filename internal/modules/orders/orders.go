@@ -195,8 +195,8 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction
 	}
-	if o.CheckoutExpiresAt != nil && o.CheckoutSuccessUrl != nil && o.CheckoutSavedPaymentMethods != nil && o.CheckoutUiMode != nil {
-		out.Checkout = &billing.OrderCheckout{UIMode: billing.CheckoutUIMode(*o.CheckoutUiMode), ExpiresAt: o.CheckoutExpiresAt.UTC(), SuccessURL: *o.CheckoutSuccessUrl,
+	if o.CheckoutExpiresAt != nil && o.CheckoutSavedPaymentMethods != nil && o.CheckoutUiMode != nil {
+		out.Checkout = &billing.OrderCheckout{UIMode: billing.CheckoutUIMode(*o.CheckoutUiMode), ExpiresAt: o.CheckoutExpiresAt.UTC(), SuccessURL: o.CheckoutSuccessUrl,
 			CancelURL: o.CheckoutCancelUrl, SavedPaymentMethods: *o.CheckoutSavedPaymentMethods}
 	}
 	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && options != nil {
