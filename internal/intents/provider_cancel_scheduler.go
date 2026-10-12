@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -105,7 +106,7 @@ func (s *ProviderCancelScheduler) enqueue(ctx context.Context, sub *models.Subsc
 		SubscriptionID: &sub.ID,
 		PspID:          sub.PspID,
 		Payload:        payload,
-		IdempotencyKey: key,
+		IdempotencyKey: cancelActionKey(ctx, key),
 		NextAttemptAt:  due.UTC(),
 		Origin:         s.origin,
 		OriginReason:   s.reason,
@@ -142,7 +143,7 @@ func (s *ProviderCancelScheduler) ScheduleNMIDelete(ctx context.Context, userID 
 			UserID:             userID,
 			RailSubscriptionID: models.DerefStr(sub.RailSubscriptionID),
 		},
-		IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, models.DerefStr(sub.RailSubscriptionID)),
+		IdempotencyKey: cancelActionKey(ctx, NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, models.DerefStr(sub.RailSubscriptionID))),
 		NextAttemptAt:  runAt.UTC(),
 		Origin:         s.origin,
 		OriginReason:   s.reason,
@@ -179,4 +180,13 @@ func releaseProviderStop(ctx context.Context, d *db.DB, intent gen.BillingProvid
 	}
 	_, err := d.Gen(ctx).ClearSubscriptionDeletionMarker(ctx, gen.ClearSubscriptionDeletionMarkerParams{MerchantID: intent.MerchantID, ID: *intent.SubscriptionID, PspID: *intent.PspID, RailSubscriptionID: railSubscriptionID, Now: now})
 	return err
+}
+
+// A later cancel after resume is a distinct admitted command. Its provider
+// operation must not revive a row owned by the old command.
+func cancelActionKey(ctx context.Context, key string) string {
+	if action, ok := destructive.ActionFromContext(ctx); ok {
+		return key + ":action:" + action.ID.String()
+	}
+	return key
 }

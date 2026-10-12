@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/open-rails/openrails/internal/destructive"
 	"time"
 
 	"github.com/google/uuid"
@@ -197,7 +198,7 @@ func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.Bi
 		if n != 1 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		return nil
+		return finishIntentActionTx(ctx, tx, in, destructive.OutcomeSucceeded)
 	})
 }
 

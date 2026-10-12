@@ -143,6 +143,10 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		return row, ErrResolutionBusy
 	}
 	ctx = pinIntentAddress(ctx, claimed)
+	ctx, err = r.bindIntentAction(ctx, claimed)
+	if err != nil {
+		return claimed, err
+	}
 	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
 	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, claimed)
@@ -176,6 +180,10 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.BillingProviderInten
 		return row, ErrResolutionBusy
 	}
 	ctx = pinIntentAddress(ctx, claimed)
+	ctx, err = r.bindIntentAction(ctx, claimed)
+	if err != nil {
+		return claimed, err
+	}
 	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
 	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, claimed)

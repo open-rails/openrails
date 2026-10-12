@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"hash/fnv"
 	"math"
 	"net/http"
@@ -122,8 +123,17 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 	if err := checkAdminRefundRail(ctx, r, paymentID, idempotencyKey, req.RevokeAccess); err != nil {
 		return nil, 0, err
 	}
+	command, err := destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+idempotencyKey, req)
+	if err != nil {
+		return nil, 0, err
+	}
+	ctx, action, err := destructive.AdmitCommand(ctx, r.State.DestructiveAdmissions, command)
+	if err != nil {
+		return nil, 0, err
+	}
 	var prepared *adminRefundPrepared
-	err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	callbackCompleted := false
+	err = r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := gen.New(tx).LockAdminRefund(ctx, adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
@@ -134,10 +144,17 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 			return err
 		}
 		prepared = result
+		callbackCompleted = true
 		return nil
 	})
 	if err != nil {
-		return nil, 0, err
+		outcome := destructive.OutcomeNoEffect
+		if callbackCompleted && !errors.Is(err, pgx.ErrTxCommitRollback) {
+			outcome = destructive.OutcomeUncertain
+		}
+		writeCtx, cancel := intents.LedgerWriteContext(ctx)
+		defer cancel()
+		return nil, 0, errors.Join(err, r.State.DestructiveAdmissions.Finish(writeCtx, action.MerchantID, action.ID, outcome, ""))
 	}
 	return issuePreparedAdminRefund(ctx, r, prepared)
 }

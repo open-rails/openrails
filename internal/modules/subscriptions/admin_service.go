@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 
 	"github.com/google/uuid"
@@ -33,14 +35,15 @@ var (
 
 // AdminSubscriptionService handles administrative subscription operations
 type AdminSubscriptionService struct {
-	SubscriptionService *SubscriptionService
-	ProductService      *catalog.ProductService
-	PriceService        *catalog.PriceService
-	EntitlementService  *entitlements.EntitlementService
-	NotificationService *NotificationService
-	PaymentService      *payments.PaymentService
-	StripeService       *StripeService
-	clock               clockwork.Clock
+	destructiveAdmissions *destructive.Admissions
+	SubscriptionService   *SubscriptionService
+	ProductService        *catalog.ProductService
+	PriceService          *catalog.PriceService
+	EntitlementService    *entitlements.EntitlementService
+	NotificationService   *NotificationService
+	PaymentService        *payments.PaymentService
+	StripeService         *StripeService
+	clock                 clockwork.Clock
 
 	// providerCancel queues the durable, admin-origin provider cancel of a
 	// merchant-initiated cancel.
@@ -194,9 +197,30 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return err
 	}
 
+	if subscription.Status == models.StatusCanceled && !revokeAccess {
+		return nil
+	}
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Status == models.StatusCanceled && revokeAccess {
-		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), nil, nil, s.EntitlementService, s.NotificationService, nil, s.Clock())
-		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess, RefuseOwnedRenewal: true})
+		command, err := cancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
+		if err != nil {
+			return err
+		}
+		return destructive.RunLocal(ctx, s.SubscriptionService.Database(), s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+			current, err := s.requireLockedSubscription(ctx, txDB, subscriptionID)
+			if err != nil {
+				return false, err
+			}
+			if current.LifecycleRev != subscription.LifecycleRev {
+				return false, apperr.Conflictf("subscription changed before cancellation; retry")
+			}
+			lifecycle := NewSubscriptionLifecycleService(txDB, nil, nil, nil, nil, nil, s.Clock())
+			_, err = lifecycle.CancelMembershipTx(ctx, txDB, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess, RefuseOwnedRenewal: true})
+			if err != nil {
+				return false, err
+			}
+			after, err := s.requireLockedSubscription(ctx, txDB, subscriptionID)
+			return err == nil && after.LifecycleRev != current.LifecycleRev, err
+		})
 	}
 
 	if !providerCancellable(subscription.Status) {
@@ -226,71 +250,101 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	observedPSP, observedRail, observedReference := subscription.PspID, subscription.Rail, subscription.RailSubscriptionID
 
-	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := s.SubscriptionService.Database().NewWithPgxTx(tx)
-		var err error
-		subscription, err = s.requireLockedSubscription(ctx, txdb, subscriptionID)
-		if err != nil {
-			return err
-		}
-		if !providerCancellable(subscription.Status) {
-			return ErrSubscriptionNotActive
-		}
-		// A delinquent member whose OpenRails rebill is in flight is settled
-		// first: the cancel waits for the money to resolve, never races it.
-		if subscription.Status != models.StatusActive {
-			if moving, err := rebillInFlight(ctx, txdb, subscription); err != nil {
+	command, err := cancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
+	if err != nil {
+		return err
+	}
+	observedRevision := subscription.LifecycleRev
+	if err := destructive.RunLocal(ctx, s.SubscriptionService.Database(), s.destructiveAdmissions, command, func(ctx context.Context, tx pgx.Tx, txdb *db.DB) (bool, error) {
+		changed := false
+		err := func() error {
+			var err error
+			subscription, err = s.requireLockedSubscription(ctx, txdb, subscriptionID)
+			if err != nil {
 				return err
-			} else if moving {
+			}
+			if subscription.Status == models.StatusCanceled {
+				return nil
+			}
+			if subscription.LifecycleRev != observedRevision {
+				return apperr.Conflictf("subscription changed before cancellation; retry")
+			}
+			if !providerCancellable(subscription.Status) {
 				return ErrSubscriptionNotActive
 			}
-		}
-		if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {
-			return apperr.Conflictf("subscription provider binding changed before cancellation")
-		}
-		if _, err := Transition(subscription, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: revokeAccess, At: now}, now); err != nil {
-			return fmt.Errorf("cancel subscription %s: %w", subscription.ID, err)
-		}
-		if reason != "" {
-			subscription.CancelFeedback = &reason
-		}
+			// A delinquent member whose OpenRails rebill is in flight is settled
+			// first: the cancel waits for the money to resolve, never races it.
+			if subscription.Status != models.StatusActive {
+				if moving, err := rebillInFlight(ctx, txdb, subscription); err != nil {
+					return err
+				} else if moving {
+					return ErrSubscriptionNotActive
+				}
+			}
+			if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {
+				return apperr.Conflictf("subscription provider binding changed before cancellation")
+			}
+			if _, err := Transition(subscription, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: revokeAccess, At: now}, now); err != nil {
+				return fmt.Errorf("cancel subscription %s: %w", subscription.ID, err)
+			}
+			if reason != "" {
+				subscription.CancelFeedback = &reason
+			}
 
-		if remote {
-			subscription.DeletionScheduledAt = nil // a merchant's cancel is due now
-			if err := s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now); err != nil {
-				return fmt.Errorf("queue provider cancel: %w", err)
+			changed = true
+			if remote {
+				subscription.DeletionScheduledAt = nil // a merchant's cancel is due now
+				if err := s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now); err != nil {
+					return fmt.Errorf("queue provider cancel: %w", err)
+				}
 			}
-		}
-		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
-			return fmt.Errorf("failed to update subscription: %w", err)
-		}
-		// Immediate cancel: access ends in the same transaction as the cancel;
-		// otherwise standing access is bounded to the paid period.
-		entSvc := entitlements.NewEntitlementService(txdb, s.Clock())
-		if revokeAccess {
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
-				return fmt.Errorf("revoke access: %w", err)
+			if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
+				return fmt.Errorf("failed to update subscription: %w", err)
 			}
-		} else {
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceGrace); err != nil {
-				return fmt.Errorf("end renewal grace: %w", err)
+			// Immediate cancel: access ends in the same transaction as the cancel;
+			// otherwise standing access is bounded to the paid period.
+			entSvc := entitlements.NewEntitlementService(txdb, s.Clock())
+			if revokeAccess {
+				if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
+					return fmt.Errorf("revoke access: %w", err)
+				}
+			} else {
+				if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceGrace); err != nil {
+					return fmt.Errorf("end renewal grace: %w", err)
+				}
 			}
-		}
-		if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
-			ID: uuid.NewSHA1(subscription.ID, []byte("cancel:admin:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
-			Data: billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID)},
-		}); err != nil {
-			return fmt.Errorf("record cancellation notification: %w", err)
-		}
-		if remote && !deleteHeld {
-			return resolveProviderCancelHeld(ctx, txdb, subscription)
-		}
-		return nil
+			if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
+				ID: uuid.NewSHA1(subscription.ID, []byte("cancel:admin:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
+				Data: billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID)},
+			}); err != nil {
+				return fmt.Errorf("record cancellation notification: %w", err)
+			}
+			if remote && !deleteHeld {
+				return resolveProviderCancelHeld(ctx, txdb, subscription)
+			}
+			return nil
+		}()
+		return changed, err
 	}); err != nil {
 		return err
 	}
-
 	return nil
+}
+
+func cancellationCommand(ctx context.Context, sub *models.Subscription, reason string, revokeAccess, accountDeletion bool) (destructive.Command, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return destructive.Command{}, err
+	}
+	if sub.MerchantID != mid.UUID() {
+		return destructive.Command{}, apperr.Conflictf("subscription merchant mismatch")
+	}
+	key := fmt.Sprintf("cancel:%s:%d:%t", sub.ID, sub.LifecycleRev, revokeAccess)
+	return destructive.CommandFromContext(ctx, destructive.CancelSubscription, sub.ID.String(), key, struct {
+		Revision                      int64
+		Reason                        string
+		RevokeAccess, AccountDeletion bool
+	}{sub.LifecycleRev, reason, revokeAccess, accountDeletion})
 }
 
 // NewAdminSubscriptionService creates a new AdminSubscriptionService
@@ -312,4 +366,9 @@ func NewAdminSubscriptionService(
 		PaymentService:      paymentService,
 		clock:               timeutil.FirstClock(clocks...),
 	}
+}
+
+// SetDestructiveAdmissions wires the shared staff-command admission boundary.
+func (s *AdminSubscriptionService) SetDestructiveAdmissions(a *destructive.Admissions) {
+	s.destructiveAdmissions = a
 }

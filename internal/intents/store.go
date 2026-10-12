@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -55,6 +56,8 @@ func (s *Store) withTxDB(txdb *db.DB) *Store {
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
+	// DestructiveActionID preserves the original staff command across provider effects.
+	DestructiveActionID *uuid.UUID
 	// operationID is set only after validating a new engine renewal admission.
 	// Existing operations always retain their stored identity.
 	operationID    uuid.UUID
@@ -334,10 +337,23 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		subject, credential = textOrNil(who.Subject), textOrNil(billingauth.CredentialName(who))
 	}
 
+	if action, ok := destructive.ActionFromContext(ctx); ok {
+		if action.MerchantID != p.MerchantID {
+			return gen.BillingProviderIntent{}, errors.New("destructive action merchant mismatch")
+		}
+		if p.DestructiveActionID != nil && *p.DestructiveActionID != action.ID {
+			return gen.BillingProviderIntent{}, errors.New("destructive action identity mismatch")
+		}
+		p.DestructiveActionID = &action.ID
+	}
+	if p.Origin == OriginAdmin && staffDestructiveIntent(p.IntentType) && p.DestructiveActionID == nil {
+		return gen.BillingProviderIntent{}, errors.New("staff destructive intent requires command admission")
+	}
+
 	// The rate ceiling gates destructive ops before the write-ahead intent is
 	// created: a trip or an evaluation error refuses, and with no row the op
 	// does not happen.
-	if s.ceiling != nil {
+	if s.ceiling != nil && p.DestructiveActionID == nil {
 		if err := s.ceiling.Check(ctx, CheckParams{
 			Actor:      actor,
 			MerchantID: p.MerchantID,
@@ -358,27 +374,31 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
-			ID:             uuidPtrOrNil(p.operationID),
-			MerchantID:     p.MerchantID,
-			Rail:           p.Provider,
-			IntentType:     p.IntentType,
-			SubscriptionID: p.SubscriptionID,
-			PaymentID:      p.PaymentID,
-			PriceID:        p.PriceID,
-			Payload:        payload,
-			IdempotencyKey: p.IdempotencyKey,
-			NextAttemptAt:  p.NextAttemptAt.UTC(),
-			Origin:         string(p.Origin),
-			OriginReason:   originReason,
-			Actor:          actorPtr,
-			Subject:        subject,
-			Credential:     credential,
-			ExpiresAt:      p.ExpiresAt,
-			PspID:          uuidPtrOrNil(p.PspID),
-			CustodianID:    uuidPtrOrNil(p.CustodianID),
+			ID:                  uuidPtrOrNil(p.operationID),
+			DestructiveActionID: p.DestructiveActionID,
+			MerchantID:          p.MerchantID,
+			Rail:                p.Provider,
+			IntentType:          p.IntentType,
+			SubscriptionID:      p.SubscriptionID,
+			PaymentID:           p.PaymentID,
+			PriceID:             p.PriceID,
+			Payload:             payload,
+			IdempotencyKey:      p.IdempotencyKey,
+			NextAttemptAt:       p.NextAttemptAt.UTC(),
+			Origin:              string(p.Origin),
+			OriginReason:        originReason,
+			Actor:               actorPtr,
+			Subject:             subject,
+			Credential:          credential,
+			ExpiresAt:           p.ExpiresAt,
+			PspID:               uuidPtrOrNil(p.PspID),
+			CustodianID:         uuidPtrOrNil(p.CustodianID),
 		})
 		if err != nil {
 			return err
+		}
+		if !reflect.DeepEqual(row.DestructiveActionID, p.DestructiveActionID) {
+			return errors.New("provider operation belongs to another destructive command")
 		}
 		if OperationTerminal(row.Status) {
 			return nil
@@ -571,10 +591,9 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return oneTerminal(s.db.Gen(ctx).MarkProviderIntentSucceeded(ctx, gen.MarkProviderIntentSucceededParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Now: now.UTC(), ResultEvidence: ev,
-	}))
+	return s.finishIntentAction(ctx, id, func(ctx context.Context, local *Store) error {
+		return oneTerminal(local.db.Gen(ctx).MarkProviderIntentSucceeded(ctx, gen.MarkProviderIntentSucceededParams{MerchantID: scopeMerchantID.UUID(), ID: id, Now: now.UTC(), ResultEvidence: ev}))
+	}, destructive.OutcomeSucceeded)
 }
 
 // pruneEvidenceKeys are the result-pointer keys a slim succeeded tombstone
@@ -776,10 +795,13 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return oneTerminal(s.db.Gen(ctx).MarkProviderIntentFailedTerminal(ctx, gen.MarkProviderIntentFailedTerminalParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Reason: &reason, ResultEvidence: ev,
-	}))
+	outcome := destructive.OutcomeUncertain
+	if noEffect, _ := evidence["destructive_no_effect"].(bool); noEffect {
+		outcome = destructive.OutcomeNoEffect
+	}
+	return s.finishIntentAction(ctx, id, func(ctx context.Context, local *Store) error {
+		return oneTerminal(local.db.Gen(ctx).MarkProviderIntentFailedTerminal(ctx, gen.MarkProviderIntentFailedTerminalParams{MerchantID: scopeMerchantID.UUID(), ID: id, Reason: &reason, ResultEvidence: ev}))
+	}, outcome)
 }
 
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {

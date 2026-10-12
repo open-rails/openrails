@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 
@@ -272,56 +273,77 @@ func lockUsageOrder(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUI
 // VoidUsageOrder voids an unpaid usage order and writes off what it still
 // claimed, so the ledger stops counting it as owed.
 func (s *MoneyService) VoidUsageOrder(ctx context.Context, id uuid.UUID) error {
+	return s.destructiveUsageOrder(ctx, id, destructive.WaiveOrder)
+}
+
+// MarkUsageOrderUncollectible stops collection while retaining the debt. A
+// later reopened order has a new admitted revision, not the old allowance.
+func (s *MoneyService) MarkUsageOrderUncollectible(ctx context.Context, id uuid.UUID) error {
+	return s.destructiveUsageOrder(ctx, id, destructive.MarkUncollectible)
+}
+
+func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, kind destructive.Kind) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+	observed, err := s.db.Gen(ctx).GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: id})
+	if err != nil {
+		return err
+	}
+	if observed.Origin != string(billing.OrderOriginUsage) {
+		return ErrUsageActionNotAllowed
+	}
+	final := string(billing.OrderVoid)
+	if kind == destructive.MarkUncollectible {
+		final = string(billing.OrderUncollectible)
+	}
+	if observed.Status == final {
+		return nil
+	}
+	if observed.Status != string(billing.OrderOpen) && !(kind == destructive.WaiveOrder && observed.Status == string(billing.OrderUncollectible)) {
+		return ErrUsageActionNotAllowed
+	}
+	if kind == destructive.MarkUncollectible && usage.Due(observed) <= 0 {
+		return ErrUsageActionNotAllowed
+	}
+	revision := observed.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	command, err := destructive.CommandFromContext(ctx, kind, id.String(), string(kind)+":"+id.String()+":"+revision, struct{ Revision string }{revision})
+	if err != nil {
+		return err
+	}
+	return destructive.RunLocal(ctx, s.db, s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+		q := txDB.Gen(ctx)
 		order, err := lockUsageOrder(ctx, q, mid.UUID(), id)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if order.Status == string(billing.OrderVoid) {
-			return nil
+		if order.Status == final {
+			return false, nil
+		}
+		if !order.UpdatedAt.Equal(observed.UpdatedAt) {
+			return false, ErrUsageActionNotAllowed
+		}
+		if kind == destructive.MarkUncollectible {
+			changed, err := usage.MarkUncollectible(ctx, q, order, s.now())
+			if err == nil && !changed {
+				err = ErrUsageActionNotAllowed
+			}
+			return changed, err
 		}
 		due := usage.Due(order)
-		voided, err := usage.VoidOrder(ctx, q, order, s.now())
+		changed, err := usage.VoidOrder(ctx, q, order, s.now())
 		if err != nil {
-			return err
+			return false, err
 		}
-		if !voided {
-			return ErrUsageActionNotAllowed
+		if !changed {
+			return false, ErrUsageActionNotAllowed
 		}
 		if due > 0 {
 			_, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
 				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id)
 		}
-		return err
-	})
-}
-
-// MarkUsageOrderUncollectible writes an open usage order off; the debt
-// stands, and collecting the order again reopens it.
-func (s *MoneyService) MarkUsageOrderUncollectible(ctx context.Context, id uuid.UUID) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		order, err := lockUsageOrder(ctx, q, mid.UUID(), id)
-		if err != nil {
-			return err
-		}
-		if order.Status == string(billing.OrderUncollectible) {
-			return nil
-		}
-		marked, err := usage.MarkUncollectible(ctx, q, order, s.now())
-		if err == nil && !marked {
-			err = ErrUsageActionNotAllowed
-		}
-		return err
+		return true, err
 	})
 }
 

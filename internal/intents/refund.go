@@ -299,6 +299,10 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 	if err := r.release(ctx, p); err != nil {
 		return Ambiguous(reason + " (and reservation release failed: " + err.Error() + ")")
 	}
+	if evidence == nil {
+		evidence = map[string]any{}
+	}
+	evidence["destructive_no_effect"] = true // canonical terminal decline/release, never an unknown provider outcome
 	return TerminalWithEvidence(reason, evidence)
 }
 

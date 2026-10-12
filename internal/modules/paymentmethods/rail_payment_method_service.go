@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 
@@ -33,9 +34,10 @@ import (
 )
 
 type RailPaymentMethodService struct {
-	PaymentMethodService paymentMethodStore
-	SubscriptionService  subscriptionReader
-	MerchantSecrets      merchants.MerchantSecretReader
+	destructiveAdmissions *destructive.Admissions
+	PaymentMethodService  paymentMethodStore
+	SubscriptionService   subscriptionReader
+	MerchantSecrets       merchants.MerchantSecretReader
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients      *railresolve.NMIFactory
@@ -854,4 +856,9 @@ func (s *RailPaymentMethodService) recordVerification(ctx context.Context, userI
 	if err := attempts.Record(ctx, s.DB.Gen(ctx), a); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("user_id", userID).Error("record card verification attempt")
 	}
+}
+
+// SetDestructiveAdmissions wires the shared staff-command admission boundary.
+func (s *RailPaymentMethodService) SetDestructiveAdmissions(a *destructive.Admissions) {
+	s.destructiveAdmissions = a
 }

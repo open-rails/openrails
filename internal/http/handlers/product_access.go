@@ -315,7 +315,7 @@ func RevokeProductAccess(r *httprequest.Request) {
 	}
 	found, err := svc.RevokeProductAccess(r.Request.Context(), id.UUID(), models.AccessRevokeReason(params.Reason))
 	if err != nil {
-		r.InternalError("failed to revoke product access", err)
+		writeRefusal(r, err, "failed to revoke product access")
 		return
 	}
 	if !found {

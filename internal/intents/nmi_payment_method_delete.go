@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 
@@ -349,7 +351,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if n != 1 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		return nil
+		return finishIntentActionTx(ctx, tx, in, destructive.OutcomeSucceeded)
 	})
 	if err != nil {
 		return Ambiguous("native deletion confirmed; atomic local completion pending: " + err.Error())
@@ -367,6 +369,14 @@ type PaymentMethodDeleteThrough struct {
 func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (paymentmethods.PaymentMethodDeleteOutcome, error) {
 	if t == nil || t.Runner == nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("vault delete intent runner not wired")
+	}
+	if pm == nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, paymentmethods.ErrPaymentMethodDeleteUnsafe
+	}
+	var err error
+	ctx, err = t.admitStaffDeletion(ctx, pm)
+	if err != nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
 	if pm != nil && pm.Custodian == models.CustodianHyperSwitch {
 		h, ok := t.Runner.Registry.Lookup(TypeHyperSwitchMethodDelete).(*HyperSwitchMethodDeleteHandler)
@@ -422,4 +432,35 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		out.Terminal = true
 	}
 	return out, nil
+}
+
+func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm *models.PaymentMethod) (context.Context, error) {
+	if customer, ok := billingauth.IdentityFromContext(ctx); ok && customer.Subject == pm.CustomerID.String() {
+		return ctx, nil
+	}
+	store, ok := t.Runner.Store.(*Store)
+	if !ok {
+		return ctx, errors.New("payment method admission store is unavailable")
+	}
+	key := NMIPaymentMethodDeleteIdempotencyKey(pm.ID)
+	if pm.Custodian == models.CustodianHyperSwitch {
+		key = TypeHyperSwitchMethodDelete + ":" + pm.ID.String()
+	}
+	// The canonical admission below validates the old row's frozen ownership.
+	// Retrying an existing deletion resumes that command without spending again.
+	if _, err := store.GetByIdempotencyKey(ctx, key); err == nil {
+		return ctx, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return ctx, err
+	}
+	command, err := destructive.CommandFromContext(ctx, destructive.DeletePaymentMethod, pm.ID.String(), "method-delete:"+pm.ID.String(), struct {
+		Customer, PSP          uuid.UUID
+		Custodian              *uuid.UUID
+		CustomerRef, MethodRef string
+	}{pm.CustomerID, pm.HoldingPSP(), pm.CustodianID, pm.RailCustomerRef, pm.RailMethodRef})
+	if err != nil {
+		return ctx, err
+	}
+	ctx, _, err = destructive.AdmitCommand(ctx, t.Runner.Admissions, command)
+	return ctx, err
 }
