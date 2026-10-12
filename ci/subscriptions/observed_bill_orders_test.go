@@ -233,3 +233,68 @@ func TestObservedLateBillKeepsCancellation(t *testing.T) {
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='pull.charge.after_cancellation' AND subject_key=$1`), "payment:"+payment.ID.String()).Scan(&findings))
 	require.Equal(t, 1, findings, "the late capture requires refund review")
 }
+
+// Native flat-price checkout leaves quantity nil; Stripe's accepted invoice
+// reports one unit. The verified invoice must reuse that order without changing
+// its frozen money or creating a second obligation.
+func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
+	w := orderWorld(t)
+	w.waive("evidenced", "normalized verified invoice exercises checkout correlation without issuing a gateway charge")
+	c := w.newCustomer()
+	price := w.lifetime("observed-flat-checkout", 100)
+	order, err := w.client[embedded].CreateOrder(t.Context(), billing.CreateOrderParams{
+		CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	orderID := order.ID.UUID()
+	var storedQuantity *int32
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT quantity FROM billing.order_lines WHERE order_id=$1`), orderID).Scan(&storedQuantity))
+	require.Nil(t, storedQuantity, "native flat checkout omits quantity")
+	d, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+	priceID, productID := w.priceStorageID(price.ID), price.ProductID.UUID()
+	bill := observed.Bill{PSPID: w.psp["stripe"].UUID(), CustomerID: uuid.MustParse(c.id), ExistingOrderID: &orderID,
+		Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "invoice", SourceKey: "flat-checkout-invoice", Currency: "USD", Total: 100,
+		Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted flat checkout", Quantity: new(1), UnitAmount: 100, Amount: 100}},
+	}
+	record := func(b observed.Bill) (out observed.Result, err error) {
+		err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var e error
+			out, e = observed.Record(ctx, d.NewWithPgxTx(tx), b, w.clock.Now())
+			return e
+		})
+		return
+	}
+	first, err := record(bill)
+	require.NoError(t, err)
+	require.False(t, first.Created)
+	require.Equal(t, orderID, first.Order.ID)
+	alias := bill
+	alias.SourceKind, alias.SourceKey = "checkout_invoice", "flat-checkout-alias"
+	replayed, err := record(alias)
+	require.NoError(t, err)
+	require.False(t, replayed.Created)
+	require.Equal(t, orderID, replayed.Order.ID)
+
+	for _, field := range []string{"quantity", "unit_amount", "amount"} {
+		changed := alias
+		changed.SourceKey = "rejected-flat-" + field
+		changed.Lines = append([]observed.Line(nil), alias.Lines...)
+		switch field {
+		case "quantity":
+			changed.Lines[0].Quantity = new(2)
+		case "unit_amount":
+			changed.Lines[0].UnitAmount = 101
+		case "amount":
+			changed.Total, changed.Lines[0].Amount = 101, 101
+		}
+		_, err = record(changed)
+		require.ErrorIs(t, err, observed.ErrConflict, field)
+	}
+	var orders, aliases int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.orders WHERE customer_id=$1`), bill.CustomerID).Scan(&orders))
+	require.Equal(t, 1, orders)
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.provider_bills WHERE order_id=$1`), orderID).Scan(&aliases))
+	require.Equal(t, 2, aliases, "only matching verified aliases were retained")
+}

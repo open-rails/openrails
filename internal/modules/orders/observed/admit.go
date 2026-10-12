@@ -42,7 +42,7 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 		}
 		for i, l := range lines {
 			x := b.Lines[i]
-			if !sameID(l.PriceID, x.PriceID) || !sameID(l.ProductID, x.ProductID) || l.Amount != x.Amount || l.UnitAmount != x.UnitAmount || !sameInt(l.Quantity, x.Quantity) || models.DerefStr(l.Source) != x.Source {
+			if !sameID(l.PriceID, x.PriceID) || !sameID(l.ProductID, x.ProductID) || l.Amount != x.Amount || l.UnitAmount != x.UnitAmount || !sameQuantity(l.Quantity, x.Quantity) || models.DerefStr(l.Source) != x.Source {
 				return order, false, ErrConflict
 			}
 		}
@@ -143,6 +143,16 @@ func int32Ptr(n *int) (*int32, error) {
 	value := int32(*n)
 	return &value, nil
 }
-func sameInt(a *int32, b *int) bool {
-	return a == nil && b == nil || a != nil && b != nil && int64(*a) == int64(*b)
+
+// Flat-price checkout omits quantity, while providers report one unit. These
+// represent the same accepted line; money and product identity still match above.
+func sameQuantity(a *int32, b *int) bool {
+	left, right := int64(1), int64(1)
+	if a != nil {
+		left = int64(*a)
+	}
+	if b != nil {
+		right = int64(*b)
+	}
+	return left == right
 }
