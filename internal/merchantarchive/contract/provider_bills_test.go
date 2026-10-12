@@ -133,3 +133,12 @@ func TestProviderArchiveWireRetainsReplayIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, seen)
 }
+
+func TestProviderSettlementEventArchiveContract(t *testing.T) {
+	for _, source := range []string{"cash", "credit", "out_of_band", "mixed"} {
+		raw := `{"customer_id":"` + testMerchant + `","status":"complete","payment_status":"succeeded","number":"2026-1","settlement_source":"` + source + `"}`
+		require.NoError(t, validateJSON("host_outbox.data", raw))
+	}
+	require.Error(t, validateJSON("host_outbox.data", `{"settlement_source":{"raw_provider_body":{}}}`))
+	require.Error(t, validateJSON("host_outbox.data", `{"settlement_source":"cash","raw_provider_body":{}}`))
+}

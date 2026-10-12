@@ -85,7 +85,8 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	w.stop()
 	charges, setups := w.providerWrites("nmi")
 	var artifact bytes.Buffer
-	require.NoError(t, merchantarchive.Export(ctx, source, mid, &artifact))
+	err = merchantarchive.Export(ctx, source, mid, &artifact)
+	require.NoError(t, err, "export: %v", errors.Unwrap(err))
 	destinationSchema := "provider_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, engine.Migrate(ctx, w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: destinationSchema, RiverSchema: destinationSchema}}))
 	quoted := pgx.Identifier{destinationSchema}.Sanitize()
@@ -223,7 +224,8 @@ func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
 	w.stop()
 	before := w.nmiWrites()
 	var artifact bytes.Buffer
-	require.NoError(t, merchantarchive.Export(ctx, source, mid, &artifact))
+	err = merchantarchive.Export(ctx, source, mid, &artifact)
+	require.NoError(t, err, "export: %v", errors.Unwrap(err))
 	destinationSchema := "schedule_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, engine.Migrate(ctx, w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: destinationSchema, RiverSchema: destinationSchema}}))
 	quoted := pgx.Identifier{destinationSchema}.Sanitize()
