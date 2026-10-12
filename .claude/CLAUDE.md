@@ -72,8 +72,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   neither of whose names the Authenticator knows. The in-process `Client` checks none.
 - OpenRails admin and operator changes never require step-up or a recent sign-in;
   `AuthMerchant` routes must not be `Sensitive`. Their authority is the route's
-  permission. AuthKit's own API-key creation and role grants keep step-up;
-  customer and customer-network policies are unchanged.
+  permission. AuthKit retains its own recent-sign-in checks for root-group,
+  OAuth-client and remote-application mutations; customer and customer-network
+  policies are unchanged.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
