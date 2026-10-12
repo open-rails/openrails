@@ -69,3 +69,4 @@ func TestCreditDepositOrders(t *testing.T) {
 	versions, err := client.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
 	require.NoError(t, err)
 	require.Len(t, versions.Items, 1, "chosen deposit amounts exist on orders, not new catalog rows")
+}
