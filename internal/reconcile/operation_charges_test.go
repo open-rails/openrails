@@ -2,6 +2,8 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,4 +56,27 @@ func TestChargeLeaseIsCurrentAfterProviderRead(t *testing.T) {
 	snapshot := &RemoteSnapshot{Transactions: []RemoteTransaction{{TransactionID: finding.SubjectKey, Type: TransactionTypeSale, Success: true}}}
 	got, _ := e.deferOperationCharges(t.Context(), ProviderStripe, uuid.New(), reader, snapshot, []Finding{finding})
 	require.Equal(t, []Finding{finding}, got, "a lease that expired during the metadata read owns no charge now")
+}
+
+// Provider descriptions that were not written in the renewal format must
+// not borrow an active operation's lease to suppress a missing-charge finding.
+func TestNMIChargeOperationRequiresRenewalDescription(t *testing.T) {
+	operation := uuid.MustParse("0199d634-a534-780b-861f-8b9577eb5f8b")
+	for _, tc := range []struct {
+		name, description string
+		want              uuid.UUID
+	}{
+		{"renewal", "OpenRails renewal " + operation.String(), operation},
+		{"provider description", operation.String(), uuid.Nil},
+		{"noncanonical renewal", "OpenRails renewal " + strings.ToUpper(operation.String()), uuid.Nil},
+		{"zero operation", "OpenRails renewal " + uuid.Nil.String(), uuid.Nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]string{"order_description": tc.description})
+			require.NoError(t, err)
+			id, err := (&NMIFetcher{}).OperationOf(t.Context(), &RemoteTransaction{Raw: raw})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, id)
+		})
+	}
 }

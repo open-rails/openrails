@@ -27,7 +27,10 @@ func (f *NMIFetcher) OperationOf(_ context.Context, t *RemoteTransaction) (uuid.
 	if json.Unmarshal(t.Raw, &raw) != nil {
 		return uuid.Nil, nil
 	}
-	id, _ := subscriptions.ParseSubscriptionCollectionDescription(raw.OrderDescription)
+	id, ok := subscriptions.ParseSubscriptionCollectionDescription(raw.OrderDescription)
+	if !ok {
+		return uuid.Nil, nil
+	}
 	return id, nil
 }
 
