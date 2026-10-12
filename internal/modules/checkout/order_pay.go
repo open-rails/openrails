@@ -755,9 +755,10 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 // customer acted: the verifier settles it, or it stays where it is. Failed
 // reports an attempt that ended without moving money.
 func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer, signature string) (OrderCharge, error) {
-	// Nothing awaits confirmation: the order answers as it stands, whoever
-	// collects it now (a settled enrollment hands collection to its provider).
-	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
+	// A settled order answers as it stands, whoever collects it now (a
+	// settled enrollment hands its order to the provider). Any other order
+	// is confirmed only while the engine collects it.
+	if order.Status == string(billing.OrderComplete) {
 		return OrderCharge{}, nil
 	}
 	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
@@ -765,6 +766,9 @@ func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders
 	}
 	if err := s.requireEngineOrder(ctx, order); err != nil {
 		return OrderCharge{}, err
+	}
+	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
+		return OrderCharge{}, nil
 	}
 	attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID)
 	switch {
