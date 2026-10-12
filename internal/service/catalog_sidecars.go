@@ -88,6 +88,16 @@ func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSid
 }
 
 func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
+	_, err := catalogCommand(ctx, s, "catalog/billing", struct {
+		Desired SyncCatalogSidecarsRequest
+		Options CatalogMutationOptions
+	}{desired, opts}, "", false, sidecarPlan(desired, opts), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}, s.syncCatalogSidecarsCommand(ctx, desired, opts)
+	})
+	return err
+}
+
+func (s *Service) syncCatalogSidecarsCommand(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.syncCatalogSidecars(ctx, desired, opts)
 	})

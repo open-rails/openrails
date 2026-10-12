@@ -22,6 +22,13 @@ const (
 
 // EnsureUsageMeter idempotently declares a catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
+	_, err := catalogCommand(ctx, s, "meter/"+spec.Key, spec, "", false, meterEditPlan(spec, nil, false, nil), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}, s.ensureUsageMeterCommand(ctx, spec)
+	})
+	return err
+}
+
+func (s *Service) ensureUsageMeterCommand(ctx context.Context, spec catalogrules.Meter) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.ensureUsageMeter(ctx, spec)
 	})
@@ -45,6 +52,17 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 // card: card sets it, removeCard removes it, neither keeps it. With
 // expectedRevision, only while the meter is at it (0: no meter yet).
 func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, card *UsageRateCardInput, removeCard bool, expectedRevision *int64) error {
+	_, err := catalogCommand(ctx, s, "meter/"+spec.Key, struct {
+		Meter  catalogrules.Meter
+		Card   *UsageRateCardInput
+		Remove bool
+	}{spec, card, removeCard}, "", false, meterEditPlan(spec, card, removeCard, expectedRevision), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}, s.setUsageMeterCommand(ctx, spec, card, removeCard, expectedRevision)
+	})
+	return err
+}
+
+func (s *Service) setUsageMeterCommand(ctx context.Context, spec catalogrules.Meter, card *UsageRateCardInput, removeCard bool, expectedRevision *int64) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		if err := scoped.expectCatalogRevision(meterObject(spec.Key), expectedRevision); err != nil {
 			return struct{}{}, err

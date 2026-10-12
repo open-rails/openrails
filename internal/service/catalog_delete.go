@@ -23,6 +23,16 @@ var ErrProductInUse = apperr.New(http.StatusConflict, billing.CodeProductInUse, 
 // provider write, PSP link or rate card refers to is refused (ErrProductInUse):
 // archive it instead.
 func (s *Service) DeleteProduct(ctx context.Context, id billing.ProductID) error {
+	_, err := catalogCommand(ctx, s, "product/"+id.String(), struct {
+		Operation string
+		ID        billing.ProductID
+	}{"delete", id}, "", false, deleteProductPlan(id), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}, s.deleteProductCommand(ctx, id)
+	})
+	return err
+}
+
+func (s *Service) deleteProductCommand(ctx context.Context, id billing.ProductID) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		if id.IsZero() {
 			return struct{}{}, apperr.Invalidf("product_id required")

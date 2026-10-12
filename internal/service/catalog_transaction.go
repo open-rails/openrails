@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -64,9 +65,30 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		if scoped.catalogBefore, err = readCatalogState(ctx, q, mid.UUID()); err != nil {
 			return err
 		}
+		admission, _ := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission)
+		if admission != nil && !sameCatalogSnapshot(admission.before, scoped.catalogBefore) {
+			admission.rolledBack = true
+			return errCatalogSnapshotMoved
+		}
 		var callErr error
 		if out, callErr = fn(ctx, &scoped); callErr != nil {
+			if admission != nil {
+				admission.rolledBack = true
+			}
 			return callErr
+		}
+		after, err := readCatalogState(ctx, q, mid.UUID())
+		if err != nil {
+			return err
+		}
+		affected := substantiveCatalogTargets(scoped.catalogBefore, after)
+		for _, object := range affected {
+			if admission == nil || !admission.targets[object] {
+				if admission != nil {
+					admission.rolledBack = true
+				}
+				return fmt.Errorf("catalog target %s has no destructive admission", object)
+			}
 		}
 		if !scoped.catalogApplying {
 			after, err := readCatalogState(ctx, q, mid.UUID())
@@ -77,9 +99,27 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 				return err
 			}
 		}
-		return refuseNewBenefitOverlap(ctx, q, mid.UUID(), before)
+		if err := refuseNewBenefitOverlap(ctx, q, mid.UUID(), before); err != nil {
+			if admission != nil {
+				admission.rolledBack = true
+			}
+			return err
+		}
+		if admission != nil && admission.action != nil {
+			outcome := destructive.OutcomeSucceeded
+			if len(affected) == 0 && !admission.external {
+				outcome = destructive.OutcomeNoEffect
+			}
+			if err := s.rt.DestructiveAdmissions.FinishTx(ctx, tx, mid.UUID(), admission.action.ID, outcome, ""); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err == nil {
+		if admission, _ := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission); admission != nil {
+			admission.finished = true
+		}
 		for _, work := range committedWork {
 			work(ctx, s)
 		}
