@@ -496,7 +496,6 @@ ci/subscriptions	TestPendingProviderStopHoldsSlotAgainstOrders	23.2
 ci/subscriptions	TestPendingSubscriptionAccessFollowsTheProduct	21.5
 ci/subscriptions	TestPeriodCloseBillsPricedUsageOnce	14.5
 ci/subscriptions	TestPriceIdentifierEscapesKeysAndHTTPPaths	11.0
-ci/subscriptions	TestPriceIdentifierRetriesPreserveLegacyOrderReceipts	8.1
 ci/subscriptions	TestPriceIdentifiersPreserveAcceptedVersions	9.4
 ci/subscriptions	TestPriceIdentityBatchesAreBoundedByTheirInputs	7.2
 ci/subscriptions	TestPriceMigrationAtRenewal	14.9
@@ -717,7 +716,6 @@ server/ci	TestHostedCheckoutPays	17.9
 server/ci	TestHostedCheckoutReceiptFailureRollsBackOrder	15.3
 server/ci	TestHostedCheckoutRegistersItsHostForWallets	14.4
 server/ci	TestHostedCheckoutReplayUsesCurrentState	75.6
-server/ci	TestHostedCheckoutReplaysLegacyCreationReceipt	18.2
 server/ci	TestHostedCheckoutSecretOpensOneOrder	9.2
 server/ci	TestLinkChallengesCrossInstancesThroughRedis	16.5
 server/ci	TestManifestBesideVaultNamesMerchantsOnly	13.4
@@ -733,7 +731,6 @@ server/ci	TestMerchantStaffStayInTheirMerchant	13.0
 server/ci	TestMountFailsClosed	17.5
 server/ci	TestNativeCustomersLinkWhenTheyAcceptNewTerms	13.2
 server/ci	TestNetworkPortal	33.1
-server/ci	TestNotificationConsumersProjectLegacyPriceIDs	16.4
 server/ci	TestNotificationEventConsumers	10.2
 server/ci	TestOperatorDirectoryAndWorkers	13.4
 server/ci	TestPublicCatalogNamesItsMerchant	14.3

@@ -89,10 +89,6 @@ the same URL while the order and checkout remain open. The reply reads the
 current order: completed, canceled or expired checkouts return no URL, and a
 retry never extends either expiry. Ordinary order reads always show `url: null`.
 
-An upgrade can also recover the capability from an older creation receipt,
-after checking the same order, customer, current secret hash and expiry. Its
-old response body is never returned.
-
 Creation receipts use the existing expiry cleanup and are excluded from billing
 archives. If a receipt has expired or is unavailable after a restore, no secret
 is reconstructed from its hash; cancel an unpaid order and create another when

@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,15 +62,6 @@ func ReplayURL(ctx context.Context, q *gen.Queries, origin string, order gen.Bil
 	}
 
 	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: order.MerchantID, Operation: "hosted_checkout_creation", IdempotencyKey: order.ID.String()})
-	legacy := false
-	if db.IsNotFound(err) && order.IdempotencyKey != nil {
-		if key, ok := strings.CutPrefix(*order.IdempotencyKey, "app:"); ok && key != "" {
-			// Before domain-owned receipts, this one response held the capability.
-			// Read only its secret; never replay the old order or other response data.
-			row, err = q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: order.MerchantID, Operation: "POST /v1/app/orders", IdempotencyKey: key})
-			legacy = true
-		}
-	}
 	if db.IsNotFound(err) {
 		return "", nil
 	}
@@ -84,31 +73,9 @@ func ReplayURL(ctx context.Context, q *gen.Queries, origin string, order gen.Bil
 	}
 	var receipt struct {
 		Secret string `json:"secret"`
-		Body   string `json:"body"`
 	}
 	if err := json.Unmarshal(row.Result, &receipt); err != nil {
 		return "", err
-	}
-	if legacy {
-		// Read just identity and capability fields, leaving old price shapes opaque.
-		var created struct {
-			ID         billing.OrderID    `json:"id"`
-			CustomerID billing.CustomerID `json:"customer_id"`
-			Checkout   *struct {
-				URL string `json:"url"`
-			} `json:"checkout"`
-		}
-		if err := json.Unmarshal([]byte(receipt.Body), &created); err != nil {
-			return "", err
-		}
-		if created.ID.UUID() != order.ID || created.CustomerID.UUID() != order.CustomerID || created.Checkout == nil {
-			return "", nil
-		}
-		link, err := url.Parse(created.Checkout.URL)
-		if err != nil || link.Path != PagePath(created.ID) {
-			return "", nil
-		}
-		receipt.Secret = link.Fragment
 	}
 	hash, ok := Hash(receipt.Secret)
 	if !ok || subtle.ConstantTimeCompare(hash, order.CheckoutSecretHash) != 1 {

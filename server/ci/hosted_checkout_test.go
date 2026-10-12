@@ -317,54 +317,6 @@ func TestHostedCheckoutReplayUsesCurrentState(t *testing.T) {
 	}
 }
 
-// Only the matching live capability is recovered from a pre-upgrade creation
-// receipt. The older response body is never replayed.
-func TestHostedCheckoutReplaysLegacyCreationReceipt(t *testing.T) {
-	s := newCheckoutShop(t)
-	customer := billing.CustomerID(uuid.New())
-	key := uuid.NewString()
-	body := map[string]any{"customer_id": customer, "lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}}
-	first := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body)
-	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
-	order := decode[billing.Order](t, first)
-	_, err := s.f.pool.Exec(t.Context(), fmt.Sprintf(`DELETE FROM %s.idempotency_keys WHERE merchant_id=$1 AND operation='hosted_checkout_creation' AND idempotency_key=$2`, s.f.schema), s.mid.UUID(), order.ID.UUID().String())
-	require.NoError(t, err)
-	stored := map[string]any{"id": order.ID, "customer_id": customer, "status": "expired", "total": "1", "lines": []map[string]any{{"price_id": "price_" + uuid.NewString()}}, "checkout": map[string]any{"url": *order.Checkout.URL}}
-	save := func() {
-		response, err := json.Marshal(stored)
-		require.NoError(t, err)
-		receipt, err := json.Marshal(map[string]any{"fingerprint": "historical", "status": 201, "content_type": "application/json", "body": string(response)})
-		require.NoError(t, err)
-		_, err = s.f.pool.Exec(t.Context(), fmt.Sprintf(`INSERT INTO %s.idempotency_keys (merchant_id,operation,idempotency_key,status,token,result,lease_expires_at,expires_at)
-VALUES ($1,'POST /v1/app/orders',$2,'succeeded',$3,$4,now(),now()+interval '1 day') ON CONFLICT(merchant_id,operation,idempotency_key) DO UPDATE SET result=EXCLUDED.result`, s.f.schema), s.mid.UUID(), key, uuid.New(), receipt)
-		require.NoError(t, err)
-	}
-	replay := func() billing.Order {
-		response := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body)
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		current := decode[billing.Order](t, response)
-		require.Equal(t, order.ID, current.ID)
-		require.Equal(t, billing.OrderOpen, current.Status)
-		require.Equal(t, order.Total, current.Total, "the legacy body is not a current order response")
-		return current
-	}
-	save()
-	require.Equal(t, order.Checkout.URL, replay().Checkout.URL)
-	stored["id"] = billing.OrderID(uuid.New())
-	save()
-	require.Nil(t, replay().Checkout.URL, "the original receipt must name this exact order")
-	stored["id"] = order.ID
-	stored["customer_id"] = billing.CustomerID(uuid.New())
-	save()
-	require.Nil(t, replay().Checkout.URL, "the original receipt must name this customer")
-	_, err = s.f.pool.Exec(t.Context(), fmt.Sprintf(`DELETE FROM %s.idempotency_keys WHERE merchant_id=$1 AND operation='POST /v1/app/orders' AND idempotency_key=$2`, s.f.schema), s.mid.UUID(), key)
-	require.NoError(t, err)
-	require.Nil(t, replay().Checkout.URL, "a missing receipt cannot be reconstructed or create a second order")
-	var count int
-	require.NoError(t, s.f.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT count(*) FROM %s.orders WHERE merchant_id=$1 AND idempotency_key=$2`, s.f.schema), s.mid.UUID(), "app:"+key).Scan(&count))
-	require.Equal(t, 1, count)
-}
-
 func TestHostedCheckoutReceiptFailureRollsBackOrder(t *testing.T) {
 	s := newCheckoutShop(t)
 	body := map[string]any{"customer_id": billing.CustomerID(uuid.New()), "lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}}

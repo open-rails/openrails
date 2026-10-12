@@ -152,10 +152,6 @@ func read(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key str
 	if err != nil {
 		return nil, err
 	}
-	row.Result, err = db.StoredPriceReferences(ctx, q, mid, row.Result)
-	if err != nil {
-		return nil, err
-	}
 	r := record(gen.BillingIdempotencyKey{
 		MerchantID: row.MerchantID, Operation: row.Operation, IdempotencyKey: row.IdempotencyKey, Status: row.Status,
 		Token: row.Token, Claims: row.Claims, Result: row.Result, Error: row.Error,

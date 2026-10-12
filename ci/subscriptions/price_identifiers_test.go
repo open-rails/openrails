@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -57,25 +55,6 @@ func TestPriceIdentifiersPreserveAcceptedVersions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, filtered.Items, 2)
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodGet, "/v1/catalog/prices/price_"+storageID.String(), nil, nil))
-
-	// Historical receipts and archives retain private row identities; reading
-	// an old stored wire receipt resolves them without accepting UUID inputs.
-	runtime := engine.Graph(w.rt).Runtime
-	ctx := merchant.WithID(t.Context(), c.MerchantID())
-	require.NoError(t, runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		raw, err := json.Marshal(map[string]any{"price_id": "price_" + storageID.String(), "amount": "9007199254740993"})
-		if err != nil {
-			return err
-		}
-		projected, err := db.StoredPriceReferences(ctx, runtime.DB.Gen(ctx), c.MerchantID().UUID(), raw)
-		if err != nil {
-			return err
-		}
-		require.JSONEq(t, `{"price_id":"premium:buy-usd:v1","amount":"9007199254740993"}`, string(projected))
-		_, err = db.StoredPriceReferences(ctx, runtime.DB.Gen(ctx), uuid.New(), raw)
-		require.Error(t, err, "a reference in another merchant is never resolved")
-		return nil
-	}))
 }
 
 func TestPriceIdentifierEscapesKeysAndHTTPPaths(t *testing.T) {
