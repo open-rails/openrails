@@ -80,11 +80,12 @@ func TestProductAccessGrantBatches(t *testing.T) {
 // refuse its neighbours, and each answers what recording it alone would.
 func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "batch", "units")
 	c := w.newCustomer()
 	_, err := createCreditGrant(t.Context(), w.client[embedded], c.customerID(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	event := func(source string, amount int64) billing.RecordUsageParams {
-		return billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "usd", EventType: "batch", Amount: amount, Source: "test", SourceID: source}
+		return billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "usd", EventType: "batch", Amount: new(int64(amount)), Source: "test", SourceID: source}
 	}
 	zero := event("orphan", 1)
 	zero.CustomerID = billing.CustomerID{}
@@ -154,12 +155,13 @@ func TestHostEventsAcknowledgeInBatches(t *testing.T) {
 // without one is refused, and a person never reaches the route.
 func TestAppWritesReplayByIdempotencyKey(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "replay", "units")
 	c := w.newCustomer()
 	send := func(token, key string, amount int64) (int, http.Header, map[string]any) {
 		t.Helper()
 		raw, err := json.Marshal(map[string]any{"items": []any{map[string]any{
 			"customer_id": c.id, "invoker": c.id, "currency": "USD", "event_type": "replay",
-			"amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
+			"dimensions": map[string]int64{"units": 1}, "amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
 		}}})
 		require.NoError(t, err)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/app/usage-events", bytes.NewReader(raw))

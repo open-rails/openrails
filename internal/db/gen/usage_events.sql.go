@@ -13,7 +13,7 @@ import (
 )
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at, outcome, forgiven_amount, charges, stated_amount FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND event_type = $3 AND source = $4 AND source_id = $5
   AND occurred_at >= $7::timestamptz
@@ -58,13 +58,13 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.Source,
 		&i.SourceID,
 		&i.LedgerTransferID,
-		&i.PricingAuthority,
 		&i.Metadata,
 		&i.OccurredAt,
 		&i.CreatedAt,
 		&i.Outcome,
 		&i.ForgivenAmount,
 		&i.Charges,
+		&i.StatedAmount,
 	)
 	return i, err
 }
@@ -74,9 +74,9 @@ const insertUsageEvent = `-- name: InsertUsageEvent :exec
 INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at,
+    ledger_transfer_id, stated_amount, metadata, occurred_at, created_at,
     outcome, forgiven_amount, charges
-) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $16, $12, $13, $14,
+) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $16::bigint, $12, $13, $14,
     $17::text, $18::bigint, $19::jsonb)
 `
 
@@ -96,7 +96,7 @@ type InsertUsageEventParams struct {
 	OccurredAt       time.Time
 	CreatedAt        time.Time
 	Dimensions       []byte
-	PricingAuthority string
+	StatedAmount     *int64
 	Outcome          string
 	ForgivenAmount   int64
 	Charges          []byte
@@ -106,7 +106,7 @@ type InsertUsageEventParams struct {
 // occurred_at. Every read names a time range. The idempotency coordinate
 // (merchant, customer, currency, event_type, source, source_id) is claimed under
 // the customer spend lock by GetUsageEventByCoords over the ingest window.
-// pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
+// stated_amount is the optional host cost; each meter decides whether to charge it.
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
 	_, err := q.db.Exec(ctx, insertUsageEvent,
 		arg.ID,
@@ -124,7 +124,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.OccurredAt,
 		arg.CreatedAt,
 		arg.Dimensions,
-		arg.PricingAuthority,
+		arg.StatedAmount,
 		arg.Outcome,
 		arg.ForgivenAmount,
 		arg.Charges,

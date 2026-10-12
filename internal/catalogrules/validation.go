@@ -232,6 +232,15 @@ func ValidateAllowance(where string, allowance *catalog.Allowance) error {
 	return nil
 }
 
+// ValidateUsageAllowance refuses allowances on event-stated prices: their
+// amount is not a cumulative quantity price from which included units deduct.
+func ValidateUsageAllowance(where string, price catalog.RatePrice, allowance *catalog.Allowance) error {
+	if price.Model == catalog.ModelDynamic && allowance != nil {
+		return fmt.Errorf("%s: a dynamic price cannot have an allowance", where)
+	}
+	return ValidateAllowance(where, allowance)
+}
+
 // ValidateFilter normalizes a meter filter and rejects ambiguous or empty
 // dimensions and values.
 func ValidateFilter(where string, filter *map[string][]string) error {
@@ -383,5 +392,5 @@ func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	if err := ValidateUsagePrice(where, &rc.Price); err != nil {
 		return err
 	}
-	return ValidateAllowance(where, rc.Allowance)
+	return ValidateUsageAllowance(where, rc.Price, rc.Allowance)
 }

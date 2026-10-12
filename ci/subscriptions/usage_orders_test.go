@@ -29,6 +29,7 @@ func TestUsageOrdersBillEachChargeOnce(t *testing.T) {
 	w.settleRefreshes()
 	w.jobs.PeriodicJobs().Clear()
 	ctx, client := t.Context(), w.client[remote]
+	declareDynamicMeter(t, client, "usage-proof", "units")
 	const threshold = int64(50_000_000) // the default collection threshold
 	const tail = int64(10_000_000)
 
@@ -49,7 +50,7 @@ func TestUsageOrdersBillEachChargeOnce(t *testing.T) {
 		return c
 	}
 	use := func(c *customer, amount int64) {
-		_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "usage-proof", Amount: amount, Source: "test", SourceID: uuid.NewString()})
+		_, err := recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "usage-proof", Amount: new(int64(amount)), Source: "test", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 	}
 	pass := func(args river.JobArgs) {

@@ -144,7 +144,7 @@ func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 		Source:           r.Source,
 		SourceID:         r.SourceID,
 		LedgerTransferID: r.LedgerTransferID,
-		PricingAuthority: r.PricingAuthority,
+		StatedAmount:     r.StatedAmount,
 		OccurredAt:       r.OccurredAt,
 		CreatedAt:        r.CreatedAt,
 	}

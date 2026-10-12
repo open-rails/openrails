@@ -46,7 +46,7 @@ export type AllowanceMode = "none" | "included"
 
 export interface RateCardFormValues {
   productId: string
-  model: "per_unit" | "tiered" | "package"
+  model: "per_unit" | "tiered" | "package" | "dynamic"
   currency: string
   unitAmount: string
   divideBy: string
@@ -195,7 +195,7 @@ export function buildRateCardRequest(
   }
 
   const price = buildPrice(values, currency)
-  const allowance = buildAllowance(values)
+  const allowance = values.model === "dynamic" ? undefined : buildAllowance(values)
   return {
     product_id: values.productId,
     filter: filterRowsToMap(values.filters),
@@ -208,6 +208,7 @@ function buildPrice(
   values: RateCardFormValues,
   currency: string
 ): RatePrice {
+  if (values.model === "dynamic") return { model: "dynamic", currency }
   if (values.model === "per_unit") {
     const divideBy = positiveInteger(
       values.divideBy,
@@ -497,6 +498,7 @@ export function summarizeRateCard(card?: MeterRateCard | null): string {
   if (!card) return "Not priced"
   const { price } = card
   const currency = price.currency ?? ""
+  if (price.model === "dynamic") return `Event amount · ${currency}`
   if (price.model === "per_unit" && price.per_unit) {
     if (price.per_unit.matrix) {
       return `${Object.keys(price.per_unit.matrix.cells ?? {}).length} matrix rates · ${currency}`

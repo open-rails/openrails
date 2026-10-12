@@ -38,9 +38,8 @@ func usageKeyWindow(now time.Time) (from, to time.Time) {
 	return now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 }
 
-// RecordUsageParams is one metered usage event. A positive Amount is the
-// host's price; otherwise the rate cards of the event type's meters price it
-// when it is recorded.
+// RecordUsageParams is one usage event. Each matching meter prices it when
+// recorded; dynamic cards take Amount, and other cards price quantities.
 type RecordUsageParams struct {
 	// Payer is the merchant subject BILLED for this usage (the payer). When nil it is
 	// resolved from Invoker (self-hosted/personal case), never synthesized.
@@ -51,9 +50,9 @@ type RecordUsageParams struct {
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...): the quantities sum meters read.
 	Dimensions map[string]int64
-	// Amount is the host-priced cost (>= 0). 0 leaves the event to its
-	// meters' rate cards; an event no priced meter consumes is metered only.
-	Amount int64
+	// Amount is the optional nonnegative cost a dynamic card charges. Failed
+	// usage must state its cost and is never rated.
+	Amount *int64
 	// Key is the idempotency coordinate; its operation must be
 	// UsageOperation(EventType), so two event types at one (source, source_id)
 	// post two distinct charges.
@@ -73,13 +72,13 @@ type RecordUsageParams struct {
 }
 
 // RecordUsage durably records a metered usage event and posts its charge in
-// one transaction: the host's Amount, or what each priced meter charges it
+// one transaction: what each priced meter charges it
 // (rateUsageTx). Usage is a fact: its charge draws the prepaid balance first
 // and the rest is owed, never refused for money. Idempotent on (merchant,
 // payer, event_type, source, source_id): a replay returns the existing event
 // with Replayed set and never charges again, even after a price change; a
-// changed host amount gets ErrIdempotencyKeyReused. The event's key is
-// honoured for the ingest window after it occurred; a host-priced event's
+// changed stated amount gets ErrIdempotencyKeyReused. The event's key is
+// honoured for the ingest window after it occurred; a failed event's
 // ledger posting is idempotent for good. The balance row is locked before the
 // idempotency check, so concurrent identical records serialize.
 func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams) (*models.UsageEvent, error) {
@@ -93,8 +92,11 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if err := params.Key.RequireOperation(UsageOperation(params.EventType)); err != nil {
 		return nil, err
 	}
-	if params.Amount < 0 {
+	if params.Amount != nil && *params.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
+	}
+	if params.Failed && params.Amount == nil {
+		return nil, fmt.Errorf("failed usage must state amount")
 	}
 	cur := normalizeCurrency(params.Currency)
 	if err := moneyutil.ValidateCurrency(cur); err != nil {
@@ -134,11 +136,6 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return err
 		}
 
-		// A failed event's amount is final: it is never rated.
-		pricingAuthority := "catalog"
-		if params.Amount > 0 || params.Failed {
-			pricingAuthority = "host"
-		}
 		outcome := UsageSucceeded
 		if params.Failed {
 			outcome = UsageFailed
@@ -156,19 +153,11 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 					Field: "outcome", Committed: ev.Outcome, Retried: outcome,
 				}
 			}
-			if ev.PricingAuthority != pricingAuthority {
+			if (ev.StatedAmount == nil) != (params.Amount == nil) ||
+				(ev.StatedAmount != nil && *ev.StatedAmount != *params.Amount) {
 				return &IdempotencyConflict{
 					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
-					Field: "pricing_authority", Committed: ev.PricingAuthority, Retried: pricingAuthority,
-				}
-			}
-			// A host-priced event charged its amount, or for a failure what
-			// its grace left: the host reported its amount plus what was
-			// forgiven. A rated event answers its first charges.
-			if reported := ev.Amount + ev.ForgivenAmount; pricingAuthority == "host" && reported != params.Amount {
-				return &IdempotencyConflict{
-					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
-					Field: "amount", Committed: reported, Retried: params.Amount,
+					Field: "amount", Committed: ev.StatedAmount, Retried: params.Amount,
 				}
 			}
 			// Callers with non-ledger side effects (a cache counter, a host
@@ -194,19 +183,20 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// What the event's meters take from it, before anything is written:
 		// a meter that cannot price it refuses it whole.
 		var quantities []usageQuantity
-		if pricingAuthority == "catalog" {
+		if !params.Failed {
 			cards, cerr := usageCards(ctx, q, tenantID, params.EventType, cur)
 			if cerr != nil {
 				return cerr
 			}
-			if quantities, cerr = usageQuantities(cards, eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}); cerr != nil {
+			if quantities, cerr = usageQuantities(cards, eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata, Amount: params.Amount}); cerr != nil {
 				return cerr
 			}
 		}
 
 		// A failure is charged what its grace does not forgive, and counts
 		// toward its windows in this transaction.
-		charge, forgiven := params.Amount, int64(0)
+		stated := derefInt64(params.Amount)
+		charge, forgiven := stated, int64(0)
 		if params.Failed {
 			periods, perr := failedUsagePeriods(params.FailedWindows, now)
 			if perr != nil {
@@ -224,10 +214,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 				if gerr != nil {
 					return gerr
 				}
-				charge = max(params.Amount-left, 0)
+				charge = max(stated-left, 0)
 			}
-			forgiven = params.Amount - charge
-			if err := key.count(ctx, q, periods, params.Amount, now); err != nil {
+			forgiven = stated - charge
+			if err := key.count(ctx, q, periods, stated, now); err != nil {
 				return err
 			}
 		}
@@ -240,7 +230,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		eventID := uuidutil.NewV7()
 		charges := []models.UsageCharge{}
 		var debitID *uuid.UUID
-		if pricingAuthority == "catalog" {
+		if !params.Failed {
 			var rerr error
 			if charges, debitID, rerr = s.rateUsageTx(ctx, q, payer, params.Invoker, cur, eventID, occurred, quantities); rerr != nil {
 				return rerr
@@ -297,7 +287,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Source:           params.Key.Source(),
 			SourceID:         params.Key.SourceID(),
 			LedgerTransferID: debitID,
-			PricingAuthority: pricingAuthority,
+			StatedAmount:     params.Amount,
 			Charges:          charges,
 			Metadata:         params.Metadata,
 			OccurredAt:       occurred,
@@ -328,7 +318,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Source:           ev.Source,
 			SourceID:         ev.SourceID,
 			LedgerTransferID: ev.LedgerTransferID,
-			PricingAuthority: pricingAuthority,
+			StatedAmount:     params.Amount,
 			Metadata:         meta,
 			OccurredAt:       ev.OccurredAt,
 			CreatedAt:        ev.CreatedAt,

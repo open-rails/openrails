@@ -837,6 +837,7 @@ func TestDepositMovesRunOut(t *testing.T) {
 // once, and each leaves the watch due.
 func TestCaptureMovesRunOut(t *testing.T) {
 	w := newChargeWorld(t)
+	declareDynamicMeter(t, w.client, "capture", "units")
 	customer := w.funded(10_000_000)
 	t0 := w.now()
 	w.start(customer, 3_600_000)
@@ -856,7 +857,7 @@ func TestCaptureMovesRunOut(t *testing.T) {
 	require.True(t, watch.DepletesAt.Equal(t0.Add(8000*time.Second)))
 	require.True(t, watch.NextCheckAt.After(t0))
 
-	_, err = captureAdmission(w.ctx, w.client, requestID, 1_500_000, nil)
+	_, err = captureAdmission(w.ctx, w.client, requestID, 1_500_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 	require.True(t, w.balance(customer).DepletesAt.Equal(t0.Add(8500*time.Second)), "1.5 USD is spent; the rest of the hold is free")
 	require.False(t, w.watched(customer).NextCheckAt.After(t0), "the capture marks the watch due at once")

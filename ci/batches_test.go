@@ -108,6 +108,7 @@ func TestCreditGrantBatchesAreAllOrNone(t *testing.T) {
 func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	f := newFixture(t)
 	a := f.runtime(t, "holds-a-"+uuid.NewString()[:8])
+	declareDynamicMeter(t, a, "capture", "units")
 	b := f.runtime(t, "holds-b-"+uuid.NewString()[:8])
 	ctx := t.Context()
 	customer := billing.CustomerID(uuid.New())
@@ -128,7 +129,7 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	for _, id := range []string{r1, r2, r3} {
 		admit(id)
 	}
-	_, err = captureAdmission(ctx, a, r3, 50_000, nil)
+	_, err = captureAdmission(ctx, a, r3, 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 
 	released, err := a.ReleaseAdmissions(ctx, []string{r1, "unknown-" + uuid.NewString(), r3, r1})

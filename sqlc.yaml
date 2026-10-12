@@ -69,6 +69,7 @@ sql:
       - "internal/migrate/postgres/0070_deleted_products.up.sql"
       - "internal/migrate/postgres/0071_rate_at_ingest.up.sql"
       - "internal/migrate/postgres/0072_capture_quantities.up.sql"
+      - "internal/migrate/postgres/0073_dynamic_pricing.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

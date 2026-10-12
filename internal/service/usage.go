@@ -38,9 +38,8 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 // a different Amount is refused with money.ErrIdempotencyKeyReused, so a
 // corrected charge never silently keeps the original number.
 //
-// Amount is the host-priced cost in the currency's internal precision; 0
-// leaves the event to its meters' rate cards, which price its Dimensions (and
-// metadata) when it is recorded.
+// Amount is the optional cost a dynamic card charges in the currency's
+// native units. Catalog cards price Dimensions and metadata independently.
 //
 // Failed records failed usage (see billing.UsageFailed); the windows it counts
 // toward are resolved from InvokerType.
@@ -52,7 +51,7 @@ type RecordUsageInput struct {
 	Currency    string
 	EventType   string
 	Dimensions  map[string]int64
-	Amount      int64
+	Amount      *int64
 	Resource    string
 	Metadata    map[string]any
 	Key         UsageIdempotencyKey
@@ -61,7 +60,7 @@ type RecordUsageInput struct {
 }
 
 // RecordUsage durably records a metered usage event and posts its charge: a
-// non-zero Amount, else what its meters' rate cards charge it. Idempotent on
+// sum of its meters' charges, or the failed cost after grace. Idempotent on
 // (merchant, payer, currency, usage:<event_type>, source, source_id); a
 // replay with a different Amount returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billing.UsageEvent, error) {
@@ -130,7 +129,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 func usageCharges(in []models.UsageCharge) []billing.UsageCharge {
 	out := make([]billing.UsageCharge, len(in))
 	for i, c := range in {
-		out[i] = billing.UsageCharge{MeterKey: c.MeterKey, Quantity: c.Quantity, Amount: c.Amount}
+		out[i] = billing.UsageCharge{MeterKey: c.MeterKey, Model: c.Model, Quantity: c.Quantity, Amount: c.Amount}
 		if c.Cell != "" {
 			cell := c.Cell
 			out[i].Cell = &cell

@@ -27,6 +27,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			ctx, client, payer := t.Context(), w.client[remote], w.newCustomer()
+			declareDynamicMeter(t, client, "remittance-proof", "units")
 			const owed = int64(50_000_000)
 			_, err := client.UpdateCustomer(ctx, payer.cid(), billing.UpdateCustomerParams{
 				CreditLimits:   []billing.CreditLimit{{Currency: "USD", Amount: 2 * owed}},
@@ -34,7 +35,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			})
 			require.NoError(t, err)
 			invoice := func() *billing.Order {
-				_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})
+				_, err := recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: new(int64(owed)), Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
 				job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

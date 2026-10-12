@@ -31,9 +31,10 @@ func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 			f := newFleet(t, 2, 0, tc.skew)
 			c := f.any().newCustomer()
 			client := f.any().client[remote]
+			declareDynamicMeter(t, client, "concurrent-finalize", "units")
 			_, err := client.UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: nmiInvoiceAmount}}})
 			require.NoError(t, err)
-			_, err = recordUsage(t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "concurrent-finalize", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
+			_, err = recordUsage(t.Context(), client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "concurrent-finalize", Amount: new(int64(nmiInvoiceAmount)), Source: "test", SourceID: uuid.NewString()})
 			require.NoError(t, err)
 			f.advance(time.Minute)
 			var merchant uuid.UUID

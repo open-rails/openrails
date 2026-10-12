@@ -91,7 +91,7 @@ export type ListPage<T> = {
 				t += " | null"
 			}
 			opt := ""
-			if f.optional || !o.output {
+			if (f.optional || !o.output) && !(o.input && f.required) {
 				opt = "?"
 			}
 			fmt.Fprintf(&b, "  %s%s: %s\n", tsKey(f.name), opt, t)

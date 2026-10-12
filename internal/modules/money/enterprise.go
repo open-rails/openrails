@@ -159,7 +159,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if err := RequireBillingCurrency(in.Price.Currency); err != nil {
 		return invalidUsageRateCard(err)
 	}
-	if err := catalogrules.ValidateAllowance("usage rate card", in.Allowance); err != nil {
+	if err := catalogrules.ValidateUsageAllowance("usage rate card", in.Price, in.Allowance); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if err := catalogrules.ValidateFilter("usage rate card", &in.Filter); err != nil {

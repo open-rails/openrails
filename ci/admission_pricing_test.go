@@ -40,7 +40,7 @@ func (p *pricing) capture(items ...billing.CaptureAdmissionParams) []billing.Cap
 // captured settles one request with its usage and answers the receipt.
 func (p *pricing) captured(requestID, eventType string, dimensions map[string]int64) *billing.CaptureReceipt {
 	p.t.Helper()
-	result := p.capture(billing.CaptureAdmissionParams{RequestID: requestID, Usage: &billing.CaptureUsage{EventType: eventType, Dimensions: dimensions}})[0]
+	result := p.capture(billing.CaptureAdmissionParams{RequestID: requestID, Usage: billing.CaptureUsage{EventType: eventType, Dimensions: dimensions}})[0]
 	require.Equal(p.t, http.StatusOK, result.Status, "%+v", result.Error)
 	return result.Receipt
 }
@@ -220,10 +220,10 @@ func TestCaptureBatchDecidesEachItem(t *testing.T) {
 	}
 
 	results := p.capture(
-		billing.CaptureAdmissionParams{RequestID: "ok", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 3}, Metadata: small}},
-		billing.CaptureAdmissionParams{RequestID: "missing", Usage: &billing.CaptureUsage{EventType: "gen"}},
-		billing.CaptureAdmissionParams{RequestID: "wrong-type", Usage: &billing.CaptureUsage{EventType: "other"}},
-		billing.CaptureAdmissionParams{RequestID: "gap", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}, Metadata: map[string]any{"model": "huge"}}},
+		billing.CaptureAdmissionParams{RequestID: "ok", Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 3}, Metadata: small}},
+		billing.CaptureAdmissionParams{RequestID: "missing", Usage: billing.CaptureUsage{EventType: "gen"}},
+		billing.CaptureAdmissionParams{RequestID: "wrong-type", Usage: billing.CaptureUsage{EventType: "other"}},
+		billing.CaptureAdmissionParams{RequestID: "gap", Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}, Metadata: map[string]any{"model": "huge"}}},
 		billing.CaptureAdmissionParams{RequestID: "ok"},
 	)
 	require.Equal(t, http.StatusOK, results[0].Status, "%+v", results[0].Error)
@@ -238,7 +238,7 @@ func TestCaptureBatchDecidesEachItem(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, results[4].Status, "a capture names its usage or an amount")
 
 	// The refused items are still open; they settle once their terms are right.
-	fixed := p.capture(billing.CaptureAdmissionParams{RequestID: "gap", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}, Metadata: small}})[0]
+	fixed := p.capture(billing.CaptureAdmissionParams{RequestID: "gap", Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}, Metadata: small}})[0]
 	require.Equal(t, http.StatusOK, fixed.Status, "%+v", fixed.Error)
 	require.EqualValues(t, 1_000, fixed.Receipt.Amount)
 	balance := p.balance(customer)
@@ -261,10 +261,10 @@ func TestCaptureRetryAnswersTheFirstReceipt(t *testing.T) {
 	require.True(t, again.Replayed)
 	first.Replayed = true
 	require.Equal(t, first, again)
-	changed := p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 3}}})[0]
+	changed := p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 3}}})[0]
 	require.ErrorIs(t, changed.Err(), billing.ErrIdempotencyKeyReused)
 	stated := int64(20_000)
-	changed = p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Amount: &stated, Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 2}}})[0]
+	changed = p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Amount: &stated, Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 2}}})[0]
 	require.ErrorIs(t, changed.Err(), billing.ErrIdempotencyKeyReused, "a host-stated amount is another term")
 	require.EqualValues(t, 1_000_000-20_000, p.balance(customer).BalanceAmount)
 }
@@ -278,7 +278,7 @@ func TestCaptureEventTypeMustMatchTheAdmission(t *testing.T) {
 	p.grant(customer, 1_000_000)
 	p.admitUsage(customer, "req-1", billing.UsageEstimate{EventType: "endpoint-a"})
 
-	result := p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Usage: &billing.CaptureUsage{EventType: "endpoint-b"}})[0]
+	result := p.capture(billing.CaptureAdmissionParams{RequestID: "req-1", Usage: billing.CaptureUsage{EventType: "endpoint-b"}})[0]
 	require.ErrorIs(t, result.Err(), billing.ErrInvalid)
 	require.Equal(t, billing.CodeInvalidParam, result.Error.Code)
 	require.Equal(t, "usage.event_type", *result.Error.Param)
@@ -357,7 +357,7 @@ func TestCaptureTxCommitsWithTheHost(t *testing.T) {
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		_, err = tx.Exec(t.Context(), "UPDATE "+requests+" SET state = 'done' WHERE id = 'done'")
 		require.NoError(t, err)
-		results, err := p.client.CaptureAdmissionsTx(p.ctx, tx, []billing.CaptureAdmissionParams{{RequestID: "done", Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
+		results, err := p.client.CaptureAdmissionsTx(p.ctx, tx, []billing.CaptureAdmissionParams{{RequestID: "done", Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "UPDATE "+requests+" SET state = 'failed' WHERE id = 'failed'")
 		require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestConcurrentCapturesOfOneCustomerAreExact(t *testing.T) {
 			// database_busy is a retry, and a retry answers the first capture.
 			for attempt := 0; ; attempt++ {
 				out, err := p.client.CaptureAdmissions(p.ctx, []billing.CaptureAdmissionParams{{RequestID: admits[i].RequestID,
-					Usage: &billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
+					Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
 				var busy *billing.StatusError
 				if errors.As(err, &busy) && busy.Code == "database_busy" && attempt < 100 {
 					time.Sleep(50 * time.Millisecond)

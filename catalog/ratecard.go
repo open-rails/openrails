@@ -1,6 +1,6 @@
 package catalog
 
-// Model selects which price block of a RatePrice applies.
+// Model selects how a rate card prices its fee or usage.
 type Model string
 
 const (

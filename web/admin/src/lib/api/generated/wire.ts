@@ -1823,7 +1823,7 @@ export type RateCard = {
 }
 
 export type RatePrice = {
-  model: "flat" | "package" | "per_unit" | "tiered"
+  model: "dynamic" | "flat" | "package" | "per_unit" | "tiered"
   currency?: string
   flat?: FlatPrice
   per_unit?: PerUnitPrice
@@ -2190,12 +2190,14 @@ export type Usage = {
 
 export type UsageCharge = {
   meter_key: string
+  model: "dynamic" | "flat" | "package" | "per_unit" | "tiered"
   cell: string | null
   quantity: number
   amount: string
 }
 
 export type UsageEstimate = {
+  amount?: string
   event_type?: string
   dimensions?: Record<string, number>
   metadata?: Record<string, unknown>

@@ -209,8 +209,9 @@ func TestPrepaidUsagePastTheBalanceIsOwed(t *testing.T) {
 	require.EqualValues(t, 500_000, balance.OwedAmount)
 	require.Equal(t, billing.BillingModePrepaid, balance.BillingMode)
 
-	hostPriced := usage(customer, "inference", nil, nil)
-	hostPriced.Amount = 100_000
+	p.meter("inference", "inference", catalog.AggregationSum, "units", nil, dynamicPrice(), nil)
+	hostPriced := usage(customer, "inference", map[string]int64{"units": 1}, nil)
+	hostPriced.Amount = new(int64(100_000))
 	require.EqualValues(t, 100_000, p.record(hostPriced).Amount, "a host-priced event past the balance is owed too")
 	require.EqualValues(t, 600_000, p.balance(customer).OwedAmount)
 
@@ -328,7 +329,7 @@ func TestLLMTokensPricePerMillionByModel(t *testing.T) {
 	held := p.admitUsage(customer, "chat-large", billing.UsageEstimate{EventType: "chat",
 		Dimensions: map[string]int64{"input_tokens": 2_000, "output_tokens": 4_000}, Metadata: map[string]any{"model": "large"}})
 	require.EqualValues(t, 5_000+40_000, held.Admission.EstimatedAmount)
-	receipt := p.capture(billing.CaptureAdmissionParams{RequestID: "chat-large", Usage: &billing.CaptureUsage{EventType: "chat",
+	receipt := p.capture(billing.CaptureAdmissionParams{RequestID: "chat-large", Usage: billing.CaptureUsage{EventType: "chat",
 		Dimensions: map[string]int64{"input_tokens": 2_000, "cached_input_tokens": 1_000, "output_tokens": 300}, Metadata: map[string]any{"model": "large"}}})[0]
 	require.Equal(t, http.StatusOK, receipt.Status, "%+v", receipt.Error)
 	require.Equal(t, map[string]int64{"input-tokens": 5_000, "cached-input-tokens": 1_250, "output-tokens": 3_000}, receiptCharges(receipt.Receipt))

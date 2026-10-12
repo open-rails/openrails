@@ -73,6 +73,7 @@ migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
+migration 0073_dynamic_pricing.up.sql sha256:10040abeeb7242ee5e58fae70cc20c89cc102cab4938a428ab1fe7e3d26fd900
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2351,25 +2352,25 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   column source text NOT NULL
   column source_id text NOT NULL
   column ledger_transfer_id uuid
-  column pricing_authority text NOT NULL
   column metadata jsonb
   column occurred_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column outcome text NOT NULL
   column forgiven_amount bigint NOT NULL
   column charges jsonb NOT NULL
+  column stated_amount bigint
   constraint usage_events_amount_check CHECK ((amount >= 0))
   constraint usage_events_charges_check CHECK ((jsonb_typeof(charges) = 'array'::text))
   constraint usage_events_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_events_customer_id_currency_ledger_transfer_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES billing.ledger_transfers(merchant_id, customer_id, currency, id)
   constraint usage_events_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint usage_events_failed_host_priced_check CHECK (((outcome = 'succeeded'::text) OR (pricing_authority = 'host'::text)))
+  constraint usage_events_failed_stated_amount_check CHECK (((outcome = 'succeeded'::text) OR (stated_amount IS NOT NULL))) NOT VALID
   constraint usage_events_forgiven_amount_check CHECK (((forgiven_amount >= 0) AND ((outcome = 'failed'::text) OR (forgiven_amount = 0))))
   constraint usage_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint usage_events_outcome_check CHECK ((outcome = ANY (ARRAY['succeeded'::text, 'failed'::text])))
   constraint usage_events_pkey PRIMARY KEY (merchant_id, id, occurred_at)
-  constraint usage_events_pricing_authority_check CHECK ((pricing_authority = ANY (ARRAY['host'::text, 'catalog'::text])))
   constraint usage_events_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
+  constraint usage_events_stated_amount_check CHECK ((stated_amount >= 0))
   index CREATE INDEX usage_events_customer_id_occurred_at_idx ON ONLY billing.usage_events USING btree (merchant_id, customer_id, occurred_at)
   index CREATE INDEX usage_events_event_type_occurred_at_idx ON ONLY billing.usage_events USING btree (merchant_id, event_type, occurred_at)
   index CREATE UNIQUE INDEX usage_events_idem_key ON ONLY billing.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id, occurred_at)
