@@ -224,7 +224,12 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   )
   AND EXISTS (
       SELECT 1 FROM billing.payments p
-      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
+      WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL
+        AND (p.status = 'refunded' OR EXISTS (
+            SELECT 1 FROM billing.payments r
+            WHERE r.merchant_id = p.merchant_id AND r.refunded_payment_id = p.id
+              AND r.deleted_at IS NULL AND r.status = 'succeeded'
+              AND r.amount < 0 AND r.reversal_kind = 'refund'))
   )
 ORDER BY g.id;
 

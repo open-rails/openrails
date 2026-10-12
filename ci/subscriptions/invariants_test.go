@@ -18,7 +18,8 @@ import (
 //	           payment or a settled invoice payment, unless its operation is
 //	           still unresolved;
 //	evidenced: every completed local rail payment is a provider charge;
-//	once:      no subscription period holds two completed charges;
+//	once:      an order's net captures and non-cash settlement do not exceed
+//	           its accepted total; separate adjustments and partials are valid;
 //	moved:     payments holds only money that moved: a declined charge is a
 //	           payment attempt, never a failed payments row.
 //
@@ -96,13 +97,15 @@ func (w *world) checkMoneyInvariants() {
 	}
 
 	var twice []string
-	rows, err = w.pool.Query(ctx, `SELECT subscription_id::text || '@' || (metadata->>'period_start') FROM `+schema+`.payments p
-		WHERE status = 'succeeded' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL
-		  AND subscription_id IS NOT NULL AND metadata ? 'period_start'
-		  AND NOT EXISTS (SELECT 1 FROM `+schema+`.payments r WHERE r.refunded_payment_id = p.id AND r.deleted_at IS NULL)
-		GROUP BY subscription_id, metadata->>'period_start' HAVING count(*) > 1`)
+	rows, err = w.pool.Query(ctx, `SELECT o.id::text FROM `+schema+`.orders o
+		JOIN `+schema+`.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
+		LEFT JOIN (SELECT merchant_id, order_id, sum(non_cash_amount) AS amount
+		    FROM `+schema+`.provider_bills GROUP BY merchant_id, order_id) b
+		  ON b.merchant_id=o.merchant_id AND b.order_id=o.id
+		WHERE p.status IN ('succeeded','refunded') AND p.money_movement='rail' AND p.deleted_at IS NULL
+		GROUP BY o.id, o.total, b.amount HAVING sum(p.amount) + coalesce(b.amount,0) > o.total`)
 	if err != nil {
-		t.Errorf("invariants: read periods: %v", err)
+		t.Errorf("invariants: read order settlements: %v", err)
 		return
 	}
 	for rows.Next() {
@@ -129,7 +132,7 @@ func (w *world) checkMoneyInvariants() {
 
 	w.reportInvariant("evidenced", "local payments with no provider charge", phantom)
 	w.reportInvariant("recorded", "provider charges with no local payment", unrecorded)
-	w.reportInvariant("once", "subscription periods charged twice", twice)
+	w.reportInvariant("once", "order settlements exceed their accepted totals", twice)
 	w.reportInvariant("moved", "failed charges in payments", failed)
 }
 
