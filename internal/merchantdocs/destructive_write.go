@@ -40,6 +40,7 @@ type configurationEdit struct {
 	action   *destructive.Action
 	noEffect bool
 	retryCAS bool
+	owner    bool // only the caller that created the receipt may prove its own CAS no-effect
 }
 
 // BeginEdit preserves one logical request through known CAS races. Its terms
@@ -56,7 +57,7 @@ func (c *Cache) BeginEdit(ctx context.Context, terms any) (context.Context, func
 	}
 	edit := &configurationEdit{digest: digest, noEffect: true}
 	return context.WithValue(ctx, configurationEditKey{}, edit), func() {
-		if edit.action == nil || !edit.noEffect || admissions == nil {
+		if edit.action == nil || !edit.owner || !edit.noEffect || admissions == nil {
 			return
 		}
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -145,6 +146,7 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 		}
 		if found {
 			edit.action = &pending
+			edit.owner = false
 			edit.noEffect = false
 		}
 	}
@@ -217,6 +219,7 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 			return Set{}, err
 		}
 		edit.action = &action
+		edit.owner = !action.Replayed
 	} else if int64(len(changes)) > edit.action.Units {
 		return Set{}, ErrWriteUncertain
 	}
@@ -231,8 +234,11 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 		set, err = c.write(ctx, id, func() error { return nil })
 	}
 	if errors.Is(putErr, ErrRevisionMismatch) {
-		edit.noEffect = true
-		edit.retryCAS = true
+		// A replaying caller did not own the shared receipt. A CAS miss is
+		// proof only that this caller wrote nothing, never that the shared
+		// action had no effect. Readback/finalization belongs to its owner.
+		edit.noEffect = edit.owner
+		edit.retryCAS = edit.owner
 		return Set{}, err
 	}
 	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
