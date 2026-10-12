@@ -3,6 +3,7 @@ package reconcile
 import (
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/merchant"
+	"strings"
 
 	"context"
 	"errors"
@@ -333,9 +334,16 @@ func ImportDeclaredSubscriptions(
 			if schedule.IntervalHours > 0 {
 				intervalHours = &schedule.IntervalHours
 			}
+			// The line names what was bought, as an accepted checkout line does.
+			description := "Subscription"
+			if product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: merchantID, ID: price.ProductID}); err == nil && strings.TrimSpace(product.DisplayName) != "" {
+				description = product.DisplayName
+			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return out, fmt.Errorf("declared import: load product %s: %w", price.ProductID, err)
+			}
 			bill := observed.Bill{PSPID: f.PspID, CustomerID: f.Customer, SubscriptionID: &sub.ID,
 				Owner: string(f.CollectionPolicy), ProviderReference: f.RailSubscriptionID, Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
-				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: "Declared provider subscription",
+				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: description,
 					Quantity: schedule.Quantity, UnitAmount: schedule.Amount / int64(quantity), Amount: schedule.Amount,
 					BillingIntervalHours: intervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}
 			if err := observed.DeclareSchedule(ctx, database, schedule.SourceReference, bill, schedule.FirstDueAt, schedule.IntervalHours, schedule.IntervalMonths, asOf); err != nil {

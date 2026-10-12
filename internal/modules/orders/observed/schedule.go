@@ -121,13 +121,17 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	}
 	bill.Lines = append([]Line(nil), bill.Lines...)
 	line := &bill.Lines[0]
-	if err == nil && line.Ownership == "" {
+	if err == nil {
 		var accepted Bill
 		if err := json.Unmarshal(prior.AcceptedBill, &accepted); err != nil {
 			return err
 		}
+		// A replay keeps the accepted line's frozen name and ownership.
 		if len(accepted.Lines) == 1 && sameID(line.PriceID, accepted.Lines[0].PriceID) && sameID(line.ProductID, accepted.Lines[0].ProductID) {
-			line.Ownership, line.ClaimKey = accepted.Lines[0].Ownership, accepted.Lines[0].ClaimKey
+			line.Description = accepted.Lines[0].Description
+			if line.Ownership == "" {
+				line.Ownership, line.ClaimKey = accepted.Lines[0].Ownership, accepted.Lines[0].ClaimKey
+			}
 		}
 	}
 	if err := freezeLineOwnership(ctx, q, mid.UUID(), line, true); err != nil {
