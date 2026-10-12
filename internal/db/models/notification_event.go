@@ -69,8 +69,8 @@ const (
 	NotificationSubscriptionChanged NotificationEventType = "subscription_changed"
 )
 
-// NotificationQueue is a customer billing fact written in the domain transaction.
-type NotificationQueue struct {
+// NotificationEvent is a customer billing fact written in the domain transaction.
+type NotificationEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -79,10 +79,4 @@ type NotificationQueue struct {
 	CreatedAt  time.Time
 }
 
-func (n *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(n.Data) }
-
-func (n *NotificationQueue) View() billing.NotificationEvent {
-	data, _ := json.Marshal(n.Data)
-	return billing.NotificationEvent{ID: billing.NotificationID(n.ID), MerchantID: billing.MerchantID(n.MerchantID), CustomerID: billing.CustomerID(n.CustomerID),
-		EventType: string(n.EventType), Data: data, CreatedAt: n.CreatedAt, ActionRequested: billing.CustomerNotificationActionRequested(string(n.EventType)), Optional: billing.CustomerNotificationOptional(string(n.EventType), n.Data)}
-}
+func (n *NotificationEvent) DataJSONB() ([]byte, error) { return json.Marshal(n.Data) }

@@ -178,3 +178,26 @@ func TestCCBillExpiryRacingRenewal(t *testing.T) {
 		})
 	}
 }
+
+// A provider fact and its customer event commit together. An unavailable source
+// store cannot leave a committed failed-payment transition with no event; the
+// same webhook retries safely once persistence recovers.
+func TestCCBillNotificationFailureRollsBackTransition(t *testing.T) {
+	w := newWorld(t)
+	m := importCCBill(t, w)
+	ctx := t.Context()
+	failure := m.failure()
+	_, err := w.pool.Exec(ctx, w.q(`ALTER TABLE billing.notification_events ADD CONSTRAINT reject_failure_event CHECK(event_type <> 'payment_method_failed')`))
+	require.NoError(t, err)
+	status := w.sendCCBill(ctx, failure.kind, failure.fields)
+	require.Equal(t, http.StatusInternalServerError, status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
+	require.Zero(t, m.c.notificationCount("payment_method_failed"))
+	_, err = w.pool.Exec(ctx, w.q(`ALTER TABLE billing.notification_events DROP CONSTRAINT reject_failure_event`))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, w.sendCCBill(ctx, failure.kind, failure.fields))
+	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status)
+	require.Equal(t, 1, m.c.notificationCount("payment_method_failed"))
+	require.Equal(t, http.StatusOK, w.sendCCBill(ctx, failure.kind, failure.fields))
+	require.Equal(t, 1, m.c.notificationCount("payment_method_failed"), "provider replay is the same durable source event")
+}

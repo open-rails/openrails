@@ -21,7 +21,7 @@ import (
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 // ValidName bounds a consumer's durable identity, independent of credentials.
-func ValidName(name string) bool { return namePattern.MatchString(name) }
+func ValidName(name string) bool { return name != "." && name != ".." && namePattern.MatchString(name) }
 
 // Consumer is a trusted binding. HTTP handlers derive owner from verified auth;
 // only the embedding host can construct a nil-merchant global binding.
@@ -71,9 +71,6 @@ func (c *Consumer) Register(ctx context.Context) error {
 		return invalid("at most 32 notification consumers per application and scope")
 	}
 	if err = q.RegisterNotificationConsumer(ctx, gen.RegisterNotificationConsumerParams(c.key)); err != nil {
-		return err
-	}
-	if err = q.ResetNotificationEventSettlement(ctx, c.key.MerchantID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -160,7 +157,10 @@ func (c *Consumer) Retire(ctx context.Context) error {
 
 // Prune bounds one maintenance pass. Pending events never expire. Grace starts
 // when all active merchant-scoped and global consumers have acknowledged.
-func Prune(ctx context.Context, database *db.DB, now time.Time) (int64, error) {
+func Prune(ctx context.Context, database *db.DB, now time.Time, limit int32) (int64, error) {
+	if limit < 1 || limit > 1000 {
+		return 0, fmt.Errorf("notification prune limit must be 1 to 1000")
+	}
 	tx, err := database.DataPool().Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -170,10 +170,7 @@ func Prune(ctx context.Context, database *db.DB, now time.Time) (int64, error) {
 	if err = q.LockNotificationConsumers(ctx); err != nil {
 		return 0, err
 	}
-	if _, err = q.SettleNotificationEvents(ctx, 500); err != nil {
-		return 0, err
-	}
-	n, err := q.PruneNotificationEvents(ctx, gen.PruneNotificationEventsParams{Cutoff: now.Add(-30 * 24 * time.Hour), RowLimit: 500})
+	n, err := q.PruneNotificationEvents(ctx, gen.PruneNotificationEventsParams{Cutoff: now.Add(-30 * 24 * time.Hour), RowLimit: limit})
 	if err != nil {
 		return 0, err
 	}

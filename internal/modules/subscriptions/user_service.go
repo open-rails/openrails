@@ -23,8 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // Sentinel errors for subscription operations. The typed ones carry the
@@ -364,6 +362,12 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		if err := txEntSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
 			return fmt.Errorf("failed to bound subscription access windows: %w", err)
 		}
+		if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
+			ID: uuid.NewSHA1(subscription.ID, []byte("cancel:user:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
+			Data: billing.NotificationData{Reason: string(PremiumEndReasonUserCancel), SubscriptionID: billing.SubscriptionID(subscription.ID)},
+		}); err != nil {
+			return fmt.Errorf("record cancellation notification: %w", err)
+		}
 		if enqueueRemoteIntent != nil {
 			return enqueueRemoteIntent(ctx, tx)
 		}
@@ -373,21 +377,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			return fmt.Errorf("failed to persist cancellation with remote intent: %w", err)
 		}
 		return err
-	}
-
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
-		CustomerID: identity.CustomerIDFromString(userID).UUID(),
-		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(PremiumEndReasonUserCancel), SubscriptionID: billing.SubscriptionID(subscription.ID)},
-	}
-	if err := s.NotificationService.Create(ctx, notification); err != nil {
-		log.WithFields(log.Fields{
-			"subscription_id":   subscription.ID,
-			"user_id":           userID,
-			"notification_type": notification.EventType,
-			"error":             err.Error(),
-		}).Error("Failed to create notification during subscription cancellation")
 	}
 
 	return nil

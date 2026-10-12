@@ -43,7 +43,9 @@ open `usage_order`.
 - The merchant gets the host event `mandate.revoked` (`GET /v1/app/host-events`):
   `mandate_id`, `kind`, `customer_id`, `currency` and, for `recurring`,
   `subscription_id`.
-- The customer gets an email: the cancellation of the subscription and when it
-  ends, or the end of usage charges and what is still owed.
-- Every receipt of a recurring or usage charge says how to cancel: it links to
-  the merchant profile's `billing_url` (else its `support_url`).
+- OpenRails records a customer notification event describing the cancellation
+  and its effective time, or the end of usage charges and what is still owed.
+- The consuming application owns required customer communications, including
+  cancellation confirmation and any receipt links to manage charge agreements.
+  Source acknowledgment records durable app processing, not email delivery or
+  customer read state. See [notification events](customer-notifications.md).

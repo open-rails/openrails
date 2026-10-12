@@ -622,14 +622,14 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			}).Warn("Payment form mismatch in new sale failure")
 		}
 
-		if s.NotificationService != nil && userID != "" {
-			notification := &models.NotificationQueue{
+		if userID != "" {
+			notification := &models.NotificationEvent{
 				ID:         uuidutil.NewV7(),
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 			}
-			if err := s.NotificationService.Create(ctx, notification); err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to create and deliver new sale failure notification")
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+				return err
 			}
 		}
 
@@ -864,14 +864,15 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			// Don't fail the webhook - access issues shouldn't block subscription updates
 		}
 
-		if s.NotificationService != nil {
-			notification := &models.NotificationQueue{
+		{
+			notification := &models.NotificationEvent{
 				ID:         uuidutil.NewV7(),
 				CustomerID: subscription.CustomerID,
-				EventType:  models.NotificationPremiumRenewed, // Use renewed for upgrades
+				EventType:  models.NotificationSubscriptionChanged,
+				Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), ToPriceID: billing.PriceID(newPrice.ID)},
 			}
-			if err := s.NotificationService.Create(ctx, notification); err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to create and deliver upgrade success notification")
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+				return err
 			}
 		}
 
@@ -973,14 +974,14 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 			return err
 		}
 
-		if s.NotificationService != nil && userID != "" {
-			notification := &models.NotificationQueue{
+		if userID != "" {
+			notification := &models.NotificationEvent{
 				ID:         uuidutil.NewV7(),
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 			}
-			if err := s.NotificationService.Create(ctx, notification); err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to create and deliver upgrade failure notification")
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+				return err
 			}
 		}
 
@@ -1088,7 +1089,6 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	if strings.TrimSpace(data.TransactionID) == "" {
 		return fmt.Errorf("missing required field: transactionId")
 	}
-	var notes []*models.NotificationQueue
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := db.NewWithPgxTx(tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
@@ -1100,7 +1100,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 				Info("CCBill UserReactivation on a live subscription; access follows payments")
 			return nil
 		}
-		changed, n, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.Resume{At: s.now().UTC()}, ccbillNotice{})
+		changed, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.Resume{At: s.now().UTC()}, ccbillNotice{})
 		if errors.Is(err, lifecycle.ErrIllegal) {
 			return raiseCCBillFinding(ctx, d, sub, ccbillReactivationUnappliedFinding,
 				"CCBill reactivated a membership with no paid period left. Access returns with CCBill's next RenewalSuccess; confirm the charge in CCBill.",
@@ -1110,14 +1110,13 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 			return err
 		}
 		if changed {
-			notes = append(n, &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumStarted})
+			return s.recordNotices(ctx, d, &models.NotificationEvent{CustomerID: sub.CustomerID, EventType: models.NotificationPremiumStarted, Data: billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID)}})
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	return nil
 }
 
@@ -1146,7 +1145,6 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 	var refundLedgerErr error
 	var refundRepairAlert *alerting.LedgerRepair
-	var notes []*models.NotificationQueue
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
@@ -1232,12 +1230,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			if sub.Status != models.StatusCanceled && refundReason != "" {
 				sub.CancelFeedback = &refundReason
 			}
-			_, n, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
+			_, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
 				ccbillNotice{revoke: models.AccessRevokeRefund, ended: subscriptions.PremiumEndReasonRefund})
 			if err != nil {
 				return fmt.Errorf("cancel refunded subscription %s: %w", sub.ID, err)
 			}
-			notes = n
 			if refundLedgerErr != nil {
 				var originalPaymentID *uuid.UUID
 				if originalPayment != nil {
@@ -1282,7 +1279,6 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	if refundRepairAlert != nil {
 		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *refundRepairAlert); err != nil {
 			return fmt.Errorf("record CCBill refund ledger repair alert: %w", err)
@@ -1313,7 +1309,6 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var notes []*models.NotificationQueue
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
@@ -1374,12 +1369,11 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 					reason := "CCBill void processed"
 					voided.CancelFeedback = &reason
 				}
-				_, n, err := s.ccbillMirrorTransition(ctx, txdb, voided, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
+				_, err := s.ccbillMirrorTransition(ctx, txdb, voided, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
 					ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail})
 				if err != nil {
 					return fmt.Errorf("cancel voided subscription %s: %w", voided.ID, err)
 				}
-				notes = n
 			}
 		} else {
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -1400,7 +1394,6 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	return nil
 }
 
@@ -1428,7 +1421,6 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	}
 	var ledgerErr error
 	var chargebackRepairAlert *alerting.LedgerRepair
-	var notes []*models.NotificationQueue
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
@@ -1495,12 +1487,11 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			feedback := fmt.Sprintf("CHARGEBACK: %s", chargebackReason)
 			sub.CancelFeedback = &feedback
 		}
-		_, n, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelChargeback, Immediate: true, At: s.now().UTC()},
+		_, err = s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelChargeback, Immediate: true, At: s.now().UTC()},
 			ccbillNotice{revoke: models.AccessRevokeChargeback, ended: subscriptions.PremiumEndReasonChargeback})
 		if err != nil {
 			return fmt.Errorf("cancel charged-back subscription %s: %w", sub.ID, err)
 		}
-		notes = n
 		if ledgerErr != nil {
 			var originalPaymentID *uuid.UUID
 			if originalPayment != nil {
@@ -1545,7 +1536,6 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	if chargebackRepairAlert != nil {
 		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *chargebackRepairAlert); err != nil {
 			return fmt.Errorf("record CCBill chargeback ledger repair alert: %w", err)
@@ -1687,7 +1677,6 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		return fmt.Errorf("failed to parse renewalDate '%s': %w", data.RenewalDate, err)
 	}
 
-	var notes []*models.NotificationQueue
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := db.NewWithPgxTx(tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
@@ -1697,7 +1686,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		now := s.now().UTC()
 		period := ccbillDeclinedPeriod(sub, renewalAt)
 		unpaid := lifecycle.Status(sub.Status).Live() && sub.CurrentPeriodEndsAt != nil && period.Equal(sub.CurrentPeriodEndsAt.UTC())
-		if _, _, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.RenewalDeclined{PeriodStart: period, Bucket: lifecycle.Retry, At: now}, ccbillNotice{}); err != nil {
+		if _, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.RenewalDeclined{PeriodStart: period, Bucket: lifecycle.Retry, At: now}, ccbillNotice{suppressNotices: true}); err != nil {
 			return err
 		}
 		if !unpaid || sub.Status != models.StatusPastDue {
@@ -1715,13 +1704,14 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("record CCBill retry date for %s: %w", sub.ID, err)
 		}
-		notes = append(notes, ccbillNotice{data: billing.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed))
+		if err := s.recordNotices(ctx, d, ccbillNotice{data: billing.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed)); err != nil {
+			return err
+		}
 		return s.recordCCBillAttempt(ctx, d, sub, period, transactionID, false, decline.Evidence{Code: strings.TrimSpace(data.FailureCode), Text: strings.TrimSpace(data.FailureReason)})
 	})
 	if err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	return nil
 }
 

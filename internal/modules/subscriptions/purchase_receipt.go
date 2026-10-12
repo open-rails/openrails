@@ -26,8 +26,8 @@ type PurchaseReceipt struct {
 	PaidAt      time.Time
 }
 
-// QueuePurchaseReceipt queues a one-off purchase's receipt and the job that
-// emails it in d, the transaction that records the payment. The receipt's id
+// QueuePurchaseReceipt records a one-off purchase fact in d, the transaction
+// that records the payment. The receipt's id
 // is the payment's, so a replayed settlement queues nothing new. A purchase
 // that took no money has none.
 func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) error {
@@ -38,13 +38,13 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 		return fmt.Errorf("a receipt needs its payment and what was bought")
 	}
 	amount := r.Amount
-	n := &models.NotificationQueue{
+	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, Rail: r.Rail,
 			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
 	}
-	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
+	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue receipt of payment %s: %w", r.PaymentID, err)
 	}
 	return nil
@@ -64,18 +64,18 @@ type AuthenticationRequest struct {
 
 // QueuePaymentAuthenticationRequired tells the customer, in d's transaction,
 // that a renewal's payment awaits their authentication on its order; the
-// email goes out by job. One notice per attempt.
+// application consumes it independently. One fact per attempt.
 func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r AuthenticationRequest) error {
 	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
 		return fmt.Errorf("an authentication notice needs its attempt and order")
 	}
 	amount := r.Amount
-	n := &models.NotificationQueue{
+	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, OrderID: billing.OrderID(r.OrderID)},
 	}
-	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, n); err != nil {
+	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)
 	}
 	return nil

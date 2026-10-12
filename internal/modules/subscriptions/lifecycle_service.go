@@ -189,8 +189,8 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 }
 
 // CreateMembershipTx executes the membership creation logic using the provided transactional DB.
-// The caller is responsible for wrapping the call in a transaction and dispatching any queued notifications.
-func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+// The caller owns the transaction; notification facts commit with it.
+func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error) {
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
@@ -280,7 +280,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	return subscription, notifications, nil
 }
 
-func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error) {
 	if dbb == nil {
 		return nil, nil, errors.New("database handle is required")
 	}
@@ -289,7 +289,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	productService := catalog.NewProductService(dbb)
 	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
 	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
-	notificationRepo := NewNotificationQueueRepo(dbb)
+	notificationRepo := NewNotificationService(dbb)
 	subService := NewSubscriptionService(dbb, priceService, productService, nil, s.Clock())
 
 	var price *models.Price
@@ -553,7 +553,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		return subscription, nil, nil
 	}
 
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	if entitlementService != nil && params.InitialPaymentReversal == "" {
 		// A membership created with an ALREADY-elapsed period (stale import /
@@ -593,7 +593,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	if params.InitialPaymentReversal == "" {
-		notification := &models.NotificationQueue{
+		notification := &models.NotificationEvent{
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
@@ -785,7 +785,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 // It also creates a Payment record for the renewal transaction.
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
 func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 	if params.Prepared != nil {
 		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
 	}
@@ -1246,7 +1246,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 }
 
 // CancelMembershipTx applies cancellation using the caller's transaction. The
-// caller owns commit/rollback and must dispatch the returned notifications only
+// caller owns commit/rollback; the returned facts are already persisted and become visible only
 // after a successful commit.
 func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, txDB *db.DB, params *CancelMembershipParams) (*CancelMembershipTxResult, error) {
 	if txDB == nil {
@@ -1255,7 +1255,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	priceService := catalog.NewPriceService(txDB)
 	productService := catalog.NewProductService(txDB)
-	notificationRepo := NewNotificationQueueRepo(txDB)
+	notificationRepo := NewNotificationService(txDB)
 	subService := NewSubscriptionService(txDB, priceService, productService, nil, s.Clock())
 
 	var subscription *models.Subscription
@@ -1275,7 +1275,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	result := &CancelMembershipTxResult{
 		SubscriptionID: subscription.ID,
 		UserID:         subscription.CustomerID.String(),
-		Notifications:  make([]*models.NotificationQueue, 0, 1),
+		Notifications:  make([]*models.NotificationEvent, 0, 1),
 	}
 	// A late event must preserve the existing cancellation and its terminal reason.
 	if subscription.Status == models.StatusCanceled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
@@ -1358,7 +1358,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	case models.CancelTypeMerchant:
 		reason = PremiumEndReasonRail
 	}
-	notification := &models.NotificationQueue{
+	notification := &models.NotificationEvent{
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
@@ -1377,7 +1377,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 type CancelMembershipTxResult struct {
 	SubscriptionID uuid.UUID
 	UserID         string
-	Notifications  []*models.NotificationQueue
+	Notifications  []*models.NotificationEvent
 }
 
 // LocalCancellation describes a side-effect-free terminal cancellation of a
@@ -1661,7 +1661,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 
 // ExpireMembership expires a subscription and revokes associated roles
 func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, subscriptionID uuid.UUID) error {
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
@@ -1669,7 +1669,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationService(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := s.newLifecycleEntitlementService(db)
 
@@ -1725,7 +1725,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			}
 		}
 
-		notification := &models.NotificationQueue{
+		notification := &models.NotificationEvent{
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
@@ -1758,7 +1758,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		return fmt.Errorf("subscription_id is required")
 	}
 
-	notifications := make([]*models.NotificationQueue, 0, 1)
+	notifications := make([]*models.NotificationEvent, 0, 1)
 
 	// Variables to capture from transaction for the deferred-delete log
 	var subscriptionID uuid.UUID
@@ -1782,7 +1782,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
+		notificationRepo := NewNotificationService(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		entSvc := s.newLifecycleEntitlementService(db)
 
@@ -2102,7 +2102,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 		if !quietRetry && !readCard {
-			notification := &models.NotificationQueue{
+			notification := &models.NotificationEvent{
 				ID:         uuidutil.NewV7(),
 				CustomerID: subscription.CustomerID,
 				EventType:  eventType,

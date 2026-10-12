@@ -762,7 +762,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		return nil, fmt.Errorf("notify: scan recently closed access windows: %w", err)
 	}
 	var out []ConvergeFinding
-	repo := subscriptions.NewNotificationQueueRepo(p.e.DB)
+	repo := subscriptions.NewNotificationService(p.e.DB)
 	for i := range closed {
 		c := closed[i]
 		if c.ClosedAt == nil {
@@ -792,7 +792,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
-				return repo.Create(ctx, &models.NotificationQueue{
+				return repo.Create(ctx, &models.NotificationEvent{
 					ID:         uuidutil.NewV7(),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,

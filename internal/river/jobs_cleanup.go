@@ -204,10 +204,19 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 
-	if n, err := notificationevents.Prune(ctx, w.DB, now); err != nil {
-		cleanupErr = errors.Join(cleanupErr, err)
-	} else {
-		result.NotificationEvents = n
+	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
+		n, err := notificationevents.Prune(ctx, w.DB, now, cleanupDeleteBatch)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			break
+		}
+		result.NotificationEvents += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+		if batch == cleanupIndexedMaxBatches-1 {
+			logger.Warn("Cleanup: notification event retention reached its pass budget")
+		}
 	}
 
 	directory := w.DB.GenDirectory()
@@ -321,6 +330,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
 		"checkout_attempts_expired": result.CheckoutAttemptsExpired,
 		"carts":                     result.Carts,
+		"notification_events":       result.NotificationEvents,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,

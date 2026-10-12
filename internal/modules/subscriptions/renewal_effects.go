@@ -25,7 +25,7 @@ type renewalEffects struct {
 // applyRenewalEffects owns the local projection for both observed provider
 // renewals and qualified accepted charges. Its explicit period and source-bound
 // grants are idempotent, so a webhook-first payment row can be completed here.
-func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationEvent, error) {
 	if !effects.PreserveLifecycle {
 		// The payment fact decides through the state machine.
 		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
@@ -69,8 +69,8 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		data.DowngradeApplied, data.NewProduct = true, effects.ProductName
 	}
 	key := "renewed:" + effects.PeriodStart.UTC().Format(time.RFC3339Nano) + ":" + effects.PeriodEnd.UTC().Format(time.RFC3339Nano)
-	notification := &models.NotificationQueue{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}
-	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, notification); err != nil {
+	notification := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}
+	if err := NewNotificationService(d).CreateIfAbsent(ctx, notification); err != nil {
 		return nil, fmt.Errorf("queue renewed notification: %w", err)
 	}
 	return notification, nil

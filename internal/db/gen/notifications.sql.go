@@ -108,59 +108,6 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteS
 	return result.RowsAffected(), nil
 }
 
-const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT merchant_id, id, customer_id, event_type, data, created_at, inserted_at, settled_at FROM billing.notification_events WHERE merchant_id=billing.current_merchant_id() AND id=$1
-`
-
-func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (BillingNotificationEvent, error) {
-	row := q.db.QueryRow(ctx, getNotificationByID, id)
-	var i BillingNotificationEvent
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.CustomerID,
-		&i.EventType,
-		&i.Data,
-		&i.CreatedAt,
-		&i.InsertedAt,
-		&i.SettledAt,
-	)
-	return i, err
-}
-
-const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
-SELECT merchant_id, id, customer_id, event_type, data, created_at, inserted_at, settled_at FROM billing.notification_events WHERE merchant_id=billing.current_merchant_id() AND customer_id=$1 ORDER BY created_at,id
-`
-
-func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uuid.UUID) ([]BillingNotificationEvent, error) {
-	rows, err := q.db.Query(ctx, listNotificationsByCustomer, customerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingNotificationEvent
-	for rows.Next() {
-		var i BillingNotificationEvent
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.ID,
-			&i.CustomerID,
-			&i.EventType,
-			&i.Data,
-			&i.CreatedAt,
-			&i.InsertedAt,
-			&i.SettledAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const premiumEndedNotificationExistsSince = `-- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=$1::uuid
 AND customer_id=$2::uuid AND event_type='premium_ended' AND created_at>=$3::timestamptz)::boolean AS found

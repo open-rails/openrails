@@ -8342,6 +8342,219 @@
         ]
       }
     },
+    "/v1/app/notification-consumers/{name}": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "app_write"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "app_write"
+        ]
+      }
+    },
+    "/v1/app/notification-consumers/{name}/events": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationEvents"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/notification-consumers/{name}/acknowledge": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcknowledgeNotificationEventsParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request",
+          "app_write"
+        ]
+      }
+    },
     "/v1/app/host-events": {
       "get": {
         "tags": [
@@ -8939,126 +9152,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/notifications": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "seen",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Notification"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/notifications/read": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MarkNotificationsReadParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomerNotificationLookup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
           "request"
         ]
       }
@@ -10444,6 +10537,17 @@
         "type": "object",
         "properties": {
           "host_event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AcknowledgeNotificationEventsParams": {
+        "type": "object",
+        "properties": {
+          "notification_ids": {
             "type": "array",
             "items": {
               "type": "string"
@@ -13394,16 +13498,12 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
-          },
-          "unread_notifications": {
-            "type": "integer"
           }
         },
         "required": [
           "id",
           "balances",
-          "default_payment_methods",
-          "unread_notifications"
+          "default_payment_methods"
         ]
       },
       "CustomerAmount": {
@@ -13709,34 +13809,6 @@
           "account_id",
           "method",
           "revoked_by"
-        ]
-      },
-      "CustomerNotificationLookup": {
-        "type": "object",
-        "properties": {
-          "notifications": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Notification"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "notifications"
         ]
       },
       "CustomerSettings": {
@@ -15082,20 +15154,6 @@
           "revoked_at"
         ]
       },
-      "MarkNotificationsReadParams": {
-        "type": "object",
-        "properties": {
-          "notification_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "all": {
-            "type": "boolean"
-          }
-        }
-      },
       "Matrix": {
         "type": "object",
         "properties": {
@@ -15208,9 +15266,6 @@
             "type": "string"
           },
           "reprice_notice_window_days": {
-            "type": "integer"
-          },
-          "renewal_receipt_min_interval_hours": {
             "type": "integer"
           },
           "provider_refund_access": {
@@ -15897,10 +15952,13 @@
           "payload"
         ]
       },
-      "Notification": {
+      "NotificationEvent": {
         "type": "object",
         "properties": {
           "id": {
+            "type": "string"
+          },
+          "merchant_id": {
             "type": "string"
           },
           "customer_id": {
@@ -15910,161 +15968,46 @@
             "type": "string"
           },
           "data": {
-            "$ref": "#/components/schemas/NotificationData"
-          },
-          "seen": {
-            "type": "boolean"
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "action_requested": {
+            "type": "boolean"
+          },
+          "optional": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
+          "merchant_id",
           "customer_id",
           "event_type",
           "data",
-          "seen",
           "created_at"
         ]
       },
-      "NotificationData": {
+      "NotificationEvents": {
         "type": "object",
         "properties": {
-          "reason": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "ended_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "from_price_id": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "to_product_id": {
-            "type": "string"
-          },
-          "to_product_name": {
-            "type": "string"
-          },
-          "old_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "new_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period_starts_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period_ends_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "downgrade_applied": {
-            "type": "boolean"
-          },
-          "new_product": {
-            "type": "string"
-          },
-          "overdue_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "overdue_orders": {
-            "type": "integer"
-          },
-          "overdue_started_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "from_state": {
-            "type": "string"
-          },
-          "to_state": {
-            "type": "string"
-          },
-          "amount_due": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "due_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "failure_code": {
-            "type": "string"
-          },
-          "failure_reason": {
-            "type": "string"
-          },
-          "decline_outcome": {
-            "type": "string"
-          },
-          "next_attempt_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "rail_subscription_id": {
-            "type": "string"
-          },
-          "transaction_id": {
-            "type": "string"
-          },
-          "quantity": {
-            "type": "integer"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "product_name": {
-            "type": "string"
-          },
-          "payment_method": {
-            "type": "string"
-          },
-          "user_email": {
-            "type": "string"
-          },
-          "payment_id": {
-            "type": "string"
-          },
-          "order_id": {
-            "type": "string"
-          },
-          "order_number": {
-            "type": "string"
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationEvent"
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "Order": {
         "type": "object",

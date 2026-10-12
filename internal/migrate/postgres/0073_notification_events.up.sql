@@ -10,11 +10,12 @@ CREATE TABLE billing.notification_events (
     data jsonb NOT NULL DEFAULT '{}',
     created_at timestamptz NOT NULL DEFAULT now(),
     inserted_at timestamptz NOT NULL DEFAULT now(),
-    settled_at timestamptz,
     PRIMARY KEY (merchant_id,id),
     FOREIGN KEY (merchant_id,customer_id) REFERENCES billing.customers(merchant_id,id) ON DELETE CASCADE
 );
 CREATE INDEX notification_events_delivery_idx ON billing.notification_events(inserted_at,merchant_id,id);
+CREATE INDEX notification_events_customer_idx ON billing.notification_events(merchant_id,customer_id,created_at,id);
+CREATE INDEX notification_events_ended_idx ON billing.notification_events(merchant_id,customer_id,created_at) WHERE event_type='premium_ended';
 CREATE TABLE billing.notification_consumers (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     merchant_id uuid REFERENCES billing.merchants(id),
@@ -31,6 +32,8 @@ CREATE TABLE billing.notification_event_acks (
     PRIMARY KEY(consumer_id,merchant_id,event_id),
     FOREIGN KEY(merchant_id,event_id) REFERENCES billing.notification_events(merchant_id,id) ON DELETE CASCADE
 );
+CREATE INDEX notification_event_acks_retention_idx ON billing.notification_event_acks(acknowledged_at);
+CREATE INDEX notification_event_acks_event_idx ON billing.notification_event_acks(merchant_id,event_id,consumer_id);
 INSERT INTO billing.notification_events(merchant_id,id,customer_id,event_type,data,created_at)
 SELECT merchant_id,id,customer_id,event_type,COALESCE(data,'{}')-'user_email',created_at
 FROM billing.notifications WHERE recipient_kind='customer';
@@ -40,7 +43,7 @@ ALTER TABLE billing.notifications ADD CONSTRAINT notifications_operator_only CHE
 CREATE FUNCTION billing.guard_notification_event() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog','billing','pg_temp' AS $$
 BEGIN
-    IF (to_jsonb(OLD)-'settled_at') IS DISTINCT FROM (to_jsonb(NEW)-'settled_at') THEN
+    IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
         RAISE EXCEPTION 'notification events are immutable' USING ERRCODE='23514';
     END IF;
     RETURN NEW;
@@ -91,10 +94,6 @@ BEGIN
                   'catalog_rate_cards',
                   'catalog_restore_receipts',
                   'checkout_attempts',
-                  'cost_observations',
-                  'cost_qualifications',
-                  'cost_refusals',
-                  'cost_resolutions',
                   'custodians',
                   'custody_migrations',
                   'customer_delinquency',
@@ -115,6 +114,7 @@ BEGIN
                   'maintenance_runs',
                   'mandates',
                   'merchant_destructive_policy',
+                  'meter_period_quantities',
                   'money_settings',
                   'nmi_bulk_checkpoints',
                   'nmi_history_months',
@@ -122,8 +122,6 @@ BEGIN
                   'notification_event_acks',
                   'notification_events',
                   'notifications',
-                  'operation_authorization_extensions',
-                  'operation_authorizations',
                   'order_lines',
                   'orders',
                   'owed_items',

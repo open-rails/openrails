@@ -713,8 +713,8 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.Bill
 		next := action.NextAttemptAt.UTC()
 		data.NextAttemptAt = &next
 	}
-	notification := &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
-	return subscriptions.NewNotificationQueueRepo(database).Create(ctx, notification)
+	notification := &models.NotificationEvent{ID: uuidutil.NewV7(), CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
+	return subscriptions.NewNotificationService(database).Create(ctx, notification)
 }
 
 func (h *OrderCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {

@@ -196,12 +196,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, invoices.Items)
 	invoice := invoices.Items[0].ID.String()
-	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.notifications (merchant_id, customer_id, event_type, data)
-		SELECT id, $2, 'test.idor', '{}' FROM billing.merchants WHERE slug = $1`), w.slug, a.cid().UUID())
-	require.NoError(t, err)
-	notes, _ := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)
-	require.NotEmpty(t, notes)
-	notification := notes[0].(map[string]any)["id"].(string)
 	pass := w.lifetime("idor:order", 3_000_000)
 	aOrder := a.must(http.MethodPost, "/orders", "order-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": pass.ID.String()}}})["id"].(string)
 
@@ -273,9 +267,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		body any
 		ids  string
 		id   string
-	}{
-		"POST /v1/me/notifications/read": {"/notifications/read", map[string]any{"notification_ids": []string{notification}}, "notifications", notification},
-	}
+	}{}
 	probed = 0
 	for _, route := range routes.Catalog() {
 		if route.Group != routes.Customer || !namesObjectsInBody(route.Request) {
@@ -306,22 +298,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	again, err := w.client[embedded].GetOrder(ctx, invoices.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, invoices.Items[0].Usage.AmountDue, again.Usage.AmountDue)
-	status, everything := w.callAt(w.server.URL, b.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true})
-	require.Equal(t, http.StatusOK, status, "%v", everything)
-	require.Empty(t, everything["notifications"], "marking all read names none")
-	unread := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)[0].(map[string]any)
-	require.Equal(t, false, unread["seen"], "A's notification is still unread: B marked only B's own")
-	marked := a.must(http.MethodPost, "/notifications/read", "", map[string]any{"notification_ids": []string{notification}})["notifications"].(map[string]any)
-	require.Equal(t, true, marked[notification].(map[string]any)["seen"], "A marks it read")
-	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.notifications (merchant_id, customer_id, event_type, data)
-		SELECT id, $2, 'test.idor', '{}' FROM billing.merchants WHERE slug = $1`), w.slug, a.cid().UUID())
-	require.NoError(t, err)
-	a.must(http.MethodPost, "/notifications/read", "", map[string]any{"all": true})
-	for _, note := range a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any) {
-		require.Equal(t, true, note.(map[string]any)["seen"], "A marks all read")
-	}
-	status, refused := w.callAt(w.server.URL, a.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true, "notification_ids": []string{notification}})
-	require.Equal(t, http.StatusBadRequest, status, "all names no ids: %v", refused)
 	waiting, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: upgradeKey})
 	require.NoError(t, err)
 	require.NotEmpty(t, waiting.NextAction.Payload["client_secret"], "A's upgrade still waits for A")

@@ -19,37 +19,10 @@ refuses delivery. Generic JSON contains title, severity, summary, fired_at and a
 optional dashboard_link. Discord and Slack destinations receive their native
 message format. Delivery retains bounded retries and SSRF protection.
 
-## Recipient storage
+## Customer event production
 
-Customer billing notices and the merchant console bell share `notifications`.
-Each row declares `recipient_kind`: customer rows have a merchant-scoped
-`customer_id`; merchant rows have no customer and carry the operator message.
-Queries and mutations select their recipient kind explicitly. `read_at` is the
-single inbox read marker; the customer API derives `seen` from it. Only customer
-rows enter the notification email sweep. One sender at a time holds a row's
-email (the dispatch that created it, its job, or any replica's sweep), so
-replicas send it once; a sender that dies is replaced after five minutes, and
-one that dies between sending and recording it means one duplicate. Retention
-applies to both recipient kinds: by default read rows expire after 90 days and
-all rows after 180 days.
-Reading a notification never acknowledges a financial or lifecycle event in
-`host_outbox`.
-
-## Renewal receipts
-
-The first purchase always sends its confirmation, and every failure,
-cancellation and downgrade notice is always sent. Renewal receipts are spaced
-per subscription by `renewal_receipt_min_interval_hours` (default 24): a renewal
-whose period starts less than that interval after the membership start or the
-last receipted renewal creates no `premium_renewed` notification. Hourly and
-daily members therefore get at most one receipt a day; weekly and longer
-cadences get one per renewal. `0` sends a receipt for every renewal. Receipts
-carry `subscription_id`, `period_starts_at` and `period_ends_at`.
-
-## Staff changes
-
-A subscription change staff make at the customer's request sends the customer
-a `subscription_changed` notice, "Changed by support at your request.", with
-`subscription_id`, `to_price_id`, `to_product_name`, `quantity`,
-`effective_at`, `new_amount` (the next renewal) and, when the change charged
-now, `amount` and `transaction_id`.
+Customer billing events live in `notification_events`, independently of the
+operator findings workflow and console alerts. OpenRails no longer owns a
+customer inbox, read state, email templates or delivery schedule. See
+[customer notification events](customer-notifications.md) for durable consumer
+registration, independent acknowledgments, migration and app-owned delivery.

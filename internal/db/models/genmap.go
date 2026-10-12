@@ -344,15 +344,6 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 	return m, nil
 }
 
-// NotificationFromGen maps one immutable source fact.
-func NotificationFromGen(n gen.BillingNotificationEvent) (*NotificationQueue, error) {
-	m := &NotificationQueue{ID: n.ID, MerchantID: n.MerchantID, CustomerID: n.CustomerID, EventType: NotificationEventType(n.EventType), CreatedAt: n.CreatedAt}
-	if err := FromJSONB(n.Data, &m.Data, "notification_events.data"); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 // PriceKeyMovementFromGen maps a generated price_key_movements row.
 func PriceKeyMovementFromGen(r gen.BillingPriceKeyMovement) *PriceKeyMovement {
 	return &PriceKeyMovement{

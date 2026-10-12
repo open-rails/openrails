@@ -1128,10 +1128,10 @@ func (q *Queries) MarkUsageOrderUncollectible(ctx context.Context, arg MarkUsage
 
 const notifyOverdueUsageOrders = `-- name: NotifyOverdueUsageOrders :one
 WITH notices AS (
-    INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
+    INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
            jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
-           NULL, $1::timestamptz
+           $1::timestamptz
     FROM billing.orders
     WHERE merchant_id = $2::uuid
       AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total

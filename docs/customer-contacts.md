@@ -2,7 +2,7 @@
 
 A customer is your user's id (the subject UUID your auth reports). Who it is —
 email, username, display name — belongs to your directory. OpenRails reads it
-for receipts and payment notices, the admin customer read
+for the admin customer read
 (`GET /v1/admin/customers/{customer_id}`, its `contact`) and search (`GET /v1/admin/customers?search=`), from one of two
 sources:
 
@@ -12,16 +12,12 @@ sources:
 | Standalone or hosted | the server's AuthKit: its own users, and each merchant's directory of its trusted issuers' users, asked on every read | in AuthKit |
 | Embedded without `Deps.UserInfo` | SCIM 2.0 pushes from your directory | what was pushed, and when (`contact.synced_at`) |
 
-Without either, OpenRails sends customers no email; in-app notices and host
-events still arrive. With `Deps.UserInfo`, the SCIM routes are not mounted: one
-source of truth.
-
-Customers get, through `Config.SMTP` or `Deps.Email`: a receipt for every
-one-off purchase (an order, a credit deposit) once its
-payment settles, naming what was bought and the amount ("12.99 USD"), once
-per payment however often the provider reports it; membership confirmations
-and renewals; and payment, usage order and dunning notices. Each is also in
-`GET /v1/me/notifications`.
+With `Deps.UserInfo`, the SCIM routes are not mounted: one source of truth.
+Customer billing facts identify their merchant and customer; the consuming
+application resolves its own recipients, preferences and delivery addresses.
+OpenRails produces [notification events](customer-notifications.md), not
+customer email or a browser inbox. `Config.SMTP` and `Deps.Email` remain available
+for operator alerts and the standalone server's AuthKit messages.
 
 ## In process
 

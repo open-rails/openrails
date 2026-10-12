@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // ccbillMirrorTransition applies one CCBill fact to a subscription the caller
@@ -24,26 +24,26 @@ import (
 // and effects persist in the same transaction. An outcome OpenRails decides
 // (refund, void, chargeback) queues the CCBill cancel with it; one CCBill
 // reported (notice.providerStopped) needs none. It returns whether the row
-// changed and the customer notices to deliver after commit.
-func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db.DB, sub *models.Subscription, ev lifecycle.Event, notice ccbillNotice) (bool, []*models.NotificationQueue, error) {
+// changed; its customer event facts are persisted in the same transaction.
+func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db.DB, sub *models.Subscription, ev lifecycle.Event, notice ccbillNotice) (bool, error) {
 	now := s.now().UTC()
 	before := *sub
 	effects, err := subscriptions.Transition(sub, ev, now)
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
 	changed := sub.Status != before.Status || !sameTime(sub.EndedAt, before.EndedAt) || !sameTime(sub.CurrentPeriodEndsAt, before.CurrentPeriodEndsAt)
 	if !changed && len(effects) == 0 {
-		return false, nil, nil
+		return false, nil
 	}
 	// Effects run through the shared executor; CCBill's notices keep
-	// their handler context and are created at delivery.
+	// their handler context and are recorded in this transaction.
 	var access []lifecycle.Effect
-	var notes []*models.NotificationQueue
+	var notes []*models.NotificationEvent
 	for _, e := range effects {
 		switch e := e.(type) {
 		case lifecycle.Notify:
-			if n := notice.build(sub, e.Kind); n != nil {
+			if n := notice.build(sub, e.Kind); n != nil && !notice.suppressNotices {
 				notes = append(notes, n)
 			}
 		case lifecycle.QueueProviderCancel:
@@ -55,16 +55,20 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 		}
 	}
 	if _, err := s.lifecycleIn(d).ApplyEffects(ctx, d, sub, access, now, subscriptions.EffectOptions{RevokeReason: notice.revoke}); err != nil {
-		return false, nil, err
+		return false, err
 	}
 	if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
-		return false, nil, fmt.Errorf("persist ccbill %s for %s: %w", lifecycle.Name(ev), sub.ID, err)
+		return false, fmt.Errorf("persist ccbill %s for %s: %w", lifecycle.Name(ev), sub.ID, err)
 	}
-	return true, notes, nil
+	if err := s.recordNotices(ctx, d, notes...); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ccbillNotice carries the handler's context for the machine's effects.
 type ccbillNotice struct {
+	suppressNotices bool
 	// providerStopped: CCBill itself ended the schedule.
 	providerStopped bool
 	revoke          models.AccessRevokeReason
@@ -72,9 +76,10 @@ type ccbillNotice struct {
 	data            billing.NotificationData
 }
 
-func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind) *models.NotificationQueue {
+func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind) *models.NotificationEvent {
 	var event models.NotificationEventType
 	data := n.data
+	data.SubscriptionID = billing.SubscriptionID(sub.ID)
 	switch kind {
 	case lifecycle.NoticeEnded:
 		event, data.Reason = models.NotificationPremiumEnded, string(n.ended)
@@ -83,18 +88,22 @@ func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind)
 	default:
 		return nil
 	}
-	return &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, EventType: event, Data: data}
+	return &models.NotificationEvent{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, EventType: event, Data: data}
 }
 
-func (s *CCBillWebhookService) deliver(ctx context.Context, notes []*models.NotificationQueue) {
-	if s.NotificationService == nil {
-		return
-	}
+// recordNotices persists event facts with the domain change, never after commit.
+func (s *CCBillWebhookService) recordNotices(ctx context.Context, d *db.DB, notes ...*models.NotificationEvent) error {
 	for _, n := range notes {
-		if err := s.NotificationService.Create(ctx, n); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"customer_id": n.CustomerID, "event": n.EventType}).Error("failed to deliver CCBill lifecycle notification")
+		if n == nil {
+			continue
+		}
+		n.ID = uuid.NewSHA1(db.PSPIDFromContext(ctx), []byte(s.Data.EventType+":"+s.stableDedupeEventKey()+":"+n.CustomerID.String()+":"+string(n.EventType)+":"+n.Data.SubscriptionID.String()))
+		n.CreatedAt = s.now().UTC()
+		if err := subscriptions.NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
+			return fmt.Errorf("record CCBill notification: %w", err)
 		}
 	}
+	return nil
 }
 
 func sameTime(a, b *time.Time) bool {
@@ -146,7 +155,6 @@ func (s *CCBillWebhookService) lifecycleIn(d *db.DB) *subscriptions.Subscription
 // ccbillMirrorEvent locks the CCBill subscription, asks decide for the event
 // (nil changes nothing) and applies it in one transaction.
 func (s *CCBillWebhookService) ccbillMirrorEvent(ctx context.Context, railSubID string, decide func(*models.Subscription) lifecycle.Event, notice ccbillNotice) error {
-	var notes []*models.NotificationQueue
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := db.NewWithPgxTx(tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
@@ -160,12 +168,11 @@ func (s *CCBillWebhookService) ccbillMirrorEvent(ctx context.Context, railSubID 
 		if ev == nil {
 			return nil
 		}
-		_, notes, err = s.ccbillMirrorTransition(ctx, d, sub, ev, notice)
+		_, err = s.ccbillMirrorTransition(ctx, d, sub, ev, notice)
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	s.deliver(ctx, notes)
 	return nil
 }

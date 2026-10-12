@@ -149,7 +149,6 @@ export type CustomerAccount = {
   id: string
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
-  unread_notifications: number
 }
 
 export type CustomerAmount = {
@@ -189,10 +188,6 @@ export type CustomerLink = {
   linked_at: string
   revoked_at: string | null
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
-}
-
-export type CustomerNotificationLookup = {
-  notifications: Record<string, Notification | null> | null
 }
 
 export type DefaultPaymentMethod = {
@@ -235,11 +230,6 @@ export type Mandate = {
   created_at: string
 }
 
-export type MarkNotificationsReadParams = {
-  notification_ids?: string[]
-  all?: boolean
-}
-
 export type NetworkLinkChallenge = {
   id: string
   nonce: string
@@ -252,58 +242,6 @@ export type NextAction = {
   transactions: string[]
   psp_id: string | null
   payload: Record<string, string> | null
-}
-
-export type Notification = {
-  id: string
-  customer_id: string
-  event_type: string
-  data: NotificationData
-  seen: boolean
-  created_at: string
-}
-
-export type NotificationData = {
-  reason?: string
-  message?: string
-  source?: string
-  product_id?: string
-  ended_at?: string
-  currency?: string
-  subscription_id?: string
-  from_price_id?: string
-  to_price_id?: string
-  to_product_id?: string
-  to_product_name?: string
-  old_amount?: string
-  new_amount?: string
-  effective_at?: string
-  period_starts_at?: string
-  period_ends_at?: string
-  downgrade_applied?: boolean
-  new_product?: string
-  overdue_amount?: string
-  overdue_orders?: number
-  overdue_started_at?: string
-  from_state?: string
-  to_state?: string
-  amount_due?: string
-  due_at?: string
-  failure_code?: string
-  failure_reason?: string
-  decline_outcome?: string
-  next_attempt_at?: string
-  rail?: string
-  rail_subscription_id?: string
-  transaction_id?: string
-  quantity?: number
-  amount?: string
-  product_name?: string
-  payment_method?: string
-  user_email?: string
-  payment_id?: string
-  order_id?: string
-  order_number?: string
 }
 
 export type Order = {

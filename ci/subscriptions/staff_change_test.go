@@ -74,7 +74,7 @@ func (w *world) requireStaffSchedule(c *customer, sub billing.SubscriptionID, re
 func (w *world) requireStaffNotice(c *customer, amount string) {
 	w.t.Helper()
 	var message, charged string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT data->>'message', coalesce(data->>'amount', '') FROM billing.notifications
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT data->>'message', coalesce(data->>'amount', '') FROM billing.notification_events
 		WHERE customer_id = $1::uuid AND event_type = 'subscription_changed' ORDER BY created_at DESC, id DESC LIMIT 1`), c.id).Scan(&message, &charged))
 	require.Equal(w.t, "Changed by support at your request.", message)
 	require.Equal(w.t, amount, charged)

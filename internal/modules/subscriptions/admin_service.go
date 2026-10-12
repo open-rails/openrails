@@ -22,8 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // Additional sentinel errors for admin operations
@@ -278,27 +276,18 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 				return fmt.Errorf("end renewal grace: %w", err)
 			}
 		}
+		if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
+			ID: uuid.NewSHA1(subscription.ID, []byte("cancel:admin:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
+			Data: billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID)},
+		}); err != nil {
+			return fmt.Errorf("record cancellation notification: %w", err)
+		}
 		if remote && !deleteHeld {
 			return resolveProviderCancelHeld(ctx, txdb, subscription)
 		}
 		return nil
 	}); err != nil {
 		return err
-	}
-
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
-		CustomerID: subscription.CustomerID,
-		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID)},
-	}
-	if err := s.NotificationService.Create(ctx, notification); err != nil {
-		log.WithFields(log.Fields{
-			"subscription_id":   subscription.ID,
-			"user_id":           subscription.CustomerID.String(),
-			"notification_type": notification.EventType,
-			"error":             err.Error(),
-		}).Error("Failed to create notification during admin subscription operation")
 	}
 
 	return nil

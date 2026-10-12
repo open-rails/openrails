@@ -80,14 +80,15 @@ type NotificationData struct {
 
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).
-	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
-	FromPriceID    PriceID        `json:"from_price_id,omitzero"`
-	ToPriceID      PriceID        `json:"to_price_id,omitzero"`
-	ToProductID    ProductID      `json:"to_product_id,omitzero"`
-	ToProductName  string         `json:"to_product_name,omitempty"`
-	OldAmount      *int64         `json:"old_amount,omitempty,string"`
-	NewAmount      *int64         `json:"new_amount,omitempty,string"`
-	EffectiveAt    *time.Time     `json:"effective_at,omitempty"`
+	SubscriptionID   SubscriptionID   `json:"subscription_id,omitzero"`
+	PriceMigrationID PriceMigrationID `json:"price_migration_id,omitzero"`
+	FromPriceID      PriceID          `json:"from_price_id,omitzero"`
+	ToPriceID        PriceID          `json:"to_price_id,omitzero"`
+	ToProductID      ProductID        `json:"to_product_id,omitzero"`
+	ToProductName    string           `json:"to_product_name,omitempty"`
+	OldAmount        *int64           `json:"old_amount,omitempty,string"`
+	NewAmount        *int64           `json:"new_amount,omitempty,string"`
+	EffectiveAt      *time.Time       `json:"effective_at,omitempty"`
 
 	// Renewal receipt (premium_renewed): the renewed period, and whether it
 	// applied a scheduled downgrade.

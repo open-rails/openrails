@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -39,28 +38,6 @@ func TestRevokingAgreements(t *testing.T) {
 	w.settings = billing.MerchantSettings{Profile: &billing.MerchantProfile{BillingURL: billingURL}}
 	w.start()
 	ctx, client := t.Context(), w.client[remote]
-	mail := func(subject string) smtptest.Message {
-		t.Helper()
-		w.mailSettled()
-		var found *smtptest.Message
-		require.Eventually(t, func() bool {
-			for _, m := range srv.Messages() {
-				if strings.Contains(m.Subject, subject) {
-					found = &m
-					return true
-				}
-			}
-			return false
-		}, 20*time.Second, 50*time.Millisecond, "an email %q", subject)
-		return *found
-	}
-	saysHowToCancel := func(m smtptest.Message) {
-		t.Helper()
-		for _, body := range []string{m.Text, m.HTML} {
-			require.Contains(t, body, "To cancel", m.Subject)
-			require.Contains(t, body, billingURL, m.Subject)
-		}
-	}
 
 	c := w.newCustomer()
 	directory.Put(userinfo.User{ID: c.id, Email: "member@host.test", Username: "member"})
@@ -68,10 +45,10 @@ func TestRevokingAgreements(t *testing.T) {
 	card := c.saveCard("nmi", visa)
 	e := &engineCase{w: w, rail: "nmi", tp: embedded, c: c, price: price.ID.String(), ent: "content:members", method: card, started: w.clock.Now()}
 	e.sub = c.subscribe(embedded, "nmi", e.price, e.ent, card)
-	saysHowToCancel(mail("Welcome to"))
+	require.True(t, c.hasNotification("premium_started"))
 	e.toFreshPeriodEnd()
 	w.runRenewals()
-	saysHowToCancel(mail("has been renewed"))
+	require.True(t, c.hasNotification("premium_renewed"))
 
 	// Usage billed in arrears under the customer's collection agreement.
 	_, err := client.UpdateCustomer(ctx, c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 200_000_000}}})
@@ -91,7 +68,7 @@ func TestRevokingAgreements(t *testing.T) {
 	}
 	require.NoError(t, use(60_000_000))
 	collect()
-	saysHowToCancel(mail("Your receipt from"))
+	require.True(t, c.hasNotification("usage_charged"))
 
 	agreements := func() map[billing.MandateKind]map[string]any {
 		out := map[billing.MandateKind]map[string]any{}
@@ -137,11 +114,8 @@ func TestRevokingAgreements(t *testing.T) {
 	require.Equal(t, usageID, events[0].MandateID.String())
 	require.Equal(t, "USD", events[0].Currency)
 	require.Nil(t, events[0].SubscriptionID)
-	stopped := mail("Usage charges at Host Shop stopped")
-	for _, b := range []string{stopped.Text, stopped.HTML} {
-		require.Contains(t, b, "30.00 USD", "what it still owes")
-		require.Contains(t, b, billingURL, "where to pay it")
-	}
+	require.Equal(t, "30000000", c.notificationData("agreement_revoked")["amount_due"])
+	require.Empty(t, srv.Messages(), "billing facts are consumed by the app, not emailed by the engine")
 	collect()
 	require.Len(t, w.nmi.ledger(""), charged, "never charged under the revoked agreement")
 	owedID, err := billing.ParseOrderID(owed["id"].(string))
@@ -185,11 +159,7 @@ func TestRevokingAgreements(t *testing.T) {
 	require.Equal(t, e.sub, *events[0].SubscriptionID)
 	require.Equal(t, "USD", events[0].Currency)
 	end := e.periodEnd()
-	confirmed := mail("has been canceled")
-	for _, b := range []string{confirmed.Text, confirmed.HTML} {
-		require.Contains(t, b, e.sub.UUID().String(), "it names the subscription")
-		require.Contains(t, b, "No further payments")
-	}
+	require.Equal(t, e.sub.String(), c.notificationData("premium_ended")["subscription_id"])
 	left := agreements()
 	require.Len(t, left, 1, "only the new usage agreement")
 	require.Contains(t, left, billing.MandateUnscheduled)

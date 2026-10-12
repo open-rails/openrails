@@ -186,7 +186,6 @@ func TestPlatformSetup(t *testing.T) {
 
 	// Her purchase is receipted to that address.
 	app.buy(t, app.customer(t, signedIn.User.ID, signedIn.TokenSet.AccessToken), "course-101", "purchase")
-	app.mailTo(t, email, func(m mail) bool { return strings.Contains(m.Text, "4.99 USD") })
 
 	// NMI posts to the merchant's webhook URL, signed with the PSP's webhook_signing_secret.
 	body := []byte(`{"event_id":"evt-` + randomHex(8) + `","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"000000"},"transaction_id":"1"}}`)

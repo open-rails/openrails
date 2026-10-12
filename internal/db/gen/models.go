@@ -748,7 +748,6 @@ type BillingNotificationEvent struct {
 	Data       []byte
 	CreatedAt  time.Time
 	InsertedAt time.Time
-	SettledAt  *time.Time
 }
 
 type BillingNotificationEventAck struct {

@@ -219,7 +219,7 @@ products:
 		require.NoError(t, err)
 		require.True(t, held["content:"+key])
 		require.Equal(t, 1, count(`SELECT count(*) FROM billing.grants WHERE customer_id = $1`, uuid.MustParse(buyer)), "one grant")
-		require.Equal(t, 1, count(`SELECT count(*) FROM billing.notifications WHERE customer_id = $1`, uuid.MustParse(buyer)), "one receipt")
+		require.Equal(t, 1, count(`SELECT count(*) FROM billing.notification_events WHERE customer_id = $1`, uuid.MustParse(buyer)), "one receipt")
 		require.Equal(t, 1, count(`SELECT count(*) FROM billing.webhook_events WHERE event_id = $1`, event.ID), "one applied event")
 	})
 

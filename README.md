@@ -813,11 +813,9 @@ Mounting gives your users these routes under `/billing`:
 | `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its usage orders and every subscription without its own card |
 | `POST /billing/v1/me/stripe/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
-| `GET /billing/v1/me` | balance per currency, the card that pays each currency, and unread notices |
+| `GET /billing/v1/me` | balance per currency and the card that pays each currency |
 | `GET /billing/v1/me/balance/transactions` | its balance transactions |
 | `GET /billing/v1/me/usage` | metered usage |
-| `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
-| `POST /billing/v1/me/notifications/read` | mark up to 100 read, or all |
 
 **Webhooks** (always mounted; payment processors, verified by signature)
 

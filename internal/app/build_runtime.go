@@ -560,7 +560,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver identity.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
-	// NotificationService created with nil emailService - will be set later in buildRuntime
+	// Domain services publish immutable notification facts; applications consume them.
 	notificationService := subscriptions.NewNotificationService(database)
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database, clock)
@@ -619,7 +619,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	// Price migrations push to Stripe and to NMI gateway schedules through
 	// the per-merchant client resolver.
-	priceMigrationService := subscriptions.NewPriceMigrationService(database, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database),
+	priceMigrationService := subscriptions.NewPriceMigrationService(database, priceService, subscriptionService, merchantconfig.NewStore(database),
 		&subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), clock)
 
 	// Catalog Q&A and drafting are independently opt-in. Draft tools only

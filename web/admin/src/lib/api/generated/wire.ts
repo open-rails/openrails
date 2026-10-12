@@ -10,6 +10,10 @@ export type AcknowledgeHostEventsParams = {
   host_event_ids?: string[]
 }
 
+export type AcknowledgeNotificationEventsParams = {
+  notification_ids?: string[]
+}
+
 export type AdminAccess = {
   admin: "none" | "read" | "update"
   catalog: boolean
@@ -638,7 +642,6 @@ export type CustomerAccount = {
   id: string
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
-  unread_notifications: number
 }
 
 export type CustomerAmount = {
@@ -699,10 +702,6 @@ export type CustomerNetworkHostEvent = {
   account_id: string
   method: "checkout" | "connect" | "sign_in" | null
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
-}
-
-export type CustomerNotificationLookup = {
-  notifications: Record<string, Notification | null> | null
 }
 
 export type CustomerSettings = {
@@ -987,11 +986,6 @@ export type MandateHostEvent = {
   revoked_at: string
 }
 
-export type MarkNotificationsReadParams = {
-  notification_ids?: string[]
-  all?: boolean
-}
-
 export type Matrix = {
   dimension: string
   cells: Record<string, MatrixCell> | null
@@ -1027,7 +1021,6 @@ export type MerchantSettings = {
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
-  renewal_receipt_min_interval_hours?: number
   provider_refund_access?: string
   arrears_grace_days?: number
   arrears_delinquency_floor?: string
@@ -1189,56 +1182,19 @@ export type NextAction = {
   payload: Record<string, string> | null
 }
 
-export type Notification = {
+export type NotificationEvent = {
   id: string
+  merchant_id: string
   customer_id: string
   event_type: string
-  data: NotificationData
-  seen: boolean
+  data: unknown | null
   created_at: string
+  action_requested?: boolean
+  optional?: boolean
 }
 
-export type NotificationData = {
-  reason?: string
-  message?: string
-  source?: string
-  product_id?: string
-  ended_at?: string
-  currency?: string
-  subscription_id?: string
-  from_price_id?: string
-  to_price_id?: string
-  to_product_id?: string
-  to_product_name?: string
-  old_amount?: string
-  new_amount?: string
-  effective_at?: string
-  period_starts_at?: string
-  period_ends_at?: string
-  downgrade_applied?: boolean
-  new_product?: string
-  overdue_amount?: string
-  overdue_orders?: number
-  overdue_started_at?: string
-  from_state?: string
-  to_state?: string
-  amount_due?: string
-  due_at?: string
-  failure_code?: string
-  failure_reason?: string
-  decline_outcome?: string
-  next_attempt_at?: string
-  rail?: string
-  rail_subscription_id?: string
-  transaction_id?: string
-  quantity?: number
-  amount?: string
-  product_name?: string
-  payment_method?: string
-  user_email?: string
-  payment_id?: string
-  order_id?: string
-  order_number?: string
+export type NotificationEvents = {
+  data: NotificationEvent[]
 }
 
 export type Order = {

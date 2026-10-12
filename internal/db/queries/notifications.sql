@@ -10,12 +10,6 @@ VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uui
 COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))
 ON CONFLICT(merchant_id,id) DO NOTHING;
 
--- name: GetNotificationByID :one
-SELECT * FROM billing.notification_events WHERE merchant_id=billing.current_merchant_id() AND id=$1;
-
--- name: ListNotificationsByCustomer :many
-SELECT * FROM billing.notification_events WHERE merchant_id=billing.current_merchant_id() AND customer_id=$1 ORDER BY created_at,id;
-
 -- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=sqlc.arg(merchant_id)::uuid
 AND customer_id=sqlc.arg(customer_id)::uuid AND event_type='premium_ended' AND created_at>=sqlc.arg(since)::timestamptz)::boolean AS found;

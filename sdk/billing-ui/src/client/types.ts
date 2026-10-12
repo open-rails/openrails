@@ -532,7 +532,6 @@ export const accountSchema = z.object({
   default_payment_methods: z.array(
     z.object({ currency: z.string(), payment_method_id: z.string() })
   ),
-  unread_notifications: z.number(),
 })
 export type Account = z.infer<typeof accountSchema>
 

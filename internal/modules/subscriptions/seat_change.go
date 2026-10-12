@@ -239,7 +239,7 @@ type StaffChangeNotice struct {
 
 // QueueStaffChangeNotice queues the notice once per change in the caller's
 // transaction; it is emailed after commit or by the notification sweep.
-func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscription, n StaffChangeNotice) (*models.NotificationQueue, error) {
+func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscription, n StaffChangeNotice) (*models.NotificationEvent, error) {
 	next, at := n.NextAmount, n.EffectiveAt.UTC()
 	data := billing.NotificationData{
 		Source: "staff", Message: "Changed by support at your request.",
@@ -250,8 +250,8 @@ func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscript
 		charged := n.Charged
 		data.Amount = &charged
 	}
-	notice := &models.NotificationQueue{ID: uuid.NewSHA1(sub.ID, []byte("staff_change:"+n.Key)), CustomerID: sub.CustomerID, EventType: models.NotificationSubscriptionChanged, Data: data}
-	if err := NewNotificationQueueRepo(d).CreateIfAbsent(ctx, notice); err != nil {
+	notice := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte("staff_change:"+n.Key)), CustomerID: sub.CustomerID, EventType: models.NotificationSubscriptionChanged, Data: data}
+	if err := NewNotificationService(d).CreateIfAbsent(ctx, notice); err != nil {
 		return nil, fmt.Errorf("queue staff change notice for %s: %w", sub.ID, err)
 	}
 	return notice, nil

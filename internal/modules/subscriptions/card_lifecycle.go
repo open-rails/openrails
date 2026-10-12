@@ -17,7 +17,7 @@ import (
 // ApplyCardLifecycle applies a card event and carries it to the subscriptions
 // the card pays, in d's transaction. The notices it returns are dispatched
 // after commit.
-func (s *SubscriptionLifecycleService) ApplyCardLifecycle(ctx context.Context, d *db.DB, ev paymentmethods.CardEvent) (paymentmethods.CardLifecycle, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) ApplyCardLifecycle(ctx context.Context, d *db.DB, ev paymentmethods.CardEvent) (paymentmethods.CardLifecycle, []*models.NotificationEvent, error) {
 	life, err := paymentmethods.ApplyCardLifecycle(ctx, d.Gen(ctx), ev)
 	if err != nil {
 		return life, nil, err
@@ -30,7 +30,7 @@ func (s *SubscriptionLifecycleService) ApplyCardLifecycle(ctx context.Context, d
 // reissue wakes those waiting on the card. A brand change, closure or contact
 // advice asks their members to act; renewals then wait for the customer
 // (mandates hold or end), and a closed card never cancels a subscription.
-func (s *SubscriptionLifecycleService) FollowCardChange(ctx context.Context, d *db.DB, life paymentmethods.CardLifecycle, now time.Time) ([]*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) FollowCardChange(ctx context.Context, d *db.DB, life paymentmethods.CardLifecycle, now time.Time) ([]*models.NotificationEvent, error) {
 	switch {
 	case life.Change.NeedsCustomer():
 		return s.AskForCard(ctx, d, life.Method.MerchantID, life.Method.ID, now)
@@ -42,13 +42,13 @@ func (s *SubscriptionLifecycleService) FollowCardChange(ctx context.Context, d *
 
 // AskForCard queues the update-your-card notice for each live subscription
 // the card pays, once per paid period.
-func (s *SubscriptionLifecycleService) AskForCard(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID, now time.Time) ([]*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) AskForCard(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID, now time.Time) ([]*models.NotificationEvent, error) {
 	ids, err := d.Gen(ctx).ListLiveSubscriptionsOnMethod(ctx, gen.ListLiveSubscriptionsOnMethodParams{MerchantID: merchantID, PaymentMethodID: methodID})
 	if err != nil {
 		return nil, err
 	}
 	repo := NewSubscriptionRepo(d)
-	var out []*models.NotificationQueue
+	var out []*models.NotificationEvent
 	for _, id := range ids {
 		sub, err := repo.GetByID(ctx, id)
 		if err != nil {

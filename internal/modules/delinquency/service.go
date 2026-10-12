@@ -321,7 +321,7 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 		since := exposure.OverdueStartedAt.UTC()
 		data.OverdueStartedAt = &since
 	}
-	if err := subscriptions.NewNotificationQueueRepo(s.db).Create(ctx, &models.NotificationQueue{
+	if err := subscriptions.NewNotificationService(s.db).Create(ctx, &models.NotificationEvent{
 		ID:         uuidutil.NewV7(),
 		CustomerID: t.CustomerID,
 		EventType:  eventType,

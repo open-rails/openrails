@@ -312,10 +312,6 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", path, refused)
 		require.Equal(t, "invalid_param", refused["error"].(map[string]any)["code"], path)
 	}
-	status, body = w.callAt(w.server.URL, c.token, http.MethodPost, "/notifications/read", "", map[string]any{
-		"notification_ids": many(billing.MaxBatchItems+1, func(int) any { return billing.NotificationID(uuid.New()).String() }),
-	})
-	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 
 	grant := map[string]any{"items": []any{map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1000", "source": "support", "source_id": uuid.NewString()}}}
 	status, body = w.staffJSON(http.MethodPost, "/v1/admin/credit-grants", grant)
