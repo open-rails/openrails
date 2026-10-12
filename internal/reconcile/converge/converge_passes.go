@@ -894,6 +894,10 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		if d.SubscriptionID != nil {
 			subID = billing.SubscriptionID(*d.SubscriptionID)
 		}
+		productID := ""
+		if d.ProductID != nil {
+			productID = billing.ProductID(*d.ProductID).String()
+		}
 		subject := "provider_charge:" + d.UserID + ":" + subID.String() + ":" + d.PeriodKey
 		out = append(out, ConvergeFinding{
 			Type:       findingDuplicateCharge,
@@ -904,7 +908,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": d.UserID, "subscription_id": subID.String(), "order_id": d.PeriodKey,
-				"product_id": billing.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
+				"product_id": productID, "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10), "currency": d.Currency,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 			},
