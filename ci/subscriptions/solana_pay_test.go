@@ -23,6 +23,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -59,8 +60,8 @@ type transferRequest struct {
 	memo      string
 }
 
-func newSolanaPay(t *testing.T) *solanaPay {
-	w := prepareWorld(t, 30)
+func newSolanaPay(t *testing.T, configure ...func(*config.Config)) *solanaPay {
+	w := prepareWorld(t, 30, configure...)
 	fake, _ := withSolana(t, w)
 	declared := w.declare
 	w.declare = func(psps map[string]openrails.PSPConfig) {

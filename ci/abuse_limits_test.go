@@ -63,7 +63,7 @@ func newAbuseInstances(t *testing.T, n int, redisConfig *openrails.RedisConfig) 
 	return newAbuseInstancesWithRedis(t, n, redisConfig, nil)
 }
 
-func newAbuseInstancesWithRedis(t *testing.T, n int, redisConfig *openrails.RedisConfig, client *redis.Client) *abuseInstances {
+func newAbuseInstancesWithRedis(t *testing.T, n int, redisConfig *openrails.RedisConfig, client redis.UniversalClient) *abuseInstances {
 	t.Helper()
 	f := newFixture(t)
 	cfg := f.config()

@@ -19,8 +19,10 @@ type Deps struct {
 	// Postgres is the host's pool; its role owns OpenRails' tables, which New
 	// creates or upgrades. Nil opens one from Config.DB.
 	Postgres *pgxpool.Pool
-	// Redis is optional shared storage for rate limits and abuse statistics.
-	Redis *redis.Client
+	// Redis is optional shared storage for rate limits and abuse statistics:
+	// a single-node, failover (Sentinel) or cluster client. The host owns it;
+	// OpenRails never closes it.
+	Redis redis.UniversalClient
 	// Vault is a borrowed, authenticated client; Config.Vault still names its
 	// mounts. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client

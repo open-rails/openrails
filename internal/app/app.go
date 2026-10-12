@@ -22,7 +22,7 @@ import (
 type App struct {
 	Config      *config.Config
 	Runtime     *Runtime
-	RedisClient *redis.Client
+	RedisClient redis.UniversalClient
 
 	// Standalone marks the engine of a standalone server (package server),
 	// which owns merchant identity and the HTTP surface: the embedded mount
@@ -41,7 +41,7 @@ type BootstrapOptions struct {
 	// FXTransport replaces the FX sources' wire (test seam).
 	FXTransport http.RoundTripper
 	PGXPool     *pgxpool.Pool
-	Redis       *redis.Client
+	Redis       redis.UniversalClient
 	Clock       clockwork.Clock
 	// EmailSender replaces the sender Config.SMTP selects.
 	EmailSender config.EmailSender
@@ -128,7 +128,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			}
 			return nil
 		}(),
-		Redis: func() *redis.Client {
+		Redis: func() redis.UniversalClient {
 			if opts != nil {
 				return opts.Redis
 			}

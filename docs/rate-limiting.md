@@ -5,7 +5,8 @@ OpenRails rate-limits on a fixed 1-minute window, per *bucket* (endpoint categor
 **any** trips — headers reflect the strictest. Counters, admin lockouts, captcha challenges and
 card-testing declines live in Redis when configured, shared by every instance, and otherwise in each process's memory,
 for one instance only: several instances need Redis. While a configured Redis does not answer,
-each process keeps them in its own memory and readiness reports Redis degraded. Never in
+each process keeps them in its own memory and readiness reports Redis degraded; once it answers,
+what memory counted meanwhile still counts. Never in
 PostgreSQL. One net/http middleware
 (`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
 embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.

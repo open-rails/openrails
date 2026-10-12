@@ -26,7 +26,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			name = "redis unavailable"
 		}
 		t.Run(name, func(t *testing.T) {
-			var rdb *redis.Client
+			var rdb redis.UniversalClient
 			var dials atomic.Int64
 			if unavailable {
 				rdb = redis.NewClient(&redis.Options{

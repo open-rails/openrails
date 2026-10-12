@@ -27,7 +27,7 @@ var errNotReached = errors.New("not reached yet")
 // Store is one process's abuse state. Its methods never fail a request: what
 // Redis cannot take, memory does.
 type Store struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 	now func() time.Time
 
 	counts, holds, marks, values *table
@@ -41,7 +41,7 @@ type Store struct {
 }
 
 // New is the store over rdb; nil keeps everything in memory.
-func New(rdb *redis.Client) *Store {
+func New(rdb redis.UniversalClient) *Store {
 	return &Store{
 		rdb: rdb, now: time.Now,
 		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit), values: newTable(tableLimit),
@@ -52,7 +52,8 @@ func New(rdb *redis.Client) *Store {
 func (s *Store) SetClock(now func() time.Time) { s.now = now }
 
 // Count adds n to key's current window, a clock-aligned span of window, and
-// returns the window's count and the time until it ends.
+// returns the window's count and the time until it ends. What memory counted
+// while Redis was down still counts once it answers again.
 func (s *Store) Count(ctx context.Context, key string, n int64, window time.Duration) (int64, time.Duration) {
 	now := s.now()
 	k, end := windowKey(key, window, now)
@@ -63,7 +64,7 @@ func (s *Store) Count(ctx context.Context, key string, n int64, window time.Dura
 		incr := pipe.IncrBy(ctx, k, n)
 		_, err := pipe.Exec(ctx)
 		if err == nil {
-			return incr.Val(), ttl
+			return incr.Val() + s.counts.get(k, now), ttl
 		}
 		s.fail(ctx, err)
 	}
@@ -206,7 +207,12 @@ func (s *Store) release(ctx context.Context, t *table, keys []string) error {
 	if s.down.Load() {
 		return s.RedisErr()
 	}
-	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+	// One DEL per key: a cluster refuses one that spans hash slots.
+	pipe := s.rdb.Pipeline()
+	for _, key := range keys {
+		pipe.Del(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
 		s.fail(ctx, err)
 		return err
 	}
@@ -220,7 +226,9 @@ func (s *Store) Probe(ctx context.Context) error {
 		return nil
 	}
 	err := s.rdb.Ping(ctx).Err()
-	if ctx.Err() != nil {
+	// A probe out of time is a Redis that does not answer; a canceled one is
+	// shutdown.
+	if errors.Is(ctx.Err(), context.Canceled) {
 		return err
 	}
 	s.record(err)

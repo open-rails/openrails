@@ -857,7 +857,7 @@ func TestLinkChallengesCrossInstancesThroughRedis(t *testing.T) {
 		t.Fatal("OPENRAILS_E2E_REDIS_ADDR must point at a disposable Redis")
 	}
 	graph, _ := operator.Of(w.srv)
-	instance := func(rdb *redis.Client) *network.Service {
+	instance := func(rdb redis.UniversalClient) *network.Service {
 		s, err := network.New(graph.Runtime.DB, w.srv.AuthKit(), abusestate.New(rdb), nil)
 		require.NoError(t, err)
 		return s

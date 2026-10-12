@@ -13,6 +13,7 @@ import (
 
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -74,7 +75,7 @@ type runtimeOverrides struct {
 	NMITransport    http.RoundTripper
 	FXTransport     http.RoundTripper
 	DB              *db.DB
-	Redis           *redis.Client
+	Redis           redis.UniversalClient
 	Clock           clockwork.Clock
 	EmailSender     config.EmailSender
 	UserInfo        userinfo.Lookup
@@ -151,7 +152,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	var (
 		database    *db.DB
-		redisClient *redis.Client
+		redisClient redis.UniversalClient
 		err         error
 	)
 	var chain fs.FS
@@ -174,7 +175,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 
 	redisOwned := false
-	if overrides != nil && overrides.Redis != nil {
+	if overrides != nil && !nilRedis(overrides.Redis) {
 		redisClient = overrides.Redis
 	} else {
 		redisClient, err = createRedisClient(cfg)
@@ -493,7 +494,7 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 
 // createRedisClient opens the declared Redis. It does not wait for it: the
 // health monitor reports it, degraded until it answers.
-func createRedisClient(cfg *config.Config) (*redis.Client, error) {
+func createRedisClient(cfg *config.Config) (redis.UniversalClient, error) {
 	if cfg.Redis == nil {
 		return nil, nil
 	}
@@ -503,6 +504,16 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	}
 	log.WithFields(log.Fields{"addr": opts.Addr, "tls": opts.TLSConfig != nil, "acl_user": opts.Username != ""}).Info("Redis declared")
 	return redis.NewClient(opts), nil
+}
+
+// nilRedis reports a missing client, including a nil pointer a host passed
+// as Deps.Redis.
+func nilRedis(c redis.UniversalClient) bool {
+	if c == nil {
+		return true
+	}
+	v := reflect.ValueOf(c)
+	return v.Kind() == reflect.Pointer && v.IsNil()
 }
 
 type servicesInstances struct {

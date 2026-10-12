@@ -2,7 +2,9 @@ package abusestate
 
 import (
 	"context"
+	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,4 +128,46 @@ func TestUnreachableRedisFallsBackToMemory(t *testing.T) {
 	require.Equal(t, []int64{1}, s.Marked(ctx, at, "fails"))
 	require.EqualValues(t, 7, s.Fallbacks(), "each operation memory took")
 	require.Error(t, s.Probe(ctx))
+}
+
+// A Redis that takes connections and never answers is down once a probe runs
+// out of time; a canceled probe is shutdown and records nothing.
+func TestSilentRedisIsDown(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	rdb := redis.NewClient(&redis.Options{Addr: ln.Addr().String(), MaxRetries: -1, ReadTimeout: 300 * time.Millisecond})
+	t.Cleanup(func() { _ = rdb.Close() })
+	s := New(rdb)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, s.Probe(canceled))
+	require.ErrorIs(t, s.RedisErr(), errNotReached, "shutdown is not Redis failing")
+
+	timed, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	require.Error(t, s.Probe(timed))
+	require.Error(t, s.RedisErr())
+	require.NotErrorIs(t, s.RedisErr(), errNotReached)
 }

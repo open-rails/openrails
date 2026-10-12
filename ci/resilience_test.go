@@ -79,7 +79,7 @@ type resilientBoot struct {
 // resilientRuntime is a started engine and its merchant's handle.
 func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
-	var rdb *redis.Client
+	var rdb redis.UniversalClient
 	if b.redisDown {
 		rdb = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
 		t.Cleanup(func() { _ = rdb.Close() })

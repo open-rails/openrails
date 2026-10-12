@@ -98,7 +98,7 @@ func attacked(deps RateLimitDeps, next http.Handler) http.Handler {
 
 // stillState is abuse state whose clock stands mid-window, so a test's
 // requests never straddle a clock-aligned window's end.
-func stillState(rdb *redis.Client) *abusestate.Store {
+func stillState(rdb redis.UniversalClient) *abusestate.Store {
 	s := abusestate.New(rdb)
 	at := time.Date(2026, 1, 1, 12, 0, 30, 0, time.UTC)
 	s.SetClock(func() time.Time { return at })

@@ -19,6 +19,7 @@ database is missing.
 ```bash
 OPENRAILS_E2E_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
 OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
+OPENRAILS_E2E_REDIS_OUTAGE_ADDR=127.0.0.1:6381 OPENRAILS_E2E_REDIS_OUTAGE_CONTAINER=e2e-redis-outage \
 OPENRAILS_E2E_VAULT_ADDR=http://127.0.0.1:8200 OPENRAILS_E2E_VAULT_TOKEN=e2e-root \
   bash scripts/e2e.sh
 ```
@@ -31,6 +32,9 @@ and its own database (created with `psql` on `OPENRAILS_E2E_DSN`'s server),
 `OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`,
 keyed by package directory; a test missing from it counts as the median. Redis is needed by the
 tests of several instances sharing limits and the card-attack captcha tests.
+`TestRedisLossAndRecoveryMidFlow` pauses and resumes its own Redis container
+(`docker pause`), named by `OPENRAILS_E2E_REDIS_OUTAGE_CONTAINER` and reached at
+`OPENRAILS_E2E_REDIS_OUTAGE_ADDR`; no other test may use it.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
   catalog and merchant isolation, orders and their attempts, signed

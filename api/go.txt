@@ -356,7 +356,7 @@ pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
-pkg openrails, type Deps struct, Redis *redis.Client
+pkg openrails, type Deps struct, Redis redis.UniversalClient
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
 pkg openrails, type Deps struct, UserInfo config.UserInfo
 pkg openrails, type Deps struct, Vault *api.Client

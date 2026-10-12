@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,7 @@ func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush 
 type AdmissionDenialFlushWorker struct {
 	river.WorkerDefaults[AdmissionDenialFlushArgs]
 	DB    *db.DB
-	Redis *redis.Client
+	Redis redis.UniversalClient
 	Clock clockwork.Clock
 }
 
@@ -49,25 +50,39 @@ func (w AdmissionDenialFlushWorker) Work(ctx context.Context, job *river.Job[Adm
 	now := clock.Now().UTC()
 	logger := log.WithContext(ctx).WithField("worker", KindAdmissionDenialFlush)
 
-	var cursor uint64
 	flushed := 0
-	for {
-		keys, next, err := w.Redis.Scan(ctx, cursor, admission.DenialKeyPrefix+"*", 100).Result()
-		if err != nil {
+	scan := func(ctx context.Context, node redis.UniversalClient) error {
+		var cursor uint64
+		for {
+			keys, next, err := node.Scan(ctx, cursor, admission.DenialKeyPrefix+"*", 100).Result()
+			if err != nil {
+				return err
+			}
+			for _, key := range keys {
+				n, err := w.flushKey(ctx, key, now)
+				if err != nil {
+					logger.WithError(err).WithField("key", key).Error("denial flush failed for key")
+					continue // other keys still flush; this one retries next cycle
+				}
+				flushed += n
+			}
+			if cursor = next; cursor == 0 {
+				return nil
+			}
+		}
+	}
+	// A cluster's SCAN reads one node: scan each primary.
+	if cluster, ok := w.Redis.(*redis.ClusterClient); ok {
+		var mu sync.Mutex
+		if err := cluster.ForEachMaster(ctx, func(ctx context.Context, node *redis.Client) error {
+			mu.Lock()
+			defer mu.Unlock()
+			return scan(ctx, node)
+		}); err != nil {
 			return err
 		}
-		for _, key := range keys {
-			n, err := w.flushKey(ctx, key, now)
-			if err != nil {
-				logger.WithError(err).WithField("key", key).Error("denial flush failed for key")
-				continue // other keys still flush; this one retries next cycle
-			}
-			flushed += n
-		}
-		cursor = next
-		if cursor == 0 {
-			break
-		}
+	} else if err := scan(ctx, w.Redis); err != nil {
+		return err
 	}
 	if flushed > 0 {
 		logger.WithField("rows", flushed).Info("flushed admission denial counters")

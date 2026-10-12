@@ -90,7 +90,7 @@ type Runtime struct {
 	DB            *db.DB
 	// leaseDB is the small pool idempotency lease renewals use (#1099).
 	leaseDB     *db.DB
-	RedisClient *redis.Client
+	RedisClient redis.UniversalClient
 	// redisOwned marks a self-dialed client; injected clients are borrowed and
 	// must never be closed here (the host owns their lifecycle).
 	redisOwned bool

@@ -44,6 +44,17 @@ func (t *table) add(key string, n int64, expires, now time.Time) int64 {
 	return n
 }
 
+// get is key's value; zero when absent.
+func (t *table) get(key string, now time.Time) int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	if e, ok := t.entries[key]; ok {
+		return e.value
+	}
+	return 0
+}
+
 // set holds key until expires.
 func (t *table) set(key string, expires, now time.Time) {
 	t.mu.Lock()
