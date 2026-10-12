@@ -134,12 +134,19 @@ func TestObservedInvoiceRecoveryRefusesExistingSubscriptionAllocation(t *testing
 	tier := w.bookTier("allocated-receipt", 5000, 30)
 	paidThrough := w.clock.Now().Add(30 * 24 * time.Hour)
 	schedule := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: tier.plan, Amount: "50.00", NextBilling: paidThrough})
-	_, err := w.client[remote].ImportBilling(t.Context(), billing.DeclaredBilling{
+	imported, err := w.client[remote].ImportBilling(t.Context(), billing.DeclaredBilling{
 		AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
-		Subscriptions: []billing.DeclaredSubscription{{SourceID: "already-allocated", Customer: c.cid(), Price: tier.price.ID, Rail: "nmi", RailSubscriptionID: schedule, StartedAt: w.clock.Now(), PaidThrough: &paidThrough, PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}},
-		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: schedule, TransactionID: sale.TransactionID, Success: true, Amount: 50_000_000, Currency: "USD", OccurredAt: w.clock.Now()}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "already-allocated", Customer: c.cid(), Price: tier.price.ID, Rail: "nmi", RailSubscriptionID: schedule, StartedAt: w.clock.Now(), PaidThrough: &paidThrough,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + schedule, Amount: 50_000_000, Currency: "USD", IntervalHours: 30 * 24, FirstDueAt: w.clock.Now()},
+			PaymentMethod:    &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: schedule, TransactionID: sale.TransactionID, Success: true, Amount: 50_000_000, Currency: "USD", OccurredAt: w.clock.Now(), NextBillingAt: &paidThrough}},
 	})
 	require.NoError(t, err)
+	require.Empty(t, imported.Blocked)
+	require.Equal(t, []string{"already-allocated"}, imported.Imported)
+	var allocated int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments p JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id WHERE p.transaction_id=$1 AND o.origin='subscription'`), sale.TransactionID).Scan(&allocated))
+	require.Equal(t, 1, allocated, "the receipt must already belong to an explicit subscription bill")
 	mid := w.client[embedded].MerchantID()
 	ctx := merchant.WithID(t.Context(), mid)
 	rt := engine.Graph(w.rt).Runtime

@@ -28,6 +28,8 @@ const order = (payment: Record<string, unknown>, status = "open") => ({
   id: "ord_1",
   customer_id: "c1",
   origin: "merchant",
+  collection_owner: "engine",
+  collection_psp_id: null,
   status,
   number: status === "complete" ? "000001" : null,
   currency: "USD",
@@ -92,6 +94,39 @@ const config = {
 }
 
 describe("OrderCheckout", () => {
+  it.each(["provider", "nmi_schedule"])(
+    "shows %s bills without another collector or confirmation",
+    async (collectionOwner) => {
+      fakeStripe.handleNextAction.mockClear()
+      const fetch = vi.fn(async (input: string) => {
+        if (input.endsWith("/me/config")) return Response.json(config)
+        if (input.endsWith("/config")) return Response.json(deployment)
+        if (input.endsWith("/me/orders/ord_1"))
+          return Response.json({
+            ...order({
+              status: "requires_action",
+              next_action: {
+                type: "authenticate",
+                psp_id: "psp_stripe",
+                payload: { client_secret: "must_not_use" },
+              },
+            }),
+            collection_owner: collectionOwner,
+          })
+        return Response.json({}, { status: 404 })
+      })
+      render(
+        <BillingProvider client={createBillingClient({ fetch })}>
+          <OrderCheckout orderId="ord_1" />
+        </BillingProvider>
+      )
+      expect(await screen.findByText(/This bill is collected by the payment provider/)).toBeTruthy()
+      expect(screen.queryByRole("button", { name: /Pay |Confirm payment/ })).toBeNull()
+      expect(fakeStripe.handleNextAction).not.toHaveBeenCalled()
+      expect(fetch.mock.calls.some(([path]) => /payment-methods|\/pay$|\/confirm$/.test(path))).toBe(false)
+    }
+  )
+
   it("has the customer authenticate a renewal their bank challenged", async () => {
     const renewal = (payment: Record<string, unknown>, status = "open") => ({
       ...order(payment, status),

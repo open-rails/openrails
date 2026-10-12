@@ -54,12 +54,7 @@ type Payment struct {
 	OrderID *OrderID `json:"order_id"`
 	// Quantity is the seats a subscription payment billed; null on a payment
 	// that bills no seats.
-	Quantity *int `json:"quantity"`
-	// PriceID, Price and Product are what a one-price charge bought; a
-	// refund names its charge's. Null on an order's payment.
-	PriceID           *PriceID        `json:"price_id"`
-	Price             *Price          `json:"price"`
-	Product           *ProductSummary `json:"product"`
+	Quantity          *int            `json:"quantity"`
 	Channel           PaymentChannel  `json:"channel"`
 	Rail              *string         `json:"rail"`
 	PSPID             *PSPID          `json:"psp_id"`

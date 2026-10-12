@@ -16,7 +16,7 @@ func TestReadArchiveBeforeUsageOrders(t *testing.T) {
 	const order = "10000000-0000-0000-0000-000000000009"
 	ordersProfile, orderRow := row(t, "orders", map[string]string{"merchant_id": testMerchant, "id": order, "customer_id": testMerchant, "origin": "customer",
 		"status": "open", "payment_status": "requires_payment_method", "currency": "USD", "total": "100", "created_at": "2026-09-01 00:00:00+00", "updated_at": "2026-09-01 00:00:00+00"})
-	orderRow = orderRow[:len(ordersProfile.Columns)-orderUsageColumns]
+	orderRow = orderRow[:len(ordersProfile.Columns)-2-orderUsageColumns]
 	paymentsProfile, paymentRow := row(t, "payments", map[string]string{"merchant_id": testMerchant, "id": order, "order_id": order})
 	at := slices.IndexFunc(paymentsProfile.Columns, func(c Column) bool { return c.Name == "ledger_transfer_id" })
 	paymentRow = slices.Insert(paymentRow, at, nil) // invoice_id

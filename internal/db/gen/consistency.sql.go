@@ -14,59 +14,31 @@ import (
 
 const conDuplicateChargesSamePeriod = `-- name: ConDuplicateChargesSamePeriod :many
 WITH charges AS (
-    SELECT purch.id, purch.customer_id, purch.subscription_id, purch.price_id, purch.amount, purch.currency, purch.purchased_at,
-           price.product_id, prod.key AS product_key,
-           purch.metadata->>'period_start' AS period_start,
-           LEAST(price.billing_interval_hours, COALESCE(price.trial_duration_hours, price.billing_interval_hours)) AS cycle_hours
-    FROM billing.payments purch
-    JOIN billing.prices price ON purch.price_id = price.id
-    JOIN billing.products prod ON price.product_id = prod.id
-    WHERE purch.merchant_id = $1::uuid AND price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND purch.deleted_at IS NULL
-      AND purch.subscription_id IS NOT NULL
-      AND purch.status = 'succeeded'
-      AND purch.money_movement = 'rail'
-      AND purch.amount > 0
-      AND purch.refunded_payment_id IS NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM billing.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
-      )
-      AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
-),
-unstamped AS (
-    SELECT c.id, c.customer_id, c.subscription_id, c.price_id, c.amount, c.currency, c.purchased_at, c.product_id, c.product_key, c.period_start, c.cycle_hours, LAG(c.id) OVER w AS prev_id, LAG(c.purchased_at) OVER w AS prev_at
-    FROM charges c
-    WHERE c.period_start IS NULL
-    WINDOW w AS (PARTITION BY c.subscription_id, c.price_id ORDER BY c.purchased_at, c.id)
-),
-groups AS (
-    SELECT subscription_id, period_start AS period_key, id, customer_id, product_id, product_key, amount, currency, purchased_at
-    FROM charges
-    WHERE period_start IS NOT NULL
-      AND (subscription_id, period_start) IN (
-          SELECT subscription_id, period_start FROM charges WHERE period_start IS NOT NULL
-          GROUP BY subscription_id, period_start HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT u.subscription_id, to_char(p.purchased_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), x.id, x.customer_id, x.product_id, x.product_key, x.amount, x.currency, x.purchased_at
-    FROM unstamped u
-    JOIN charges p ON p.id = u.prev_id
-    JOIN charges x ON x.id IN (u.id, u.prev_id)
-    WHERE u.cycle_hours IS NOT NULL AND u.cycle_hours > 0
-      AND u.purchased_at - u.prev_at < make_interval(secs => u.cycle_hours * 1800)
+    SELECT p.id, p.customer_id, p.subscription_id, p.order_id, p.amount, p.currency, p.purchased_at,
+           o.total,
+           p.amount + COALESCE((SELECT SUM(r.amount) FROM billing.payments r
+             WHERE r.merchant_id=p.merchant_id AND r.refunded_payment_id=p.id
+               AND r.status='succeeded' AND r.deleted_at IS NULL),0) AS net_amount
+    FROM billing.payments p
+    JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id
+    WHERE p.merchant_id=$1::uuid AND p.deleted_at IS NULL
+      AND p.subscription_id IS NOT NULL AND p.status IN ('succeeded','refunded')
+      AND p.money_movement='rail' AND p.amount>0 AND p.refunded_payment_id IS NULL
+      AND ($2::uuid IS NULL OR p.customer_id=$2::uuid)
+), excess AS (
+    SELECT subscription_id, order_id, MIN(customer_id::text)::text AS user_id,
+           COUNT(*)::int AS count, ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
+           SUM(net_amount)::bigint AS total_amount, MIN(currency)::text AS currency,
+           MIN(purchased_at)::timestamptz AS first_date, MAX(purchased_at)::timestamptz AS last_date
+    FROM charges GROUP BY subscription_id, order_id HAVING SUM(net_amount)>MAX(total)
 )
-SELECT
-    subscription_id,
-    period_key::text AS period_key,
-    MIN(customer_id::text)::text AS user_id,
-    MIN(product_id::text)::uuid AS product_id,
-    MIN(product_key)::text AS product_key,
-    COUNT(*)::int AS count,
-    ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
-    SUM(amount)::bigint AS total_amount,
-    MIN(currency)::text AS currency,
-    MIN(purchased_at)::timestamptz AS first_date,
-    MAX(purchased_at)::timestamptz AS last_date
-FROM groups
-GROUP BY subscription_id, period_key
+SELECT e.subscription_id, e.order_id::text AS period_key, e.user_id,
+       l.product_id, l.product_key, e.count, e.payment_ids, e.total_amount, e.currency, e.first_date, e.last_date
+FROM excess e
+JOIN LATERAL (SELECT line.product_id, prod.key::text AS product_key
+    FROM billing.order_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
+    WHERE line.merchant_id=$1::uuid AND line.order_id=e.order_id
+    ORDER BY line.position LIMIT 1) l ON true
 `
 
 type ConDuplicateChargesSamePeriodParams struct {
@@ -78,7 +50,7 @@ type ConDuplicateChargesSamePeriodRow struct {
 	SubscriptionID *uuid.UUID
 	PeriodKey      string
 	UserID         string
-	ProductID      uuid.UUID
+	ProductID      *uuid.UUID
 	ProductKey     string
 	Count          int32
 	PaymentIds     []uuid.UUID
@@ -88,10 +60,9 @@ type ConDuplicateChargesSamePeriodRow struct {
 	LastDate       time.Time
 }
 
-// More than one captured charge for one subscription period (metadata
-// period_start). A charge without one is judged by cadence: two at one price
-// within half the shortest cycle (billing or trial); a price change starts new
-// coverage. Distinct periods are never a duplicate. Refunds net out both ways.
+// A subscription order may have multiple genuine partial payments. Report
+// excess net captured money against its frozen total, never infer duplicate
+// periods from current price cadence or receipt-time proximity.
 func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDuplicateChargesSamePeriodParams) ([]ConDuplicateChargesSamePeriodRow, error) {
 	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID)
 	if err != nil {

@@ -879,8 +879,7 @@ type BillingOwnershipClaim struct {
 
 // Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
-	ID      uuid.UUID
-	PriceID *uuid.UUID
+	ID uuid.UUID
 	// How the money arrived: rail (through a PSP) or manual (recorded by the merchant). Manual rows have no rail and no PSP.
 	Channel       string
 	Rail          *string
@@ -923,7 +922,7 @@ type BillingPayment struct {
 	MoneyMovement string
 	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
 	CreditGrantSnapshot []byte
-	// The order this charge (or its refund) paid; its lines say what it bought, and price_id is then NULL.
+	// Required immutable bill identity for every payment and reversal. Prices and products belong to the order lines.
 	OrderID *uuid.UUID
 	// The owed payment that settled a usage order's charge or remittance. A balance repayment moves no money and is only its ledger transfer.
 	LedgerTransferID *uuid.UUID

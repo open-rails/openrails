@@ -48,7 +48,7 @@ SET status = $1::text, payment_status = 'requires_payment_method',
     expired_at = CASE WHEN $1::text = 'expired' THEN $2::timestamptz ELSE expired_at END,
     updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND status = 'open' AND $1::text IN ('canceled', 'expired')
+  AND collection_owner = 'engine' AND status = 'open' AND $1::text IN ('canceled', 'expired')
 `
 
 type CloseOrderParams struct {
@@ -271,7 +271,7 @@ const deleteClosedUnpaidOrders = `-- name: DeleteClosedUnpaidOrders :execrows
 DELETE FROM billing.orders o
 WHERE o.ctid IN (
     SELECT c.ctid FROM billing.orders c
-    WHERE c.merchant_id = $1::uuid AND c.status IN ('canceled', 'expired')
+    WHERE c.merchant_id = $1::uuid AND c.collection_owner = 'engine' AND c.status IN ('canceled', 'expired')
       AND c.payment_id IS NULL AND c.attempt_id IS NULL
       AND COALESCE(c.canceled_at, c.expired_at) < $2::timestamptz
       AND NOT EXISTS (SELECT 1 FROM billing.checkout_attempts a WHERE a.merchant_id = c.merchant_id AND a.order_id = c.id)
@@ -841,7 +841,7 @@ func (q *Queries) HandOverOwnershipClaim(ctx context.Context, arg HandOverOwners
 
 const listExpiredOrders = `-- name: ListExpiredOrders :many
 SELECT id FROM billing.orders
-WHERE merchant_id = $1::uuid AND status = 'open'
+WHERE merchant_id = $1::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= $2::timestamptz
 ORDER BY expires_at
 LIMIT $3::int
@@ -999,10 +999,10 @@ func (q *Queries) ListOrderLines(ctx context.Context, arg ListOrderLinesParams) 
 const listOrderSweepMerchants = `-- name: ListOrderSweepMerchants :many
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
-    WHERE status = 'open' AND expires_at <= $1::timestamptz
+    WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= $1::timestamptz
     UNION
     SELECT merchant_id FROM billing.orders
-    WHERE status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
+    WHERE collection_owner = 'engine' AND status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
       AND COALESCE(canceled_at, expired_at) < $2::timestamptz
 ) due
 LIMIT $3::int

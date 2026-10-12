@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 )
 
-func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
+func TestDurationHistoricalArchiveRefusesOrderlessPayments(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	client := w.client[embedded]
@@ -73,25 +74,15 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 	destination, err := db.NewWithPGXPool(w.pool, schema)
 	require.NoError(t, err)
 	before := e.providerAttempts()
-	result, err := merchantarchive.Restore(t.Context(), destination, client.MerchantID(), bytes.NewReader(historical.Bytes()))
-	require.NoError(t, err)
-	require.False(t, result.Replayed)
-	var cadence, access int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT p.billing_interval_hours,s.access_duration_hours_snapshot FROM "+quoted+".subscriptions s JOIN "+quoted+".prices p ON p.id=s.price_id WHERE s.id=$1", e.sub.UUID()).Scan(&cadence, &access))
-	require.Equal(t, 720, cadence)
-	require.Equal(t, 720, access)
-	var finite bool
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT bool_and(ends_at IS NOT NULL) FROM "+quoted+".product_access WHERE source_type='subscription' AND source_id=$1", e.sub.UUID().String()).Scan(&finite))
-	require.True(t, finite, "old open projections recover their paid grant bounds")
-	var changed int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM (SELECT id,starts_at,ends_at FROM "+pgx.Identifier{w.schema}.Sanitize()+".grants EXCEPT SELECT id,starts_at,ends_at FROM "+quoted+".grants) changed").Scan(&changed))
-	require.Zero(t, changed, "the immutable paid ledger is preserved exactly")
-	var windows int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM (SELECT product_id,source_type,source_id,starts_at,ends_at FROM "+pgx.Identifier{w.schema}.Sanitize()+".product_access EXCEPT SELECT product_id,source_type,source_id,starts_at,ends_at FROM "+quoted+".product_access) changed").Scan(&windows))
-	require.Zero(t, windows, "converted product access matches the source's")
-	replay, err := merchantarchive.Restore(t.Context(), destination, client.MerchantID(), bytes.NewReader(historical.Bytes()))
-	require.NoError(t, err)
-	require.True(t, replay.Replayed)
-	require.Equal(t, result.Digest, replay.Digest)
-	require.Equal(t, before, e.providerAttempts(), "restoring historical terms never bills the provider")
+	_, err = merchantarchive.Restore(t.Context(), destination, client.MerchantID(), bytes.NewReader(historical.Bytes()))
+	var refusal *merchantarchive.Error
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, "invalid_artifact", refusal.Code)
+	require.ErrorContains(t, errors.Unwrap(err), "payments without order identity")
+	for _, table := range []string{"products", "prices", "subscriptions", "payments", "grants"} {
+		var rows int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+quoted+"."+table).Scan(&rows))
+		require.Zero(t, rows, "refused archive must roll back every retained row")
+	}
+	require.Equal(t, before, e.providerAttempts(), "refusing historical terms never bills the provider")
 }

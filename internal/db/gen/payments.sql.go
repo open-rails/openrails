@@ -106,7 +106,7 @@ func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRef
 const createPayment = `-- name: CreatePayment :execrows
 
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, credit_grant_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -114,32 +114,32 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement, order_id, quantity
 ) VALUES (
-    $1, $6::uuid, $2, $7::text, $8::text, $3, $4, $5,
-    $9,
-    $10::text,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    $17,
+    $1::uuid, $2::uuid, $3::text, $4::text,
+    $5::text, $6::bigint, $7::bigint,
+    $8,
+    $9::text,
+    $10, $11,
+    $12, $13,
+    $14, $15,
+    $16,
+    COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $20, $21, $22,
-    $23::uuid,
-    $24, $25, $26, $27,
-    $28,
-    $29::text, $30::uuid, $31::int
+    $19, $20, $21,
+    $22::uuid,
+    $23, $24, $25, $26,
+    $27,
+    $28::text, $29::uuid, $30::int
 )
 `
 
 type CreatePaymentParams struct {
 	ID                  uuid.UUID
-	PriceID             *uuid.UUID
-	TransactionID       string
-	Amount              int64
-	ListAmount          int64
 	MerchantID          uuid.UUID
 	Channel             string
 	Rail                *string
+	TransactionID       string
+	Amount              int64
+	ListAmount          int64
 	Currency            string
 	Status              string
 	SubscriptionID      *uuid.UUID
@@ -171,13 +171,12 @@ type CreatePaymentParams struct {
 func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPayment,
 		arg.ID,
-		arg.PriceID,
-		arg.TransactionID,
-		arg.Amount,
-		arg.ListAmount,
 		arg.MerchantID,
 		arg.Channel,
 		arg.Rail,
+		arg.TransactionID,
+		arg.Amount,
+		arg.ListAmount,
 		arg.Currency,
 		arg.Status,
 		arg.SubscriptionID,
@@ -210,7 +209,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 
 const createPaymentIfNotExists = `-- name: CreatePaymentIfNotExists :execrows
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, credit_grant_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -218,33 +217,33 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement, order_id, quantity
 ) VALUES (
-    $1, $6::uuid, $2, $7::text, $8::text, $3, $4, $5,
-    $9,
-    $10::text,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    $17,
+    $1::uuid, $2::uuid, $3::text, $4::text,
+    $5::text, $6::bigint, $7::bigint,
+    $8,
+    $9::text,
+    $10, $11,
+    $12, $13,
+    $14, $15,
+    $16,
+    COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $20, $21, $22,
-    $23::uuid,
-    $24, $25, $26, $27,
-    $28,
-    $29::text, $30::uuid, $31::int
+    $19, $20, $21,
+    $22::uuid,
+    $23, $24, $25, $26,
+    $27,
+    $28::text, $29::uuid, $30::int
 )
 ON CONFLICT DO NOTHING
 `
 
 type CreatePaymentIfNotExistsParams struct {
 	ID                  uuid.UUID
-	PriceID             *uuid.UUID
-	TransactionID       string
-	Amount              int64
-	ListAmount          int64
 	MerchantID          uuid.UUID
 	Channel             string
 	Rail                *string
+	TransactionID       string
+	Amount              int64
+	ListAmount          int64
 	Currency            string
 	Status              string
 	SubscriptionID      *uuid.UUID
@@ -273,13 +272,12 @@ type CreatePaymentIfNotExistsParams struct {
 func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymentIfNotExistsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPaymentIfNotExists,
 		arg.ID,
-		arg.PriceID,
-		arg.TransactionID,
-		arg.Amount,
-		arg.ListAmount,
 		arg.MerchantID,
 		arg.Channel,
 		arg.Rail,
+		arg.TransactionID,
+		arg.Amount,
+		arg.ListAmount,
 		arg.Currency,
 		arg.Status,
 		arg.SubscriptionID,
@@ -329,7 +327,7 @@ func (q *Queries) DeletePayment(ctx context.Context, arg DeletePaymentParams) (i
 }
 
 const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionID :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $2::uuid AND purch.subscription_id = $1
   AND purch.amount > 0
   AND COALESCE(purch.status::text, 'succeeded') = 'succeeded'
@@ -348,7 +346,6 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, arg GetLa
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -408,7 +405,7 @@ func (q *Queries) GetLatestPaidPaymentIDForSubscription(ctx context.Context, arg
 }
 
 const getPaymentByID = `-- name: GetPaymentByID :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments WHERE payments.merchant_id = $2::uuid AND id = $1
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments WHERE payments.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
 `
 
@@ -422,7 +419,6 @@ func (q *Queries) GetPaymentByID(ctx context.Context, arg GetPaymentByIDParams) 
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -461,7 +457,7 @@ func (q *Queries) GetPaymentByID(ctx context.Context, arg GetPaymentByIDParams) 
 }
 
 const getPaymentByNMISubscriptionOrder = `-- name: GetPaymentByNMISubscriptionOrder :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $1::uuid AND purch.psp_id = $2::uuid
   AND purch.metadata ->> 'nmi_subscription_order_id' = $3::text
   AND purch.deleted_at IS NULL
@@ -479,7 +475,6 @@ func (q *Queries) GetPaymentByNMISubscriptionOrder(ctx context.Context, arg GetP
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -518,7 +513,7 @@ func (q *Queries) GetPaymentByNMISubscriptionOrder(ctx context.Context, arg GetP
 }
 
 const getPaymentByPSPTransactionID = `-- name: GetPaymentByPSPTransactionID :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $1::uuid
   AND purch.psp_id IS NOT DISTINCT FROM $2::uuid
   AND purch.channel = $3::text AND purch.rail IS NOT DISTINCT FROM $4::text
@@ -545,7 +540,6 @@ func (q *Queries) GetPaymentByPSPTransactionID(ctx context.Context, arg GetPayme
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -584,7 +578,7 @@ func (q *Queries) GetPaymentByPSPTransactionID(ctx context.Context, arg GetPayme
 }
 
 const getPaymentByStripeInvoice = `-- name: GetPaymentByStripeInvoice :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $1::uuid AND purch.psp_id = $2::uuid
   AND purch.metadata ->> 'stripe_invoice_id' = $3::text
   AND purch.deleted_at IS NULL
@@ -602,7 +596,6 @@ func (q *Queries) GetPaymentByStripeInvoice(ctx context.Context, arg GetPaymentB
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -688,7 +681,7 @@ func (q *Queries) GetPaymentRefundTotals(ctx context.Context, arg GetPaymentRefu
 }
 
 const getRefundByAdminIdempotencyKey = `-- name: GetRefundByAdminIdempotencyKey :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $2::uuid AND purch.refunded_payment_id = $1
   AND purch.metadata ->> 'admin_refund_idempotency_key' = $3::text
   AND purch.deleted_at IS NULL
@@ -706,7 +699,6 @@ func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRef
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
 		&i.TransactionID,
@@ -854,7 +846,7 @@ func (q *Queries) LinkRefundedPayment(ctx context.Context, arg LinkRefundedPayme
 }
 
 const listObservedInitialMembershipPayments = `-- name: ListObservedInitialMembershipPayments :many
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
 WHERE merchant_id=$1::uuid
   AND subscription_id=$2::uuid
   AND metadata->>'order_id'=$3::text
@@ -879,7 +871,6 @@ func (q *Queries) ListObservedInitialMembershipPayments(ctx context.Context, arg
 		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
 			&i.TransactionID,
@@ -925,7 +916,7 @@ func (q *Queries) ListObservedInitialMembershipPayments(ctx context.Context, arg
 }
 
 const listPaymentsByCustomer = `-- name: ListPaymentsByCustomer :many
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments purch
 WHERE purch.merchant_id = $1::uuid
   AND purch.customer_id = $2::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
@@ -949,7 +940,6 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, arg ListPaymentsBy
 		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
 			&i.TransactionID,
@@ -995,7 +985,7 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, arg ListPaymentsBy
 }
 
 const listPaymentsByIDs = `-- name: ListPaymentsByIDs :many
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
 `
@@ -1016,7 +1006,6 @@ func (q *Queries) ListPaymentsByIDs(ctx context.Context, arg ListPaymentsByIDsPa
 		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
 			&i.TransactionID,
@@ -1062,7 +1051,7 @@ func (q *Queries) ListPaymentsByIDs(ctx context.Context, arg ListPaymentsByIDsPa
 }
 
 const listPaymentsPage = `-- name: ListPaymentsPage :many
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments p
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments p
 WHERE p.merchant_id = $1::uuid
   AND COALESCE(p.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND p.deleted_at IS NULL
@@ -1128,7 +1117,6 @@ func (q *Queries) ListPaymentsPage(ctx context.Context, arg ListPaymentsPagePara
 		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
 			&i.TransactionID,
@@ -1210,7 +1198,7 @@ func (q *Queries) ListRefundRowsForTotal(ctx context.Context, arg ListRefundRows
 }
 
 const listRefundsForPayment = `-- name: ListRefundsForPayment :many
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
 WHERE payments.merchant_id = $2::uuid AND refunded_payment_id = $1
   AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -1232,7 +1220,6 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, arg ListRefundsForP
 		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
 			&i.TransactionID,

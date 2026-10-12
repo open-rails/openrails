@@ -51,8 +51,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id
   AND status IN ('succeeded', 'refunded') AND deleted_at IS NULL;
 
 -- name: LinkAcceptedRenewalPaymentOrder :execrows
-UPDATE billing.payments p SET order_id = sqlc.arg(order_id)::uuid, price_id = NULL
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid
+UPDATE billing.payments p SET order_id = sqlc.arg(order_id)::uuid
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid AND p.deleted_at IS NULL
   AND (p.order_id IS NULL OR p.order_id = sqlc.arg(order_id)::uuid)
   AND EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id = p.merchant_id AND o.id = sqlc.arg(order_id)::uuid
     AND o.customer_id = p.customer_id AND o.currency = p.currency AND o.subscription_id = p.subscription_id
@@ -60,9 +60,14 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id
 
 -- name: PaymentMatchesOrderPrice :one
 SELECT EXISTS (SELECT 1 FROM billing.payments p JOIN billing.order_lines l ON l.merchant_id = p.merchant_id AND l.order_id = p.order_id
- WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid AND l.price_id = sqlc.arg(price_id)::uuid)::boolean;
+ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid AND l.price_id = sqlc.arg(price_id)::uuid AND p.deleted_at IS NULL)::boolean;
 
--- name: ListProviderBillsForOrder :many
-SELECT * FROM billing.provider_bills
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
-ORDER BY created_at, source_kind, source_key LIMIT 100;
+-- name: ListProviderBillsForOrders :many
+SELECT b.order_id, b.psp_id, b.source_kind, b.provider_reference, b.settlement_source, b.non_cash_amount, b.settled_at
+FROM unnest(sqlc.arg(order_ids)::uuid[]) AS orders(id)
+CROSS JOIN LATERAL (
+    SELECT order_id, psp_id, source_kind, source_key, provider_reference, settlement_source, non_cash_amount, settled_at, created_at
+    FROM billing.provider_bills
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = orders.id
+    ORDER BY created_at, source_kind, source_key LIMIT 100
+) b;

@@ -95,15 +95,11 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			OccurredAt: row.OccurredAt, AcknowledgedAt: row.DeliveredAt}
 		switch event.Type {
 		case billing.HostEventPaymentSettled:
-			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || (row.PaymentPriceID == nil) == (row.PaymentOrderID == nil) && row.PaymentSubscriptionID == nil {
+			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentOrderID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
 			event.Payment = &billing.PaymentSettledEvent{PaymentID: billing.PaymentID(*row.PaymentID), CustomerID: billing.CustomerID(*row.PaymentCustomerID),
 				Amount: *row.Amount, Currency: derefString(row.Currency)}
-			if row.PaymentPriceID != nil {
-				price := billing.PriceID(*row.PaymentPriceID)
-				event.Payment.PriceID = &price
-			}
 			if row.PaymentOrderID != nil {
 				order := billing.OrderID(*row.PaymentOrderID)
 				event.Payment.OrderID = &order

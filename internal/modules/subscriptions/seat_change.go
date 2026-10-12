@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -82,14 +83,15 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 	if err := keepPendingPrice(ctx, txDB, sub, terms.AcceptedAt); err != nil {
 		return err
 	}
+	var payment *models.Payment
 	if terms.Amount > 0 {
 		token := charge.TokenTypePSPToken
 		if custodian != "" {
 			token = payments.DefaultTokenType(string(rail), custodian)
 		}
 		kind := payments.AttemptInitial
-		payment := &models.Payment{
-			ID: terms.PaymentID, CustomerID: sub.CustomerID, PriceID: terms.PriceID, SubscriptionID: &sub.ID,
+		payment = &models.Payment{
+			ID: terms.PaymentID, CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
 			Rail: rail, PspID: &terms.PSPID, TransactionID: transaction,
 			Amount: terms.Amount, ListAmount: terms.RecurringAmount, Currency: terms.Currency,
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
@@ -97,9 +99,21 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 			Metadata:    withPaidPeriod(staff.Metadata(map[string]any{"added_seats": added}), terms.PeriodStart),
 			PurchasedAt: terms.AcceptedAt, CreatedAt: s.now(),
 		}
-		if err := payments.NewPaymentService(txDB, s.Clock()).Create(ctx, payment); err != nil {
-			return fmt.Errorf("record seat increase payment: %w", err)
-		}
+	}
+	description := terms.ProductName
+	if description == "" {
+		description = "Subscription seat increase"
+	}
+	if _, err := observed.Record(ctx, txDB, observed.Bill{
+		PSPID: terms.PSPID, CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
+		Owner: observed.OwnerEngine, Kind: "adjustment", SourceKind: "accepted_seat_change", SourceKey: terms.PaymentID.String(),
+		Currency: terms.Currency, Total: terms.Amount, PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd,
+		Payment: payment, Settled: true, SettlementSource: "cash",
+		Lines: []observed.Line{{PriceID: &terms.PriceID, ProductID: &terms.ProductID, Description: description,
+			Quantity: &added, UnitAmount: terms.Amount / int64(added), Amount: terms.Amount,
+			AccessDurationHours: terms.AccessDurationHours}},
+	}, s.now()); err != nil {
+		return fmt.Errorf("record seat increase order: %w", err)
 	}
 	if err := s.resizeAccess(ctx, txDB, sub, terms.PeriodStart); err != nil || staff == nil {
 		return err

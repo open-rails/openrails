@@ -88,10 +88,10 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	}
 	purchase := func(customer billing.CustomerID, face, paid int64) (*models.Payment, purchasedcredits.Params) {
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
+		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
 			TransactionID: uuid.NewString(), Amount: paid, ListAmount: paid, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now}
-		require.NoError(t, paymentService.Create(ctx, p))
-		params := purchasedcredits.Params{CustomerID: identity.CustomerID(customer), PaymentID: p.ID, ProductID: product.ID.UUID(), Currency: "USD", Amount: face, PaidAmount: paid, StartsAt: now}
+		line := recordFundingOrder(t, ctx, database, p, storedPrice.ID, product.ID.UUID())
+		params := purchasedcredits.Params{CustomerID: identity.CustomerID(customer), PaymentID: p.ID, OrderLineID: line, ProductID: product.ID.UUID(), Currency: "USD", Amount: face, PaidAmount: paid, StartsAt: now}
 		_, err := purchasedcredits.New(database).Fund(ctx, params)
 		require.NoError(t, err)
 		return p, params
@@ -250,7 +250,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.EqualValues(t, 300_000, bal.OwedAmount, "a charged-back repayment is owed again")
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		recovery := &models.Payment{ID: uuid.New(), CustomerID: disputed.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
+		recovery := &models.Payment{ID: uuid.New(), CustomerID: disputed.UUID(), OrderID: payment.OrderID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
 			TransactionID: uuid.NewString(), Amount: 20_000_000, ListAmount: 20_000_000, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt: now, CreatedAt: now, RefundedPaymentID: &payment.ID, ReversalKind: new(payments.ReversalDisputeReversal),
 			Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}}

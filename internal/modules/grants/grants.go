@@ -494,12 +494,12 @@ func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscrip
 // payment that has none (derive-1): [purchased_at, expiration_rfc3339),
 // source purchase, payment-linked so the refund check sees it.
 func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWalletPaymentsRow) error {
-	if !pay.ExpiresAt.After(pay.PurchasedAt) {
+	if pay.ProductID == nil || !pay.ExpiresAt.After(pay.PurchasedAt) {
 		return nil
 	}
 	pid := pay.ID
 	exp := pay.ExpiresAt.UTC()
-	_, err := l.deriveAccessWindow(ctx, customerWindow{Customer: pay.CustomerID, Product: pay.ProductID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Start: pay.PurchasedAt.UTC(), End: &exp})
+	_, err := l.deriveAccessWindow(ctx, customerWindow{Customer: pay.CustomerID, Product: *pay.ProductID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Start: pay.PurchasedAt.UTC(), End: &exp})
 	return err
 }
 

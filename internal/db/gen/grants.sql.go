@@ -1402,10 +1402,10 @@ func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngran
 }
 
 const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
-SELECT p.id, p.customer_id, p.purchased_at,
-       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, pr.product_id
+SELECT DISTINCT p.id, p.customer_id, p.purchased_at,
+       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, l.product_id
 FROM billing.payments p
-JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.order_lines l ON l.order_id = p.order_id AND l.merchant_id = p.merchant_id AND l.product_id IS NOT NULL
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
   AND p.deleted_at IS NULL
@@ -1436,7 +1436,7 @@ type ListUngrantedWalletPaymentsRow struct {
 	CustomerID  uuid.UUID
 	PurchasedAt time.Time
 	ExpiresAt   time.Time
-	ProductID   uuid.UUID
+	ProductID   *uuid.UUID
 }
 
 // derive.wallet.missing: succeeded Solana wallet payments with a stored access

@@ -221,7 +221,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	payload := subscriptions.NMIUpgradePayload{Staff: staffChange(req), Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: instrument, PaymentMethodID: methodRow.ID,
-		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
+		RecurringIntervalHours: *newPrice.RecurringCycleHours(), RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		AccessDurationHours: newPrice.AccessDurationHours, TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"
 	if downgrade {

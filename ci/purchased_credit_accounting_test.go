@@ -46,14 +46,15 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	start := time.Now().UTC().Truncate(time.Microsecond)
 	expiry := start.Add(365 * 24 * time.Hour)
+	orderLines := map[uuid.UUID]uuid.UUID{}
 	newPayment := func(amount int64) *models.Payment {
-		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
+		p := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()),
 			TransactionID: uuid.NewString(), Amount: amount, ListAmount: amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start}
-		require.NoError(t, payments.NewPaymentService(database).Create(ctx, p))
+		orderLines[p.ID] = recordFundingOrder(t, ctx, database, p, storedPrice.ID, product.ID.UUID())
 		return p
 	}
 	payment := newPayment(80_000_000)
-	params := purchasedcredits.Params{CustomerID: identity.CustomerID(customer), PaymentID: payment.ID, ProductID: product.ID.UUID(), Currency: "USD", Amount: 100_000_000, PaidAmount: 80_000_000, StartsAt: start, ExpiresAt: &expiry}
+	params := purchasedcredits.Params{CustomerID: identity.CustomerID(customer), PaymentID: payment.ID, OrderLineID: orderLines[payment.ID], ProductID: product.ID.UUID(), Currency: "USD", Amount: 100_000_000, PaidAmount: 80_000_000, StartsAt: start, ExpiresAt: &expiry}
 	svc := purchasedcredits.New(database)
 	paymentService := payments.NewPaymentService(database)
 	var cumulative int64
@@ -69,7 +70,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 				return err
 			}
 		} else {
-			recovery := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: cumulative - total, ListAmount: payment.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &payment.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": lastReversal.ID.String()}}
+			recovery := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), OrderID: payment.OrderID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: cumulative - total, ListAmount: payment.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &payment.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": lastReversal.ID.String()}}
 			if err := paymentService.Create(ctx, recovery); err != nil {
 				return err
 			}
@@ -122,6 +123,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	rollbackPayment := newPayment(80_000_000)
 	rolled := params
 	rolled.PaymentID = rollbackPayment.ID
+	rolled.OrderLineID = orderLines[rollbackPayment.ID]
 	stop := errors.New("rollback requested")
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := purchasedcredits.New(database.NewWithPgxTx(tx)).Fund(ctx, rolled)
@@ -145,6 +147,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	second := newPayment(200_000_000)
 	other := params
 	other.PaymentID = second.ID
+	other.OrderLineID = orderLines[second.ID]
 	other.Amount = 200_000_000
 	other.PaidAmount = 200_000_000
 	secondGrant, err := svc.Fund(ctx, other)
@@ -243,6 +246,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	fourth := newPayment(100_000_000)
 	fourthTerms := thirdTerms
 	fourthTerms.PaymentID = fourth.ID
+	fourthTerms.OrderLineID = orderLines[fourth.ID]
 	_, err = svc.Fund(ctx, fourthTerms)
 	require.NoError(t, err)
 	_, err = paymentService.Refund(ctx, fourth.ID, uuid.NewString(), 50_000_000, payments.ReversalRefund)
@@ -251,7 +255,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	chargeback, err := paymentService.Refund(ctx, fourth.ID, uuid.NewString(), 50_000_000, payments.ReversalChargeback)
 	require.NoError(t, err)
-	recovery := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: 50_000_000, ListAmount: fourth.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &fourth.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}}
+	recovery := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), OrderID: fourth.OrderID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: 50_000_000, ListAmount: fourth.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &fourth.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}}
 	require.NoError(t, paymentService.Create(ctx, recovery))
 	assertBalance(0)
 	require.EqualValues(t, 0, accountBalance("credit_refund_loss"))
@@ -259,6 +263,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 		retiredPayment := newPayment(100_000_000)
 		retiredTerms := thirdTerms
 		retiredTerms.PaymentID = retiredPayment.ID
+		retiredTerms.OrderLineID = orderLines[retiredPayment.ID]
 		retiredGrant, err := svc.Fund(ctx, retiredTerms)
 		require.NoError(t, err)
 		if retiredAs == "revoked_credits" {
@@ -277,7 +282,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, frozen-100_000_000, accountBalance(retiredAs))
 		require.EqualValues(t, 0, accountBalance("credit_refund_loss"), "retired value is available in its source account, not consumed loss")
-		returned := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), PriceID: storedPrice.ID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: 100_000_000, ListAmount: retiredPayment.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &retiredPayment.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": refunded.ID.String()}}
+		returned := &models.Payment{ID: uuid.New(), CustomerID: customer.UUID(), OrderID: retiredPayment.OrderID, Channel: models.ChannelRail, Rail: "stripe", PspID: new(psp.ID.UUID()), TransactionID: uuid.NewString(), Amount: 100_000_000, ListAmount: retiredPayment.Amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: start, CreatedAt: start, RefundedPaymentID: &retiredPayment.ID, ReversalKind: new(payments.ReversalDisputeReversal), Metadata: map[string]any{"reverses_payment_id": refunded.ID.String()}}
 		require.NoError(t, paymentService.Create(ctx, returned))
 		require.EqualValues(t, frozen, accountBalance(retiredAs))
 		assertBalance(0)
@@ -286,6 +291,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 		expiringPayment := newPayment(100_000_000)
 		expiringTerms := thirdTerms
 		expiringTerms.PaymentID = expiringPayment.ID
+		expiringTerms.OrderLineID = orderLines[expiringPayment.ID]
 		_, err := svc.Fund(ctx, expiringTerms)
 		require.NoError(t, err)
 		pending, err := paymentService.ReserveRefund(ctx, expiringPayment.ID, uuid.NewString(), 50_000_000, nil)

@@ -115,11 +115,12 @@ type Order struct {
 	gen.BillingOrder
 	Lines           []gen.BillingOrderLine
 	PriceReferences map[uuid.UUID]billing.PriceID
+	ProviderBills   []billing.OrderProviderBill
 }
 
-// Payable reports an open order not past its expiry (a renewal has none).
+// Payable reports an engine-collected open order not past its expiry.
 func Payable(o gen.BillingOrder, now time.Time) bool {
-	return o.Status == string(billing.OrderOpen) && (o.ExpiresAt == nil || o.ExpiresAt.After(now))
+	return o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && (o.ExpiresAt == nil || o.ExpiresAt.After(now))
 }
 
 // Live reports an order that may still take payment.
@@ -174,10 +175,16 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	out := billing.Order{
 		ID: billing.OrderID(o.ID), CustomerID: billing.CustomerID(o.CustomerID), Origin: billing.OrderOrigin(o.Origin),
 		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
-		Lines: make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
+		CollectionOwner: billing.OrderCollectionOwner(o.CollectionOwner),
+		ProviderBills:   append(make([]billing.OrderProviderBill, 0, len(o.ProviderBills)), o.ProviderBills...),
+		Lines:           make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
 		Payment:   billing.OrderPayment{Status: billing.OrderPaymentStatus(o.PaymentStatus)},
 		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, VoidedAt: o.VoidedAt,
 		UncollectibleAt: o.UncollectibleAt, CreatedAt: o.CreatedAt,
+	}
+	if o.PspID != nil {
+		psp := billing.PSPID(*o.PspID)
+		out.CollectionPSPID = &psp
 	}
 	if o.SubscriptionID != nil && o.PeriodStartsAt != nil && o.PeriodEndsAt != nil && o.DueAt != nil {
 		out.Renewal = &billing.OrderRenewal{SubscriptionID: billing.SubscriptionID(*o.SubscriptionID), PeriodStartsAt: *o.PeriodStartsAt, PeriodEndsAt: *o.PeriodEndsAt, DueAt: *o.DueAt}
@@ -185,14 +192,14 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	if o.Origin == string(billing.OrderOriginUsage) {
 		out.Usage = usageView(o.BillingOrder)
 	}
-	if o.AwaitsCustomer() {
+	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction
 	}
 	if o.CheckoutExpiresAt != nil && o.CheckoutSuccessUrl != nil && o.CheckoutSavedPaymentMethods != nil && o.CheckoutUiMode != nil {
 		out.Checkout = &billing.OrderCheckout{UIMode: billing.CheckoutUIMode(*o.CheckoutUiMode), ExpiresAt: o.CheckoutExpiresAt.UTC(), SuccessURL: *o.CheckoutSuccessUrl,
 			CancelURL: o.CheckoutCancelUrl, SavedPaymentMethods: *o.CheckoutSavedPaymentMethods}
 	}
-	if o.Status == string(billing.OrderOpen) && options != nil {
+	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && options != nil {
 		out.PaymentOptions = options
 	}
 	if len(o.LastPaymentError) > 0 {

@@ -366,47 +366,6 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 
 -- Backfills a rail charge that has no local payment record, deduped on
 -- payments_psp_id_transaction_id_key.
--- name: ReconcileBackfillPayment :execrows
-INSERT INTO billing.payments (
-    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
-    money_movement
-) VALUES (
-    sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
-    sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
-    sqlc.arg(currency),
-    'succeeded', sqlc.narg(subscription_id), sqlc.narg(metadata),
-    COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid,
-    -- The row mirrors a charge the rail actually settled.
-    'rail'
-)
-ON CONFLICT DO NOTHING;
-
--- Records a rail refund missing locally as a negative-amount payment row linked
--- to the refunded payment. Same dedupe identity.
--- name: ReconcileRecordRefund :execrows
-INSERT INTO billing.payments (
-    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement, order_id
-) VALUES (
-    sqlc.arg(merchant_id)::uuid,
-    sqlc.narg(price_id), 'rail', sqlc.arg(rail)::text,
-    sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
-    sqlc.arg(currency),
-    'succeeded', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
-    sqlc.narg(metadata),
-    COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    -- A refund is real (negative) money movement at the rail; the settlement
-    -- feed excludes it on amount/refunded_payment_id, not on this.
-    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail',
-    -- A refund names what its charge paid.
-    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid)
-)
-ON CONFLICT DO NOTHING;
-
 -- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE billing.payments
 SET status = 'refunded'
@@ -665,7 +624,7 @@ LIMIT sqlc.arg(row_limit)::int;
 SELECT e.id AS access_id, e.customer_id, e.product_id,
        e.source_type, e.source_id, e.starts_at, e.ends_at,
        pay.id AS payment_id,
-       pr.product_id AS payment_product_id,
+       paid_line.product_id AS payment_product_id,
        CASE
            WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
            ELSE 'refunded_payment'
@@ -675,8 +634,9 @@ LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id::text = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
        ON e.source_type = 'purchase' AND pay.id = e.payment_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
-LEFT JOIN billing.prices pr
-       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
+LEFT JOIN LATERAL (SELECT l.product_id FROM billing.order_lines l
+       WHERE l.merchant_id=e.merchant_id AND l.order_id=pay.order_id AND l.product_id=e.product_id
+       LIMIT 1) paid_line ON true
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL

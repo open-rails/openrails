@@ -34,7 +34,6 @@ type Payment struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
-	PriceID    uuid.UUID `json:"price_id"`
 
 	// Optional linkage to the subscription that generated this payment
 	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
@@ -101,6 +100,5 @@ type Payment struct {
 	CreatedAt   time.Time `json:"created_at"`
 
 	// Relationships
-	Price        *Price        `json:"price,omitempty"`
 	Subscription *Subscription `json:"subscription,omitempty"`
 }

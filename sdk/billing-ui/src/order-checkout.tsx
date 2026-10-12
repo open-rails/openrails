@@ -111,14 +111,14 @@ export function OrderCheckout({
   }, [client, orderId, m])
 
   React.useEffect(() => {
-    if (!savedPaymentMethods) return
+    if (!savedPaymentMethods || order?.collection_owner !== "engine") return
     const abort = new AbortController()
     client.listPaymentMethods({ signal: abort.signal }).then(
       (page) => setMethods(page.data),
       () => undefined
     )
     return () => abort.abort()
-  }, [client, savedPaymentMethods])
+  }, [client, savedPaymentMethods, order?.collection_owner])
 
   React.useEffect(() => {
     if (order && settled(order)) settledRef.current?.(order)
@@ -127,6 +127,7 @@ export function OrderCheckout({
   // A Solana order awaits its wallet: confirm asks OpenRails to read the
   // chain, until the transfer lands.
   const awaitingWallet =
+    order?.collection_owner === "engine" &&
     order?.payment.status === "requires_action" &&
     order.payment.next_action?.type === "solana_pay"
   React.useEffect(() => {
@@ -140,7 +141,10 @@ export function OrderCheckout({
     return () => window.clearInterval(timer)
   }, [awaitingWallet, client, order])
 
-  const options = React.useMemo(() => order?.payment_options ?? [], [order])
+  const options = React.useMemo(
+    () => order?.collection_owner === "engine" ? order.payment_options : [],
+    [order]
+  )
   const psps = React.useMemo(
     () =>
       (merchant?.payment.psps ?? []).filter((psp) =>
@@ -236,7 +240,7 @@ export function OrderCheckout({
       return false
     }
     const next = result.order.payment.next_action
-    if (result.order.payment.status !== "requires_action" || !next) return true
+    if (result.order.collection_owner !== "engine" || result.order.payment.status !== "requires_action" || !next) return true
     if (next.type === "redirect_to_url" && next.url) {
       window.location.assign(next.url)
       return true
@@ -264,7 +268,7 @@ export function OrderCheckout({
   const pay = async (
     payment: () => Promise<OrderPaymentInput>
   ): Promise<boolean> => {
-    if (busy) return false
+    if (busy || order.collection_owner !== "engine") return false
     setBusy(true)
     setError(undefined)
     try {
@@ -291,7 +295,7 @@ export function OrderCheckout({
   // A payment the bank asks the customer to authenticate before they came
   // here (a renewal charged while they were away).
   const authenticate = async () => {
-    if (busy) return
+    if (busy || order.collection_owner !== "engine") return
     setBusy(true)
     setError(undefined)
     try {
@@ -307,6 +311,7 @@ export function OrderCheckout({
     }
   }
   const awaitingAuthentication =
+    order.collection_owner === "engine" &&
     order.status === "open" &&
     order.payment.status === "requires_action" &&
     order.payment.next_action?.type === "authenticate"
@@ -315,6 +320,7 @@ export function OrderCheckout({
   const due = order.usage?.amount_due ?? order.total
   const payLabel = `Pay ${money(due)}`
   const open =
+    order.collection_owner === "engine" &&
     (order.status === "open" ||
       (order.status === "uncollectible" && !!order.usage)) &&
     order.payment.status === "requires_payment_method"
@@ -365,6 +371,10 @@ export function OrderCheckout({
       ) : order.status === "complete" ? (
         <p role="status" className="text-sm font-semibold">
           Payment complete
+        </p>
+      ) : order.collection_owner !== "engine" ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          This bill is collected by the payment provider. No payment is needed here.
         </p>
       ) : order.status === "processing" ? (
         <p role="status" className="text-sm text-muted-foreground">

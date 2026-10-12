@@ -3,13 +3,21 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,10 +60,10 @@ func TestDuplicateChargeFindings(t *testing.T) {
 			require.Empty(t, w.openFindings(duplicateCharge), "consecutive periods and a declined-then-retried period are not duplicates")
 			require.NotContains(t, w.openFindings(duplicateCharge), stale, "the calendar-month false positive closes")
 
-			// A price change on the same subscription starts its own coverage.
+			// A separate adjustment bill on the same subscription is its own obligation.
 			w.chargeAgain(clean.c.id, time.Minute, true)
 			w.converge()
-			require.Empty(t, w.openFindings(duplicateCharge), "a charge at a new price is not a duplicate")
+			require.Empty(t, w.openFindings(duplicateCharge), "a separate billed adjustment is not a duplicate")
 			w.dropLatestCharge(clean.c.id)
 
 			// A second capture of one period, a day later (across a month
@@ -67,20 +75,20 @@ func TestDuplicateChargeFindings(t *testing.T) {
 			require.Len(t, findings, 1)
 			require.Equal(t, "critical", findings[0].severity)
 			require.Contains(t, findings[0].subject, strings.TrimPrefix(dup.sub.String(), "sub_"))
-			require.Contains(t, findings[0].action, "Refund the later charge pay_"+later, "the refund targets the later charge")
-			require.Regexp(t, `; total [0-9]+\.[0-9]{2} USD; payments `, findings[0].action, "the total reads in its currency")
+			require.Contains(t, findings[0].action, "pay_"+later)
+			require.Contains(t, findings[0].action, "refund only the verified excess")
+			require.Regexp(t, `; net [0-9]+\.[0-9]{2} USD; payments `, findings[0].action, "the total reads in its currency")
 			w.dropLatestCharge(dup.c.id)
 			w.converge()
 			require.Empty(t, w.openFindings(duplicateCharge), "the finding closes once the duplicate is gone")
 
-			// Rows written before charges named their period are judged by
-			// the cadence.
+			// Removing optional period metadata cannot hide the order identity.
 			w.forgetPaidPeriods(clean.c.id)
 			w.converge()
 			require.Empty(t, w.openFindings(duplicateCharge))
 			w.chargeAgain(clean.c.id, time.Minute, false)
 			w.converge()
-			require.Len(t, w.openFindings(duplicateCharge), 1, "two charges within one unnamed period")
+			require.Len(t, w.openFindings(duplicateCharge), 1, "excess captures of one order do not depend on metadata")
 		})
 	}
 }
@@ -124,38 +132,57 @@ func (w *world) forgetPaidPeriods(customerID string) {
 	require.NoError(w.t, err)
 }
 
-// chargeAgain records a second provider capture of the customer's latest
-// charge, after it, for the same period — or, newPrice, at another price of
-// the product. It returns the new payment's id.
-func (w *world) chargeAgain(customerID string, after time.Duration, newPrice bool) string {
+// chargeAgain adds a real money fixture, either against the same obligation
+// or a separate accepted adjustment in the same period. It never invents a
+// current-price cadence to decide whether two captures duplicate money.
+func (w *world) chargeAgain(customerID string, after time.Duration, separateBill bool) string {
 	w.t.Helper()
-	id := uuid.New()
-	priceExpr, metadataExpr := "price_id", "metadata"
-	if newPrice {
-		// A plan change opens its own period at the moment it is paid.
-		metadataExpr = `metadata || jsonb_build_object('period_start', to_char((purchased_at + $2::interval) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))`
-		priceExpr = `(SELECT p2.id FROM billing.prices p2 JOIN billing.prices p1 ON p1.id = pay.price_id WHERE p2.product_id = p1.product_id AND p2.id <> p1.id LIMIT 1)`
-		w.anotherPrice(customerID)
-	}
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payments (id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id,
-			metadata, purchased_at, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement)
-		SELECT $3::uuid, `+priceExpr+`, channel, rail, transaction_id || '-again', amount, list_amount, currency, status, subscription_id,
-			`+metadataExpr+`, purchased_at + $2::interval, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement
-		FROM billing.payments pay WHERE customer_id = $1::uuid AND status = 'succeeded' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
+	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(w.t, err)
-	return id.String()
-}
-
-// anotherPrice adds a second price to the product of the customer's latest
-// charge (a plan change target).
-func (w *world) anotherPrice(customerID string) {
-	w.t.Helper()
-	err := w.catalogExec(w.t.Context(), w.q(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, billing_interval_hours, key, archived)
-		SELECT gen_random_uuid(), p.product_id, p.amount * 2, p.currency, p.merchant_id, p.access_duration_hours, p.billing_interval_hours, p.key || '-plus', false
-		FROM billing.payments pay JOIN billing.prices p ON p.id = pay.price_id
-		WHERE pay.customer_id = $1::uuid ORDER BY pay.purchased_at DESC LIMIT 1
-		ON CONFLICT DO NOTHING`), customerID)
-	require.NoError(w.t, err)
+	ctx := merchant.WithID(w.t.Context(), w.client[embedded].MerchantID())
+	var paymentID uuid.UUID
+	require.NoError(w.t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		bound := d.NewWithPgxTx(tx)
+		q := bound.Gen(ctx)
+		var originalID uuid.UUID
+		if err := tx.QueryRow(ctx, w.q(`SELECT id FROM billing.payments WHERE customer_id=$1::uuid AND status='succeeded' AND refunded_payment_id IS NULL ORDER BY purchased_at DESC LIMIT 1`), customerID).Scan(&originalID); err != nil {
+			return err
+		}
+		service := payments.NewPaymentService(bound)
+		original, err := service.GetByID(ctx, originalID)
+		if err != nil {
+			return err
+		}
+		payment := *original
+		payment.ID, payment.TransactionID = uuid.New(), uuid.NewString()
+		payment.PurchasedAt = original.PurchasedAt.Add(after)
+		paymentID = payment.ID
+		if !separateBill {
+			return service.Create(ctx, &payment)
+		}
+		if original.OrderID == nil || original.SubscriptionID == nil || original.PspID == nil {
+			return fmt.Errorf("fixture requires an accepted subscription order")
+		}
+		mid := w.client[embedded].MerchantID().UUID()
+		sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid, ID: *original.SubscriptionID})
+		if err != nil {
+			return err
+		}
+		lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid, OrderIds: []uuid.UUID{*original.OrderID}})
+		if err != nil {
+			return err
+		}
+		require.Len(w.t, lines, 1)
+		l := lines[0]
+		_, err = observed.Record(db.WithPSPID(ctx, *original.PspID), bound, observed.Bill{PSPID: *original.PspID, CustomerID: original.CustomerID, SubscriptionID: original.SubscriptionID,
+			Owner: string(sub.CollectionPolicy), Kind: "adjustment", SourceKind: "fixture_adjustment", SourceKey: payment.ID.String(), Currency: payment.Currency, Total: payment.Amount,
+			PeriodStart: *sub.CurrentPeriodStartsAt, PeriodEnd: *sub.CurrentPeriodEndsAt, Payment: &payment, Settled: true, SettlementSource: "cash",
+			Lines: []observed.Line{{PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: models.DerefIntPtr(l.Quantity), UnitAmount: l.UnitAmount, Amount: l.Amount,
+				BillingIntervalHours: models.DerefIntPtr(l.BillingIntervalHours), AccessDurationHours: models.DerefIntPtr(l.AccessDurationHours)}},
+		}, w.clock.Now())
+		return err
+	}))
+	return paymentID.String()
 }
 
 // dropLatestCharge removes the customer's latest charge row.

@@ -12,9 +12,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -310,7 +313,6 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 	payment := &models.Payment{
 		ID:                  paymentID,
 		CustomerID:          customerID,
-		PriceID:             price.ID,
 		SubscriptionID:      req.SubscriptionID,
 		Channel:             req.Channel,
 		Rail:                models.Rail(req.Rail),
@@ -339,11 +341,33 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		payment.TokenType = &tt
 	}
 
-	created, err := s.PaymentService.CreateIfNotExists(ctx, payment)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment record: %w", err)
+	if s.transactionDB == nil {
+		return nil, errors.New("recording a purchase requires its transaction")
 	}
-	if !created {
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	payment.PspID = &psp
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		// The fallback names immutable accepted identity, not a mutable display name.
+		description = "Purchase " + price.ID.String()
+	}
+	bill, err := observed.Record(ctx, s.transactionDB, observed.Bill{
+		PSPID: psp, CustomerID: customerID, SubscriptionID: req.SubscriptionID, ExistingOrderID: req.OrderID,
+		Owner: observed.OwnerEngine, Kind: "purchase", SourceKind: "purchase", SourceKey: req.TransactionID,
+		Currency: currency, Total: amount, Payment: payment, Settled: true, SettlementSource: "cash",
+		ProviderReference: req.TransactionID,
+		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &product.ID, Description: description,
+			UnitAmount: amount, Amount: amount, AccessDurationHours: price.AccessDurationHours}},
+	}, now)
+	if err != nil {
+		return nil, fmt.Errorf("record purchase order: %w", err)
+	}
+	payment = bill.Payment
+	paymentID = payment.ID
+	if !bill.PaymentCreated {
 		lookup := func() (*models.Payment, error) {
 			if req.Channel == models.ChannelManual {
 				return s.PaymentService.GetManualByTransactionID(ctx, req.TransactionID)
@@ -356,9 +380,6 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		}
 		if existingPayment.CustomerID.String() != req.UserID {
 			return nil, paymentTransactionTaken("payment transaction belongs to a different user")
-		}
-		if existingPayment.PriceID != req.PriceID {
-			return nil, paymentTransactionTaken("payment transaction belongs to a different price")
 		}
 		if (existingPayment.SubscriptionID == nil) != (req.SubscriptionID == nil) {
 			return nil, paymentTransactionTaken("payment transaction subscription linkage mismatch")
@@ -506,8 +527,22 @@ func (s *CheckoutPurchaseService) grantPurchasedCredits(ctx context.Context, pay
 	if s.transactionDB == nil {
 		return errors.New("purchased credit requires the payment transaction")
 	}
-	_, err := purchasedcredits.New(s.transactionDB, s.clock).Fund(ctx, purchasedcredits.Params{
-		CustomerID: identity.CustomerID(payment.CustomerID), PaymentID: payment.ID, ProductID: productID,
+	if payment.OrderID == nil {
+		return errors.New("purchased credit requires its order")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	lines, err := s.transactionDB.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{*payment.OrderID}})
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 || lines[0].ProductID == nil || *lines[0].ProductID != productID || lines[0].Amount != payment.Amount {
+		return errors.New("purchased credit must name its accepted order line")
+	}
+	_, err = purchasedcredits.New(s.transactionDB, s.clock).Fund(ctx, purchasedcredits.Params{
+		CustomerID: identity.CustomerID(payment.CustomerID), PaymentID: payment.ID, ProductID: productID, OrderLineID: lines[0].ID,
 		Amount: credit.Amount, PaidAmount: payment.Amount, Currency: credit.Currency,
 		StartsAt: credit.StartsAt, ExpiresAt: credit.ExpiresAt,
 	})

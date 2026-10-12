@@ -4,7 +4,7 @@
 
 -- name: CreatePayment :execrows
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, credit_grant_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -12,7 +12,8 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement, order_id, quantity
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
+    sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
     sqlc.arg(currency),
     sqlc.arg(status)::text,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
@@ -30,7 +31,7 @@ INSERT INTO billing.payments (
 
 -- name: CreatePaymentIfNotExists :execrows
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, credit_grant_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -38,7 +39,8 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement, order_id, quantity
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
+    sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
     sqlc.arg(currency),
     sqlc.arg(status)::text,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),

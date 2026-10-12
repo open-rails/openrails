@@ -183,7 +183,7 @@ func TestObservedCompletedCalendarBillRepairsLifecycle(t *testing.T) {
 	require.True(t, done.Completed)
 	require.True(t, w.subscription(embedded, l.sub).CurrentPeriodEndsAt.Equal(start))
 	lifecycle := engine.Graph(w.rt).Runtime.SubscriptionLifecycleService
-	params := &subscriptions.RenewMembershipParams{ProviderBill: &b, Rail: models.RailNMI, RailSubscriptionID: l.railSub, Amount: b.Total, AmountProvided: true, Currency: b.Currency}
+	params := &subscriptions.RenewMembershipParams{ProviderBill: &b, Rail: models.RailNMI, RailSubscriptionID: l.railSub, TransactionID: "credit-settlement-reference", Amount: b.Total, AmountProvided: true, Currency: b.Currency}
 	require.NoError(t, lifecycle.RenewMembership(ctx, params))
 	require.True(t, w.subscription(embedded, l.sub).CurrentPeriodEndsAt.Equal(end))
 	var grants int
@@ -195,6 +195,9 @@ func TestObservedCompletedCalendarBillRepairsLifecycle(t *testing.T) {
 	grants = count()
 	require.NoError(t, lifecycle.RenewMembership(ctx, params))
 	require.Equal(t, grants, count(), "completed receipt replay repeats no access effects")
+	var payments int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.payments WHERE order_id=$1`), done.Order.ID).Scan(&payments))
+	require.Zero(t, payments, "non-cash provider settlement never invents a gateway payment")
 }
 
 func TestObservedLateBillKeepsCancellation(t *testing.T) {
@@ -202,6 +205,7 @@ func TestObservedLateBillKeepsCancellation(t *testing.T) {
 	w.waive("evidenced", "normalized authenticated late receipt exercises local accounting without issuing another gateway charge")
 	l := importLegacy(t, w, "nmi", embedded)
 	w.refreshProviders()
+	w.armDestructive()
 	l.c.must(http.MethodPost, "/subscriptions/"+l.sub.String()+"/cancel", "", map[string]any{"reason": "finished"})
 	w.settle()
 	before := w.subscription(embedded, l.sub)

@@ -1,6 +1,9 @@
 package contract
 
 import (
+	"go/parser"
+	"go/scanner"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -146,9 +149,9 @@ func TestDocsNameWhatExists(t *testing.T) {
 	}
 }
 
-// TestREADMEEmbeddedExample keeps the README's install example the program
-// in examples/embedded, which compiles: its catalog, its newBilling and its
-// billingAuth.
+// TestREADMEEmbeddedExample keeps the README's executable billing setup on
+// the compiled examples/embedded program. Comments, production AuthKit keys
+// and the host's choice of optional route groups may differ.
 func TestREADMEEmbeddedExample(t *testing.T) {
 	root := filepath.Join("..", "..")
 	read := func(rel string) string {
@@ -157,6 +160,7 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 		return string(body)
 	}
 	readme, program := read("README.md"), read("examples/embedded/main.go")
+	programCode := readmeGoTokens(t, program)
 	_, catalog, ok := strings.Cut(readme, "```yaml\n")
 	require.True(t, ok)
 	catalog, _, _ = strings.Cut(catalog, "```")
@@ -165,42 +169,68 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	_, body, ok := strings.Cut(readme, "func newBilling(")
 	require.True(t, ok)
 	body, _, _ = strings.Cut(body, "\n}\n")
-	require.Contains(t, program, "func newBilling("+body+"\n}\n", "the README's newBilling")
+	require.Contains(t, programCode, readmeGoTokens(t, "func newBilling("+body+"\n}\n"), "the README's newBilling, including Deps.UserInfo")
 
-	// The README's roles, its AuthKit configuration (but its production keys)
-	// and its mount are the program's.
 	_, roles, ok := strings.Cut(readme, "rbac := authkit.NewRoles()\n")
 	require.True(t, ok)
 	roles, _, _ = strings.Cut(roles, "```")
-	for _, line := range strings.Split(strings.TrimSpace(roles), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		require.Contains(t, program, "\t"+strings.TrimRight(line, " ")+"\n", "the README's role registration")
-	}
+	require.Contains(t, programCode, readmeGoTokens(t, "rbac := authkit.NewRoles()\n"+roles), "the README's role registration")
+
 	_, config, ok := strings.Cut(readme, "ak, err := authkit.New(ctx, authkit.Config{\n")
 	require.True(t, ok)
 	config, _, _ = strings.Cut(config, "}, authkit.Deps{")
+	// The program trusts its direct development peer. A deployed host chooses
+	// its own proxy policy, signing keys and audiences; both use the issuer
+	// that newBilling binds to the merchant.
+	programConfig := strings.ReplaceAll(programCode, readmeGoTokens(t, "DirectPeerIP: true,"), "")
+	programConfig = strings.Join(strings.Fields(programConfig), " ")
 	for _, line := range strings.Split(strings.TrimSpace(config), "\n") {
 		field, _, _ := strings.Cut(strings.TrimSpace(line), ":")
 		if field == "Keys" || field == "Token" {
-			continue // the program signs with development keys, as its own issuer
+			continue
 		}
-		require.Contains(t, strings.Join(strings.Fields(program), " "), strings.Join(strings.Fields(line), " "), "the README's AuthKit configuration")
+		code := readmeGoTokens(t, line)
+		if code != "" {
+			require.Contains(t, programConfig, code, "the README's AuthKit configuration")
+		}
 	}
-	_, mount, ok := strings.Cut(readme, "\t// Billing. Public, customer (/me) and webhook routes are always mounted.\n")
-	require.True(t, ok)
-	mount, _, _ = strings.Cut(mount, "\n\t})\n")
-	require.Contains(t, program, mount, "the README's mount")
-	require.NotContains(t, readme+program, "billingAuth", "AuthKit is the Auth; no adapter")
+	require.Contains(t, readmeGoTokens(t, config), readmeGoTokens(t, "Issuer: issuer,"), "AuthKit issues for the merchant's issuer")
 
-	// The README's user lookup is AuthKit's, as the program's is.
-	_, userInfo, ok := strings.Cut(readme, "#### Customer contact info")
-	require.True(t, ok)
-	_, userInfo, ok = strings.Cut(userInfo, "\tUserInfo: ")
-	require.True(t, ok)
-	userInfo, _, _ = strings.Cut(userInfo, "\n")
-	require.Contains(t, program, "\t\tUserInfo: "+userInfo+"\n", "the README's Deps.UserInfo")
+	const mountCall = "err = openrailsgin.Mount(r, bill, openrails.Routes{\n"
+	_, mount, ok := strings.Cut(readme, mountCall)
+	require.True(t, ok, "the README mounts its billing engine")
+	mount, _, _ = strings.Cut(mount, "```")
+	_, err := parser.ParseFile(token.NewFileSet(), "readme-mount.go", "package main\nfunc mount() {\n"+mountCall+mount+"\n}", 0)
+	require.NoError(t, err, "the README's mount is valid Go")
+	// Optional groups are the host's choice. Keep the authentication and
+	// mount prefix tied to the compiled example independently of those flags.
+	for _, binding := range []string{"Auth: ak.Authenticator(),", `Prefix: "/billing",`} {
+		code := readmeGoTokens(t, binding)
+		require.Contains(t, readmeGoTokens(t, mount), code, "the README's mount binding")
+		require.Contains(t, programCode, code, "the example's mount binding")
+	}
+	require.NotContains(t, readme+program, "billingAuth", "AuthKit is the Auth; no adapter")
+}
+
+// readmeGoTokens compares executable Go without coupling it to explanatory
+// comments or layout. The scanner keeps literals (including URLs) intact.
+func readmeGoTokens(t *testing.T, source string) string {
+	t.Helper()
+	var scan scanner.Scanner
+	scan.Init(token.NewFileSet().AddFile("", -1, len(source)), []byte(source), nil, 0)
+	var tokens []string
+	for {
+		_, tok, literal := scan.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if literal == "" || tok == token.SEMICOLON {
+			literal = tok.String()
+		}
+		tokens = append(tokens, literal)
+	}
+	require.Zero(t, scan.ErrorCount, "the README's Go tokens")
+	return strings.Join(tokens, " ")
 }
 
 // proseDocs lists the documents, relative to the repository root.

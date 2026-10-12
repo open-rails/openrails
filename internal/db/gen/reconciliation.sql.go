@@ -1685,7 +1685,7 @@ const listUnjustifiedAccessWindows = `-- name: ListUnjustifiedAccessWindows :man
 SELECT e.id AS access_id, e.customer_id, e.product_id,
        e.source_type, e.source_id, e.starts_at, e.ends_at,
        pay.id AS payment_id,
-       pr.product_id AS payment_product_id,
+       paid_line.product_id AS payment_product_id,
        CASE
            WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
            ELSE 'refunded_payment'
@@ -1695,8 +1695,9 @@ LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id::text = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
        ON e.source_type = 'purchase' AND pay.id = e.payment_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
-LEFT JOIN billing.prices pr
-       ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
+LEFT JOIN LATERAL (SELECT l.product_id FROM billing.order_lines l
+       WHERE l.merchant_id=e.merchant_id AND l.order_id=pay.order_id AND l.product_id=e.product_id
+       LIMIT 1) paid_line ON true
 WHERE e.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
@@ -2128,65 +2129,6 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 	return result.RowsAffected(), nil
 }
 
-const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
-
-INSERT INTO billing.payments (
-    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, metadata, purchased_at, customer_id, psp_id,
-    money_movement
-) VALUES (
-    $1::uuid,
-    $2, 'rail', $3::text,
-    $4, $5, $5,
-    $6,
-    'succeeded', $7, $8,
-    COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10, $11::uuid,
-    -- The row mirrors a charge the rail actually settled.
-    'rail'
-)
-ON CONFLICT DO NOTHING
-`
-
-type ReconcileBackfillPaymentParams struct {
-	MerchantID     uuid.UUID
-	PriceID        *uuid.UUID
-	Rail           string
-	TransactionID  string
-	Amount         int64
-	Currency       string
-	SubscriptionID *uuid.UUID
-	Metadata       []byte
-	PurchasedAt    time.Time
-	CustomerID     uuid.UUID
-	PspID          *uuid.UUID
-}
-
-// Enforce appliers: idempotent local writes only, never a provider call.
-// Subscription state transitions go through reconcile.Decide and
-// reconcile.ApplyDecision instead.
-// Backfills a rail charge that has no local payment record, deduped on
-// payments_psp_id_transaction_id_key.
-func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
-		arg.MerchantID,
-		arg.PriceID,
-		arg.Rail,
-		arg.TransactionID,
-		arg.Amount,
-		arg.Currency,
-		arg.SubscriptionID,
-		arg.Metadata,
-		arg.PurchasedAt,
-		arg.CustomerID,
-		arg.PspID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const reconcileExecutingOperations = `-- name: ReconcileExecutingOperations :many
 SELECT id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
@@ -2543,6 +2485,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 }
 
 const reconcileMarkPaymentRefunded = `-- name: ReconcileMarkPaymentRefunded :execrows
+
 UPDATE billing.payments
 SET status = 'refunded'
 WHERE payments.merchant_id = $1::uuid AND id = $2 AND status <> 'refunded' AND deleted_at IS NULL
@@ -2553,6 +2496,11 @@ type ReconcileMarkPaymentRefundedParams struct {
 	ID         uuid.UUID
 }
 
+// Enforce appliers: idempotent local writes only, never a provider call.
+// Subscription state transitions go through reconcile.Decide and
+// reconcile.ApplyDecision instead.
+// Backfills a rail charge that has no local payment record, deduped on
+// payments_psp_id_transaction_id_key.
 func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, arg ReconcileMarkPaymentRefundedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileMarkPaymentRefunded, arg.MerchantID, arg.ID)
 	if err != nil {
@@ -2664,66 +2612,6 @@ func (q *Queries) ReconcilePSPHasExecutingOperations(ctx context.Context, arg Re
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
-}
-
-const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
-INSERT INTO billing.payments (
-    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
-    status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement, order_id
-) VALUES (
-    $1::uuid,
-    $2, 'rail', $3::text,
-    $4, $5, $5,
-    $6,
-    'succeeded', $7, $8,
-    $9,
-    COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    -- A refund is real (negative) money movement at the rail; the settlement
-    -- feed excludes it on amount/refunded_payment_id, not on this.
-    $11, $12::uuid, 'refund', 'rail',
-    -- A refund names what its charge paid.
-    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid)
-)
-ON CONFLICT DO NOTHING
-`
-
-type ReconcileRecordRefundParams struct {
-	MerchantID        uuid.UUID
-	PriceID           *uuid.UUID
-	Rail              string
-	TransactionID     string
-	Amount            int64
-	Currency          string
-	SubscriptionID    *uuid.UUID
-	RefundedPaymentID *uuid.UUID
-	Metadata          []byte
-	PurchasedAt       time.Time
-	CustomerID        uuid.UUID
-	PspID             *uuid.UUID
-}
-
-// Records a rail refund missing locally as a negative-amount payment row linked
-// to the refunded payment. Same dedupe identity.
-func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecordRefundParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileRecordRefund,
-		arg.MerchantID,
-		arg.PriceID,
-		arg.Rail,
-		arg.TransactionID,
-		arg.Amount,
-		arg.Currency,
-		arg.SubscriptionID,
-		arg.RefundedPaymentID,
-		arg.Metadata,
-		arg.PurchasedAt,
-		arg.CustomerID,
-		arg.PspID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const recordSubscriptionVerificationReads = `-- name: RecordSubscriptionVerificationReads :exec
