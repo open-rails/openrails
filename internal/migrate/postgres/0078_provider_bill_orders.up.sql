@@ -48,3 +48,33 @@ COMMENT ON TABLE billing.provider_bills IS 'Scoped immutable provider bill ident
 ALTER TABLE billing.orders DROP CONSTRAINT orders_complete_payment_check;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_complete_payment_check CHECK (
     status <> 'complete' OR total = 0 OR payment_id IS NOT NULL OR origin = 'usage' OR collection_owner <> 'engine');
+
+-- Ending access cannot cancel or forgive an independently issued provider bill.
+CREATE OR REPLACE FUNCTION billing.void_ended_renewal_orders() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    IF NEW.status = 'canceled' OR NEW.deleted_at IS NOT NULL THEN
+        WITH voided AS (
+            UPDATE billing.orders o
+            SET status = 'void', payment_status = 'requires_payment_method', voided_at = now(), updated_at = now()
+            WHERE o.merchant_id = NEW.merchant_id AND o.subscription_id = NEW.id AND o.origin = 'subscription' AND o.collection_owner = 'engine' AND o.status = 'open'
+            RETURNING o.id, o.customer_id, o.total, o.currency)
+        INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, amount, currency, occurred_at, data, dedupe_key)
+        SELECT NEW.merchant_id, 'order.voided', 'order', v.id, v.total, v.currency, now(),
+               jsonb_build_object('customer_id', v.customer_id, 'status', 'void', 'payment_status', 'requires_payment_method'),
+               'order.voided:' || v.id
+        FROM voided v
+        ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- A provider owns the bill's lifetime. A newly observed one-off bill has no
+-- invented local expiry; existing checkout expiry remains historical only.
+ALTER TABLE billing.orders DROP CONSTRAINT orders_period_check;
+ALTER TABLE billing.orders ADD CONSTRAINT orders_period_check CHECK (
+    (origin IN ('subscription', 'usage')) = (period_starts_at IS NOT NULL AND period_ends_at IS NOT NULL AND due_at IS NOT NULL)
+    AND (origin = 'subscription') = (subscription_id IS NOT NULL)
+    AND (collection_owner <> 'engine' OR (origin IN ('subscription', 'usage')) = (expires_at IS NULL))
+    AND (period_ends_at IS NULL OR period_ends_at > period_starts_at));

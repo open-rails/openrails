@@ -71,8 +71,10 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 		params.PeriodStartsAt = nil
 		params.PeriodEndsAt = nil
 		params.DueAt = nil
-		expiry := now.Add(24 * time.Hour)
-		params.ExpiresAt = &expiry
+		if b.Owner == OwnerEngine {
+			expiry := now.Add(24 * time.Hour)
+			params.ExpiresAt = &expiry
+		}
 	}
 	order, err := q.CreateObservedOrder(ctx, params)
 	if err != nil {
@@ -86,6 +88,15 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 	return order, true, nil
 }
 func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uuid.UUID, position int, l Line, now time.Time) error {
+	if l.Source == "" {
+		price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: o.MerchantID, ID: *l.PriceID})
+		if err != nil {
+			return err
+		}
+		if price.ProductID != *l.ProductID {
+			return ErrConflict
+		}
+	}
 	if l.Source == "" && l.Ownership == "" {
 		p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: o.MerchantID, ID: *l.ProductID})
 		if err != nil {
