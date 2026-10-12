@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -112,6 +113,10 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	if err != nil {
 		return nil, err
 	}
+	return usageEventReceipt(ev), nil
+}
+
+func usageEventReceipt(ev *models.UsageEvent) *billing.UsageEvent {
 	out := &billing.UsageEvent{
 		ID: billing.UsageEventID(ev.ID), CustomerID: billing.CustomerID(ev.CustomerID), Invoker: ev.Invoker, Currency: ev.Currency,
 		EventType: ev.EventType, Dimensions: ev.Dimensions, Outcome: billing.UsageOutcome(ev.Outcome), Amount: ev.Amount, ForgivenAmount: ev.ForgivenAmount,
@@ -122,5 +127,5 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		txn := billing.BalanceTransactionID(*ev.LedgerTransferID)
 		out.BalanceTransactionID = &txn
 	}
-	return out, nil
+	return out
 }
