@@ -423,9 +423,6 @@ func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
-		return OrderAnswer{}, orders.ErrNotPayable
-	}
 	var signature string
 	if params.Signature != nil {
 		signature = strings.TrimSpace(*params.Signature)
