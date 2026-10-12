@@ -229,13 +229,9 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
 	typed := map[string]func() error{
-		"void order": func() error { _, err := c.VoidOrder(ctx, billing.OrderID{}); return err },
+		"void order": func() error { _, err := c.WaiveOrderBalance(ctx, billing.OrderID{}); return err },
 		"uncollectible order": func() error {
 			_, err := c.MarkOrderUncollectible(ctx, billing.OrderID{})
-			return err
-		},
-		"retry order": func() error {
-			_, err := c.RetryOrderCollection(ctx, billing.OrderID{}, billing.RetryOrderCollectionParams{IdempotencyKey: "k"})
 			return err
 		},
 		"payment methods customer": func() error {

@@ -19,8 +19,6 @@ var (
 	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
 	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
-	usageRetryErrors  = codes("card_declined", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_action_not_allowed", "order_not_payable",
-		"order_payment_in_progress", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_not_found", "service_unavailable")
 )
 
 var ordersRoutes = []Route{
@@ -57,10 +55,8 @@ var ordersRoutes = []Route{
 		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/void", Group: Admin, Auth: AuthMerchant, Name: "VoidOrder", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
-		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.VoidOrder)},
+	{Method: POST, Path: "/v1/admin/orders/{id}/waive-balance", Group: Admin, Auth: AuthMerchant, Name: "WaiveOrderBalance", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
+		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.WaiveOrderBalance)},
 	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.MarkOrderUncollectible)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/retry-collection", Group: Admin, Auth: AuthMerchant, Name: "RetryOrderCollection", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationOffChannel, IdempotencyKey: true,
-		Request: billing.RetryOrderCollectionParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: usageRetryErrors, Handler: h(handlers.RetryOrderCollection)},
 }

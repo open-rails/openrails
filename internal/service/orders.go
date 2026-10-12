@@ -695,7 +695,7 @@ func orderDigest(v any) []byte {
 // RecordPayment records money the merchant received outside OpenRails for an
 // order: part or all of what a usage order owes, or another order's total.
 // created is false when the same remittance was already recorded.
-func (s *Service) RecordPayment(ctx context.Context, params billing.CreatePaymentParams) (payment *models.Payment, created bool, err error) {
+func (s *Service) RecordPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (payment *models.Payment, created bool, err error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, false, err

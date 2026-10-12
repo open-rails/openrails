@@ -98,24 +98,14 @@ func (c *Client) adminOrderPost(ctx context.Context, id billing.OrderID, action 
 	return &out, nil
 }
 
-// VoidOrder voids an unpaid usage order: what it still owes is written off.
+// WaiveOrderBalance forgives the unpaid balance of a usage order. Existing payments remain recorded.
 // Repeating it changes nothing.
-func (c *Client) VoidOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
-	return c.adminOrderPost(ctx, id, "void", nil, nil, requestOptions)
+func (c *Client) WaiveOrderBalance(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
+	return c.adminOrderPost(ctx, id, "waive-balance", nil, nil, requestOptions)
 }
 
 // MarkOrderUncollectible writes an open usage order off; collecting it
 // again reopens it. Repeating it changes nothing.
 func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
 	return c.adminOrderPost(ctx, id, "mark-uncollectible", nil, nil, requestOptions)
-}
-
-// RetryOrderCollection charges what a usage order owes to one of its
-// customer's cards now. The same IdempotencyKey answers the first attempt; a failed
-// charge is an *Error (card_declined or payment_failed) carrying the order.
-func (c *Client) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams, requestOptions ...RequestOption) (*billing.Order, error) {
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
-	}
-	return c.adminOrderPost(ctx, id, "retry-collection", params, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions)
 }
