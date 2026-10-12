@@ -182,6 +182,9 @@ func TestProviderOwnedRenewals(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.deliver(rail, first))
 		require.Equal(t, http.StatusOK, w.deliver(rail, first), "a duplicate delivery")
 		renewed := l.periodEnd()
+		if !renewed.After(end) {
+			w.dumpJobs()
+		}
 		require.True(t, renewed.After(end), "the provider renewal moves the local period")
 		paid := len(completed(w.payments(tp, l.c.id)))
 
