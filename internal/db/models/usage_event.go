@@ -43,7 +43,7 @@ type UsageEvent struct {
 	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id,omitempty"`
 	// StatedAmount is the optional cost supplied by the host, independent of
 	// what the meters charged. Failed events always state their cost.
-	StatedAmount *int64 `json:"stated_amount"`
+	StatedAmount *int64 `json:"stated_amount,string"`
 	// Charges are what each priced meter charged the event when it was
 	// recorded; Amount is their sum.
 	Charges    []UsageCharge  `json:"charges"`
