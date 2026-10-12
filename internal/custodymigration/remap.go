@@ -163,8 +163,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 
 // create mints a custodian-held instrument for a card the export carried and
 // our book has no row for. It is the IMPORT half: the original vault handle is
-// still recorded on the row (rail_customer_ref) and in the migration record, so
-// a card that arrives this way is as auditable as one that was remapped.
+// recorded in the migration record, as for a remapped card.
 func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (RowResult, error) {
 	if !p.apply {
 		out.Outcome = OutcomeCreated
@@ -186,15 +185,11 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 		}
 		brand, last4, month, year := models.ParseCard(tk.CardType, tk.LastFour, tk.ExpiryDate).Columns()
 		if _, cerr := q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-			ID:         newID,
-			MerchantID: p.merchantID.UUID(),
-			CustomerID: *tk.Customer,
-			Rail:       p.sourceRail,
-			// The card's provenance: it came out of THIS PSP vault entry. The
-			// handle is dead as an address the moment the custodian holds the
-			// card, and it is the only link back to charges made before.
-			RailCustomerRef: strings.TrimSpace(tk.SourceRailCustomerRef),
-			RailMethodRef:   token,
+			ID:            newID,
+			MerchantID:    p.merchantID.UUID(),
+			CustomerID:    *tk.Customer,
+			Rail:          p.sourceRail,
+			RailMethodRef: token,
 
 			Custodian:          p.custodianKind(),
 			CustodianID:        &p.custodian.ID,

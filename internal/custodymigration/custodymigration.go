@@ -32,8 +32,9 @@
 //
 // FOUR PROPERTIES THE FLIP MUST HAVE (they are the design, not decoration):
 //
-//  1. The old PSP vault handle is never lost. It stays on the payment_methods
-//     row (rail_customer_ref) AND is copied into billing.custody_migrations.
+//  1. The old PSP vault handle is never lost: billing.custody_migrations
+//     keeps it. The payment_methods row holds only live custody, so its
+//     rail_customer_ref is cleared.
 //  2. Subscriptions are untouched. Same payment_method_id, no lifecycle write.
 //  3. Reversible IN RECORD, not in custody. Every field needed to re-point an
 //     instrument back at its PSP vault is recorded. That does not restore the
