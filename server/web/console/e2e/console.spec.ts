@@ -64,7 +64,7 @@ test("owner composes Billing, Access and Account with a live merchant selector",
     page.getByRole("heading", { name: "Account security", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "Sessions", exact: true })
+    page.getByRole("heading", { name: "Active sessions", exact: true })
   ).toBeVisible()
   await page.getByRole("button", { name: "Dark theme", exact: true }).click()
   await expect(page.locator(".console-shell")).toHaveAttribute(
@@ -135,7 +135,7 @@ test("account security remains usable when billing permissions are unavailable",
     page.getByRole("heading", { name: "Account security", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "Sessions", exact: true })
+    page.getByRole("heading", { name: "Active sessions", exact: true })
   ).toBeVisible()
 })
 
@@ -165,7 +165,7 @@ test("a native AuthKit credential write asks for fresh sign-in and retries once"
     .getByRole("link", { name: "Access", exact: true })
     .click()
   await page.getByRole("link", { name: "API keys", exact: true }).click()
-  await page.getByRole("button", { name: /Create API key|New API key/ }).click()
+  await page.getByRole("button", { name: "New key", exact: true }).click()
   await page.getByLabel("Name", { exact: true }).fill("Browser proof")
   await page
     .getByRole("combobox", { name: "Role", exact: true })
@@ -241,12 +241,17 @@ test("a group invitation reaches enrollment through the shipped console", async 
     .selectOption(health.merchants[0])
   await page.getByRole("link", { name: "Invitations", exact: true }).click()
   await page.getByRole("textbox", { name: /Email/i }).fill(email)
-  await page.getByRole("combobox", { name: "Role", exact: true }).selectOption("merchant:viewer")
-  const invited = page.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    response.url().endsWith(`/groups/${health.merchants[0]}/invitations`)
+  await page
+    .getByRole("combobox", { name: "Role", exact: true })
+    .selectOption("merchant:viewer")
+  const invited = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/groups/${health.merchants[0]}/invitations`)
   )
-  await page.getByRole("button", { name: /Send invitation|Invite/, exact: true }).click()
+  await page
+    .getByRole("button", { name: /Send invitation|Invite/, exact: true })
+    .click()
   const invitation = await invited
   expect(invitation.status(), await invitation.text()).toBe(202)
   const letter = await request.get(

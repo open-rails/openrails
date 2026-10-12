@@ -173,12 +173,18 @@ function SignedIn({
         replace
       />
     )
+  if (!identity.user)
+    return (
+      <p role="status" className="console-empty">
+        Loading your account…
+      </p>
+    )
   return (
     <MerchantWorkspace
-      key={identity.user?.id}
+      key={identity.user.id}
       config={config}
       session={session}
-      subject={identity.user!.id}
+      subject={identity.user.id}
     />
   )
 }

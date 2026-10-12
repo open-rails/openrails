@@ -40,21 +40,21 @@ export function useIdentity(): ConsoleIdentity {
 
 export function LocalIdentity({ children }: { children: React.ReactNode }) {
   const session = useSession()
-  const { status, user, signOut } = session
+  const { status, userId, user, signOut } = session
   const value = React.useMemo<ConsoleIdentity>(
     () => ({
       status,
       user:
-        status === "signed_in" && user
+        status === "signed_in" && userId
           ? {
-              id: user.id,
-              email: user.email ?? undefined,
-              username: user.username ?? undefined,
+              id: userId,
+              email: user?.email ?? undefined,
+              username: user?.username ?? undefined,
             }
           : null,
       signOut,
     }),
-    [status, user, signOut]
+    [status, userId, user, signOut]
   )
   return (
     <IdentityContext.Provider value={value}>
@@ -70,16 +70,16 @@ export function IssuerIdentity({
   name: string
   children: React.ReactNode
 }) {
-  const { status, user, signIn, signOut } = useIssuerAuth()
+  const { status, userId, user, signIn, signOut } = useIssuerAuth()
   const value = React.useMemo<ConsoleIdentity>(
     () => ({
       status,
       user:
-        status === "signed_in" && user
+        status === "signed_in" && userId
           ? {
-              id: user.sub,
-              email: user.email,
-              username: user.preferredUsername ?? user.name,
+              id: userId,
+              email: user?.email,
+              username: user?.preferredUsername ?? user?.name,
             }
           : null,
       signOut: () => signOut(),
@@ -89,7 +89,7 @@ export function IssuerIdentity({
           signIn({ returnTo, prompt: silent ? "none" : undefined }),
       },
     }),
-    [status, user, signIn, signOut, name]
+    [status, userId, user, signIn, signOut, name]
   )
   return (
     <IdentityContext.Provider value={value}>
