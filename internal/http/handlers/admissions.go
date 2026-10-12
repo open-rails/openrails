@@ -151,17 +151,26 @@ func admissionItemScope(r *httprequest.Request, svc *billingservice.Service, req
 		return api.Coded(billing.CodeInvalidParam, "request_id required").WithParam("request_id")
 	}
 	customer, err := svc.AdmissionCustomer(r.Request.Context(), requestID)
-	if errors.Is(err, spendgate.ErrNotFound) {
-		return api.Coded("admission_not_found", "")
-	}
 	if err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error("admission lookup failed")
-		return api.Coded(billing.CodeInternalError, "admission lookup failed")
+		return admissionLookupRefusal(r, requestID, err)
 	}
 	if !serviceCustomerScopeAllows(r, billingidentity.CustomerID(customer)) {
 		return api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, "")
 	}
 	return nil
+}
+
+// admissionLookupRefusal answers a failed lookup: a typed refusal keeps its
+// code (database_busy is a retry), anything else is a 500.
+func admissionLookupRefusal(r *httprequest.Request, requestID string, err error) *api.APIError {
+	if errors.Is(err, spendgate.ErrNotFound) {
+		return api.Coded("admission_not_found", "")
+	}
+	if out := refusalOf(err); out != nil {
+		return out
+	}
+	log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error("admission lookup failed")
+	return api.Coded(billing.CodeInternalError, "admission lookup failed")
 }
 
 func admissionRefusal(err *api.APIError) billing.AdmissionResult {
