@@ -28,6 +28,7 @@ import (
 func TestObservedBillMoneyFidelity(t *testing.T) {
 	w := newWorld(t)
 	w.waive("evidenced", "normalized provider receipt fixtures exercise the local writer without calling a payment gateway")
+	w.waive("once", "a deliberate extra provider capture is retained and raises an overpayment finding")
 	c := w.newCustomer()
 	price := w.lifetime("observed-test", 100)
 	var priceID uuid.UUID

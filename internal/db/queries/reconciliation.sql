@@ -773,7 +773,12 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   )
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
-      OR (e.source_type = 'purchase' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+      OR (e.source_type = 'purchase' AND pay.id IS NOT NULL
+          AND (pay.status = 'refunded' OR EXISTS (
+              SELECT 1 FROM billing.payments r
+              WHERE r.merchant_id = pay.merchant_id AND r.refunded_payment_id = pay.id
+                AND r.deleted_at IS NULL AND r.status = 'succeeded'
+                AND r.amount < 0 AND r.reversal_kind = 'refund')))
   )
 -- Oldest window first, capped: truncation delays an operator decision rather
 -- than losing one.

@@ -135,6 +135,20 @@ const (
 // ID. reversalKind says WHAT the reversal is (refund vs chargeback); the rails
 // handle the actual money movement, this persists the event. amount is micros.
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, time.Time{}, nil)
+}
+
+// RecordObservedRefund retains the provider's occurrence time and provenance.
+// Local accounting effects use the service clock; they are never backdated.
+// A replay returns the first accepted facts without rewriting their metadata.
+func (s *PaymentService) RecordObservedRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
+	if occurredAt.IsZero() {
+		return nil, errors.New("observed refund requires its provider occurrence time")
+	}
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt.UTC().Truncate(time.Microsecond), metadata)
+}
+
+func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -156,7 +170,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 			return err
 		}
 		scoped := NewPaymentService(transactionDB, s.clock)
-		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind)
+		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt, metadata)
 		if err != nil {
 			return err
 		}
@@ -169,7 +183,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 // refund of the same payment is unresolved.
 var ErrRefundReservationPending = errors.New("an OpenRails refund of this payment is still in flight; retry")
 
-func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
+func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
 	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
 		return nil, fmt.Errorf("invalid reversal kind %q", reversalKind)
 	}
@@ -210,6 +224,10 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	if strings.TrimSpace(refundTransactionID) == "" {
 		return nil, errors.New("refund transaction id is required")
 	}
+	now := s.now()
+	if occurredAt.IsZero() {
+		occurredAt = now
+	}
 
 	refund := &models.Payment{
 		ID:             uuidutil.NewV7(),
@@ -233,8 +251,9 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		// The reversal settled at the rail; the feed excludes it on
 		// amount/refunded_payment_id, not on this marker.
 		MoneyMovement: models.MoneyMovementRail,
-		PurchasedAt:   s.now(),
-		CreatedAt:     s.now(),
+		PurchasedAt:   occurredAt,
+		CreatedAt:     now,
+		Metadata:      metadata,
 	}
 	if err := s.Create(ctx, refund); err != nil {
 		return nil, err

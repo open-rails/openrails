@@ -125,7 +125,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if lookupErr != nil && !db.IsNotFound(lookupErr) {
 		return false, lookupErr
 	}
-	_, err = svc.Refund(ctx, original.ID, key, amount, payments.ReversalRefund)
+	_, err = svc.RecordObservedRefund(ctx, original.ID, key, amount, payments.ReversalRefund, a.PurchasedAt, a.Metadata)
 	return db.IsNotFound(lookupErr) && err == nil, err
 }
 

@@ -79,6 +79,14 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	}
 	if bill.Payment != nil {
 		payment := *bill.Payment
+		if payment.AttemptKind == nil {
+			switch bill.Kind {
+			case "initial", "purchase":
+				payment.AttemptKind = new(payments.AttemptInitial)
+			case "renewal":
+				payment.AttemptKind = new(payments.AttemptRenewal)
+			}
+		}
 		payment.OrderID = &result.Order.ID
 		payment.PspID = &bill.PSPID
 		if payment.ID == uuid.Nil {

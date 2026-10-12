@@ -215,6 +215,10 @@ func TestProviderOwnedRenewals(t *testing.T) {
 			require.NotNil(t, payment.OrderID, "every verified charge belongs to its bill")
 			require.True(t, orderIDs[*payment.OrderID])
 		}
+		var renewals int
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND purchased_at >= $2 AND attempt_kind='renewal' AND amount > 0`), l.sub.UUID(), end).Scan(&renewals))
+		require.Equal(t, 2, renewals, "both provider renewals retain their metrics classification")
+		require.Equal(t, float64(1), w.metricTotal(end, "unique_rebilled_customers", nil))
 	})
 }
 
