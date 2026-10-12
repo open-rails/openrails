@@ -71,6 +71,20 @@ func TestObservedRefundRetainsHistoryAndAccessReview(t *testing.T) {
 	changed, err = writer.RecordRefund(ctx, action)
 	require.NoError(t, err)
 	require.False(t, changed)
+	conflicting := action
+	conflicting.AmountCents++
+	_, err = writer.RecordRefund(ctx, conflicting)
+	require.ErrorContains(t, err, "different payment facts")
+	// Later discovery metadata cannot rewrite the first accepted evidence.
+	rediscovered := action
+	rediscovered.Metadata = map[string]any{"provider": "nmi", "later_discovery": true}
+	changed, err = writer.RecordRefund(ctx, rediscovered)
+	require.NoError(t, err)
+	require.False(t, changed)
+	retained, err := svc.GetByID(ctx, recorded.ID)
+	require.NoError(t, err)
+	require.True(t, refundedAt.Equal(retained.PurchasedAt))
+	require.Equal(t, recorded.Metadata, retained.Metadata)
 	action.TransactionID, action.PurchasedAt = "second-partial", refundedAt.Add(time.Hour)
 	changed, err = writer.RecordRefund(ctx, action)
 	require.NoError(t, err)
