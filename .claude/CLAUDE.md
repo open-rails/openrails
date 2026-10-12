@@ -20,8 +20,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   against the root's source (`replace … => ../`).
 - `examples/` is a module too. Check each module on its own (`GOWORK=off`;
   `scripts/check.sh` runs all three).
-- `scripts/release vX.Y.Z` releases root and server in lockstep: it pins server's require
-  of the root, then tags `vX.Y.Z` and `server/vX.Y.Z` on that master commit.
+- `scripts/release` releases root and server in lockstep: `prepare vX.Y.Z` opens a PR pinning
+  server's require of the root; once it is green, `publish vX.Y.Z` fast-forwards master to it and
+  pushes the `vX.Y.Z` and `server/vX.Y.Z` tags with it.
 
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):

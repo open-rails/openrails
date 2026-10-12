@@ -134,13 +134,15 @@ The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
 ## Releases
 
 ```sh
-scripts/release vX.Y.Z ["note"]   # on master's head, clean, equal to origin/master
+scripts/release prepare vX.Y.Z            # opens the release PR from origin/master
+scripts/release publish vX.Y.Z ["note"]   # once that PR's checks pass
 ```
 
-The root and server modules release together. The script pins
-`server/go.mod`'s require of the root to `vX.Y.Z`, commits that, tags the
-commit `vX.Y.Z` and `server/vX.Y.Z` (signed, annotated) and pushes master and
-both tags. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
+The root and server modules release together. Master accepts only commits
+whose checks passed, so `prepare` pins `server/go.mod`'s require of the root
+to `vX.Y.Z` on a `release/vX.Y.Z` branch and opens its PR; `publish`
+fast-forwards master to the green PR head and pushes it with the signed,
+annotated `vX.Y.Z` and `server/vX.Y.Z` tags in one atomic push. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
 server module: binaries, checksums, SBOMs, generated notes, build
 provenance; then `@openrails/billing-ui@X.Y.Z` on npm) and
 `docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one

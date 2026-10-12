@@ -1,50 +1,68 @@
 #!/usr/bin/env bash
-# Releases the root module and the server module in lockstep:
+# Releases the root module and the server module in lockstep. Master only
+# accepts commits whose checks passed, so a release is two steps:
 #
-#   scripts/release vX.Y.Z ["note"]
+#   scripts/release prepare vX.Y.Z           # opens the release PR
+#   scripts/release publish vX.Y.Z ["note"]  # once that PR is green
 #
-# On master's head it pins the server and console browser fixture's root require
-# to vX.Y.Z (replaces keep in-repository builds on local source), commits that, tags
-# the commit vX.Y.Z and server/vX.Y.Z (signed, annotated) and pushes master and
-# both tags at once. The vX.Y.Z tag runs release.yaml and docker-publish.yaml.
+# prepare pins the server and console browser fixture's root require to vX.Y.Z
+# (replaces keep in-repository builds on local source) on origin/master, commits
+# that to release/vX.Y.Z and opens its PR. publish fast-forwards master to the
+# green PR head and pushes it with the signed, annotated vX.Y.Z and
+# server/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
+# docker-publish.yaml.
 set -euo pipefail
-
 die() {
   echo "release: $*" >&2
   exit 1
 }
-
-version="${1:-}"
-note="${2:-}"
-[[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] ||
-  die "usage: scripts/release vX.Y.Z [note]"
-message="$version${note:+: $note}"
-
+usage="usage: scripts/release prepare vX.Y.Z | publish vX.Y.Z [note]"
+step="${1:-}"
+version="${2:-}"
+note="${3:-}"
+[[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "$usage"
+branch="release/$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
-[[ "$(git symbolic-ref --quiet --short HEAD)" == master ]] || die "check out master"
-[[ -z "$(git status --porcelain)" ]] || die "the working tree is not clean"
 git fetch --quiet origin master --tags
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || die "master is not origin/master"
 for tag in "$version" "server/$version"; do
   if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
     die "$tag already exists"
   fi
 done
 
-# The browser fixture imports both modules, so its direct root requirement
-# must advance with the server's. A failed build leaves these manifests as they were.
-release_manifests=(server/go.mod server/web/console/e2e/server/go.mod)
-trap 'git checkout --quiet -- "${release_manifests[@]}"' ERR
-for manifest in "${release_manifests[@]}"; do
-  (cd "${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
-done
-trap - ERR
-if ! git diff --quiet -- "${release_manifests[@]}"; then
-  git add "${release_manifests[@]}"
-  git commit --quiet -S -m "Release $version: pin server and browser fixture to the paired root"
-fi
-git tag -s -a "$version" -m "$message"
-git tag -s -a "server/$version" -m "server/$message"
-git push --atomic origin master "refs/tags/$version" "refs/tags/server/$version"
-echo "release: $version and server/$version at $(git rev-parse --short HEAD)"
+case "$step" in
+prepare)
+  work="$(mktemp -d)"
+  trap 'git worktree remove --force "$work" >/dev/null 2>&1 || true' EXIT
+  git worktree add --quiet --detach "$work" origin/master
+  # The browser fixture imports both modules, so its direct root requirement
+  # must advance with the server's.
+  for manifest in server/go.mod server/web/console/e2e/server/go.mod; do
+    (cd "$work/${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
+  done
+  git -C "$work" commit --quiet -S -am "Release $version: pin server and browser fixture to the paired root"
+  git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
+  gh pr create --base master --head "$branch" --title "Release $version" \
+    --body "Pins server and the console browser fixture to the paired root. When its checks pass: \`scripts/release publish $version\`."
+  ;;
+publish)
+  git fetch --quiet origin "$branch"
+  head="$(git rev-parse "origin/$branch")"
+  git merge-base --is-ancestor origin/master "$head" || die "$branch is not ahead of origin/master; prepare it again"
+  state="$(gh pr view "$branch" --json headRefOid,mergeStateStatus -q '.headRefOid + " " + .mergeStateStatus')"
+  [[ "$state" == "$head CLEAN" ]] || die "the $branch PR is not green at $head ($state)"
+  message="$version${note:+: $note}"
+  git tag -s -a "$version" -m "$message" "$head"
+  git tag -s -a "server/$version" -m "server/$message" "$head"
+  if ! git push --atomic origin "$head:refs/heads/master" "refs/tags/$version" "refs/tags/server/$version"; then
+    git tag -d "$version" "server/$version" >/dev/null
+    die "push refused; tags removed locally"
+  fi
+  git push --quiet origin --delete "$branch" || true
+  echo "release: $version and server/$version at ${head:0:9}"
+  ;;
+*)
+  die "$usage"
+  ;;
+esac
