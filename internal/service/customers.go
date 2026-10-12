@@ -196,5 +196,13 @@ func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.Cust
 		return nil, err
 	}
 	m := money[customer.UUID()]
-	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, DefaultPaymentMethods: m.Defaults}, nil
+	currencies := make([]string, 0, len(m.Balances))
+	for _, b := range m.Balances {
+		currencies = append(currencies, b.Currency)
+	}
+	lines, err := s.moneyService().LowBalanceLines(ctx, customer, currencies)
+	if err != nil {
+		return nil, err
+	}
+	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, DefaultPaymentMethods: m.Defaults, LowBalanceLines: lines}, nil
 }

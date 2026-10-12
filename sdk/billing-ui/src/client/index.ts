@@ -49,6 +49,7 @@ export type {
   PublicConfig,
   PublicMerchant,
   ListPage,
+  LowBalanceLine,
   NetworkLinkChallenge,
   NewCard,
   CardCaptureReference,

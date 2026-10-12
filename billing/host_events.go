@@ -52,23 +52,32 @@ const (
 	// HostEventMandateRevoked: the customer revoked one of its charge
 	// agreements; the merchant charges nothing more under it.
 	HostEventMandateRevoked HostEventType = "mandate.revoked"
-	// The balance of a customer with a running charge went under its low
-	// line, or its capacity reached zero: once per crossing.
+	// A watched customer's balance (every prepaid one, and every one with a
+	// running charge) went under its low line, or its capacity reached zero:
+	// once per crossing, re-armed by a funding.
 	HostEventBalanceLow      HostEventType = "balance.low"
 	HostEventBalanceDepleted HostEventType = "balance.depleted"
 )
 
 // BalanceHostEvent is balance.low or balance.depleted: the customer's balance
-// in one currency as the crossing was seen, at AsOf. On balance.depleted,
-// stop what the customer's running charges pay for.
+// in one currency as the crossing was seen, at AsOf. LowBalanceAmount is the
+// effective line it was judged at: the larger of the amount line and the burn
+// rate (AccrualRatePerHour + UsageRatePerHour) times the runway line.
+// DepletesAt is exact (running charges and credit lot lapses), null when
+// neither moves the balance; RunwayEndsAt is when capacity reaches zero at the
+// burn rate, null at rate zero. On balance.depleted, stop what the customer's
+// running charges pay for.
 type BalanceHostEvent struct {
 	CustomerID         CustomerID `json:"customer_id"`
 	Currency           string     `json:"currency"`
 	AvailableAmount    int64      `json:"available_amount,string"`
 	OwedAmount         int64      `json:"owed_amount,string"`
 	AccrualRatePerHour int64      `json:"accrual_rate_per_hour,string"`
+	UsageRatePerHour   int64      `json:"usage_rate_per_hour,string"`
+	LowBalanceAmount   int64      `json:"low_balance_amount,string"`
 	AsOf               time.Time  `json:"as_of"`
-	DepletesAt         time.Time  `json:"depletes_at"`
+	DepletesAt         *time.Time `json:"depletes_at"`
+	RunwayEndsAt       *time.Time `json:"runway_ends_at"`
 }
 
 // OrderHostEvent is one order transition: the order's status and its

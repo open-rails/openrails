@@ -84,7 +84,8 @@ not throttle or suppress emission for delivery preferences. Routine
 and `usage_charged` facts have `optional: true`. Consumers should default to
 skipping these unless their application or user opts in, while still
 acknowledging them. Subscription activation, contractual plan changes,
-required advance repricing, failure and repair facts are not optional.
+required advance repricing, failure and repair facts are not optional, nor
+are `balance_low` and `balance_depleted` ([balance notices](balance-notices.md)).
 OpenRails does not invent an upcoming-charge reminder schedule.
 
 Price-change events describe the recorded schedule transition, not an applied

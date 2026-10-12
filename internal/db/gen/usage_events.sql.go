@@ -132,6 +132,38 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 	return err
 }
 
+const sumUsageAmountBetween = `-- name: SumUsageAmountBetween :one
+SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
+FROM billing.usage_events
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text
+  AND occurred_at > $4::timestamptz AND occurred_at <= $5::timestamptz
+`
+
+type SumUsageAmountBetweenParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Since      time.Time
+	Until      time.Time
+}
+
+// A balance watch's usage rate: the customer's rated usage dated in
+// (since, until], so consecutive looks read each event once. Served by
+// usage_events_customer_id_occurred_at_idx.
+func (q *Queries) SumUsageAmountBetween(ctx context.Context, arg SumUsageAmountBetweenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumUsageAmountBetween,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Since,
+		arg.Until,
+	)
+	var total_amount int64
+	err := row.Scan(&total_amount)
+	return total_amount, err
+}
+
 const sumUsageAmountSince = `-- name: SumUsageAmountSince :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_events

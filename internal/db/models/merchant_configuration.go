@@ -50,6 +50,17 @@ type MerchantConfiguration struct {
 	// CheckoutRouting is the merchant's processor preference: ordered rules,
 	// first match wins. Empty ⇒ the built-in default order.
 	CheckoutRouting []CheckoutRoutingRule `json:"checkout_routing,omitempty"`
+
+	// BalanceNotices are the customers' default low-balance lines.
+	BalanceNotices BalanceNoticeConfiguration `json:"balance_notices,omitempty"`
+}
+
+// BalanceNoticeConfiguration is a merchant's validated default low-balance
+// lines: RunwayHours nil ⇒ the built-in 24; a currency absent from LowAmounts
+// has no amount line.
+type BalanceNoticeConfiguration struct {
+	RunwayHours *int             `json:"runway_hours,omitempty"`
+	LowAmounts  map[string]int64 `json:"low_amounts,omitempty"`
 }
 
 type CheckoutRoutingRule = billing.CheckoutRoutingRule

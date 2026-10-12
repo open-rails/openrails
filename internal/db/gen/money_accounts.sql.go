@@ -105,7 +105,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -133,11 +133,13 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
 		&i.CollectionRevokedAt,
+		&i.LowBalanceAmount,
+		&i.LowBalanceRunwayHours,
 	)
 	return i, err
 }
 
-const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :exec
+const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :execrows
 INSERT INTO billing.money_settings (
     merchant_id, customer_id, currency, billing_mode, created_at, updated_at
 ) VALUES ($1, $2, $4, $3, $5, $5)
@@ -153,15 +155,18 @@ type InsertMoneyAccountSettingsIfAbsentParams struct {
 }
 
 // Default settings row in the given billing mode; no-op when the row exists.
-func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg InsertMoneyAccountSettingsIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertMoneyAccountSettingsIfAbsent,
+func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg InsertMoneyAccountSettingsIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertMoneyAccountSettingsIfAbsent,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.BillingMode,
 		arg.Currency,
 		arg.Now,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listCustomerBalanceCurrencies = `-- name: ListCustomerBalanceCurrencies :many
@@ -212,9 +217,9 @@ func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCus
 }
 
 const listCustomerSettingsAccounts = `-- name: ListCustomerSettingsAccounts :many
-SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
+SELECT customer_id, currency, credit_limit_amount, tier, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
-  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
+  AND (credit_limit_amount <> 0 OR tier IS NOT NULL OR low_balance_amount IS NOT NULL OR low_balance_runway_hours IS NOT NULL)
 ORDER BY customer_id, currency
 LIMIT $3::int
 `
@@ -226,14 +231,17 @@ type ListCustomerSettingsAccountsParams struct {
 }
 
 type ListCustomerSettingsAccountsRow struct {
-	CustomerID        uuid.UUID
-	Currency          string
-	CreditLimitAmount int64
-	Tier              *string
+	CustomerID            uuid.UUID
+	Currency              string
+	CreditLimitAmount     int64
+	Tier                  *string
+	LowBalanceAmount      *int64
+	LowBalanceRunwayHours *int32
 }
 
-// The customers' credit limits and trust levels, by currency. A customer has
-// at most one row per registered currency, which bounds row_limit.
+// The customers' credit limits, trust levels and low-balance lines, by
+// currency. A customer has at most one row per registered currency, which
+// bounds row_limit.
 func (q *Queries) ListCustomerSettingsAccounts(ctx context.Context, arg ListCustomerSettingsAccountsParams) ([]ListCustomerSettingsAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listCustomerSettingsAccounts, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
 	if err != nil {
@@ -248,6 +256,8 @@ func (q *Queries) ListCustomerSettingsAccounts(ctx context.Context, arg ListCust
 			&i.Currency,
 			&i.CreditLimitAmount,
 			&i.Tier,
+			&i.LowBalanceAmount,
+			&i.LowBalanceRunwayHours,
 		); err != nil {
 			return nil, err
 		}
@@ -364,7 +374,7 @@ func (q *Queries) ListCustomersMoneyAccounts(ctx context.Context, arg ListCustom
 }
 
 const listCustomersMoneySettings = `-- name: ListCustomersMoneySettings :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
 LIMIT $3::int
@@ -397,6 +407,8 @@ func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustom
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
 			&i.CollectionRevokedAt,
+			&i.LowBalanceAmount,
+			&i.LowBalanceRunwayHours,
 		); err != nil {
 			return nil, err
 		}
@@ -448,7 +460,7 @@ func (q *Queries) ListDefaultPaymentMethodsByCustomers(ctx context.Context, arg 
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -478,6 +490,8 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
 			&i.CollectionRevokedAt,
+			&i.LowBalanceAmount,
+			&i.LowBalanceRunwayHours,
 		); err != nil {
 			return nil, err
 		}
@@ -490,7 +504,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, low_balance_amount, low_balance_runway_hours FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -515,11 +529,13 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
 		&i.CollectionRevokedAt,
+		&i.LowBalanceAmount,
+		&i.LowBalanceRunwayHours,
 	)
 	return i, err
 }
 
-const restoreMoneyCollection = `-- name: RestoreMoneyCollection :exec
+const restoreMoneyCollection = `-- name: RestoreMoneyCollection :execrows
 UPDATE billing.money_settings
 SET collection_revoked_at = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
@@ -535,14 +551,17 @@ type RestoreMoneyCollectionParams struct {
 
 // A new collection agreement in the currency: the merchant's billing mode
 // applies again.
-func (q *Queries) RestoreMoneyCollection(ctx context.Context, arg RestoreMoneyCollectionParams) error {
-	_, err := q.db.Exec(ctx, restoreMoneyCollection,
+func (q *Queries) RestoreMoneyCollection(ctx context.Context, arg RestoreMoneyCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreMoneyCollection,
 		arg.Now,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeMoneyCollection = `-- name: RevokeMoneyCollection :exec
@@ -625,6 +644,37 @@ func (q *Queries) SetMoneyAccountDefaultPaymentMethod(ctx context.Context, arg S
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setMoneyAccountLowBalanceLine = `-- name: SetMoneyAccountLowBalanceLine :exec
+UPDATE billing.money_settings
+SET low_balance_amount = $1::bigint,
+    low_balance_runway_hours = $2::int,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND customer_id = $5::uuid AND currency = $6::text
+`
+
+type SetMoneyAccountLowBalanceLineParams struct {
+	LowBalanceAmount      *int64
+	LowBalanceRunwayHours *int32
+	Now                   time.Time
+	MerchantID            uuid.UUID
+	CustomerID            uuid.UUID
+	Currency              string
+}
+
+// The customer's own low-balance line; null inherits the merchant's. The
+// settings row must already exist.
+func (q *Queries) SetMoneyAccountLowBalanceLine(ctx context.Context, arg SetMoneyAccountLowBalanceLineParams) error {
+	_, err := q.db.Exec(ctx, setMoneyAccountLowBalanceLine,
+		arg.LowBalanceAmount,
+		arg.LowBalanceRunwayHours,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
+	return err
 }
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec

@@ -75,6 +75,7 @@ sql:
       - "internal/migrate/postgres/0076_dynamic_pricing.up.sql"
       - "internal/migrate/postgres/0077_retire_checkout_creation.up.sql"
       - "internal/migrate/postgres/0078_proposals.up.sql"
+      - "internal/migrate/postgres/0079_balance_notices.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

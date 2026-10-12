@@ -54,7 +54,7 @@ var excludedTables = map[string]string{
 	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
 	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
 	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
-	"balance_watches":                   "derived: when a customer with a running charge is next looked at; restore watches every running charge again",
+	"balance_watches":                   "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -98,7 +98,7 @@ var excludedColumns = map[string]string{
 	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
 	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
 	"price_keys":                        "merchant_id product_id key revision created_at updated_at",
-	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at",
+	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment

@@ -46,7 +46,7 @@ func TestRunningChargeRoutes(t *testing.T) {
 	startedAt := w.clock.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	start := map[string]any{
 		"reference": reference, "customer_id": c.id, "currency": "usd", "rate_per_hour": "3600000",
-		"started_at": startedAt.Format(time.RFC3339), "low_balance_amount": "1000000", "resource": "gpu:a100",
+		"started_at": startedAt.Format(time.RFC3339), "resource": "gpu:a100",
 	}
 	status, started := w.merchantJSON(usage, http.MethodPost, "/v1/app/running-charges", start)
 	require.Equal(t, http.StatusCreated, status, "%v", started)

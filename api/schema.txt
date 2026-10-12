@@ -79,6 +79,7 @@ migration 0075_operational_read_indexes.up.sql sha256:cd72215555b01a71af5b5785c7
 migration 0076_dynamic_pricing.up.sql sha256:67d784d49e2ec82b305b55b9c903cd9de8430813b23c7aaa18d14d9aa78b9fc7
 migration 0077_retire_checkout_creation.up.sql sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
 migration 0078_proposals.up.sql sha256:9dec89446fbca70a67abd7b6cbb8c95fc8ef607fa5ad20f0d86ebcc3c3986a7f
+migration 0079_balance_notices.up.sql sha256:029ebd8f3f412841331e3aad32d57645e4385eb67f06fbe3e16d31f135647c0e
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -181,17 +182,21 @@ table billing.balance_watches
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column next_check_at timestamp with time zone NOT NULL
+  column next_check_at timestamp with time zone
   column depletes_at timestamp with time zone
   column low_notified_at timestamp with time zone
   column depleted_at timestamp with time zone
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column funded_at timestamp with time zone
+  column usage_rate_per_hour bigint NOT NULL
+  column rate_sampled_at timestamp with time zone
   constraint balance_watches_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint balance_watches_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
   constraint balance_watches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint balance_watches_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  constraint balance_watches_usage_rate_per_hour_check CHECK ((usage_rate_per_hour >= 0))
   index CREATE INDEX balance_watches_depletes_at_idx ON billing.balance_watches USING btree (merchant_id, depletes_at)
-  index CREATE INDEX balance_watches_next_check_at_idx ON billing.balance_watches USING btree (next_check_at)
+  index CREATE INDEX balance_watches_next_check_at_idx ON billing.balance_watches USING btree (next_check_at, merchant_id, customer_id, currency) WHERE (next_check_at IS NOT NULL)
   index CREATE UNIQUE INDEX balance_watches_pkey ON billing.balance_watches USING btree (merchant_id, customer_id, currency)
 
 table billing.book_identity
@@ -987,11 +992,15 @@ table billing.money_settings
   column credit_limit_amount bigint NOT NULL DEFAULT 0
   column default_payment_method_id uuid
   column collection_revoked_at timestamp with time zone
+  column low_balance_amount bigint
+  column low_balance_runway_hours integer
   constraint money_settings_billing_mode_check CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text])))
   constraint money_settings_credit_limit_amount_nonneg_check CHECK ((credit_limit_amount >= 0))
   constraint money_settings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint money_settings_customer_id_default_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, default_payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (default_payment_method_id)
   constraint money_settings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint money_settings_low_balance_amount_check CHECK ((low_balance_amount >= 0))
+  constraint money_settings_low_balance_runway_hours_check CHECK (((low_balance_runway_hours >= 0) AND (low_balance_runway_hours <= 8760)))
   constraint money_settings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency)
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
@@ -2105,7 +2114,6 @@ table billing.running_charges
   column currency text NOT NULL
   column rate_per_hour bigint NOT NULL
   column overdraft_amount bigint NOT NULL
-  column low_balance_amount bigint NOT NULL
   column resource text
   column started_at timestamp with time zone NOT NULL
   column stopped_at timestamp with time zone
@@ -2115,7 +2123,6 @@ table billing.running_charges
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint running_charges_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint running_charges_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
-  constraint running_charges_low_balance_amount_check CHECK ((low_balance_amount >= 0))
   constraint running_charges_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint running_charges_overdraft_amount_check CHECK ((overdraft_amount >= 0))
   constraint running_charges_pkey PRIMARY KEY (merchant_id, id)

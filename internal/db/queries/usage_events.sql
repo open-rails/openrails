@@ -86,6 +86,16 @@ WHERE ue.merchant_id = sqlc.arg(merchant_id) AND ue.customer_id = sqlc.arg(custo
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY ue.event_type, d.key;
 
+-- name: SumUsageAmountBetween :one
+-- A balance watch's usage rate: the customer's rated usage dated in
+-- (since, until], so consecutive looks read each event once. Served by
+-- usage_events_customer_id_occurred_at_idx.
+SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
+FROM billing.usage_events
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+  AND occurred_at > sqlc.arg(since)::timestamptz AND occurred_at <= sqlc.arg(until)::timestamptz;
+
 -- name: SumUsageAmountSince :one
 -- accrual_rate_cap: the customer's rated usage over a lookback window, for the
 -- measured accrual rate. Window-bounded, never history; served by

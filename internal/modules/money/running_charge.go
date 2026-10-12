@@ -71,8 +71,6 @@ func validateRunningChargeStart(in billing.StartRunningChargeParams, now time.Ti
 		return time.Time{}, runningChargeInvalid("minimum_amount", "minimum_amount must be nonnegative")
 	case in.OverdraftAmount < 0:
 		return time.Time{}, runningChargeInvalid("overdraft_amount", "overdraft_amount must be nonnegative")
-	case in.LowBalanceAmount < 0:
-		return time.Time{}, runningChargeInvalid("low_balance_amount", "low_balance_amount must be nonnegative")
 	case len(in.Resource) > runningChargeMaxTextBytes || !utf8.ValidString(in.Resource) || strings.ContainsRune(in.Resource, 0):
 		return time.Time{}, runningChargeInvalid("resource", "resource must be at most %d bytes of UTF-8", runningChargeMaxTextBytes)
 	}
@@ -153,7 +151,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	}
 	row, err := q.InsertRunningCharge(ctx, gen.InsertRunningChargeParams{
 		MerchantID: merchantID.UUID(), Reference: in.Reference, CustomerID: customer.UUID(), Currency: in.Currency,
-		RatePerHour: in.RatePerHour, OverdraftAmount: in.OverdraftAmount, LowBalanceAmount: in.LowBalanceAmount,
+		RatePerHour: in.RatePerHour, OverdraftAmount: in.OverdraftAmount,
 		Resource: resource, StartedAt: startedAt, Now: now,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -189,7 +187,6 @@ func replayRunningChargeStart(row gen.BillingRunningCharge, in billing.StartRunn
 		{"currency", row.Currency == in.Currency, row.Currency, in.Currency},
 		{"rate_per_hour", row.RatePerHour == in.RatePerHour, row.RatePerHour, in.RatePerHour},
 		{"overdraft_amount", row.OverdraftAmount == in.OverdraftAmount, row.OverdraftAmount, in.OverdraftAmount},
-		{"low_balance_amount", row.LowBalanceAmount == in.LowBalanceAmount, row.LowBalanceAmount, in.LowBalanceAmount},
 		{"resource", resource == in.Resource, resource, in.Resource},
 		{"started_at", in.StartedAt == nil || row.StartedAt.Equal(instant(*in.StartedAt)), row.StartedAt, in.StartedAt},
 	}
@@ -382,7 +379,7 @@ func runningChargeFromRow(row gen.BillingRunningCharge, now time.Time) (*billing
 		ID: billing.RunningChargeID(row.ID), Reference: row.Reference, CustomerID: billing.CustomerID(row.CustomerID),
 		Currency: row.Currency, RatePerHour: row.RatePerHour, State: billing.RunningChargeRunning,
 		StartedAt: row.StartedAt.UTC(), ChargedAmount: row.PostedAmount, PostedAmount: row.PostedAmount, AsOf: now,
-		OverdraftAmount: row.OverdraftAmount, LowBalanceAmount: row.LowBalanceAmount, Resource: row.Resource,
+		OverdraftAmount: row.OverdraftAmount, Resource: row.Resource,
 		CreatedAt: row.CreatedAt.UTC(), UpdatedAt: row.UpdatedAt.UTC(),
 	}
 	if row.StoppedAt != nil {
@@ -400,9 +397,9 @@ func runningChargeFromRow(row gen.BillingRunningCharge, now time.Time) (*billing
 }
 
 // runningChargeLines are the lines a customer's running charges draw on its
-// balance: their rates summed, the smallest overdraft and the largest low line.
+// balance: their rates summed and the smallest overdraft.
 type runningChargeLines struct {
-	ratePerHour, overdraft, low int64
+	ratePerHour, overdraft int64
 }
 
 func runningLines(charges []gen.BillingRunningCharge) runningChargeLines {
@@ -412,14 +409,12 @@ func runningLines(charges []gen.BillingRunningCharge) runningChargeLines {
 		if i == 0 || c.OverdraftAmount < lines.overdraft {
 			lines.overdraft = c.OverdraftAmount
 		}
-		lines.low = max(lines.low, c.LowBalanceAmount)
 	}
 	return lines
 }
 
 // capacityFloor is the available balance at which a customer's capacity is
-// zero, and what it owes: prepaid, what it owes less the overdraft; arrears,
-// as far below zero as its credit line still reaches.
+// zero, and what it owes (capacityFloors).
 func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, overdraft int64) (floor, owed int64, err error) {
 	if owed, err = s.moneyLedger(q, merchantID).OutstandingOwed(ctx, customer, currency); err != nil {
 		return 0, 0, err
@@ -428,75 +423,12 @@ func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, mercha
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, err
 	}
-	if err == nil && settings.BillingMode == BillingModeArrears && settings.CollectionRevokedAt == nil {
-		return -max(satSub(settings.CreditLimitAmount, owed), 0), owed, nil
+	var row *gen.BillingMoneySetting
+	if err == nil {
+		row = &settings
 	}
-	return satSub(owed, overdraft), owed, nil
-}
-
-// balanceRunOut is what a customer's running charges do to one balance.
-type balanceRunOut struct {
-	ratePerHour int64
-	// depletesAt is when capacity reaches zero; lowAt when the balance less
-	// what is owed goes under the low line, nil with no line.
-	depletesAt time.Time
-	lowAt      *time.Time
-	// depleted: capacity is at zero now. low: the balance is under the line now.
-	depleted, low bool
-	owed          int64
-	// checkpointDue: a charge is not yet posted through the last 00:00 UTC.
-	checkpointDue bool
-}
-
-// runOut projects bal, derived at bal.AsOf, forward under the customer's
-// running charges. ok is false when none runs.
-func (s *MoneyService) runOut(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance) (out balanceRunOut, ok bool, err error) {
-	charges, err := q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{
-		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency,
-	})
-	if err != nil || len(charges) == 0 {
-		return out, false, err
-	}
-	lines := runningLines(charges)
-	for _, c := range charges {
-		out.checkpointDue = out.checkpointDue || c.PostedThroughAt.Before(bal.AsOf.Truncate(24*time.Hour))
-	}
-	floor, owed, err := s.capacityFloor(ctx, q, bal.MerchantID, bal.CustomerID, bal.Currency, lines.overdraft)
-	if err != nil {
-		return out, false, err
-	}
-	rows, err := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
-		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
-	})
-	if err != nil {
-		return out, false, err
-	}
-	lots := make([]creditLot, len(rows))
-	for i, row := range rows {
-		lots[i] = creditLot{remaining: row.Remaining, endsAt: row.EndsAt}
-	}
-	// A lapsed lot the expiry sweep has not reached is still in the balance:
-	// what it will expire with is not there to draw.
-	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
-		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
-	})
-	if err != nil {
-		return out, false, err
-	}
-	unspent, err := lapsedUnspent(charges, lapsed)
-	if err != nil {
-		return out, false, err
-	}
-	available := satSub(satSub(bal.Balance, bal.HeldBalance), unspent)
-	out.ratePerHour, out.owed = lines.ratePerHour, owed
-	out.depletesAt = firstInstantAtOrUnder(bal.AsOf, available, lots, lines.ratePerHour, floor)
-	out.depleted = !out.depletesAt.After(bal.AsOf)
-	if lines.low > 0 {
-		// Under the line: at or under one unit less than it.
-		lowAt := firstInstantAtOrUnder(bal.AsOf, available, lots, lines.ratePerHour, satAdd(owed, lines.low-1))
-		out.lowAt, out.low = &lowAt, !lowAt.After(bal.AsOf)
-	}
-	return out, true, nil
+	floor, _, _ = capacityFloors(row, owed, overdraft)
+	return floor, owed, nil
 }
 
 // lapsedUnspent is what lapsed lots the expiry sweep has not reached will
@@ -528,35 +460,6 @@ func lapsedUnspent(charges []gen.BillingRunningCharge, lapsed []gen.ListLapsedCr
 	return unspent, nil
 }
 
-// watchBalance writes when a customer's balance is next looked at: the low
-// line, the run-out or the next 00:00 UTC, whichever is first. With no charge
-// running there is nothing to watch.
-func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) error {
-	bal, err := s.deriveBalance(ctx, q, merchantID, customer, currency)
-	if err != nil {
-		return err
-	}
-	out, ok, err := s.runOut(ctx, q, bal)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return q.DeleteBalanceWatch(ctx, gen.DeleteBalanceWatchParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
-	}
-	next := earlier(out.depletesAt, nextMidnight(bal.AsOf))
-	if out.lowAt != nil {
-		next = earlier(next, *out.lowAt)
-	}
-	// A charge started in the past may already be due a day's checkpoint.
-	if out.checkpointDue {
-		next = bal.AsOf
-	}
-	return q.UpsertBalanceWatch(ctx, gen.UpsertBalanceWatchParams{
-		MerchantID: merchantID, CustomerID: customer, Currency: currency,
-		NextCheckAt: next, DepletesAt: &out.depletesAt, Now: bal.AsOf,
-	})
-}
-
 // PublicBalance is bal as a customer's money in one currency: what its
 // running charges have accrued apart from its other holds, the rate they draw
 // it at and when its capacity reaches zero. It reads through s's own
@@ -570,10 +473,10 @@ func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalan
 		BalanceAmount: bal.Balance, HeldAmount: bal.HeldBalance - bal.Accrued, AccruedAmount: bal.Accrued,
 		AvailableAmount: bal.Balance - bal.HeldBalance, OwedAmount: owed, AsOf: bal.AsOf,
 	}
-	run, ok, err := s.runOut(ctx, s.db.Gen(ctx), bal)
-	if err != nil || !ok {
+	view, err := s.viewBalance(ctx, s.db.Gen(ctx), bal)
+	if err != nil || len(view.charges) == 0 {
 		return out, err
 	}
-	out.AccrualRatePerHour, out.DepletesAt = run.ratePerHour, &run.depletesAt
+	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.project(lowBalanceLine{}, 0).depletesAt
 	return out, nil
 }

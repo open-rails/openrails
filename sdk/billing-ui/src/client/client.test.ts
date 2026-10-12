@@ -106,6 +106,9 @@ describe("createBillingClient", () => {
         },
       ],
       default_payment_methods: [{ currency: "USD", payment_method_id: "pm_1" }],
+      low_balance_lines: [
+        { currency: "USD", amount: "0", runway_hours: 24, source: "default" },
+      ],
     }
     const fetch = vi.fn(async () => json(200, account))
     const client = createBillingClient({

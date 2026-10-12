@@ -45,6 +45,12 @@ it("calls only routes OpenRails mounts for customers", async () => {
         currency: "USD",
         paymentMethodId: "pm_1",
       }),
+    () =>
+      client.setLowBalanceLine({
+        currency: "USD",
+        amount: "2500000",
+        runwayHours: null,
+      }),
     () => client.listPayments(),
     () => client.listOrders({ origin: "usage" }),
     () => client.getOrder("ord_1"),

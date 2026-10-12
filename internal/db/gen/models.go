@@ -76,19 +76,26 @@ type BillingAdmissionOperation struct {
 	RateCards []byte
 }
 
-// One row per customer and currency with a running charge: when its balance is next looked at (the low line, the run-out or the next 00:00 UTC, whichever is first) and what the last look found. Derived from the running charges and the balance; stopping the last charge deletes the row.
+// One row per prepaid customer balance and per customer and currency with a running charge: when its balance is next looked at (a low line, the run-out, a credit lot lapse or the next 00:00 UTC, whichever is first; null until a change marks it due) and what the last look found. Derived from the balance, the running charges and the billing mode; an arrears customer with no running charge has none.
 type BillingBalanceWatch struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	NextCheckAt time.Time
-	// When the customer's capacity reaches zero at the rate of its running charges, as last computed; in the past while it is at zero.
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// When the balance is next looked at; to_timestamp(0) once a change marks it due, null with nothing scheduled.
+	NextCheckAt *time.Time
+	// When the customer's capacity reaches zero at the rate of its running charges and the lapse of its credit lots, as last computed; in the past while it is at zero, null when nothing exact moves it.
 	DepletesAt *time.Time
-	// When balance.low was sent for the current crossing; null once the balance is back above the line.
+	// When balance.low was sent for the current crossing; cleared by a look that finds the balance above its line after a funding.
 	LowNotifiedAt *time.Time
-	// When balance.depleted was sent for the current crossing; null once capacity is back above zero.
+	// When balance.depleted was sent for the current crossing; cleared by a look that finds capacity above zero after a funding.
 	DepletedAt *time.Time
 	UpdatedAt  time.Time
+	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
+	FundedAt *time.Time
+	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the usage events dated since rate_sampled_at.
+	UsageRatePerHour int64
+	// The instant usage_rate_per_hour was sampled at; usage events dated before it are not read again.
+	RateSampledAt *time.Time
 }
 
 // Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.
@@ -452,7 +459,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, revoked charge agreements and the low and depleted balance of a customer with a running charge. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, revoked charge agreements and the low and depleted balance of a watched customer. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -679,6 +686,10 @@ type BillingMoneySetting struct {
 	DefaultPaymentMethodID *uuid.UUID
 	// When the customer revoked its collection agreement in the currency: from then admission spends only its balance, whatever billing_mode, until a new default card gives another.
 	CollectionRevokedAt *time.Time
+	// The customer's low-balance amount line in the row currency; 0 is none, null inherits the merchant's settings.balance_notices.
+	LowBalanceAmount *int64
+	// The customer's low-balance runway line in hours of spend at its burn rate; 0 is none, null inherits the merchant's settings.balance_notices, else 24.
+	LowBalanceRunwayHours *int32
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
@@ -1426,12 +1437,10 @@ type BillingRunningCharge struct {
 	RatePerHour int64
 	// How far below zero this charge lets a prepaid customer's capacity reach; the smallest among a customer's running charges applies.
 	OverdraftAmount int64
-	// The balance under which the customer is told it is low; the largest among a customer's running charges applies, 0 is no line.
-	LowBalanceAmount int64
-	Resource         *string
-	StartedAt        time.Time
-	StoppedAt        *time.Time
-	PostedThroughAt  time.Time
+	Resource        *string
+	StartedAt       time.Time
+	StoppedAt       *time.Time
+	PostedThroughAt time.Time
 	// What the ledger has been posted: running_charge_total through posted_through_at.
 	PostedAmount int64
 	CreatedAt    time.Time

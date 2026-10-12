@@ -5507,6 +5507,60 @@
         ]
       }
     },
+    "/v1/me/low-balance-lines/{currency}": {
+      "put": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLowBalanceLineParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveLowBalanceLine"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
     "/v1/me/balance/transactions": {
       "get": {
         "tags": [
@@ -12746,13 +12800,39 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "usage_rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "low_balance_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "as_of": {
             "type": "string",
             "format": "date-time"
           },
           "depletes_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12761,9 +12841,42 @@
           "available_amount",
           "owed_amount",
           "accrual_rate_per_hour",
+          "usage_rate_per_hour",
+          "low_balance_amount",
           "as_of",
-          "depletes_at"
+          "depletes_at",
+          "runway_ends_at"
         ]
+      },
+      "BalanceNoticeAmount": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "amount"
+        ]
+      },
+      "BalanceNoticeSettings": {
+        "type": "object",
+        "properties": {
+          "runway_hours": {
+            "type": "integer"
+          },
+          "low_amounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BalanceNoticeAmount"
+            }
+          }
+        }
       },
       "BalanceTransaction": {
         "type": "object",
@@ -14759,12 +14872,19 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveLowBalanceLine"
+            }
           }
         },
         "required": [
           "id",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "low_balance_lines"
         ]
       },
       "CustomerAmount": {
@@ -15087,6 +15207,12 @@
               "$ref": "#/components/schemas/TrustLevel"
             }
           },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceLine"
+            }
+          },
           "billing_policy": {
             "oneOf": [
               {
@@ -15111,6 +15237,7 @@
         "required": [
           "credit_limits",
           "trust_levels",
+          "low_balance_lines",
           "billing_policy",
           "invoice_profile"
         ]
@@ -15524,6 +15651,35 @@
             }
           }
         }
+      },
+      "EffectiveLowBalanceLine": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "runway_hours": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "default",
+              "merchant"
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "amount",
+          "runway_hours",
+          "source"
+        ]
       },
       "EntitlementChange": {
         "type": "object",
@@ -16320,6 +16476,40 @@
           "memo"
         ]
       },
+      "LowBalanceLine": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "amount",
+          "runway_hours"
+        ]
+      },
       "Mandate": {
         "type": "object",
         "properties": {
@@ -16666,6 +16856,9 @@
           },
           "checkout": {
             "$ref": "#/components/schemas/MerchantCheckoutSettings"
+          },
+          "balance_notices": {
+            "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
           "billing_policies": {
             "type": "array",
@@ -20868,10 +21061,6 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "low_balance_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "resource": {
             "oneOf": [
               {
@@ -20904,7 +21093,6 @@
           "posted_amount",
           "as_of",
           "overdraft_amount",
-          "low_balance_amount",
           "resource",
           "created_at",
           "updated_at"
@@ -20995,6 +21183,32 @@
         "properties": {
           "payment_method_id": {
             "type": "string"
+          }
+        }
+      },
+      "SetLowBalanceLineParams": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -21179,10 +21393,6 @@
             "description": "A number as a decimal string."
           },
           "overdraft_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "low_balance_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
@@ -21834,6 +22044,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TrustLevel"
+            }
+          },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceLine"
             }
           },
           "billing_policy": {

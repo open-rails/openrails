@@ -305,7 +305,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 	}
 
 	now := s.now()
-	if err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, BillingMode: "prepaid", Now: now}); err != nil {
+	if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, BillingMode: "prepaid", Now: now}); err != nil {
 		return nil, nil, err
 	}
 	if n, err := q.SetMoneyAccountDefaultPaymentMethod(ctx, gen.SetMoneyAccountDefaultPaymentMethodParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, PaymentMethodID: &method.ID, Now: now}); err != nil {
@@ -317,9 +317,14 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 		Kind: charge.AgreementUnscheduled, Currency: c.Currency, Lineage: unscheduled, AcceptedAt: now}, now); err != nil {
 		return nil, nil, err
 	}
-	// A new collection agreement: the merchant's billing mode applies again.
-	if err := q.RestoreMoneyCollection(ctx, gen.RestoreMoneyCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
+	// A new collection agreement: the merchant's billing mode applies again,
+	// and the balance watch follows it.
+	if restored, err := q.RestoreMoneyCollection(ctx, gen.RestoreMoneyCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
 		return nil, nil, err
+	} else if restored > 0 {
+		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
+			return nil, nil, err
+		}
 	}
 	var swaps []uuid.UUID
 	for _, m := range moves {

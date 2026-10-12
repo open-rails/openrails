@@ -1976,7 +1976,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
 - [Admin console](docs/billing-admin.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
-- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md).
+- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md), [balance notices](docs/balance-notices.md).
 
 **Operate the deployment** — for whoever keeps it running:
 

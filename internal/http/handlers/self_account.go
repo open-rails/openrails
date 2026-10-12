@@ -1,12 +1,13 @@
 package handlers
 
 import (
-	"github.com/open-rails/openrails/billing"
-
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // Self-service money surface: the customer reads its own balance and ledger.
@@ -25,7 +26,7 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 }
 
 // GetMe answers the customer's own summary: money per currency, the card
-// that pays each currency, and unread notices.
+// that pays each currency, and the low-balance line of each balance.
 func GetMe(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
@@ -50,4 +51,35 @@ func ListMyBalanceTransactions(r *httprequest.Request) {
 		return
 	}
 	listBalanceTransactions(r, payer, nil)
+}
+
+// SetMyLowBalanceLine sets the customer's own low-balance line in one
+// currency and answers the line its balance is judged at.
+func SetMyLowBalanceLine(r *httprequest.Request) {
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, r.Param("currency"))
+	if !ok {
+		return
+	}
+	if err := money.RequireBillingCurrency(currency); err != nil {
+		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("currency"))
+		return
+	}
+	var params billing.SetLowBalanceLineParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.SetLowBalanceLine(r.Request.Context(), payer, currency, params)
+	if err != nil {
+		writeRefusal(r, err, "low-balance line update failed")
+		return
+	}
+	r.SuccessJSON(out)
 }

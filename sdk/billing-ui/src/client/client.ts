@@ -13,6 +13,7 @@ import {
   accountSchema,
   customerConfigSchema,
   customerLinkSchema,
+  lowBalanceLineSchema,
   networkLinkChallengeSchema,
   publicConfigSchema,
   listPageSchema,
@@ -29,6 +30,7 @@ import {
   type Account,
   type CustomerConfig,
   type CustomerLink,
+  type LowBalanceLine,
   type NetworkLinkChallenge,
   type PublicConfig,
   type CurrencyScales,
@@ -718,10 +720,33 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * The customer's summary: balance and amount owed per currency, the card
-     * that pays each currency, and unread notices.
+     * that pays each currency, and the low-balance line of each balance.
      */
     getAccount(signal?: AbortSignal): Promise<Account> {
       return json(accountSchema, "/me", { signal })
+    },
+
+    /**
+     * Sets the customer's own low-balance line in one currency and answers
+     * the line its balance is judged at. `null` inherits the merchant's; 0
+     * turns that part off.
+     */
+    setLowBalanceLine(input: {
+      currency: string
+      amount: string | null
+      runwayHours: number | null
+    }): Promise<LowBalanceLine> {
+      return json(
+        lowBalanceLineSchema,
+        `/me/low-balance-lines/${id(input.currency.toUpperCase())}`,
+        {
+          method: "PUT",
+          body: {
+            amount: input.amount,
+            runway_hours: input.runwayHours,
+          } satisfies wire.SetLowBalanceLineParams,
+        }
+      )
     },
 
     /**

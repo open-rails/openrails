@@ -158,5 +158,11 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	}); err != nil {
 		return nil, err
 	}
+	// The billing mode decides whether the balance is watched.
+	if err := s.db.Gen(ctx).WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{
+		MerchantID: cur.MerchantID, CustomerID: cur.CustomerID, Currency: cur.Currency, Now: now,
+	}); err != nil {
+		return nil, err
+	}
 	return s.GetAccountSettings(ctx, payer, currency)
 }

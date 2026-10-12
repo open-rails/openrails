@@ -20,7 +20,8 @@ const (
 	KindBalanceWatch = "openrails.balance_watch"
 
 	// BalanceWatchInterval is the watcher's cadence: how long a balance that
-	// ran out, went low, changed or crossed 00:00 UTC waits to be looked at.
+	// ran out, went low, changed, lost a lapsing lot or crossed 00:00 UTC
+	// waits to be looked at.
 	BalanceWatchInterval = 30 * time.Second
 
 	// balanceWatchBatch is how many due watches one read takes. The read is
@@ -35,8 +36,8 @@ type BalanceWatchArgs struct{}
 func (BalanceWatchArgs) Kind() string { return KindBalanceWatch }
 
 // BalanceWatchWorker looks at every customer whose balance watch is due: it
-// posts the daily checkpoint of its running charges, tells the host of a low
-// or depleted balance, and writes when to look next
+// posts the daily checkpoint of its running charges, tells the host and the
+// customer of a low or depleted balance, and writes when to look next
 // (money.WatchBalanceInTx), on the money service's clock. An idle pass reads
 // no row.
 type BalanceWatchWorker struct {
