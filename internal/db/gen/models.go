@@ -1318,6 +1318,7 @@ type BillingProviderSchedule struct {
 	CustomerID        uuid.UUID
 	PspID             uuid.UUID
 	InitialOrderID    *uuid.UUID
+	AcceptedVersion   int64
 	SourceReference   string
 	ProviderReference string
 	FirstDueAt        time.Time
