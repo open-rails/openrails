@@ -1898,6 +1898,11 @@ LEFT JOIN billing.payments pay
 LEFT JOIN LATERAL (SELECT l.product_id FROM billing.order_lines l
        WHERE l.merchant_id=e.merchant_id AND l.order_id=pay.order_id AND l.product_id=e.product_id
        LIMIT 1) paid_line ON true
+LEFT JOIN LATERAL (SELECT true AS settled FROM billing.payments r
+       WHERE r.merchant_id = pay.merchant_id AND r.refunded_payment_id = pay.id
+         AND r.deleted_at IS NULL AND r.status = 'succeeded'
+         AND r.amount < 0 AND r.reversal_kind = 'refund'
+       LIMIT 1) refund ON true
 WHERE e.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
@@ -1928,11 +1933,7 @@ WHERE e.merchant_id = $1::uuid
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'purchase' AND pay.id IS NOT NULL
-          AND (pay.status = 'refunded' OR EXISTS (
-              SELECT 1 FROM billing.payments r
-              WHERE r.merchant_id = pay.merchant_id AND r.refunded_payment_id = pay.id
-                AND r.deleted_at IS NULL AND r.status = 'succeeded'
-                AND r.amount < 0 AND r.reversal_kind = 'refund')))
+          AND (pay.status = 'refunded' OR refund.settled))
   )
 ORDER BY e.starts_at, e.id
 LIMIT $4::int
