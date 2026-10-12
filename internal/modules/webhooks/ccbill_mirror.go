@@ -148,7 +148,7 @@ func (s *CCBillWebhookService) lifecycleIn(d *db.DB) *subscriptions.Subscription
 	if s.SubscriptionLifecycleService != nil {
 		lc.SetConfig(s.SubscriptionLifecycleService.Config)
 	}
-	lc.SetProviderCancelScheduler(intents.NewProviderCancelScheduler(d, nil, intents.OriginAdmin, "CCBill reported a refund, void or chargeback; CCBill must stop rebilling"))
+	lc.SetProviderCancelScheduler(intents.NewProviderCancelScheduler(d, nil, intents.OriginProvider, "CCBill reported a refund, void or chargeback; CCBill must stop rebilling"))
 	return lc
 }
 

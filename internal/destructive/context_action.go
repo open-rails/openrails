@@ -8,10 +8,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
 type actionContextKey struct{}
+type preparedActionsKey struct{}
+
+// BindPreparedActions attaches a batch already admitted atomically. Each
+// command still crosses Start itself before its first effect.
+func BindPreparedActions(ctx context.Context, actions []Action) context.Context {
+	byKey := make(map[string]Action, len(actions))
+	for _, action := range actions {
+		byKey[action.Key] = action
+	}
+	return context.WithValue(ctx, preparedActionsKey{}, byKey)
+}
+
 type admissionsContextKey struct{}
 
 // BindAdmissions preserves the shared service through internal provider work.
@@ -62,6 +75,13 @@ func AdmitCommand(ctx context.Context, admissions *Admissions, command Command) 
 		}
 		return ctx, prior, nil
 	}
+	if prepared, ok := ctx.Value(preparedActionsKey{}).(map[string]Action); ok {
+		action, found := prepared[command.Key]
+		if !found || action.MerchantID != command.MerchantID || action.Kind != command.Kind || action.Target != command.Target || action.Digest != command.Digest {
+			return ctx, Action{}, ErrConflict
+		}
+		return BindAction(BindAdmissions(ctx, admissions), action), action, nil
+	}
 	action, err := admissions.Admit(ctx, command)
 	if err != nil {
 		return ctx, Action{}, err
@@ -88,7 +108,17 @@ func RunLocal(ctx context.Context, database *db.DB, admissions *Admissions, comm
 	}
 	callbackCompleted := false
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		locked, err := gen.New(tx).LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: action.MerchantID, ID: action.ID})
+		if err != nil {
+			return err
+		}
+		if locked.State == string(StateNoEffect) {
+			return ErrActionFinal
+		}
 		changed, err := fn(ctx, tx, database.NewWithPgxTx(tx))
+		if changed && locked.State == string(StateSucceeded) {
+			return ErrActionFinal
+		}
 		if err != nil {
 			return err
 		}

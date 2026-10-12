@@ -96,10 +96,10 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	client, err := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
 	if err != nil {
-		return Parked("ccbill rail not armable (fail closed): " + err.Error())
+		return parkedBeforeEffect("ccbill rail not armable (fail closed): " + err.Error())
 	}
 	if client.ReadOnly {
-		return Parked("ccbill datalink client is read-only (mode=readonly)")
+		return parkedBeforeEffect("ccbill datalink client is read-only (mode=readonly)")
 	}
 
 	sub, err := h.loadSubscription(ctx, intent)
@@ -123,14 +123,18 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return h.stopped(ctx, intent, psid, verifiedEvidence(psid, status, false))
 	}
 
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock.Now())
+	if err != nil {
+		return parkedBeforeEffect(err.Error())
+	}
 	res, err := client.CancelSubscription(ctx, psid)
 	if err != nil {
 		switch {
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
-			return Parked("ccbill provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("ccbill provider writes blocked (mode=readonly)")
 		case errors.Is(err, providerposture.ErrDisarmed):
 			// Refused before the wire: nothing executed, nothing to verify.
-			return Parked("ccbill cancel held by sandbox posture gate: " + err.Error())
+			return parkedBeforeEffect("ccbill cancel held by sandbox posture gate: " + err.Error())
 		case errors.Is(err, ccbill.ErrDataLinkAuth):
 			// An explicit HTTP/authentication rejection did not execute the action.
 			if ccbillDenialExhausted(intent.Attempts) {

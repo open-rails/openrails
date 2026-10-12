@@ -337,6 +337,9 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		subject, credential = textOrNil(who.Subject), textOrNil(billingauth.CredentialName(who))
 	}
 
+	if _, ok := destructive.ActionFromContext(ctx); p.DestructiveActionID != nil && !ok {
+		return gen.BillingProviderIntent{}, errors.New("destructive action requires its internal admission context")
+	}
 	if action, ok := destructive.ActionFromContext(ctx); ok {
 		if action.MerchantID != p.MerchantID {
 			return gen.BillingProviderIntent{}, errors.New("destructive action merchant mismatch")
@@ -820,7 +823,7 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
 		wake := nextAttemptAt
-		if len(recovery) > 0 {
+		if strings.Contains(string(recovery), `"recovery_held":true`) {
 			wake = time.Time{}
 		}
 		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
@@ -860,10 +863,30 @@ func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string)
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.db.Gen(ctx).MarkProviderIntentSuperseded(ctx, gen.MarkProviderIntentSupersededParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Reason: &reason,
-	}))
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		local := s.withTxDB(s.db.NewWithPgxTx(tx))
+		if err := one(local.db.Gen(ctx).MarkProviderIntentSuperseded(ctx, gen.MarkProviderIntentSupersededParams{MerchantID: scopeMerchantID.UUID(), ID: id, Reason: &reason})); err != nil {
+			return err
+		}
+		row, err := local.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if row.DestructiveActionID == nil {
+			return nil
+		}
+		action, ok := destructive.ActionFromContext(ctx)
+		if !ok || action.ID != *row.DestructiveActionID {
+			return errors.New("superseded command has no original admission")
+		}
+		outcome := destructive.OutcomeUncertain
+		if action.Kind == destructive.CancelSubscription || cancelIntent(row.IntentType) {
+			outcome = destructive.OutcomeSucceeded
+		} else if action.State == destructive.StateReserved {
+			outcome = destructive.OutcomeNoEffect
+		}
+		return finishIntentActionTx(ctx, tx, row, outcome)
+	})
 }
 
 // Terminal transitions must actually commit one row; a stale or prohibited

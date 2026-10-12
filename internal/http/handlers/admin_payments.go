@@ -111,7 +111,7 @@ func writeAdminRefundError(r *httprequest.Request, err error) {
 		r.APIError(refusal)
 		return
 	}
-	r.InternalError("refund request failed", err)
+	writeRefusal(r, err, "refund request failed")
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, idempotencyKey string) (*models.Payment, int, error) {
@@ -120,10 +120,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		// the database; without one there is nothing durable to execute.
 		return nil, 0, errors.New("refund ledger unavailable: runtime has no database")
 	}
-	if err := checkAdminRefundRail(ctx, r, paymentID, idempotencyKey, req.RevokeAccess); err != nil {
-		return nil, 0, err
-	}
-	command, err := destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+idempotencyKey, req)
+	command, err := adminRefundCommand(ctx, r, paymentID, req, idempotencyKey)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -621,4 +618,46 @@ func writeRecordedPayment(r *httprequest.Request, status int, id uuid.UUID) {
 		refunds = []*models.Payment{}
 	}
 	r.JSON(status, PaymentToAPI(payment, refunds))
+}
+
+func adminRefundCommand(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, key string) (destructive.Command, error) {
+	if err := validateRefund(req); err != nil {
+		return destructive.Command{}, err
+	}
+	if err := checkAdminRefundRail(ctx, r, paymentID, key, req.RevokeAccess); err != nil {
+		return destructive.Command{}, err
+	}
+	svc := r.State.PaymentService
+	prior, err := svc.GetRefundByAdminIdempotencyKey(ctx, paymentID, key)
+	if err == nil {
+		if !adminRefundMatchesRequest(prior, req) {
+			return destructive.Command{}, api.Coded(billing.CodeIdempotencyKeyReused, "idempotency key was already used for another refund")
+		}
+	} else {
+		if !db.IsNotFound(err) {
+			return destructive.Command{}, err
+		}
+		payment, err := svc.GetByID(ctx, paymentID)
+		if err != nil {
+			return destructive.Command{}, err
+		}
+		amount := req.Amount
+		if req.Full {
+			refunded, err := svc.GetRefundTotalByPaymentID(ctx, paymentID)
+			if err != nil {
+				return destructive.Command{}, err
+			}
+			amount = payment.Amount - refunded
+		}
+		if err := svc.ValidateRefund(ctx, payment, amount); err != nil {
+			return destructive.Command{}, api.Coded(refundCodeNotRefundable, err.Error())
+		}
+		if _, err := refundAmountCents(payment.Currency, amount); err != nil {
+			return destructive.Command{}, api.Coded(billing.CodeInvalidParam, err.Error())
+		}
+		if payment.PspID == nil {
+			return destructive.Command{}, api.Coded(refundCodeUnsupported, "payment carries no PSP")
+		}
+	}
+	return destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+key, req)
 }

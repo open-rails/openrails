@@ -201,7 +201,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return nil
 	}
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Status == models.StatusCanceled && revokeAccess {
-		command, err := cancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
+		command, err := CancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	observedPSP, observedRail, observedReference := subscription.PspID, subscription.Rail, subscription.RailSubscriptionID
 
-	command, err := cancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
+	command, err := CancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,8 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	return nil
 }
 
-func cancellationCommand(ctx context.Context, sub *models.Subscription, reason string, revokeAccess, accountDeletion bool) (destructive.Command, error) {
+// CancellationCommand is the immutable revision-bound command shared by ordinary and finding-driven cancellation.
+func CancellationCommand(ctx context.Context, sub *models.Subscription, reason string, revokeAccess, accountDeletion bool) (destructive.Command, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return destructive.Command{}, err

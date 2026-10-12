@@ -258,15 +258,6 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		}
 	}
 
-	if intent.DestructiveActionID != nil {
-		action, err := r.Admissions.Start(ctx, intent.MerchantID, *intent.DestructiveActionID)
-		if err != nil {
-			r.park(ctx, logEntry, stats, intent.ID, now, err.Error())
-			return
-		}
-		ctx = destructive.BindAction(ctx, action)
-	}
-
 	if !attemptLogged {
 		if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
 			r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
@@ -537,6 +528,16 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
 			applied = OutcomeAmbiguous
 		} else {
+			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
+				if store, ok := r.Store.(*Store); ok {
+					if err := store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
+						logEntry.WithError(err).Error("cannot persist unsent destructive operation")
+					} else {
+						stats.Parked++
+					}
+					return
+				}
+			}
 			r.park(ctx, logEntry, stats, intent.ID, now, outcome.Reason)
 			return
 		}

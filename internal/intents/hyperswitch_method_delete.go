@@ -113,12 +113,16 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 		return Ambiguous("deletion is not claimed")
 	}
 	if h.Rails == nil {
-		return Parked("custodian deletion is unavailable")
+		return parkedBeforeEffect("custodian deletion is unavailable")
 	}
 	if err := h.checkFence(ctx, current, p); err != nil {
-		return Parked("accepted deletion fence is inconsistent")
+		return parkedBeforeEffect("accepted deletion fence is inconsistent")
 	}
 	if p.DetachOnly {
+		ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock.Now())
+		if err != nil {
+			return parkedBeforeEffect(err.Error())
+		}
 		if err := h.complete(ctx, current, p); err != nil {
 			return Ambiguous("local alias detachment pending")
 		}
@@ -126,25 +130,29 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	}
 	configuration := merchants.Of(h.DB)
 	if configuration == nil {
-		return Parked("merchant configuration is unavailable")
+		return parkedBeforeEffect("merchant configuration is unavailable")
 	}
 	row, ok, err := configuration.CustodianScopeByID(ctx, billing.MerchantID(current.MerchantID), *current.CustodianID)
 	if err != nil || !ok || row.Environment != p.Environment {
-		return Parked("accepted custodian account is unavailable")
+		return parkedBeforeEffect("accepted custodian account is unavailable")
 	}
 	binding, err := deletionBinding(row, h.Rails.Config)
 	if err != nil || binding != p.Binding {
-		return Parked("accepted custodian binding changed")
+		return parkedBeforeEffect("accepted custodian binding changed")
 	}
 	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row)
 	if err != nil {
-		return Parked("accepted custodian credentials are unavailable")
+		return parkedBeforeEffect("accepted custodian credentials are unavailable")
+	}
+	ctx, err = startProtectedEffect(ctx, h.DB, current, h.Clock.Now())
+	if err != nil {
+		return parkedBeforeEffect(err.Error())
 	}
 	if err := client.DeleteMethod(ctx, p.Instrument.RailMethodRef); err != nil {
 		if errors.Is(err, hyperswitch.ErrUnknown) {
 			return Ambiguous("exact native deletion requires retry")
 		}
-		return Parked("native deletion capability is unavailable")
+		return parkedBeforeEffect("native deletion capability is unavailable")
 	}
 	if err := h.complete(ctx, current, p); err != nil {
 		return Ambiguous("native deletion completed; local completion pending")

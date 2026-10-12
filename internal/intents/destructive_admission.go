@@ -2,11 +2,14 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"time"
 )
 
 // staffDestructiveIntent is the durable portion of a protected staff command.
@@ -64,4 +67,74 @@ func (s *Store) finishIntentAction(ctx context.Context, id uuid.UUID, transition
 		}
 		return finishIntentActionTx(ctx, tx, row, outcome)
 	})
+}
+
+// startProtectedEffect is called immediately before the provider write. A
+// canonical unsent refusal retains its reservation but must face holds again.
+func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingProviderIntent, now time.Time) (context.Context, error) {
+	if in.DestructiveActionID == nil {
+		if in.Origin == string(OriginAdmin) && staffDestructiveIntent(in.IntentType) {
+			return ctx, errors.New("staff destructive operation has no admission")
+		}
+		return ctx, nil
+	}
+	admissions := destructive.AdmissionsFromContext(ctx)
+	if admissions == nil {
+		return ctx, errors.New("destructive effect admission is not wired")
+	}
+	action, ok := destructive.ActionFromContext(ctx)
+	if !ok || action.ID != *in.DestructiveActionID {
+		return ctx, errors.New("destructive effect has no original action")
+	}
+	var evidence struct {
+		BeforeEffect bool `json:"destructive_before_effect"`
+	}
+	if len(in.ResultEvidence) > 0 && json.Unmarshal(in.ResultEvidence, &evidence) != nil {
+		return ctx, errors.New("destructive effect evidence is malformed")
+	}
+	var err error
+	if action.Kind != destructive.CancelSubscription && !cancelIntent(in.IntentType) {
+		action, err = admissions.StartPending(ctx, in.MerchantID, action.ID)
+	} else {
+		action, err = admissions.Start(ctx, in.MerchantID, action.ID)
+	}
+	if err != nil {
+		return ctx, err
+	}
+	if database == nil {
+		return ctx, errors.New("destructive send fence has no database")
+	}
+	n, err := database.Gen(ctx).FenceDestructiveProviderSend(ctx, gen.FenceDestructiveProviderSendParams{MerchantID: in.MerchantID, ID: in.ID, DestructiveActionID: *in.DestructiveActionID, Attempts: in.Attempts, Now: now})
+	if err != nil {
+		return ctx, err
+	}
+	if n != 1 {
+		return ctx, errors.New("destructive send fence lost its operation claim")
+	}
+	return destructive.BindAction(ctx, action), nil
+}
+func cancelIntent(kind string) bool {
+	return kind == TypeNMIDeleteSubscription || kind == TypeCCBillCancelSubscription || kind == TypeStripeCancelSubscription
+}
+func parkedBeforeEffect(reason string) Outcome {
+	out := Parked(reason)
+	out.Evidence = map[string]any{"destructive_before_effect": true}
+	return out
+}
+
+// startLocalCompletion is for a verified provider fact or a local-only detach.
+// Recovery of an effect already sent never starts a replacement command.
+func startLocalCompletion(ctx context.Context, in gen.BillingProviderIntent) (context.Context, error) {
+	if in.DestructiveActionID == nil {
+		return ctx, nil
+	}
+	admissions := destructive.AdmissionsFromContext(ctx)
+	if admissions == nil {
+		return ctx, errors.New("destructive local completion is not wired")
+	}
+	action, err := admissions.Start(ctx, in.MerchantID, *in.DestructiveActionID)
+	if err != nil {
+		return ctx, err
+	}
+	return destructive.BindAction(ctx, action), nil
 }

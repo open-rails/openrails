@@ -1,28 +1,23 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -54,6 +49,11 @@ func findingActionRefusal(err error) *api.APIError {
 	var param *findingParamError
 	if errors.As(err, &param) {
 		return api.Coded(billing.CodeInvalidParam, message)
+	}
+	if refusal := refusalOf(err); refusal != nil {
+		out := *refusal
+		out.Message = message
+		return &out
 	}
 	var refusal *api.APIError
 	if errors.As(err, &refusal) {
@@ -274,6 +274,47 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 		}
 	}
 
+	var commands []destructive.Command
+	if hasCancel {
+		sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subID)
+		if err != nil {
+			return err
+		}
+		if sub.Status != models.StatusCanceled {
+			if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail == models.RailSolana {
+				return subscriptions.ErrCustomerActionRequired
+			}
+			command, err := subscriptions.CancellationCommand(r.Request.Context(), sub, reason, true, false)
+			if err != nil {
+				return err
+			}
+			commands = append(commands, command)
+		}
+	}
+	if hasRefund {
+		request, err := findingRefundRequest(params, reason)
+		if err != nil {
+			return err
+		}
+		command, err := adminRefundCommand(r.Request.Context(), r, paymentID, request, findingRefundKey(finding.ID, paymentID))
+		if err != nil {
+			return err
+		}
+		commands = append(commands, command)
+	}
+	if len(commands) > 0 {
+		if r.State.DestructiveAdmissions == nil {
+			return errors.New("destructive finding admission is not wired")
+		}
+		actions, err := r.State.DestructiveAdmissions.AdmitBatch(r.Request.Context(), commands)
+		if err != nil {
+			return err
+		}
+		original := r.Request
+		r.Request = original.WithContext(destructive.BindPreparedActions(original.Context(), actions))
+		defer func() { r.Request = original }()
+	}
+
 	if hasCancel {
 		if err := cancelSubscriptionForFinding(r, subID, reason, result); err != nil {
 			return err
@@ -323,19 +364,11 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if _, err := r.State.PaymentService.GetByID(ctx, paymentID); err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
-	// Without an explicit amount the remaining refundable amount is refunded.
-	request := RefundRequest{Full: true, Reason: reason}
-	if raw, ok := params["amount"]; ok && raw != nil {
-		parsed, perr := paramAmountMicros(raw)
-		if perr != nil {
-			return perr
-		}
-		request = RefundRequest{Amount: parsed, Reason: reason}
+	request, err := findingRefundRequest(params, reason)
+	if err != nil {
+		return err
 	}
-	if revoke, ok := params["revoke_access"].(bool); ok {
-		request.RevokeAccess = revoke
-	}
-	idempotencyKey := "finding:" + finding.ID.String() + ":refund:" + paymentID.String()
+	idempotencyKey := findingRefundKey(finding.ID, paymentID)
 	refund, status, err := executeAdminRefund(ctx, r, paymentID, request, idempotencyKey)
 	if err != nil {
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
@@ -355,4 +388,23 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 		result["refund"] = "completed"
 	}
 	return nil
+}
+
+func findingRefundKey(finding, payment uuid.UUID) string {
+	return "finding:" + finding.String() + ":refund:" + payment.String()
+}
+
+func findingRefundRequest(params map[string]any, reason string) (RefundRequest, error) {
+	request := RefundRequest{Full: true, Reason: reason}
+	if raw, ok := params["amount"]; ok && raw != nil {
+		amount, err := paramAmountMicros(raw)
+		if err != nil {
+			return request, err
+		}
+		request = RefundRequest{Amount: amount, Reason: reason}
+	}
+	if revoke, ok := params["revoke_access"].(bool); ok {
+		request.RevokeAccess = revoke
+	}
+	return request, nil
 }
