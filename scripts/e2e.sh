@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Runs ./ci/... of the root module and of server/: each package's test binary
-# is built once, then every top-level test runs in its own process against the
-# same disposable database. Every test creates its own schema, so tests never
-# share state. A package is named by its directory (ci/subscriptions, server/ci).
+# is built once, then every top-level test runs in its own process with its own
+# database on the disposable server (migrations hold a database-wide lock, so a
+# shared database would queue every test's migrations behind one another).
+# Every test creates its own schema, so tests never share state. A package is
+# named by its directory (ci/subscriptions, server/ci).
 #
 # OPENRAILS_E2E_WORKERS runners split the tests longest first, each to the
 # least-loaded worker, by ci/e2e-durations.tsv (a test missing from it counts
@@ -18,6 +20,7 @@ cd "$(dirname "$0")/.."
 # Each module is proven on its own, never through a developer's go.work.
 export GOWORK=off
 : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL database}"
+command -v psql >/dev/null || { echo "e2e: psql is required to create each test's database" >&2; exit 2; }
 [[ -n "${OPENRAILS_E2E_VAULT_ADDR:-}" ]] || echo "e2e: OPENRAILS_E2E_VAULT_ADDR is unset; tests that need Vault skip" >&2
 workers="${OPENRAILS_E2E_WORKERS:-1}"
 worker="${OPENRAILS_E2E_WORKER:-0}"
@@ -74,22 +77,36 @@ awk -F'\t' -v OFS='\t' -v d="$median" -v file="$durations" '
 touch "$E2E_OUT/mine"
 echo "e2e: $(wc -l <"$E2E_OUT/all.tsv") tests in all; worker $worker runs $(wc -l <"$E2E_OUT/mine"), $jobs at a time"
 
+# test_dsn prints OPENRAILS_E2E_DSN naming database $1 instead.
+test_dsn() {
+  if [[ "$OPENRAILS_E2E_DSN" =~ ^(postgres(ql)?://[^/?]*)(/[^?]*)?(\?.*)?$ ]]; then
+    printf '%s/%s%s' "${BASH_REMATCH[1]}" "$1" "${BASH_REMATCH[4]}"
+  else
+    printf '%s dbname=%s' "$OPENRAILS_E2E_DSN" "$1"
+  fi
+}
+
 run_one() {
-  local name=$1 test=$2 status=0 start secs log file
+  local name=$1 test=$2 status=0 start secs log file db
   file="${name//\//_}"
   log="$E2E_OUT/logs/$file.$test.log"
+  db="e2e_${OPENRAILS_E2E_WORKER:-0}_$$"
   start=$EPOCHREALTIME
-  (cd "$(<"$E2E_OUT/$file.dir")" && "$(<"$E2E_OUT/$file.bin")" -test.count=1 -test.parallel=4 \
-    -test.timeout="$E2E_TIMEOUT" -test.run="^$test\$") >"$log" 2>&1 || status=$?
+  PGOPTIONS="-c client_min_messages=warning" psql "$OPENRAILS_E2E_DSN" -Xq -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" -c "CREATE DATABASE \"$db\"" >"$log" 2>&1 || status=$?
+  if ((status == 0)); then
+    (cd "$(<"$E2E_OUT/$file.dir")" && OPENRAILS_E2E_DSN="$(test_dsn "$db")" "$(<"$E2E_OUT/$file.bin")" -test.count=1 -test.parallel=4 \
+      -test.timeout="$E2E_TIMEOUT" -test.run="^$test\$") >>"$log" 2>&1 || status=$?
+  fi
   if ((status == 0)) && grep -q 'no tests to run' "$log"; then
     echo "e2e: -run ^$test\$ matched no test" >>"$log"
     status=1
   fi
   secs="$(awk -v a="$start" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.1f", b - a }')"
+  PGOPTIONS="-c client_min_messages=warning" psql "$OPENRAILS_E2E_DSN" -Xq -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" >>"$log" 2>&1 || true
   printf '%s\t%s\t%s\t%s\n' "$name" "$test" "$secs" "$status" >>"$E2E_OUT/results.tsv"
   if ((status == 0)); then echo "e2e: ok   $name $test ${secs}s"; else echo "e2e: FAIL $name $test ${secs}s"; fi
 }
-export -f run_one
+export -f run_one test_dsn
 : >"$E2E_OUT/results.tsv"
 xargs -r -P "$jobs" -n 2 bash -c 'run_one "$1" "$2"' _ <"$E2E_OUT/mine" || true
 

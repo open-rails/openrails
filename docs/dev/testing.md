@@ -25,7 +25,8 @@ OPENRAILS_E2E_VAULT_ADDR=http://127.0.0.1:8200 OPENRAILS_E2E_VAULT_TOKEN=e2e-roo
 
 `scripts/e2e.sh` builds the packages under `./ci/...` of the root and server
 modules once (tags
-`e2e,integration`, `-race`) and runs each top-level test in its own process,
+`e2e,integration`, `-race`) and runs each top-level test in its own process
+and its own database (created with `psql` on `OPENRAILS_E2E_DSN`'s server),
 `OPENRAILS_E2E_JOBS` at a time, longest first. CI splits the suite across
 `OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`,
 keyed by package directory; a test missing from it counts as the median. Redis is needed by the
