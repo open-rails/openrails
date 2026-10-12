@@ -77,14 +77,16 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	if rail == "stripe" {
 		attachDeclaredStripeInvoice(t, w, &book)
 	}
-	for _, apply := range configure {
-		apply(&book)
-	}
 	if rail == "nmi" {
 		book.Subscriptions[0].AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + l.railSub, Amount: 9_990_000, Currency: "USD", IntervalHours: monthHours, FirstDueAt: start}
 		for i := range book.Transactions {
 			book.Transactions[i].NextBillingAt = &end
 		}
+	}
+	for _, apply := range configure {
+		apply(&book)
+	}
+	if rail == "nmi" {
 		if book.Subscriptions[0].Dunning != nil {
 			w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) {
 				s.NextBilling = book.Subscriptions[0].PaidThrough.Add(monthHours * time.Hour)
@@ -524,4 +526,34 @@ func attachDeclaredStripeInvoice(t *testing.T, w *world, book *billing.DeclaredB
 			}
 		}
 	}
+}
+
+// A real month_frequency schedule keeps its accepted calendar boundaries even
+// when the local catalog expresses a 30-day interval.
+func TestNMIProviderAcceptedCalendarRenewal(t *testing.T) {
+	w := newWorld(t)
+	l := importLegacy(t, w, "nmi", embedded, func(book *billing.DeclaredBilling) {
+		schedule := book.Subscriptions[0].AcceptedSchedule
+		schedule.IntervalHours, schedule.IntervalMonths = 0, 1
+		next := schedule.FirstDueAt.AddDate(0, 1, 0)
+		book.Subscriptions[0].PaidThrough = &next
+		for i := range book.Transactions {
+			book.Transactions[i].NextBillingAt = &next
+		}
+		w.nmi.EditSchedule(book.Subscriptions[0].RailSubscriptionID, func(s *nmimock.Schedule) { s.Days, s.Months, s.NextBilling = 0, 1, next })
+	})
+	start := l.periodEnd()
+	charges := l.engineCharges()
+	for range 2 {
+		w.advance(start.Sub(w.clock.Now()) + time.Hour)
+		event := l.providerRenewal(true)
+		require.Equal(t, http.StatusOK, w.deliver("nmi", event))
+		next := start.AddDate(0, 1, 0)
+		require.True(t, l.periodEnd().Equal(next), "verified monthly boundary remains exact")
+		payments := len(completed(w.payments(embedded, l.c.id)))
+		require.Equal(t, http.StatusOK, w.deliver("nmi", event))
+		require.Len(t, completed(w.payments(embedded, l.c.id)), payments)
+		start = next
+	}
+	require.Equal(t, charges, l.engineCharges(), "observing monthly provider bills issues no local charge")
 }

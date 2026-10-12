@@ -119,7 +119,10 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if err != nil {
 		return false, err
 	}
-	if original.OrderID == nil || original.CustomerID != a.CustomerID || !strings.EqualFold(original.Currency, a.Currency) || original.PspID == nil || a.PspID == nil || *original.PspID != *a.PspID {
+	if original.OrderID == nil || original.CustomerID != a.CustomerID || string(original.Rail) != a.Rail || !strings.EqualFold(original.Currency, a.Currency) || original.PspID == nil || a.PspID == nil || *original.PspID != *a.PspID {
+		return false, observed.ErrConflict
+	}
+	if a.SubscriptionID != nil && (original.SubscriptionID == nil || *a.SubscriptionID != *original.SubscriptionID) {
 		return false, observed.ErrConflict
 	}
 	// Query reports can reuse the sale's reference for its refund action.
