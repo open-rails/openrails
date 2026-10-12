@@ -88,8 +88,16 @@ func TestImportPaymentMethodIdempotent(t *testing.T) {
 				railSub := w.stripe.AddSubscription(ref.RailCustomerRef, method, link, 999, start, end)
 				subs.Subscriptions = append(subs.Subscriptions, billing.DeclaredSubscription{SourceID: "legacy-" + railSub, Customer: customerID, Price: price.ID, Rail: "stripe",
 					RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
-				subs.Transactions = append(subs.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: w.stripe.LatestCharge(railSub), Success: true,
-					Amount: 9_990_000, Currency: "USD", OccurredAt: start})
+				// A Stripe charge is proven by its finalized invoice.
+				charge, invoice := w.stripe.LatestCharge(railSub), declaredStripeInvoice(t, w, railSub)
+				paidAt := start
+				for _, p := range invoice.Payments {
+					if p.ChargeID == charge {
+						paidAt = p.PaidAt
+					}
+				}
+				subs.Transactions = append(subs.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: charge, Success: true,
+					Amount: 9_990_000, Currency: "USD", OccurredAt: paidAt, StripeInvoice: invoice})
 				want[railSub] = bareID
 				if ref.RailMethodRef != "" {
 					want[railSub] = fullID

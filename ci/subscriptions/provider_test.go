@@ -517,7 +517,22 @@ func declareRecurringAnchor(book *billing.DeclaredBilling) {
 // transaction, instead of inventing a bill from a charge and today's price.
 func attachDeclaredStripeInvoice(t *testing.T, w *world, book *billing.DeclaredBilling) {
 	t.Helper()
-	raw, err := json.Marshal(w.stripe.Subscription(book.Subscriptions[0].RailSubscriptionID))
+	invoice := declaredStripeInvoice(t, w, book.Subscriptions[0].RailSubscriptionID)
+	for i := range book.Transactions {
+		book.Transactions[i].StripeInvoice = invoice
+		for _, p := range invoice.Payments {
+			if p.ChargeID == book.Transactions[i].TransactionID {
+				book.Transactions[i].OccurredAt = p.PaidAt
+			}
+		}
+	}
+}
+
+// declaredStripeInvoice is the subscription's latest invoice as a verified
+// import snapshot, in native units.
+func declaredStripeInvoice(t *testing.T, w *world, railSub string) *billing.DeclaredStripeInvoice {
+	t.Helper()
+	raw, err := json.Marshal(w.stripe.Subscription(railSub))
 	require.NoError(t, err)
 	var head struct {
 		Invoice struct {
@@ -535,14 +550,7 @@ func attachDeclaredStripeInvoice(t *testing.T, w *world, book *billing.DeclaredB
 	for _, p := range bill.Payments {
 		invoice.Payments = append(invoice.Payments, billing.DeclaredStripeInvoicePayment{ID: p.ID, ChargeID: p.ChargeID, PaymentIntentID: p.PaymentIntentID, Amount: p.Amount * 10_000, PaidAt: p.PaidAt})
 	}
-	for i := range book.Transactions {
-		book.Transactions[i].StripeInvoice = invoice
-		for _, p := range invoice.Payments {
-			if p.ChargeID == book.Transactions[i].TransactionID {
-				book.Transactions[i].OccurredAt = p.PaidAt
-			}
-		}
-	}
+	return invoice
 }
 
 // A real month_frequency schedule keeps its accepted calendar boundaries even
