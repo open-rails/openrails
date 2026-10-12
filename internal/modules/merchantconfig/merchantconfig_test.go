@@ -138,11 +138,11 @@ func TestNormalizeCheckoutRouting(t *testing.T) {
 	require.Nil(t, out, "no rules is no policy")
 
 	out, err = NormalizeCheckoutRouting([]models.CheckoutRoutingRule{
-		{Match: models.CheckoutRoutingMatch{Currency: " usd ", Country: "us", Mode: " Subscription "}, Prefer: []string{" Mobius ", "CCBill"}},
+		{Match: models.CheckoutRoutingMatch{Currency: " usd ", Country: "  ", Mode: " Subscription "}, Prefer: []string{" Mobius ", "CCBill"}},
 		{Prefer: []string{"stripe"}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, models.CheckoutRoutingMatch{Currency: "USD", Country: "US", Mode: "subscription"}, out[0].Match)
+	require.Equal(t, models.CheckoutRoutingMatch{Currency: "USD", Mode: "subscription"}, out[0].Match)
 	require.Equal(t, []string{"mobius", "ccbill"}, out[0].Prefer)
 	require.True(t, out[1].Match.IsCatchAll())
 
@@ -154,11 +154,22 @@ func TestNormalizeCheckoutRouting(t *testing.T) {
 		`repeats "mobius"`:           {{Prefer: []string{"mobius", "mobius"}}},
 		"unreachable":                {{Prefer: []string{"mobius"}}, {Match: models.CheckoutRoutingMatch{Currency: "eur"}, Prefer: []string{"ccbill"}}},
 		"unknown currency":           match(models.CheckoutRoutingMatch{Currency: "dollars"}),
-		"ISO-3166-1":                 match(models.CheckoutRoutingMatch{Country: "USA"}),
 		"one_off or subscription":    match(models.CheckoutRoutingMatch{Mode: "recurring"}),
 	} {
 		_, err := NormalizeCheckoutRouting(rules)
 		require.ErrorContains(t, err, want)
+	}
+}
+
+func TestCheckoutRoutingRejectsCountry(t *testing.T) {
+	for _, country := range []string{"US", " us ", "USA"} {
+		t.Run(country, func(t *testing.T) {
+			_, err := NormalizeCheckoutRouting([]models.CheckoutRoutingRule{
+				{Match: models.CheckoutRoutingMatch{Country: country}, Prefer: []string{"nmi"}},
+				{Prefer: []string{"stripe"}},
+			})
+			require.ErrorContains(t, err, "checkout_routing[0].match.country is not supported")
+		})
 	}
 }
 

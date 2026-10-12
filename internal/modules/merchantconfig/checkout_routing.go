@@ -74,8 +74,8 @@ func normalizeRoutingMatch(i int, m models.CheckoutRoutingMatch) (models.Checkou
 			return out, fmt.Errorf("checkout_routing[%d].match.currency: %w", i, err)
 		}
 	}
-	if out.Country != "" && !isAlpha(out.Country, 2) {
-		return out, fmt.Errorf("checkout_routing[%d].match.country must be a 2-letter ISO-3166-1 code", i)
+	if out.Country != "" {
+		return out, fmt.Errorf("checkout_routing[%d].match.country is not supported", i)
 	}
 	if out.Mode != "" {
 		if _, ok := validRoutingModes[out.Mode]; !ok {
@@ -83,16 +83,4 @@ func normalizeRoutingMatch(i int, m models.CheckoutRoutingMatch) (models.Checkou
 		}
 	}
 	return out, nil
-}
-
-func isAlpha(s string, n int) bool {
-	if len(s) != n {
-		return false
-	}
-	for _, r := range s {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return false
-		}
-	}
-	return true
 }

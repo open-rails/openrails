@@ -56,6 +56,9 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.ErrorContains(t, err, "undeclared policy")
 	_, _, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}}, nil)
 	require.ErrorContains(t, err, "profile.logo_url")
+	countryRouting := []billing.CheckoutRoutingRule{{Match: billing.CheckoutRoutingMatch{Country: "US"}, Prefer: []string{"nmi"}}}
+	_, _, err = boot("refused", billing.MerchantSettings{CheckoutRouting: &countryRouting}, nil)
+	require.ErrorContains(t, err, "match.country is not supported")
 	require.Zero(t, merchants(), "a refused declaration creates no merchant")
 
 	grace, floor, threshold := 7, int64(5_000_000), int64(50_000_000)
