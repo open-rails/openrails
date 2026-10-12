@@ -107,6 +107,8 @@
       "func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams, requestOptions ...RequestOption) (*billing.Price, error)",
       "func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams, requestOptions ...RequestOption) (*billing.Product, error)",
       "func (c *Client) WaiveOrderBalance(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
+      "func (c *LocalClient) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
+      "func (c *LocalClient) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)",
       "func (c *LocalClient) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error)",
       "func (c *LocalClient) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *LocalClient) SCIMHandler() (http.Handler, error)",
@@ -4446,7 +4448,9 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "http": "net/http",
-      "time": "time"
+      "strings": "strings",
+      "time": "time",
+      "url": "net/url"
     },
     "operations.go": {
       "billing": "github.com/open-rails/openrails/billing",

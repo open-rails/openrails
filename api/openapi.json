@@ -2084,6 +2084,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -5617,7 +5626,7 @@
         "x-openrails-errors": [
           "admission_not_found",
           "invalid_param",
-          "service_credential_customer_scope_denied"
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:application"
@@ -6061,14 +6070,6 @@
           "app"
         ],
         "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "OpenRails-Expected-Merchant",
             "in": "header",
