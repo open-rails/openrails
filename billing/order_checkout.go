@@ -37,8 +37,8 @@ type OrderCheckoutParams struct {
 
 // OrderCheckout is an order's hosted checkout.
 type OrderCheckout struct {
-	// URL is the checkout URL. Only the response that created it carries
-	// it; every other read is null.
+	// URL is the checkout URL. Creation and an authenticated retry while the
+	// order and checkout remain open can return it; ordinary reads are null.
 	URL                 *string        `json:"url"`
 	UIMode              CheckoutUIMode `json:"ui_mode"`
 	ExpiresAt           time.Time      `json:"expires_at"`
