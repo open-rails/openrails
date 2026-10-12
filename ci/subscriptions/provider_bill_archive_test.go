@@ -35,7 +35,7 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	w := newWorld(t)
 	w.waive("evidenced", "normalized provider money fixtures qualify offline archive and replay, not a gateway sale")
 	c := w.newCustomer()
-	price := w.lifetime("archive-provider-goods", 100)
+	price := w.membership("archive-provider-goods", 100)
 	priceID, productID := w.priceStorageID(price.ID), price.ProductID.UUID()
 	checkout, err := c.sell(embedded, order{price: price.ID})
 	require.NoError(t, err)
