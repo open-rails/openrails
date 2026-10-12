@@ -58,8 +58,13 @@ func TestReadPreCreditCatalogRows(t *testing.T) {
 				}
 				return nil
 			})
-			require.NoError(t, err, table)
-			require.Equal(t, 1, count)
+			if table == "payments" {
+				require.ErrorContains(t, err, "payments without order identity")
+				require.Zero(t, count)
+			} else {
+				require.NoError(t, err, table)
+				require.Equal(t, 1, count)
+			}
 		}
 	}
 }

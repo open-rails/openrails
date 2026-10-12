@@ -24,8 +24,8 @@ until cutover is complete. SQL checks every merchant table is empty before the
 first import; it cannot inspect manifest credentials or other runtime processes.
 Merchant directory/authority settings are never copied over the destination.
 
-The fixed profiles in `contract/profiles.go` cover 48 retained tables, including mandates, card versions,
-ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
+The fixed profiles in `contract/profiles.go` cover retained billing tables, including mandates, card versions,
+ledger accounts/transfers, orders, grants, product access, admission receipts,
 running charges, rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is
 encoded as decimal strings; nested money contracts use integer JSON tokens.
@@ -37,6 +37,16 @@ unsupported nested shapes refuse export. Migration-inventory tests require new
 OpenRails tables to receive an explicit ownership decision. New schema fields
 require an explicit portability decision; a list of known table names alone is
 not sufficient coverage.
+
+Provider bills retain their scoped external identities, immutable accepted lines,
+collection owner and settlement source. Accepted recurring schedules and executed
+cycle receipts move with the same book, so a replay after restore resolves the
+original obligation instead of creating another order. Typed, bounded snapshots
+and merchant/customer/order references are checked on export and restore. This
+never executes collection or reconstructs provider history from current prices.
+Archives with payments lacking an order are incompatible with the current
+prelaunch contract and are refused; no historical payment-price fallback or
+automatic database reset is performed.
 
 ## Exclusions and refusals
 
