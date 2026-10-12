@@ -1,13 +1,11 @@
 package server
 
 import (
-	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	checkoutpage "github.com/open-rails/openrails/web/checkout"
 )
 
@@ -16,38 +14,14 @@ import (
 // the admin console, AuthKit or the product's pages (Stripe keeps
 // checkout.stripe.com apart from its dashboard).
 func checkoutOrigin(cfg Config) (string, error) {
-	raw := strings.TrimSpace(cfg.HostedCheckoutURL)
-	if raw == "" {
+	if strings.TrimSpace(cfg.HostedCheckoutURL) == "" {
 		return "", nil
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.User != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") ||
-		!(u.Scheme == "https" || u.Scheme == "http" && isLoopback(u.Hostname())) {
-		return "", fmt.Errorf("server: hosted_checkout.url %q must be an https origin with no path (http on loopback)", raw)
-	}
-	origin := strings.ToLower(u.Scheme + "://" + u.Host)
-	others := []struct{ name, url string }{
-		{"public_billing_base_url", cfg.Engine.PublicBillingBaseURL}, {"auth.token.issuer", cfg.Auth.Token.Issuer},
-		{"auth.frontend.base_url", cfg.Auth.Frontend.BaseURL},
-	}
+	forbidden := []string{cfg.Engine.PublicBillingBaseURL, cfg.Auth.Token.Issuer, cfg.Auth.Frontend.BaseURL}
 	if cfg.Auth.HTTP != nil {
-		others = append(others, struct{ name, url string }{"auth.http.public_url", cfg.Auth.HTTP.PublicURL})
+		forbidden = append(forbidden, cfg.Auth.HTTP.PublicURL)
 	}
-	for _, other := range others {
-		o, err := url.Parse(strings.TrimSpace(other.url))
-		if err == nil && o.Host != "" && strings.ToLower(o.Scheme+"://"+o.Host) == origin {
-			return "", fmt.Errorf("server: hosted_checkout.url %s is %s's origin; serve the checkout page on its own origin", origin, other.name)
-		}
-	}
-	return origin, nil
-}
-
-func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return hostedcheckout.Origin(cfg.HostedCheckoutURL, forbidden...)
 }
 
 // checkoutAssets is the host's checkout page build, else the one embedded

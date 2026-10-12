@@ -1,20 +1,13 @@
 package server
 
 import (
-	"fmt"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/http/checkouthttp"
+	"github.com/open-rails/openrails/server/internal/network"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
-	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/http/router"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/server/internal/network"
 )
 
 // buildCheckout serves the hosted checkout at origin: the page, and the
@@ -24,24 +17,6 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 	if origin == "" {
 		return nil
 	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return fmt.Errorf("hosted checkout origin %q", origin)
-	}
-	page, err := hostedcheckout.Page(assets)
-	if err != nil {
-		return fmt.Errorf("%w: build it (`task checkout-build`) before go build, or unset hosted_checkout.url", err)
-	}
-	mux := &router.Table{}
-	httproutes.RegisterCheckoutRoutes(router.NewMux(mux, "", s.runtime), s.runtime, httproutes.Options{
-		Capabilities: &billing.Capabilities{RouteGroups: map[string]bool{}, Features: map[string]bool{}},
-	})
-	captcha := ""
-	if config.CaptchaEnabled(s.cfg.Captcha) {
-		captcha = config.CaptchaProvider(s.cfg.Captcha)
-	}
-	// With the customer network the page signs shoppers in at the server's
-	// own AuthKit.
 	var issuers []string
 	if s.runtime.Network != nil {
 		if iss, err := url.Parse(s.controlPlane.Issuer()); err == nil && iss.Host != "" {
@@ -49,26 +24,11 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 			s.runtime.CheckoutNetwork = &billing.PublicNetwork{Issuer: s.controlPlane.Issuer(), ClientID: network.CheckoutClientID}
 		}
 	}
-	store := hostedcheckout.NewStore(s.runtime.DB)
-	var settings hostedcheckout.MerchantSettings
-	if s.runtime.Merchants != nil {
-		settings = s.runtime.Merchants
+	host, handler, err := checkouthttp.New(s.runtime, origin, assets, issuers, s.sharedRateLimit)
+	if err != nil {
+		return err
 	}
-	mux.Handle("GET /c/{order_id}", page)
-	mux.Handle("GET "+hostedcheckout.SignInPath, page)
-	mux.Handle("GET /assets/{file...}", page)
-	mux.Handle("GET "+hostedcheckout.ApplePayDomainAssociationPath, hostedcheckout.ApplePayDomainAssociation())
-	s.checkoutHost = strings.ToLower(u.Host)
-	s.checkoutHandler = middleware.ChainHTTP(mux.Handler(),
-		middleware.RecoverHTTP(),
-		middleware.RequestLogHTTP(),
-		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha, issuers...), store.Framing(settings)),
-		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
-		billingauth.ExplicitCredentials,
-		hostedcheckout.ResolveHTTP(store, s.runtime.Clock.Now),
-		s.sharedRateLimit,
-	)
-	s.runtime.HostedCheckoutOrigin = origin
+	s.checkoutHost, s.checkoutHandler = host, handler
 	return nil
 }
 

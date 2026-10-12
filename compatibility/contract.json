@@ -121,6 +121,7 @@
       "func (c *NotificationConsumer) Retire(ctx context.Context) error",
       "func (e *BoundMerchantError) Error() string",
       "func (e *Engine) Close(ctx context.Context) error",
+      "func (e *Engine) HostedCheckout(origin string, assets fs.FS) (string, http.Handler, error)",
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
       "func (e *Engine) MerchantBySlug(slug string) (*Client, error)",
@@ -2030,6 +2031,10 @@
       "riverhelpers": "github.com/open-rails/helpers/river",
       "riverjobs": "github.com/open-rails/openrails/internal/river",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "hosted_checkout.go": {
+      "fs": "io/fs",
+      "http": "net/http"
     },
     "internal/api/error.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4504,12 +4509,10 @@
     },
     "server/hosted_checkout.go": {
       "checkoutpage": "github.com/open-rails/openrails/web/checkout",
-      "fmt": "fmt",
       "fs": "io/fs",
+      "hostedcheckout": "github.com/open-rails/openrails/internal/hostedcheckout",
       "http": "net/http",
-      "net": "net",
-      "strings": "strings",
-      "url": "net/url"
+      "strings": "strings"
     },
     "server/internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",
