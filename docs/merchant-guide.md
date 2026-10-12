@@ -127,7 +127,7 @@ products:
 
 A customer lacking any of them is refused `403 entitlement_required`
 (`metadata.missing` names the keys) when ordering, and again when paying an order
-or checkout opened while they held them; a preview's line carries the same
+or purchase opened while they held them; a preview's line carries the same
 `refusal`. Merchant orders follow the rule too: to give the product anyway, grant
 it (`POST /v1/admin/product-access`). The check is at purchase only: what a
 customer bought stays theirs if they later lose the keys. `[]` clears the list.

@@ -76,7 +76,7 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		// Orders before usage orders had none of their columns; before
 		// embedded pay URLs hosted ones only; before renewals none of their
 		// columns; before pay URLs none of theirs; before the payment axis one
-		// status. Before migration 88, embedded was a ui_mode.
+		// status. Before migration 89, embedded was a ui_mode.
 		if p.Name == "orders" && len(r.Values) < len(p.Columns) {
 			missing := len(p.Columns) - 2 - len(r.Values)
 			if missing == orderUsageColumns+1+orderRenewalColumns+orderPayURLColumns+1 {
@@ -160,7 +160,7 @@ func hostedIfPayURL(p Profile, values []*string) *string {
 	return nil
 }
 
-// embeddedFromUIMode reads an order archived before migration 88, whose
+// embeddedFromUIMode reads an order archived before migration 89, whose
 // embedded column was its ui_mode, hosted or embedded.
 func embeddedFromUIMode(p Profile, values []*string) {
 	for i, c := range p.Columns[:min(len(p.Columns), len(values))] {

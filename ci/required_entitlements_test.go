@@ -24,10 +24,10 @@ import (
 )
 
 // A members-only post sells only to customers who hold the channel's
-// membership when they order and when they pay. A member buys it through the
-// checkout; a non-member is refused on the customer's route, in a preview and
+// membership when they order and when they pay. A member buys it through its
+// pay URL; a non-member is refused on the customer's route, in a preview and
 // on the merchant's own order; a member whose membership is revoked before
-// paying is refused at the checkout, and asking again for the open order is
+// paying is refused on the payment page, and asking again for the open order is
 // refused too. The catalog document declares the requirement; an edit then
 // takes the field, and the document no longer changes it.
 func TestRequiredEntitlementsGateOrders(t *testing.T) {
@@ -41,11 +41,11 @@ func TestRequiredEntitlementsGateOrders(t *testing.T) {
 	cfg.RateLimitsDisabled = true
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"members-only": {
 		DisplayName: "Members only",
-		Settings:    billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
+		Settings:    billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs:        map[string]openrails.PSPConfig{"nmi": nmiPSP()},
 	}}
 	bill, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	_, checkoutHost, err := bill.HostedCheckout("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Checkout</title>")}})
+	_, paymentHost, err := bill.PaymentPage("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Payment</title>")}})
 	require.NoError(t, err)
 	auth := &authtest.Fake{}
 	app := http.NewServeMux()
@@ -108,19 +108,19 @@ products:
 	lines := []map[string]any{{"price_id": price}}
 	order := func(token string) *httptest.ResponseRecorder {
 		t.Helper()
-		return call(app, http.MethodPost, "/v1/me/orders", token, map[string]any{"lines": lines, "checkout": map[string]any{"ui_mode": "embedded"}})
+		return call(app, http.MethodPost, "/v1/me/orders", token, map[string]any{"lines": lines, "pay_url": map[string]any{"embedded": true}})
 	}
 	secretOf := func(o billing.Order) string {
 		t.Helper()
-		require.NotNil(t, o.Checkout)
-		require.NotNil(t, o.Checkout.URL)
-		_, secret, ok := strings.Cut(*o.Checkout.URL, "#")
+		require.NotNil(t, o.PayURLExpiresAt)
+		require.NotNil(t, o.PayURL)
+		_, secret, ok := strings.Cut(*o.PayURL, "#")
 		require.True(t, ok)
 		return secret
 	}
 	pay := func(o billing.Order, secret string) *httptest.ResponseRecorder {
 		t.Helper()
-		return call(checkoutHost, http.MethodPost, "https://pay.e2e.test/v1/me/orders/"+o.ID.String()+"/pay", secret, map[string]any{
+		return call(paymentHost, http.MethodPost, "https://pay.e2e.test/v1/me/orders/"+o.ID.String()+"/pay", secret, map[string]any{
 			"payment": map[string]any{
 				"token":           gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 				"billing_details": map[string]any{"name": "Card Holder", "address": map[string]string{"country": "US", "postal_code": "10001"}},
@@ -182,7 +182,7 @@ products:
 	require.False(t, holds(bob, post))
 
 	// A member whose membership is revoked before paying is refused at the
-	// checkout, and asking again for the open order is refused too.
+	// purchase, and asking again for the open order is refused too.
 	carol := uuid.NewString()
 	carolToken := auth.Person(carol)
 	access := grant(carol)
@@ -195,11 +195,11 @@ products:
 	require.Equal(t, billing.OrderOpen, decode[billing.Order](t, call(app, http.MethodGet, "/v1/me/orders/"+open.ID.String(), carolToken, nil)).Status)
 	require.False(t, holds(carol, post))
 
-	// The merchant's hosted checkout for a member who leaves takes no payment.
+	// The merchant's payment page for a member who leaves takes no payment.
 	dave := uuid.NewString()
 	access = grant(dave)
 	hosted, err := shop.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: cid(dave), Lines: []billing.OrderLineParams{{PriceID: price}}, IdempotencyKey: uuid.NewString(),
-		Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}})
+		PayURL: &billing.OrderPayURLParams{SuccessURL: "https://shop.e2e.test/thanks"}})
 	require.NoError(t, err)
 	require.NoError(t, shop.RevokeProductAccess(ctx, access, billing.RevokeProductAccessParams{Reason: "left the channel"}))
 	refused(pay(*hosted, secretOf(*hosted)))

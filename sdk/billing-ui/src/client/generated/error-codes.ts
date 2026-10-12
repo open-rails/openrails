@@ -27,12 +27,6 @@ export type OpenRailsErrorCode =
   | "card_requires_https"
   | "catalog_benefit_overlap"
   | "catalog_revision_conflict"
-  | "order_attempt_closed"
-  | "order_attempt_expired"
-  | "pay_url_attempts_exhausted"
-  | "embed_origins_required"
-  | "pay_url_expired"
-  | "pay_url_not_found"
   | "credential_expired"
   | "credential_revoked"
   | "credit_grant_held"
@@ -53,6 +47,7 @@ export type OpenRailsErrorCode =
   | "default_payment_method_required"
   | "default_rate_card_not_found"
   | "destructive_actions_held"
+  | "embed_origins_required"
   | "entitlement_required"
   | "finding_action_failed"
   | "finding_not_actionable"
@@ -60,7 +55,6 @@ export type OpenRailsErrorCode =
   | "hold_not_found"
   | "host_event_not_found"
   | "host_principal_invalid"
-  | "pay_url_unavailable"
   | "idempotency_key_in_use"
   | "idempotency_key_required"
   | "idempotency_key_reused"
@@ -91,12 +85,18 @@ export type OpenRailsErrorCode =
   | "network_link_in_use"
   | "network_terms_required"
   | "order_action_not_allowed"
+  | "order_attempt_closed"
+  | "order_attempt_expired"
   | "order_has_recurring_line"
   | "order_line_unavailable"
   | "order_not_cancelable"
   | "order_not_payable"
   | "order_payment_in_progress"
   | "order_total_changed"
+  | "pay_url_attempts_exhausted"
+  | "pay_url_expired"
+  | "pay_url_not_found"
+  | "pay_url_unavailable"
   | "payment_duplicate_refused"
   | "payment_exceeds_due"
   | "payment_failed"
@@ -225,12 +225,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
   catalog_benefit_overlap: { status: 409, type: "invalid_request_error", meaning: "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group." },
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
-  order_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The order attempt already completed or was canceled." },
-  order_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The order attempt expired before it was paid." },
-  pay_url_attempts_exhausted: { status: 409, type: "invalid_request_error", meaning: "The purchase took its most card attempts; the merchant creates a new order." },
-  embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded payment page needs the origins that may frame it: the merchant's settings payment_page.embed_origins." },
-  pay_url_expired: { status: 410, type: "invalid_request_error", meaning: "The pay URL expired; the merchant creates a new order." },
-  pay_url_not_found: { status: 404, type: "invalid_request_error", meaning: "The pay URL is unknown or no longer valid." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
   credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
@@ -251,6 +245,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   destructive_actions_held: { status: 409, type: "invalid_request_error", meaning: "The kill switch holds changes that end access or write to a provider; the proposal stays open." },
+  embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins." },
   entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
@@ -258,7 +253,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant, or names an invalid invoker." },
-  pay_url_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no payment page, or the order cannot take one." },
   idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },
   idempotency_key_reused: { status: 422, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
@@ -289,12 +283,18 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   network_link_in_use: { status: 409, type: "invalid_request_error", meaning: "The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first." },
   network_terms_required: { status: 403, type: "authorization_error", meaning: "The openrails.dev account has not accepted the network terms." },
   order_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The order's origin or status does not allow this action." },
+  order_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The order attempt already completed or was canceled." },
+  order_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The order attempt expired before it was paid." },
   order_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
   order_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
   order_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open order, or one awaiting the customer's action, can be canceled." },
   order_not_payable: { status: 409, type: "invalid_request_error", meaning: "The order takes no payment: it is paid, canceled or expired." },
   order_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this order is unresolved; read the order." },
   order_total_changed: { status: 409, type: "invalid_request_error", meaning: "The order's total is not expected_total; preview it again." },
+  pay_url_attempts_exhausted: { status: 409, type: "invalid_request_error", meaning: "The pay URL took its most card attempts; the merchant creates a new order." },
+  pay_url_expired: { status: 410, type: "invalid_request_error", meaning: "The pay URL expired; the merchant creates a new order." },
+  pay_url_not_found: { status: 404, type: "invalid_request_error", meaning: "The pay URL is unknown or no longer valid." },
+  pay_url_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no payment origin, or the order cannot take a pay URL." },
   payment_duplicate_refused: { status: 409, type: "invalid_request_error", meaning: "The provider refused an identical charge it had just made; retry after its duplicate window." },
   payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the usage order has due, or is not the order's total." },
   payment_failed: { status: 402, type: "card_error", meaning: "The payment was not made." },
@@ -317,7 +317,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
   platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant." },
-  platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A card PSP purchase offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant." },
+  platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A card PSP routing offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant." },
   price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
   price_change_target_archived: { status: 422, type: "invalid_request_error", meaning: "The target price is archived." },
   price_increase_notice_too_short: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },
