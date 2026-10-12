@@ -97,7 +97,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
-	ctx, finishEdit, err := cache.BeginEdit(ctx, params)
+	terms := params
+	terms.ExpectedRevision = nil
+	ctx, finishEdit, err := cache.BeginEdit(ctx, terms)
 	if err != nil {
 		return nil, err
 	}

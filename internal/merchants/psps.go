@@ -289,10 +289,12 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 	if req.Archived && (len(req.Settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap) {
 		return billing.PSP{}, apperr.Invalidf("archived goes alone in its request").WithParam("archived")
 	}
+	terms := req
+	terms.ExpectedRevision = nil
 	ctx, finishEdit, err := s.config.BeginEdit(ctx, struct {
 		ID      billing.PSPID
 		Request billing.UpdatePSPParams
-	}{pspID, req})
+	}{pspID, terms})
 	if err != nil {
 		return billing.PSP{}, err
 	}
@@ -312,13 +314,17 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 			// removed, and drains.
 			return billing.PSP{}, ErrPSPNotFound
 		}
-		if req.ExpectedRevision != nil && *req.ExpectedRevision != held.Revision {
-			return billing.PSP{}, RevisionMismatch("the PSP", *req.ExpectedRevision, held.Revision)
+		cas := held.Revision
+		if req.ExpectedRevision != nil {
+			cas = *req.ExpectedRevision
 		}
 		next := clonePSP(held.Value)
 		probed, rotated := false, false
 		if req.Archived {
 			if next.Archived {
+				if _, err := s.config.PutPSP(ctx, id, scope.Key, next, cas); err != nil {
+					return billing.PSP{}, err
+				}
 				return s.pspWithObligations(ctx, id, scope)
 			}
 			if len(j.live(scope.Rail, scope.Environment)) <= 1 && !req.AllowLast {
@@ -349,7 +355,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 				}
 			}
 		}
-		_, err = s.config.PutPSP(ctx, id, scope.Key, next, held.Revision)
+		_, err = s.config.PutPSP(ctx, id, scope.Key, next, cas)
 		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
 			if req.ExpectedRevision != nil || attempt >= 2 {
 				return billing.PSP{}, ErrRevisionMismatch

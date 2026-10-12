@@ -187,7 +187,13 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 			fields["credit_grant"] = catalogJSON(req.CreditGrant)
 		}
 		if req.SetEntitlements {
-			fields["entitlements"] = catalogJSON(req.Entitlements)
+			keys, err := catalogwire.NormalizeEntitlements(req.Entitlements)
+			if err != nil {
+				return nil, err
+			}
+			keys = append([]string{}, keys...)
+			slices.Sort(keys)
+			fields["entitlements"] = catalogJSON(keys)
 		}
 		if req.SetTierGroup {
 			fields["tier_group"] = catalogOptionalText(req.TierGroup)

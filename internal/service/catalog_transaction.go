@@ -46,6 +46,19 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 	var committedWork []func(context.Context, *Service)
 	err = s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		admission, _ := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission)
+		if writes && admission != nil && admission.action != nil {
+			locked, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid.UUID(), ID: admission.action.ID})
+			if err != nil {
+				return err
+			}
+			if locked.State == string(destructive.StateNoEffect) {
+				return destructive.ErrActionFinal
+			}
+			if locked.State == string(destructive.StateSucceeded) {
+				admission.finished = true
+			}
+		}
 		if _, err := q.LockCatalogRevision(ctx, mid.UUID()); err != nil {
 			return err
 		}
@@ -65,7 +78,6 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		if scoped.catalogBefore, err = readCatalogState(ctx, q, mid.UUID()); err != nil {
 			return err
 		}
-		admission, _ := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission)
 		if admission != nil && !sameCatalogSnapshot(admission.before, scoped.catalogBefore) {
 			admission.rolledBack = true
 			return errCatalogSnapshotMoved
@@ -82,6 +94,9 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			return err
 		}
 		affected := substantiveCatalogTargets(scoped.catalogBefore, after)
+		if admission != nil && admission.finished && len(affected) > 0 {
+			return destructive.ErrActionFinal
+		}
 		for _, object := range affected {
 			if admission == nil || !admission.targets[object] {
 				if admission != nil {

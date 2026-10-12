@@ -220,7 +220,7 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 	} else if int64(len(changes)) > edit.action.Units {
 		return Set{}, ErrWriteUncertain
 	}
-	if _, err = admissions.Start(ctx, id.UUID(), edit.action.ID); err != nil {
+	if _, err = admissions.StartPending(ctx, id.UUID(), edit.action.ID); err != nil {
 		return Set{}, err
 	}
 	edit.noEffect = false
