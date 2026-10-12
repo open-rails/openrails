@@ -423,6 +423,7 @@ export const aProduct = (
   display_name: id,
   description: "",
   entitlements: [],
+  required_entitlements: [],
   tier_group: "plans",
   ownership: null,
   tier_rank: tierRank,
