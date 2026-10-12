@@ -823,7 +823,8 @@ from your issuer (AuthKit issues them) for this deployment, holding the route's
 permission: `root:entitlements:read` for the content gate, `root:usage:manage`
 for usage events, admissions and running charges, `root:events:read` for host
 events, `root:orders:manage` for orders. A person is refused.
-Writes take an `Idempotency-Key`, so a retry never double-counts. Embedded, call
+Writes use their durable operation identity (request ID, usage source, running-charge
+reference, or an order's `Idempotency-Key`), so a retry never double-counts. Embedded, call
 the same `Client` methods in process instead. The `scim/v2` routes also take a
 merchant provisioning token, for directories like Okta or Entra ID that can't
 get a token from your issuer; that token opens nothing else.

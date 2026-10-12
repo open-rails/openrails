@@ -97,6 +97,9 @@ const (
 	CodeUnsupportedMediaType = "unsupported_media_type"
 	CodeRouteNotFound        = "route_not_found"
 	CodeMethodNotAllowed     = "method_not_allowed"
+	// CodeMerchantMismatch: the credential's merchant differs from the
+	// request's expected merchant; no operation was executed.
+	CodeMerchantMismatch = "merchant_mismatch"
 )
 
 // Customer link codes (openrails.dev).
@@ -163,8 +166,8 @@ var errorCodes = []ErrorCode{
 	{CodeUnsupportedMediaType, 415, invalid, "The request body is not application/json."},
 	{CodeRouteNotFound, 404, invalid, "No route matches the path."},
 	{CodeMethodNotAllowed, 405, invalid, "The path exists but not for this method; Allow lists its methods."},
+	{CodeMerchantMismatch, 412, invalid, "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed."},
 	{"idempotency_key_required", 400, invalid, "The operation needs an Idempotency-Key header."},
-	{"idempotency_key_in_progress", 409, invalid, "A request with this Idempotency-Key is still running; retry it later."},
 	{"csrf_origin_denied", 403, authz, "A cookie-authenticated request came from an origin that is not allowed."},
 	{"captcha_required", 403, invalid, "The caller must solve a captcha and resend with its token."},
 	{"captcha_invalid", 403, invalid, "The captcha token was rejected."},

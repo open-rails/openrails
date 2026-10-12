@@ -14,8 +14,13 @@ import (
 // BoundHeader is the response header naming the merchant a merchant-bound
 // request acted on (`OpenRails-Bound-Merchant: <uuid>`): the one its
 // credential is bound to. The Go client checks it against its handle's
-// merchant. No request header names a merchant.
+// merchant.
 const BoundHeader = "OpenRails-Bound-Merchant"
+
+// ExpectedHeader is an optional request precondition: the authenticated
+// credential must be bound to this merchant. It never selects a merchant
+// or grants authority, and a mismatch is refused before any operation runs.
+const ExpectedHeader = "OpenRails-Expected-Merchant"
 
 // ErrNoMerchant is returned by Require when no merchant has been resolved onto
 // the context. It signals a programming/wiring error — every merchant-owned code

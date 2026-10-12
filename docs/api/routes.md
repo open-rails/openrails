@@ -193,26 +193,26 @@ What the signed-in caller may use of each staff route group that is on: any pers
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, usage uses source identity and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/app/orders/preview` | application | `merchant:orders:manage`<br>`root:orders:manage` | `PreviewOrderParams` | 200 `OrderPreview` |  |
 | POST | `/v1/app/orders` | application | `merchant:orders:manage`<br>`root:orders:manage` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
-| POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` | `Idempotency-Key` |
+| POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` |  |
 | GET | `/v1/app/catalog/products` | application | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
-| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/{request_id}/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` | `Idempotency-Key` |
-| POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
+| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` |  |
+| POST | `/v1/app/admissions/{request_id}/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionParams` | 200 `CaptureReceipt` |  |
+| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
+| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
+| POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` |  |
+| POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` |  |
+| POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
+| POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
 | GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
 | GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |

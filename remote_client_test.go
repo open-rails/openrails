@@ -285,9 +285,10 @@ func TestExtraHeadersCannotCarryACredential(t *testing.T) {
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, []string{"Bearer test-key"}, r.Header.Values("Authorization"))
 		require.Equal(t, "kept", r.Header.Get("X-Trace"))
+		require.Equal(t, []string{testMerchant.String()}, r.Header.Values(merchant.ExpectedHeader))
 		_, _ = w.Write([]byte(`{}`))
 	})
-	extra := http.Header{"authorization": {"Bearer broader-key"}, "Authorization": {"Bearer broader-key"}, "X-Trace": {"kept"}}
+	extra := http.Header{"authorization": {"Bearer broader-key"}, "Authorization": {"Bearer broader-key"}, "X-Trace": {"kept"}, merchant.ExpectedHeader: {billing.MerchantID(uuid.New()).String()}}
 	original := extra.Clone()
 	require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/admin/configuration", nil, nil, extra))
 	require.True(t, reflect.DeepEqual(extra, original), "request mutated the caller's header map")

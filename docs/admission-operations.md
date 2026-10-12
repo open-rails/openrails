@@ -2,7 +2,8 @@
 
 How admissions and their holds behave. The routes are `/v1/app/admissions`
 ([routes](api/routes.md)), your backend's own: they take an application's
-credential and an `Idempotency-Key` on each write. The Go methods are `Admit`,
+credential. The durable `request_id` owns replay; no `Idempotency-Key` header
+is needed. The Go methods are `Admit`,
 `CaptureAdmission`, `ReleaseAdmissions` and `ExtendAdmissions`. Admit,
 release and extend take up to 1,000 items and answer one result per item, each
 decided on its own; capture settles one request.

@@ -19,8 +19,8 @@ day. One stored instant per customer says when its balance is next looked at.
 ## Routes and methods
 
 Your backend's routes, behind `billing.MerchantUsageManage` or
-`billing.RootUsageManage`, each write with an
-`Idempotency-Key` ([routes](api/routes.md)):
+`billing.RootUsageManage` ([routes](api/routes.md)). The durable `reference`
+owns replay; no `Idempotency-Key` header is needed:
 
 | Route | Go method | Answers |
 | --- | --- | --- |

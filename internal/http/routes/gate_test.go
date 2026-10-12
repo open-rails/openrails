@@ -591,9 +591,9 @@ func TestStaffGate(t *testing.T) {
 	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootEventsRead: true}}, "GET /v1/app/host-events", nil)
 	require.Equal(t, http.StatusNoContent, got.status, "events alone")
 	require.Equal(t, "GET /v1/app/host-events", got.staff.Route)
-	// Its writes run once per Idempotency-Key.
+	// Naturally identified writes need no redundant HTTP retry key.
 	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
-	require.Equal(t, http.StatusBadRequest, got.status, "a programmatic write without an Idempotency-Key")
+	require.Equal(t, http.StatusNoContent, got.status, "acknowledging named events needs no Idempotency-Key")
 
 	// The retired selector header names nothing.
 	got = runRoute(t, rt, &recordingAuth{who: person}, "GET /v1/admin/payments", map[string]string{retiredSelector: "id:" + merchantB.String()})

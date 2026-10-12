@@ -227,7 +227,7 @@
       "const (\n\tCodeScheduledChangeExists       = \"scheduled_change_exists\"\n\tCodePriceMigrationNotFound      = \"price_migration_not_found\"\n\tCodePriceChangeCurrencyMismatch = \"price_change_currency_mismatch\"\n\tCodePriceChangeTargetArchived   = \"price_change_target_archived\"\n\tCodePriceIncreaseNoticeTooShort = \"price_increase_notice_too_short\"\n)",
       "const (\n\tCodeSubscriptionChangeInFlight = \"subscription_change_in_flight\"\n\n\tCodeSubscriptionChangeRefused = \"subscription_change_refused\"\n\n\tCodeSubscriptionChangeIdempotencyConflict = \"subscription_change_idempotency_conflict\"\n\n\tCodeSubscriptionChangeIdempotencyKeyRequired = \"subscription_change_idempotency_key_required\"\n\n\tCodeSubscriptionChangeCycleUnknown = \"subscription_change_cycle_unknown\"\n\n\tCodeSubscriptionChangePeriodUnknown = \"subscription_change_period_unknown\"\n\n\tCodeSubscriptionChangeCreditExceedsPrice = \"subscription_change_credit_exceeds_price\"\n\n\tCodeSubscriptionChangeRenewalDue = \"subscription_change_renewal_due\"\n\n\tCodeSubscriptionChangeAlreadyScheduled = \"subscription_change_already_scheduled\"\n\n\tCodeSubscriptionChangeCadenceUnsupported = \"subscription_change_cadence_unsupported\"\n\n\tCodeSubscriptionChangeRequiresLinkedPlan = \"subscription_change_requires_linked_plan\"\n\n\tCodeSubscriptionChangeTargetInactive = \"subscription_change_target_inactive\"\n\n\tCodeSubscriptionChangeUnsupportedOnRail = \"subscription_change_unsupported_on_rail\"\n\n\tCodeSubscriptionChangeProviderConflict = \"subscription_change_provider_conflict\"\n\n\tCodeStoredCredentialRequired = \"stored_credential_required\"\n)",
       "const (\n\tCodeSubscriptionResumable = \"subscription_resumable\"\n\n\tCodeSubscriptionPaidThrough = \"subscription_paid_through\"\n)",
-      "const (\n\tCodeUnknownField = \"unknown_field\"\n\n\tCodeInvalidQuery = \"invalid_query\"\n\n\tCodeInvalidCursor        = \"invalid_cursor\"\n\tCodeUnsupportedMediaType = \"unsupported_media_type\"\n\tCodeRouteNotFound        = \"route_not_found\"\n\tCodeMethodNotAllowed     = \"method_not_allowed\"\n)",
+      "const (\n\tCodeUnknownField = \"unknown_field\"\n\n\tCodeInvalidQuery = \"invalid_query\"\n\n\tCodeInvalidCursor        = \"invalid_cursor\"\n\tCodeUnsupportedMediaType = \"unsupported_media_type\"\n\tCodeRouteNotFound        = \"route_not_found\"\n\tCodeMethodNotAllowed     = \"method_not_allowed\"\n\n\tCodeMerchantMismatch = \"merchant_mismatch\"\n)",
       "const (\n\tCollectChargeAutomatically InvoiceCollectionMethod = \"charge_automatically\"\n\tCollectSendInvoice         InvoiceCollectionMethod = \"send_invoice\"\n)",
       "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\n\tCreditGrantTerminated CreditGrantState = \"terminated\"\n)",
       "const (\n\tCreditGrantIDPrefix        = \"cgr_\"\n\tBalanceTransactionIDPrefix = \"txn_\"\n)",
@@ -1291,8 +1291,7 @@
       "type stripeThinEnvelope struct {\n\tID            string          `json:\"id\"`\n\tObject        string          `json:\"object\"`\n\tType          string          `json:\"type\"`\n\tAccount       string          `json:\"account\"`\n\tContext       string          `json:\"context\"`\n\tCreated       json.RawMessage `json:\"created\"`\n\tSnapshotEvent string          `json:\"snapshot_event\"`\n\tRelatedObject *struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t\tURL  string `json:\"url\"`\n\t} `json:\"related_object\"`\n\tData struct {\n\t\tObject             json.RawMessage `json:\"object\"`\n\t\tPreviousAttributes json.RawMessage `json:\"previous_attributes\"`\n\t} `json:\"data\"`\n}"
     ],
     "internal/http/routes": [
-      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}",
-      "type appResponse struct {\n\tFingerprint string `json:\"fingerprint\"`\n\tStatus      int    `json:\"status\"`\n\tContentType string `json:\"content_type\"`\n\tBody        string `json:\"body\"`\n}"
+      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}"
     ],
     "internal/integrations/basistheory": [
       "type AccountUpdaterJob struct {\n\tID          string     `json:\"id\"`\n\tTenantID    string     `json:\"tenant_id\"`\n\tState       string     `json:\"state\"`\n\tUploadURL   string     `json:\"upload_url\"`\n\tDownloadURL string     `json:\"download_url\"`\n\tCreatedAt   time.Time  `json:\"created_at\"`\n\tExpiresAt   *time.Time `json:\"expires_at\"`\n}",
@@ -2135,6 +2134,7 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "http": "net/http",
       "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "reflect": "reflect",
       "routes": "github.com/open-rails/openrails/internal/http/routes",
       "sort": "sort",
@@ -2433,23 +2433,6 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
-    },
-    "internal/http/routes/app_requests.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "hex": "encoding/hex",
-      "http": "net/http",
-      "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "idempotency": "github.com/open-rails/openrails/internal/modules/idempotency",
-      "io": "io",
-      "json": "encoding/json",
-      "middleware": "github.com/open-rails/openrails/internal/http/middleware",
-      "router": "github.com/open-rails/openrails/internal/http/router",
-      "sha256": "crypto/sha256",
-      "strings": "strings"
     },
     "internal/http/routes/meta.go": {
       "http": "net/http"
@@ -4451,8 +4434,7 @@
     "refunds.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
-      "http": "net/http",
-      "strings": "strings"
+      "http": "net/http"
     },
     "remote.go": {
       "atomic": "sync/atomic",

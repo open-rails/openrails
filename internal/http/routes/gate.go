@@ -34,10 +34,10 @@ import (
 // (boundMerchant) and, by the route's tier, checks who the subject is, asks
 // the Verified's Can for the route's permission (its merchant: name in that
 // merchant's scope, else its root: name in the Authenticator's root scope)
-// and, for a person on a Sensitive route, its CheckRecentSignIn. Nothing in
-// the request names the merchant. It answers every refusal itself, as
-// auth.Refuse says, and binds the verdict in its own context, where handlers
-// re-check it.
+// and, for a person on a Sensitive route, its CheckRecentSignIn. The optional
+// expected-merchant precondition can refuse a binding, never select one.
+// It answers every refusal itself, as auth.Refuse says, and binds the verdict
+// in its own context, where handlers re-check it.
 
 // MountError refuses a route the mount cannot gate. Mounting stops; a route
 // is never mounted open.
@@ -350,6 +350,21 @@ func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Ver
 		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
 	pin(r, target)
+	if values, present := r.Request.Header[http.CanonicalHeaderKey(merchant.ExpectedHeader)]; present {
+		var expected billing.MerchantID
+		var parseErr error
+		if len(values) == 1 {
+			expected, parseErr = billing.ParseMerchantID(strings.TrimSpace(values[0]))
+		}
+		if len(values) != 1 || parseErr != nil || expected.IsZero() {
+			r.AbortCode(billing.CodeInvalidParam, merchant.ExpectedHeader+" must contain one nonzero merchant UUID")
+			return nil, billingauth.Identity{}, billingauth.Target{}, false
+		}
+		if expected != target.MerchantID {
+			r.AbortCode(billing.CodeMerchantMismatch, "The credential is bound to a different merchant; the operation was not executed.")
+			return nil, billingauth.Identity{}, billingauth.Target{}, false
+		}
+	}
 	return v, c, target, true
 }
 

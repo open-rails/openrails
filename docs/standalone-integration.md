@@ -264,24 +264,24 @@ per endpoint cost. Keep the call's deadline short (the context's, or
 `RemoteOptions.Timeout`) so a slow OpenRails cannot stall your hot path.
 
 **Any other stack** calls the same HTTP surface with its application's
-access token (a person's is refused on `/v1/app`), and an `Idempotency-Key` on
-each write:
+access token (a person's is refused on `/v1/app`). The admission's `request_id`
+is its durable retry identity:
 
 ```bash
 # Pre-authorize + hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/app/admissions \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -H "Idempotency-Key: admit-req-789" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
        "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
 
 # Settle at real cost…
 curl -X POST https://openrails.example/v1/app/admissions/req-789/capture \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -H "Idempotency-Key: capture-req-789" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/app/admissions/release \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -H "Idempotency-Key: release-req-789" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"request_ids":["req-789"]}'
 ```
 
