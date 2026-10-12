@@ -143,7 +143,7 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 				continue
 			}
 			// Offer lookup is a read with a POST body.
-			if route.Method == http.MethodGet || route.Method == http.MethodHead || strings.HasSuffix(route.Path, "/offers/lookup") {
+			if route.Method == http.MethodGet || route.Method == http.MethodHead {
 				reads++
 			} else {
 				writes++

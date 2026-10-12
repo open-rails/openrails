@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (171), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (170), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -123,23 +123,23 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
-| GET | `/v1/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
+| GET | `/v1/catalog/meters` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Meter` |  |
 | PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
-| POST | `/v1/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| POST | `/v1/catalog/ask` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
 | POST | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
-| GET | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
+| GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Product` |  |
 | PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
 | POST | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
-| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
-| GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |
+| GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
 | POST | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
-| POST | `/v1/catalog/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
-| GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
-| GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
+| POST | `/v1/catalog/price-migrations/preview` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `PriceMigration` |  |
 | POST | `/v1/catalog/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
 
 ## Merchant configuration
@@ -200,7 +200,6 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/orders/preview` | application | `merchant:orders:manage`<br>`root:orders:manage` | `PreviewOrderParams` | 200 `OrderPreview` |  |
 | POST | `/v1/app/orders` | application | `merchant:orders:manage`<br>`root:orders:manage` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` | `Idempotency-Key` |
-| GET | `/v1/app/catalog/products` | application | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/admissions/{request_id}/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |

@@ -52,7 +52,7 @@ export const zh: BillingUiMessageBundle = {
     once: "一次性",
     permanent: "无预定到期时间的访问权限",
   },
-  offers: {
+  products: {
     empty: "没有可解锁此内容的商品",
     once: "{amount}",
     rent: "租用 {period}，{amount}",

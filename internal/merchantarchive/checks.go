@@ -259,7 +259,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
-	// Current available offers obey the same product/price contract as ordinary
+	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (

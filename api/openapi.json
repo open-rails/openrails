@@ -1410,106 +1410,6 @@
         ]
       }
     },
-    "/v1/app/catalog/products": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "entitlement",
-            "in": "query",
-            "style": "form",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "keys",
-            "in": "query",
-            "style": "form",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:read",
-          "root": "root:catalog:read"
-        },
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request"
-        ]
-      }
-    },
     "/v1/catalog/apply": {
       "post": {
         "tags": [
@@ -1637,8 +1537,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
@@ -1684,8 +1584,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "allowance_meter_not_found",
@@ -1809,8 +1709,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-mounted-when": "catalog_copilot",
         "x-openrails-errors": [
@@ -2000,8 +1900,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2054,8 +1954,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2305,8 +2205,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2368,8 +2268,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2521,8 +2421,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -3279,8 +3179,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -3329,8 +3229,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -3383,8 +3283,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_param",

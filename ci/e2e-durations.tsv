@@ -208,7 +208,6 @@ ci/subscriptions	TestLegacyNMITierUpgradeLostDuplicateSettles	13.7
 ci/subscriptions	TestLegacyNMITierUpgradeScheduleUpdateRetried	10.2
 ci/subscriptions	TestLegacyNMIZeroEngineCharges	43.7
 ci/subscriptions	TestLifecycleDecisionsAreAudited	10.9
-ci/subscriptions	TestListOffersIsOneRequest	9.2
 ci/subscriptions	TestListReadsAreBatched	11.8
 ci/subscriptions	TestMerchantDunningPolicy	19.6
 ci/subscriptions	TestMerchantHandsOverACheckoutSession	9.7

@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A dump is a reusable declaration of current offers. In particular, prepaid
+// A dump is a reusable declaration of current prices. In particular, prepaid
 // products must not become empty ownership products when copied to a merchant.
 func TestCatalogYAMLDumpRoundTrip(t *testing.T) {
 	source := newWorld(t)
@@ -88,8 +88,8 @@ products:
   retired:
     display_name: Retired product
     archived: true
-  old-offer:
-    display_name: No current offers
+  old-price:
+    display_name: No current prices
     prices:
       retired:
         currency: USD
@@ -131,11 +131,11 @@ products:
 		}
 		require.True(t, product.CreditGrant.Set)
 	}
-	require.NotContains(t, products, "retired", "this command exports active offers, not archived history")
-	require.Empty(t, products["old-offer"].Prices)
+	require.NotContains(t, products, "retired", "this command exports active prices, not archived history")
+	require.Empty(t, products["old-price"].Prices)
 	require.EqualValues(t, 100000000, *products["api-pack"].CreditGrant.Value.Amount)
 	require.Equal(t, 90, *products["api-pack"].CreditGrant.Value.ExpiresAfterDays)
-	require.Len(t, products["api-pack"].Prices, 1, "the archived revision is not a current offer")
+	require.Len(t, products["api-pack"].Prices, 1, "the archived revision is not a current price")
 	require.EqualValues(t, 90000000, products["api-pack"].Prices["buy"].UnitAmount.Value)
 	require.True(t, products["api-deposit"].CreditGrant.Value.FromPayment)
 	require.Equal(t, 365, *products["api-deposit"].CreditGrant.Value.ExpiresAfterDays)

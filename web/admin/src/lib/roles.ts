@@ -214,7 +214,7 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Check entitlements",
     section: "programs",
   },
-  "merchant:catalog:read": { label: "Read offers", section: "programs" },
+  "merchant:catalog:read": { label: "Read catalog", section: "programs" },
   "merchant:orders:manage": {
     label: "Create and cancel orders",
     section: "programs",
@@ -286,7 +286,7 @@ export const SECTIONS: {
     id: "programs",
     title: "Programs (/v1/app)",
     description:
-      "What an API key's program may call. A storefront, for example, needs only entitlements and offers.",
+      "What an API key's program may call. A storefront, for example, needs only entitlements and products.",
   },
   {
     id: "staff",

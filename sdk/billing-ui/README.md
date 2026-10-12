@@ -10,7 +10,7 @@ billing (subscriptions, saved cards, payment history).
 | `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 
-The checkout owns the browser payment flow, behind `<BuyButton>`, `<Offers>`
+The checkout owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
 and `<OrderCheckout>`: the signed-in customer's order, read and paid with
 their own credential. Card data is tokenized in the PSP's own fields
 (Collect.js, Stripe Elements) and never enters the host application.
@@ -31,7 +31,7 @@ pnpm add @openrails/billing-ui@X.Y.Z
 A React app imports from one place:
 
 ```tsx
-import { BillingProvider, BuyButton, Offers, createBillingClient, formatAmount } from "@openrails/billing-ui"
+import { BillingProvider, BuyButton, ProductList, createBillingClient, formatAmount } from "@openrails/billing-ui"
 
 // auth-ui's authFetch attaches the bearer and retries once after a refresh;
 // `getToken: () => token` works for any other auth.
@@ -62,9 +62,9 @@ const billing = createBillingClient({
 })
 ```
 
-`<BuyButton>` buys one price, `<Offers>` the products your server names by
+`<BuyButton>` buys one price, `<ProductList>` the products your server names by
 key (a course, its bundle and the membership that also unlocks it; the Go
-`Client.ListOffers` finds the products granting an entitlement): a
+`Client.ListProducts` finds the products granting an entitlement): a
 `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
 "$10.00 every 30 days"). Both look prices up in the public catalog of the
 merchant whose id you pass as `merchant`, signed in or out. The purchase is
@@ -86,9 +86,9 @@ granting anything.
   onPaid={() => navigate("/courses/css-101")} // your gate now admits them
 />
 
-<Offers
+<ProductList
   merchant={merchantId}
-  keys={["course-101", "course-bundle", "channel-membership"]} // from your server, or products={...} from its Client.ListOffers
+  keys={["course-101", "course-bundle", "channel-membership"]} // from your server, or products={...} from its Client.ListProducts
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
   onPaid={() => navigate("/courses/css-101")}

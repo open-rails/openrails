@@ -52,7 +52,7 @@ export const de: BillingUiMessageBundle = {
     once: "einmalig",
     permanent: "Zugriff ohne geplantes Ablaufdatum",
   },
-  offers: {
+  products: {
     empty: "Nichts im Angebot schaltet dies frei",
     once: "{amount}",
     rent: "{period} leihen, {amount}",
@@ -94,8 +94,10 @@ export const de: BillingUiMessageBundle = {
   },
   cancel: {
     title: "{name} kündigen?",
-    description: "Künftige Zahlungen werden eingestellt. Bereits gekaufter Zugriff bleibt bestehen.",
-    solanaDescription: "Deine Wallet signiert eine On-Chain-Kündigung. Bereits gekaufter Zugriff bleibt bestehen.",
+    description:
+      "Künftige Zahlungen werden eingestellt. Bereits gekaufter Zugriff bleibt bestehen.",
+    solanaDescription:
+      "Deine Wallet signiert eine On-Chain-Kündigung. Bereits gekaufter Zugriff bleibt bestehen.",
     reasonLabel: "Warum kündigst du?",
     reasonPlaceholder: "Dein Feedback hilft uns, besser zu werden.",
     reasonHint: "{count}/{max}",

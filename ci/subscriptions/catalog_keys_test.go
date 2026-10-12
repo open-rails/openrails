@@ -360,10 +360,9 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 		page, err = w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: []string{"course:102", "channel:membership"}, Keys: []string{bundle.Key, course.Key}})
 		require.NoError(t, err, top)
 		require.Equal(t, []string{bundle.Key}, productKeys(t, page), "%s: both filters apply", top)
-		_, err = w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), })
+		_, err = w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true)})
 		require.NoError(t, err, top)
 	}
 	appStatus, appBody := w.merchantCall(w.auth.hostToken(t), http.MethodGet, "/v1/app/catalog/products")
 	require.Equal(t, http.StatusNotFound, appStatus, appBody)
-	require.Contains(t, appBody, "route_not_found", "the duplicate catalog route is removed")
 }

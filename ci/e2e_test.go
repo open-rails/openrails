@@ -187,11 +187,11 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
 	forSale := true
-	offers, err := client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"content:welcome"}, ForSale: &forSale})
+	prices, err := client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"content:welcome"}, ForSale: &forSale})
 	require.NoError(t, err)
-	require.Len(t, offers.Items, 1)
-	require.Len(t, offers.Items[0].Prices, 1)
-	require.Equal(t, price.ID, offers.Items[0].Prices[0].ID)
+	require.Len(t, prices.Items, 1)
+	require.Len(t, prices.Items[0].Prices, 1)
+	require.Equal(t, price.ID, prices.Items[0].Prices[0].ID)
 }
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {

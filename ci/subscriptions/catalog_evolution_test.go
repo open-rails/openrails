@@ -25,7 +25,7 @@ import (
 )
 
 // A key identifies a product-local chain; equal money under another key is a
-// separate offer. Reusing financial terms preserves the original UUID/revision.
+// separate price. Reusing financial terms preserves the original UUID/revision.
 func TestCatalogProductScopedPriceVersions(t *testing.T) {
 	w := newWorld(t)
 	for _, tp := range []topology{embedded, remote} {
@@ -45,7 +45,7 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 				products[i] = product
 				original[i] = create(product, "monthly", 1_000_000)
 				require.Zero(t, original[i].Version)
-				alias := create(product, "other-offer", 1_000_000)
+				alias := create(product, "other-price", 1_000_000)
 				require.NotEqual(t, original[i].ID, alias.ID, "equal financial terms cannot steal another key")
 				require.Zero(t, alias.Version)
 				repeat := create(product, "monthly", 1_000_000)
