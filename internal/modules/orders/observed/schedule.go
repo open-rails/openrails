@@ -2,6 +2,7 @@ package observed
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,10 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if order.CollectionOwner != OwnerNMISchedule && order.CollectionOwner != OwnerProvider || order.PspID == nil {
 		return errors.New("accepted schedule order has no provider collection owner")
 	}
+	sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid.UUID(), ID: subscriptionID})
+	if err != nil || strings.TrimSpace(models.DerefStr(sub.RailSubscriptionID)) == "" {
+		return errors.New("accepted schedule requires its provider agreement reference")
+	}
 	line, err := q.GetOrderLineBySubscription(ctx, gen.GetOrderLineBySubscriptionParams{MerchantID: mid.UUID(), OrderID: orderID, SubscriptionID: subscriptionID})
 	if err != nil {
 		return fmt.Errorf("accepted schedule subscription line: %w", err)
@@ -49,7 +54,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		unit /= int64(*line.Quantity)
 	}
 	bill := Bill{PSPID: *order.PspID, CustomerID: order.CustomerID, SubscriptionID: &subscriptionID, Owner: order.CollectionOwner,
-		Kind: "renewal", SourceKind: "provider_cycle", Currency: order.Currency, Total: recurringAmount,
+		Kind: "renewal", SourceKind: "provider_cycle", ProviderReference: models.DerefStr(sub.RailSubscriptionID), Currency: order.Currency, Total: recurringAmount,
 		Lines: []Line{{PriceID: line.PriceID, ProductID: line.ProductID, Description: line.Description,
 			Quantity: models.DerefIntPtr(line.Quantity), UnitAmount: unit, Amount: recurringAmount,
 			BillingIntervalHours: &cadenceHours, AccessDurationHours: models.DerefIntPtr(line.AccessDurationHours)}}}
@@ -58,11 +63,11 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID,
-		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
+		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
-	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
+	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID, SourceReference: "order:" + orderID.String()})
 	if err != nil {
 		return err
 	}
@@ -76,7 +81,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 // order, cash movement or historical settlement is invented by this declaration.
 func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, firstDue time.Time, cadenceHours, cadenceMonths int, now time.Time) error {
 	firstDue = firstDue.UTC().Truncate(time.Microsecond)
-	if bill.SubscriptionID == nil || firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || strings.TrimSpace(source) == "" || len(source) > 512 {
+	if bill.SubscriptionID == nil || strings.TrimSpace(bill.ProviderReference) == "" || firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || strings.TrimSpace(source) == "" || len(source) > 512 {
 		return errors.New("declared provider schedule is incomplete")
 	}
 	mid, err := merchant.Require(ctx)
@@ -84,7 +89,7 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 		return err
 	}
 	bill.Kind, bill.SourceKind = "renewal", "provider_cycle"
-	bill.SourceKey, bill.ProviderReference = "", ""
+	bill.SourceKey = ""
 	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = time.Time{}, time.Time{}, time.Time{}
 	if bill.Payment != nil || bill.Settled || bill.Total <= 0 || len(bill.Lines) != 1 || bill.Lines[0].Amount != bill.Total {
 		return errors.New("declared schedule is an accepted agreement, not historical money")
@@ -95,11 +100,11 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	}
 	q := d.Gen(ctx)
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID,
-		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), CadenceMonths: int32(cadenceMonths), AcceptedBill: raw, Now: now})
+		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), CadenceMonths: int32(cadenceMonths), AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
-	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID})
+	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID, SourceReference: source})
 	if err != nil {
 		return err
 	}
@@ -129,60 +134,80 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 		return Bill{}, errors.New("provider cycle receipt is incomplete")
 	}
 	q := d.Gen(ctx)
-	schedule, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
-	if err != nil {
-		return Bill{}, fmt.Errorf("provider cycle has no accepted enrollment agreement: %w", err)
-	}
-	var bill Bill
-	if err := json.Unmarshal(schedule.AcceptedBill, &bill); err != nil {
-		return Bill{}, err
-	}
-	if !receipt.Approved && receipt.Amount == 0 {
-		receipt.Amount, receipt.Currency = bill.Total, bill.Currency
-	}
-	if schedule.PspID != sub.PspID || schedule.CustomerID != sub.CustomerID || bill.SubscriptionID == nil || *bill.SubscriptionID != sub.ID || bill.Owner != string(sub.CollectionPolicy) || receipt.Amount != bill.Total || !strings.EqualFold(receipt.Currency, bill.Currency) {
-		return Bill{}, ErrConflict
-	}
 	bound, err := q.GetProviderCycleReceipt(ctx, gen.GetProviderCycleReceiptParams{MerchantID: sub.MerchantID, PspID: sub.PspID, TransactionID: receipt.TransactionID})
+	var schedule gen.BillingProviderSchedule
 	var due time.Time
 	switch {
 	case err == nil:
-		if bound.SubscriptionID != sub.ID || bound.Amount != receipt.Amount || bound.Currency != bill.Currency || bound.Approved != receipt.Approved || !bound.OccurredAt.Equal(receipt.OccurredAt) {
+		if bound.SubscriptionID != sub.ID || bound.Amount != receipt.Amount && receipt.Amount != 0 || bound.Currency != receipt.Currency && receipt.Currency != "" || bound.Approved != receipt.Approved || !bound.OccurredAt.Equal(receipt.OccurredAt) {
 			return Bill{}, ErrConflict
 		}
-		due = bound.DueAt
-	case db.IsNotFound(err):
-		if !receipt.Approved {
-			// A declined execution belongs to the next accepted unpaid cycle,
-			// anchored by enrollment and actual prior receipts. A changed
-			// next-retry date supplies no obligation identity.
-			prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
-			if err != nil && !db.IsNotFound(err) {
-				return Bill{}, err
-			}
-			receipt.NextBillingAt = schedule.FirstDueAt
-			if err == nil {
-				index, err := scheduleBoundaryIndex(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), prior)
-				if err != nil {
-					return Bill{}, err
-				}
-				receipt.NextBillingAt = scheduleBoundary(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), index+1)
-			}
-		}
-		due, err = scheduleReceiptCycle(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), receipt)
+		schedule, err = q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, SourceReference: bound.ScheduleSourceReference})
 		if err != nil {
 			return Bill{}, err
 		}
+		due = bound.DueAt
+	case db.IsNotFound(err):
+		schedules, err := q.ListProviderSchedules(ctx, gen.ListProviderSchedulesParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ProviderReference: sub.RailSubscriptionID})
+		if err != nil {
+			return Bill{}, err
+		}
+		matches := 0
+		selected := receipt
+		for i, candidate := range schedules {
+			var terms Bill
+			if err := json.Unmarshal(candidate.AcceptedBill, &terms); err != nil {
+				return Bill{}, err
+			}
+			attempt := receipt
+			if !attempt.Approved && attempt.Amount == 0 {
+				attempt.Amount, attempt.Currency = terms.Total, terms.Currency
+			}
+			if candidate.PspID != sub.PspID || candidate.CustomerID != sub.CustomerID || terms.SubscriptionID == nil || *terms.SubscriptionID != sub.ID || terms.Owner != string(sub.CollectionPolicy) || attempt.Amount != terms.Total || !strings.EqualFold(attempt.Currency, terms.Currency) {
+				continue
+			}
+			if !attempt.Approved {
+				prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ScheduleSourceReference: candidate.SourceReference})
+				if err != nil && !db.IsNotFound(err) {
+					return Bill{}, err
+				}
+				attempt.NextBillingAt = candidate.FirstDueAt
+				if err == nil {
+					index, err := scheduleBoundaryIndex(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), prior)
+					if err != nil {
+						return Bill{}, err
+					}
+					attempt.NextBillingAt = scheduleBoundary(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), index+1)
+				}
+			}
+			candidateDue, err := scheduleReceiptCycle(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), attempt)
+			if err != nil || i+1 < len(schedules) && !candidateDue.Before(schedules[i+1].FirstDueAt) {
+				continue
+			}
+			matches++
+			schedule, due, selected = candidate, candidateDue, attempt
+		}
+		if matches != 1 {
+			return Bill{}, errors.New("provider receipt cannot prove exactly one accepted schedule version")
+		}
 		if err := q.InsertProviderCycleReceipt(ctx, gen.InsertProviderCycleReceiptParams{MerchantID: sub.MerchantID, PspID: sub.PspID,
-			TransactionID: receipt.TransactionID, SubscriptionID: sub.ID, DueAt: due, Amount: receipt.Amount, Currency: bill.Currency,
+			TransactionID: receipt.TransactionID, SubscriptionID: sub.ID, ScheduleSourceReference: schedule.SourceReference, DueAt: due, Amount: selected.Amount, Currency: selected.Currency,
 			OccurredAt: receipt.OccurredAt, Approved: receipt.Approved}); err != nil {
 			return Bill{}, err
 		}
 	default:
 		return Bill{}, err
 	}
-	bill.SourceKey = sub.ID.String() + ":" + due.UTC().Format(time.RFC3339Nano)
-	bill.ProviderReference = sub.RailSubscriptionID
+	var bill Bill
+	if err := json.Unmarshal(schedule.AcceptedBill, &bill); err != nil {
+		return Bill{}, err
+	}
+	if schedule.PspID != sub.PspID || schedule.CustomerID != sub.CustomerID || bill.SubscriptionID == nil || *bill.SubscriptionID != sub.ID || bill.Owner != string(sub.CollectionPolicy) {
+		return Bill{}, ErrConflict
+	}
+	version := sha256.Sum256([]byte(schedule.SourceReference))
+	bill.SourceKey = fmt.Sprintf("%s:%x:%s", sub.ID, version[:16], due.UTC().Format(time.RFC3339Nano))
+	bill.ProviderReference = schedule.ProviderReference
 	index, err := scheduleBoundaryIndex(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), due)
 	if err != nil {
 		return Bill{}, err

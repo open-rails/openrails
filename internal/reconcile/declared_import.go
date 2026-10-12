@@ -330,7 +330,7 @@ func ImportDeclaredSubscriptions(
 				intervalHours = &schedule.IntervalHours
 			}
 			bill := observed.Bill{PSPID: f.PspID, CustomerID: f.Customer, SubscriptionID: &sub.ID,
-				Owner: string(f.CollectionPolicy), Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
+				Owner: string(f.CollectionPolicy), ProviderReference: f.RailSubscriptionID, Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
 				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: "Declared provider subscription",
 					Quantity: schedule.Quantity, UnitAmount: schedule.Amount / int64(quantity), Amount: schedule.Amount,
 					BillingIntervalHours: intervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}

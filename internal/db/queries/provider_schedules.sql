@@ -1,23 +1,29 @@
 -- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
-        sqlc.narg(initial_order_id)::uuid, sqlc.arg(source_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
+        sqlc.narg(initial_order_id)::uuid, sqlc.arg(source_reference)::text, sqlc.arg(provider_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
         sqlc.arg(accepted_bill)::jsonb, sqlc.arg(now)::timestamptz)
-ON CONFLICT (merchant_id, subscription_id) DO NOTHING;
+ON CONFLICT (merchant_id, subscription_id, source_reference) DO NOTHING;
 
 -- name: GetProviderSchedule :one
-SELECT * FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid FOR UPDATE;
+SELECT * FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND source_reference = sqlc.arg(source_reference)::text FOR UPDATE;
+
+-- name: ListProviderSchedules :many
+SELECT * FROM billing.provider_schedules
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND provider_reference = sqlc.arg(provider_reference)::text
+ORDER BY first_due_at ASC, source_reference ASC FOR UPDATE;
 
 -- name: GetProviderCycleReceipt :one
 SELECT * FROM billing.provider_cycle_receipts WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND transaction_id = sqlc.arg(transaction_id)::text;
 
 -- name: InsertProviderCycleReceipt :exec
-INSERT INTO billing.provider_cycle_receipts (merchant_id, psp_id, transaction_id, subscription_id, due_at, amount, currency, occurred_at, approved)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(transaction_id)::text, sqlc.arg(subscription_id)::uuid,
+INSERT INTO billing.provider_cycle_receipts (merchant_id, psp_id, transaction_id, subscription_id, schedule_source_reference, due_at, amount, currency, occurred_at, approved)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(transaction_id)::text, sqlc.arg(subscription_id)::uuid, sqlc.arg(schedule_source_reference)::text,
         sqlc.arg(due_at)::timestamptz, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(occurred_at)::timestamptz,
         sqlc.arg(approved)::boolean);
 
 -- name: LatestSettledProviderCycle :one
 SELECT due_at FROM billing.provider_cycle_receipts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND approved
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND schedule_source_reference = sqlc.arg(schedule_source_reference)::text AND approved
 ORDER BY due_at DESC LIMIT 1;
