@@ -667,7 +667,7 @@ func adminRefundCommand(ctx context.Context, r *httprequest.Request, paymentID u
 			return destructive.Command{}, api.Coded(refundCodeUnsupported, "payment carries no PSP")
 		}
 	}
-	return destructive.CommandFromContext(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+key, req)
+	return destructive.CommandFromContextExplicit(ctx, destructive.Refund, paymentID.String(), "refund:"+paymentID.String()+":"+key, req)
 }
 
 // An existing reservation owns its accepted admission and provider operation,
