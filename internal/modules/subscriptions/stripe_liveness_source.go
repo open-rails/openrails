@@ -42,6 +42,7 @@ type StripeLivenessRecord struct {
 	// LatestInvoiceTransactionID follows the webhook's transaction-id
 	// precedence (charge > payment_intent > invoice id) so a probe-driven
 	// repair and a late-arriving invoice.paid webhook dedupe on the same key.
+	LatestBill                 *StripeBill
 	LatestInvoicePaid          bool
 	LatestInvoiceID            string
 	LatestInvoiceTransactionID string
@@ -190,7 +191,7 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		}
 		rec.LatestInvoicePaid = inv.Paid || strings.EqualFold(strings.TrimSpace(inv.Status), "paid")
 		rec.LatestInvoiceID = strings.TrimSpace(inv.ID)
-		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(charge, intent, inv.ID)
+		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(charge, intent)
 		rec.LatestInvoiceAmountPaid = inv.AmountPaid
 		rec.LatestInvoiceAmountDue = inv.AmountDue
 		rec.LatestInvoiceCurrency = strings.TrimSpace(inv.Currency)
@@ -263,5 +264,17 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 		}
 		return StripeLivenessRecord{}, errors.New(msg)
 	}
-	return parseStripeLivenessSubscription(body)
+	rec, err := parseStripeLivenessSubscription(body)
+	if err != nil || rec.LatestInvoiceID == "" {
+		return rec, err
+	}
+	bill, err := p.ReadBill(ctx, rec.LatestInvoiceID)
+	if err != nil {
+		return rec, err
+	}
+	if bill.SubscriptionID != id || bill.CustomerID != rec.CustomerID {
+		return rec, errors.New("Stripe latest invoice identity mismatch")
+	}
+	rec.LatestBill = &bill
+	return rec, nil
 }

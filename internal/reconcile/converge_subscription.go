@@ -84,9 +84,6 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	// mid-cycle upgrade invoices outside the decider's boundary window). The
 	// lookback cap in backfillSubscriptionPayments bounds age.
 	d.Backfill = snapshotChargesFor(sub, snap)
-	if snap.BillsRecorded {
-		d.Backfill = nil
-	}
 	out.Decision = d
 
 	backfilled, _, err := applyDecisionSideEffects(ctx, database, sub, d, now, lookback)
@@ -110,9 +107,6 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 			*sub = *cur
 			d = Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
 			d.Declared, d.Backfill = snap.Provider == ProviderDeclared, snapshotChargesFor(sub, snap)
-			if snap.BillsRecorded {
-				d.Backfill = nil
-			}
 			out.Decision = d
 			if applied, err = ApplyDecision(ctx, database, lc, sub, d, now); err != nil {
 				return out, err
@@ -158,7 +152,7 @@ func snapshotChargesFor(sub *models.Subscription, snap *RemoteSnapshot) []Remote
 // payment count and whether a rail customer row was materialized.
 func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.Subscription, d Decision, now time.Time, lookbackCap time.Duration) (int, bool, error) {
 	q := database.Gen(ctx)
-	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, d.Backfill, now, lookbackCap)
+	backfilled, err := backfillSubscriptionPayments(ctx, database, sub, d.Backfill, now, lookbackCap)
 	if err != nil {
 		return 0, false, fmt.Errorf("converge: backfill %s: %w", sub.ID, err)
 	}

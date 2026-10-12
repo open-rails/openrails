@@ -308,7 +308,7 @@ func ImportDeclaredSubscriptions(
 		if f.CancelKind != DeclaredCancelNone && outcome == DeclaredImported {
 			// Fresh row from settled history: written faithfully above; no decider
 			// pass, but money truth still lands.
-			if _, err := backfillSubscriptionPayments(ctx, q, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
+			if _, err := backfillSubscriptionPayments(ctx, database, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
 			}
 			// Declared canceled but the provider-side schedule was not confirmed
