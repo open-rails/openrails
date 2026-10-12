@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Product represents a product offering (e.g., Premium Membership)
+// Product represents a product (e.g., Premium Membership)
 // This represents our product catalog concept
 type Product struct {
 	Revision    int64     `json:"revision"`

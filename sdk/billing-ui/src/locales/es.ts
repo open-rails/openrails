@@ -52,7 +52,7 @@ export const es: BillingUiMessageBundle = {
     once: "pago único",
     permanent: "Acceso sin vencimiento programado",
   },
-  offers: {
+  products: {
     empty: "Nada a la venta desbloquea esto",
     once: "{amount}",
     rent: "Alquilar {period}, {amount}",
@@ -93,8 +93,10 @@ export const es: BillingUiMessageBundle = {
   },
   cancel: {
     title: "¿Cancelar {name}?",
-    description: "Se detienen los pagos futuros. Conservas el acceso ya adquirido.",
-    solanaDescription: "Tu cartera firma una cancelación en la cadena. Conservas el acceso ya adquirido.",
+    description:
+      "Se detienen los pagos futuros. Conservas el acceso ya adquirido.",
+    solanaDescription:
+      "Tu cartera firma una cancelación en la cadena. Conservas el acceso ya adquirido.",
     reasonLabel: "¿Por qué cancelas?",
     reasonPlaceholder: "Tus comentarios nos ayudan a mejorar.",
     reasonHint: "{count}/{max}",

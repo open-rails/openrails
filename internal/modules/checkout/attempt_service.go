@@ -765,7 +765,7 @@ func (s *CheckoutAttemptService) GetSession(ctx context.Context, sessionID uuid.
 	return s.sessionToResponse(session), nil
 }
 
-// The offer uses the shared commercial terms type, not a second membership
+// The price uses the shared commercial terms type, not a second membership
 // payload. A JSON string preserves integer benefit caps through RailState's
 // map[string]any database roundtrip. No quote is financial authority.
 const initialMembershipQuoteKey = "initial_membership_quote"
@@ -873,7 +873,7 @@ func acceptedInitialMembershipQuote(ctx context.Context, session *models.Checkou
 }
 
 // initialMembershipSessionResponse is a read-only projection of the accepted
-// operation. Session expiry is an offer deadline, never a payment outcome.
+// operation. Session expiry is a checkout deadline, never a payment outcome.
 func (s *CheckoutAttemptService) initialMembershipSessionResponse(ctx context.Context, session *models.CheckoutAttempt) (*CheckoutAttemptResponse, bool, error) {
 	if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
 		return nil, false, nil

@@ -61,7 +61,7 @@ const (
 )
 
 // backendPermissions are what the backend's tokens carry on the server:
-// customer support's reads, the content gate and offers, by OpenRails' names
+// customer support's reads, the content gate and catalog, by OpenRails' names
 // for the merchant's own staff, and AuthKit's own for the SCIM pushes.
 var backendPermissions = []string{
 	string(billing.MerchantCustomerRead), string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead),

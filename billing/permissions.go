@@ -56,7 +56,7 @@ const (
 	// The programmatic routes' (/v1/app). The content gate.
 	MerchantEntitlementsRead Permission = "merchant:entitlements:read"
 	RootEntitlementsRead     Permission = "root:entitlements:read"
-	// Offers: what a customer may buy.
+	// Catalog reads: products, prices, meters and price migrations.
 	MerchantCatalogRead Permission = "merchant:catalog:read"
 	RootCatalogRead     Permission = "root:catalog:read"
 	// Admissions and usage events, which charge customers.

@@ -44,7 +44,8 @@ const (
 	Admin Group = "admin"
 	// CatalogAdmin is the catalog, its reads and edits, document
 	// applications and moving subscribers between prices at /v1/catalog, behind
-	// billing.MerchantCatalogManage or its root: twin. A document skips an
+	// billing.MerchantCatalogRead for reads and MerchantCatalogManage for edits,
+	// or their root: twins. A document skips an
 	// object whose field an edit set differently.
 	CatalogAdmin Group = "catalog"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,

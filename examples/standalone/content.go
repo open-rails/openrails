@@ -121,7 +121,7 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 				entitlements = append(entitlements, course.Entitlement)
 			}
 		}
-		products, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Keys: keys, PageRequest: billing.PageRequest{Limit: len(keys)}})
+		listed, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Keys: keys, PageRequest: billing.PageRequest{Limit: len(keys)}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
@@ -137,7 +137,7 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			return
 		}
 		prices := map[string][]gin.H{} // by product key
-		for _, product := range products.Items {
+		for _, product := range listed.Items {
 			for _, p := range product.Prices {
 				prices[product.Key] = append(prices[product.Key], gin.H{"key": p.Key, "amount": strconv.FormatInt(p.UnitAmount, 10), "currency": p.Currency, "terms": terms(p)})
 			}
@@ -176,7 +176,7 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		}
 		// Everything on sale granting a key that unlocks it: the course, the
 		// bundle, the membership. The buy page lists them by product key.
-		products, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: course.unlock(), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
+		listed, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: course.unlock(), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
@@ -187,7 +187,7 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			return
 		}
 		products := []string{}
-		for _, product := range products.Items {
+		for _, product := range listed.Items {
 			products = append(products, product.Key)
 		}
 		slices.Sort(products)

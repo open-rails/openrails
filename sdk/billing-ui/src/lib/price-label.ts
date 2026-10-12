@@ -4,7 +4,7 @@ import type { Translator } from "../i18n/messages"
 import { periodOf } from "./period"
 
 /** "$4.99", "Rent for 3 days, $1.99" or "$10.00 every 30 days". */
-export function offerLabel(
+export function priceLabel(
   price: Pick<
     Price,
     | "unit_amount"
@@ -21,15 +21,15 @@ export function offerLabel(
     `${price.unit_amount} ${price.currency}`
   const every = periodOf(price.billing_interval_hours)
   if (every)
-    return m.t("offers.recurring", {
+    return m.t("products.recurring", {
       amount,
       every: m.plural(`interval.every.${every.unit}`, every.count),
     })
   const access = periodOf(price.access_duration_hours)
   if (access)
-    return m.t("offers.rent", {
+    return m.t("products.rent", {
       amount,
       period: m.plural(`interval.duration.${access.unit}`, access.count),
     })
-  return m.t("offers.once", { amount })
+  return m.t("products.once", { amount })
 }

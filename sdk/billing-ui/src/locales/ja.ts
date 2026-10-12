@@ -52,7 +52,7 @@ export const ja: BillingUiMessageBundle = {
     once: "買い切り",
     permanent: "有効期限のないアクセス",
   },
-  offers: {
+  products: {
     empty: "これを利用できる商品はありません",
     once: "{amount}",
     rent: "{period}レンタル、{amount}",
@@ -94,7 +94,8 @@ export const ja: BillingUiMessageBundle = {
   cancel: {
     title: "{name}を解約しますか？",
     description: "今後の支払いは停止します。購入済みのアクセスは維持されます。",
-    solanaDescription: "ウォレットでオンチェーンの解約に署名します。購入済みのアクセスは維持されます。",
+    solanaDescription:
+      "ウォレットでオンチェーンの解約に署名します。購入済みのアクセスは維持されます。",
     reasonLabel: "解約の理由を教えてください",
     reasonPlaceholder: "ご意見はサービス改善に役立てます。",
     reasonHint: "{count}/{max}",

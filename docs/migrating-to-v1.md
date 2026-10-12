@@ -222,7 +222,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`; its receipt reports the catalog revision (`applied_revision`), and each product, price and meter its own `revision` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
 | `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`; the meter's rate card prices every customer (no per-customer price) |
-| `ListOffersForEntitlements` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
+| `Entitlement-based catalog lookup` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
@@ -507,7 +507,7 @@ calendar ([data retention](operations.md#data-retention)):
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
 | `getSolanaConfig()` | `getCustomerConfig()`; the network is `payment.solana.network` |
 | `getConfig()` and `useConfig()` with `payment` and `merchant` | `getConfig()` and `useConfig()` are the deployment's part; `getCustomerConfig()` and `useCustomerConfig()` read the merchant's `payment` and `merchant` (`GET /v1/me/config`) |
-| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<Offers keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<Offers merchant keys>` |
+| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<ProductList keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<ProductList merchant keys>` |
 | A `getToken` you refresh yourself | `tokenSource({ fetchToken })` keeps the token in memory and replaces it before it expires; `redeemAssertion` redeems a backend's customer assertion |
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/me/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
@@ -587,7 +587,7 @@ using `price_key` also supply `product_key`; requests using immutable price IDs
 keep their current shape.
 
 A price exposes an automatically assigned `revision`, starting at zero within
-its product/key. `UpdatePrice` no longer accepts `key`: create a new offer and
+its product/key. `UpdatePrice` no longer accepts `key`: create a new price and
 archive the old one. Price terms and parent are immutable; product and price
 rows cannot be deleted. Existing UUIDs and purchase references survive the
 additive migrations. Reusing historical financial terms preserves their original

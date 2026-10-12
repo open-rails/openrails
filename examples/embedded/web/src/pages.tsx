@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { SignInDialog } from "@openrails/auth-ui"
 import { useAuth } from "@openrails/auth-ui/react"
-import { BuyButton, formatAmount, Offers } from "@openrails/billing-ui"
+import { BuyButton, formatAmount, ProductList } from "@openrails/billing-ui"
 
 import { auth, billing } from "./clients"
 
@@ -101,7 +101,7 @@ export function CourseBuyPage() {
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [offer, setOffer] = useState<{ merchant_id: string; products: string[] }>()
+  const [catalog, setCatalog] = useState<{ merchant_id: string; products: string[] }>()
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
@@ -110,7 +110,7 @@ export function CourseBuyPage() {
           navigate(`/courses/${course}`, { replace: true })
           break
         case 402: // not theirs yet: the server names the products that unlock it
-          setOffer(await res.json())
+          setCatalog(await res.json())
           break
         default: // unknown course, or the server is unavailable
           setFailed(true)
@@ -118,12 +118,12 @@ export function CourseBuyPage() {
     })
   }, [course, navigate])
   if (failed) return <p>Couldn't load this course.</p>
-  if (!offer) return <p>Loading…</p>
+  if (!catalog) return <p>Loading…</p>
   return (
     <>
-      <Offers
-        merchant={offer.merchant_id}
-        keys={offer.products}
+      <ProductList
+        merchant={catalog.merchant_id}
+        keys={catalog.products}
         signedIn={signedIn}
         onSignInRequired={() => setSigningIn(true)}
         onPaid={() => navigate(`/courses/${course}`)}

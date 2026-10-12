@@ -80,7 +80,7 @@ products:
 		_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: p.ID, Key: "bad", Currency: "USD", UnitAmount: 1000000, BillingIntervalHours: ptrCreditHours(720), AccessDurationHours: ptrCreditHours(720)})
 		require.Error(t, err)
 	}
-	// Partial batches may archive the incompatible offer and change the product
+	// Partial batches may archive the incompatible price and change the product
 	// together. History never prevents a future definition, but restore validates it.
 	apply(fmt.Sprintf(`schema_version: 1
 products:

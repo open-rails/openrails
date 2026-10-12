@@ -61,6 +61,6 @@ func TestCreditDepositOrders(t *testing.T) {
 	}
 	current, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
-	require.Zero(t, current.UnitAmount, "each deposit must leave the shared offer unchanged")
+	require.Zero(t, current.UnitAmount, "each deposit must leave the shared price unchanged")
 	require.Zero(t, current.Version, "deposits are not catalog price versions")
 }

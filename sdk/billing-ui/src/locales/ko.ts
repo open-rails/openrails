@@ -52,7 +52,7 @@ export const ko: BillingUiMessageBundle = {
     once: "일회성",
     permanent: "예정된 만료일이 없는 이용권",
   },
-  offers: {
+  products: {
     empty: "이용할 수 있는 상품이 없습니다",
     once: "{amount}",
     rent: "{period} 대여, {amount}",
@@ -93,7 +93,8 @@ export const ko: BillingUiMessageBundle = {
   cancel: {
     title: "{name}을(를) 해지할까요?",
     description: "향후 결제가 중단됩니다. 이미 구매한 이용권은 유지됩니다.",
-    solanaDescription: "지갑에서 온체인 해지에 서명합니다. 이미 구매한 이용권은 유지됩니다.",
+    solanaDescription:
+      "지갑에서 온체인 해지에 서명합니다. 이미 구매한 이용권은 유지됩니다.",
     reasonLabel: "해지하는 이유를 알려 주세요",
     reasonPlaceholder: "의견은 서비스 개선에 도움이 됩니다.",
     reasonHint: "{count}/{max}",
