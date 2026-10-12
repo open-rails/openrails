@@ -307,8 +307,7 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 	if kind == destructive.MarkUncollectible && usage.Due(observed) <= 0 {
 		return ErrUsageActionNotAllowed
 	}
-	revision := observed.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	command, err := destructive.CommandFromContext(ctx, kind, id.String(), string(kind)+":"+id.String()+":"+revision, struct{ Revision string }{revision})
+	command, err := usageOrderDestructiveCommand(ctx, kind, observed)
 	if err != nil {
 		return err
 	}
@@ -321,7 +320,10 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 		if order.Status == final {
 			return false, nil
 		}
-		if !order.UpdatedAt.Equal(observed.UpdatedAt) {
+		if order.Total != observed.Total || usage.Due(order) != usage.Due(observed) || order.Status != observed.Status {
+			return false, ErrUsageActionNotAllowed
+		}
+		if (order.AttemptID == nil) != (observed.AttemptID == nil) || order.AttemptID != nil && *order.AttemptID != *observed.AttemptID {
 			return false, ErrUsageActionNotAllowed
 		}
 		if kind == destructive.MarkUncollectible {
@@ -437,4 +439,18 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		return nil, false, err
 	}
 	return payment, created, nil
+}
+
+// A collection is the only transition that reopens an uncollectible order.
+// Its immutable attempt ID distinguishes that new episode even with a frozen
+// clock; incidental updates must never stand in for operation identity.
+func usageOrderDestructiveCommand(ctx context.Context, kind destructive.Kind, order gen.BillingOrder) (destructive.Command, error) {
+	revision := "initial"
+	if order.AttemptID != nil {
+		revision = order.AttemptID.String()
+	}
+	return destructive.CommandFromContext(ctx, kind, order.ID.String(), string(kind)+":"+order.ID.String()+":"+revision, struct {
+		Revision, Status string
+		Total, Due       int64
+	}{revision, order.Status, order.Total, usage.Due(order)})
 }
