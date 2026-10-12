@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -609,7 +610,7 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 	if err != nil {
 		return err
 	}
-	payment := &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
+	payment := &models.Payment{ID: p.NewPaymentID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
 	database := h.Checkout.SubscriptionService.Database()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
@@ -617,14 +618,24 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 			return err
 		}
 		service := payments.NewPaymentService(d, h.Checkout.Clock())
-		if _, err := service.CreateIfNotExists(ctx, payment); err != nil {
+		if in.PspID == nil {
+			return errors.New("proration requires its accepted PSP")
+		}
+		if _, err := observed.Record(ctx, d, observed.Bill{
+			PSPID: *in.PspID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID,
+			Owner: observed.OwnerNMISchedule, Kind: "adjustment", SourceKind: "nmi_proration", SourceKey: in.ID.String(),
+			Currency: p.Currency, Total: p.ProrationAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd,
+			ProviderReference: receipt.TransactionID(), Payment: payment, Settled: true, SettlementSource: "cash",
+			Lines: []observed.Line{{PriceID: &p.PriceID, ProductID: &p.ProductID, Description: p.ProductName,
+				UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, AccessDurationHours: p.AccessDurationHours}},
+		}, h.Checkout.now()); err != nil {
 			return err
 		}
 		stored, err := service.GetByID(ctx, payment.ID)
 		if err != nil {
 			return err
 		}
-		if stored.CustomerID != customer || stored.PriceID != p.PriceID || stored.SubscriptionID == nil || *stored.SubscriptionID != p.OldSubscriptionID || stored.PspID == nil || *stored.PspID != *in.PspID || stored.Rail != models.RailNMI || stored.TransactionID != receipt.TransactionID() || stored.Amount != p.ProrationAmount || stored.ListAmount != p.RecurringAmount || stored.Currency != p.Currency || stored.Status != "succeeded" || stored.MoneyMovement != models.MoneyMovementRail || stored.RefundedPaymentID != nil || !stored.PurchasedAt.Equal(p.PeriodStart) || stored.Metadata["upgrade_intent_id"] != in.ID.String() {
+		if stored.CustomerID != customer || stored.SubscriptionID == nil || *stored.SubscriptionID != p.OldSubscriptionID || stored.PspID == nil || *stored.PspID != *in.PspID || stored.Rail != models.RailNMI || stored.TransactionID != receipt.TransactionID() || stored.Amount != p.ProrationAmount || stored.ListAmount != p.RecurringAmount || stored.Currency != p.Currency || stored.Status != "succeeded" || stored.MoneyMovement != models.MoneyMovementRail || stored.RefundedPaymentID != nil || !stored.PurchasedAt.Equal(p.PeriodStart) || stored.Metadata["upgrade_intent_id"] != in.ID.String() {
 			return errors.New("recorded proration contradicts the accepted tier change")
 		}
 		if err := recordProrationAttempt(ctx, d, in, p, customer, paymentattempts.Attempt{Approved: true, TransactionID: payment.TransactionID, PaymentID: &payment.ID}, h.Checkout.now()); err != nil {

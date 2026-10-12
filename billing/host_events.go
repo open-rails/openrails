@@ -103,7 +103,6 @@ type PaymentSettledEvent struct {
 	PaymentID      PaymentID       `json:"payment_id"`
 	CustomerID     CustomerID      `json:"customer_id"`
 	OrderID        *OrderID        `json:"order_id,omitempty"`
-	PriceID        *PriceID        `json:"price_id,omitempty"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	Amount         int64           `json:"amount,string"`
 	Currency       string          `json:"currency"`

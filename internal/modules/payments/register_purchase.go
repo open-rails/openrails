@@ -11,6 +11,8 @@ import (
 type RegisterPurchaseRequest struct {
 	UserID  string
 	PriceID uuid.UUID
+	// OrderID reuses a prior accepted order; nil only when the verified purchase has none.
+	OrderID *uuid.UUID
 	// Channel defaults to rail; a manual purchase names no Rail.
 	Channel          models.Channel
 	Rail             string

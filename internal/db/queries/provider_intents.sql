@@ -545,7 +545,7 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 -- charge's billing interval from the time its local payment row was recovered.
 SELECT sqlc.embed(i), p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
        p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
-       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
 FROM billing.payments p
 JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id

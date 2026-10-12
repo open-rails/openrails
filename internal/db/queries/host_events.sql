@@ -1,11 +1,10 @@
 -- name: ListHostEvents :many
--- A settled payment carries its customer, price and subscription from the
+-- A settled payment carries its customer, order and subscription from the
 -- authoritative payment row so a host never re-reads the payment to route it.
-SELECT h.*, p.customer_id AS payment_customer_id, price.public_id AS payment_price_id,
+SELECT h.*, p.customer_id AS payment_customer_id,
   p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
-LEFT JOIN billing.prices price ON price.merchant_id = p.merchant_id AND price.id = p.price_id
 WHERE h.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.arg(event_type)::text = '' OR h.event_type = sqlc.arg(event_type)::text)
   AND (sqlc.narg(payment_id)::uuid IS NULL OR h.payment_id = sqlc.narg(payment_id)::uuid)
@@ -15,11 +14,10 @@ ORDER BY h.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListHostEventsByIDs :many
-SELECT h.*, p.customer_id AS payment_customer_id, price.public_id AS payment_price_id,
+SELECT h.*, p.customer_id AS payment_customer_id,
   p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
-LEFT JOIN billing.prices price ON price.merchant_id = p.merchant_id AND price.id = p.price_id
 WHERE h.merchant_id = sqlc.arg(merchant_id)::uuid AND h.id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY h.id;
 

@@ -280,10 +280,10 @@ var referenceChecks = []rowCheck{
 	// A native lot retains its payment's accepted promise. The product's current
 	// benefit is deliberately irrelevant to previously purchased credit.
 	{"payments", `credit_grant_snapshot IS NOT NULL AND status='succeeded' AND NOT EXISTS (
-  SELECT 1 FROM billing.grants g JOIN billing.prices pr ON pr.merchant_id=$1 AND pr.id=payments.price_id
+  SELECT 1 FROM billing.grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
   WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.kind='credit' AND g.event='grant'
     AND g.source_type='purchase' AND g.source_id=payments.id::text
-    AND g.customer_id=payments.customer_id AND g.product_id=pr.product_id
+    AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
     AND g.currency=payments.currency AND g.amount=(payments.credit_grant_snapshot->>'amount')::bigint
     AND (g.spec_snapshot->'deposit'->>'paid_amount')::bigint=payments.amount AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
