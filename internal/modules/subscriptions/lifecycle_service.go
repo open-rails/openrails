@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -237,6 +238,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 					if err != nil {
 						return nil, nil, err
 					}
+					if err := paymentHasPrice(ctx, txDB, payment, terms.PriceID); err != nil {
+						return nil, nil, err
+					}
 					if err := ValidateInitialMembershipPayment(*terms, payment, params.Rail, params.TransactionID); err != nil {
 						return nil, nil, err
 					}
@@ -347,7 +351,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if existingPayment.CustomerID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction belongs to a different user")
 			}
-			if existingPayment.PriceID != price.ID {
+			if err := paymentHasPrice(ctx, dbb, existingPayment, price.ID); err != nil {
 				return nil, nil, fmt.Errorf("payment transaction belongs to a different price")
 			}
 			if existingPayment.SubscriptionID == nil {
@@ -634,7 +638,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		payment := &models.Payment{
 			ID:             uuidutil.NewV7(),
 			CustomerID:     subscription.CustomerID,
-			PriceID:        price.ID,
 			SubscriptionID: &subscription.ID,
 			Rail:           params.Rail,
 			// The charge belongs to the account that took it: the subscription's.
@@ -659,7 +662,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}
 			payment.TokenType = &token
 		}
-		if err := paymentService.Create(ctx, payment); err != nil {
+		if _, err := initialBill(ctx, dbb, params, subscription, payment, now); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
@@ -737,7 +740,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		}
 		now := s.now().UTC()
 		payment := &models.Payment{
-			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: priceID, SubscriptionID: &subscription.ID,
+			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, SubscriptionID: &subscription.ID,
 			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
 			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
 			Metadata:      metadata,
@@ -748,7 +751,8 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 			payment.TokenType = &tt
 		}
-		created, err := payments.NewPaymentService(db, s.Clock()).CreateIfNotExists(ctx, payment)
+		recorded, err := renewalBill(ctx, db, params, subscription, payment, now)
+		created := recorded.PaymentCreated
 		if err != nil {
 			return fmt.Errorf("failed to persist confirmed charge: %w", err)
 		}
@@ -757,8 +761,11 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			if err != nil {
 				return err
 			}
-			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.PriceID != priceID {
+			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.OrderID == nil {
 				return errors.New("confirmed charge replay belongs to different accepted terms")
+			}
+			if err := paymentHasPrice(ctx, db, existing, priceID); err != nil {
+				return err
 			}
 			// This writer records the original financial fact without granting
 			// access. A later refund may already have changed its mutable status
@@ -811,6 +818,28 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
+		var providerPayment *models.Payment
+		if bill := params.ProviderBill; bill != nil {
+			if bill.SubscriptionID == nil || *bill.SubscriptionID != subscription.ID || bill.CustomerID != subscription.CustomerID || bill.PSPID != subscription.PspID {
+				return errors.New("provider bill belongs to another subscription")
+			}
+			recorded, err := renewalBill(ctx, db, params, subscription, nil, s.now().UTC())
+			if err != nil {
+				return err
+			}
+			// Money survives late, partial and duplicate observations. Only a
+			// newly settled renewal may advance the existing paid period.
+			_, terminal := TerminalCancelReason(subscription)
+			if !recorded.Completed || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
+				return nil
+			}
+			copy := *params
+			copy.Amount, copy.Currency, copy.AmountProvided = bill.Total, bill.Currency, true
+			copy.CurrentPeriodStartsAt, copy.CurrentPeriodEndsAt = &bill.PeriodStart, &bill.PeriodEnd
+			params = &copy
+			providerPayment = recorded.Payment
+		}
+
 		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
 			return err
 		}
@@ -820,7 +849,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		fromQuantity := CloneQuantity(subscription.Quantity)
 		applyingDowngrade := false
 		preserveLifecycle := false
-		var acceptedPayment *models.Payment
+		acceptedPayment := providerPayment
 		if terms := params.Prepared; terms != nil {
 			if err := terms.Validate(); err != nil {
 				return err
@@ -835,10 +864,13 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			// exact payment. Check before applying a change or advancing the period.
 			existing, err := paymentService.GetByPSPTransactionID(ctx, params.Rail, params.TransactionID)
 			if err == nil {
-				if existing.SubscriptionID == nil || *existing.SubscriptionID != terms.SubscriptionID || existing.CustomerID != terms.CustomerID || existing.PriceID != terms.PriceID {
+				if existing.SubscriptionID == nil || *existing.SubscriptionID != terms.SubscriptionID || existing.CustomerID != terms.CustomerID || existing.OrderID == nil {
 					return errors.New("renewal transaction already belongs to different accepted terms")
 				}
 				if err := validateCompletedPayment(existing, terms.Amount, terms.Currency); err != nil {
+					return err
+				}
+				if err := paymentHasPrice(ctx, db, existing, terms.PriceID); err != nil {
 					return err
 				}
 				acceptedPayment = existing
@@ -854,6 +886,25 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.Amount, Currency: terms.Currency}
 			newProduct = &models.Product{ID: terms.ProductID, DisplayName: terms.ProductName}
 			applyingDowngrade = applied != nil && applied.Source == billing.ScheduledChangeChange && applied.PriceID != applied.FromPriceID
+		} else if bill := params.ProviderBill; bill != nil {
+			// The provider's finalized line is the paid agreement. A changed
+			// local catalog or scheduled change cannot reprice that receipt.
+			var plan *observed.Line
+			for i := range bill.Lines {
+				if bill.Lines[i].PriceID != nil && bill.Lines[i].ProductID != nil && bill.Lines[i].BillingIntervalHours != nil {
+					if plan != nil {
+						return errors.New("provider renewal has ambiguous subscription lines")
+					}
+					plan = &bill.Lines[i]
+				}
+			}
+			if plan == nil {
+				return errors.New("provider renewal has no verified subscription line")
+			}
+			price = &models.Price{ID: *plan.PriceID, ProductID: *plan.ProductID, Amount: plan.Amount, Currency: bill.Currency, BillingIntervalHours: plan.BillingIntervalHours, AccessDurationHours: plan.AccessDurationHours}
+			newProduct = &models.Product{ID: *plan.ProductID, DisplayName: plan.Description}
+			subscription.PriceID, subscription.ProductID = price.ID, price.ProductID
+			subscription.Quantity = CloneQuantity(plan.Quantity)
 		} else {
 			// A due scheduled change applies at this renewal: its first on or
 			// after effective_at.
@@ -918,7 +969,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			payment := &models.Payment{
 				ID:             uuidutil.NewV7(),
 				CustomerID:     subscription.CustomerID,
-				PriceID:        price.ID,
 				SubscriptionID: &subscription.ID,
 				Rail:           params.Rail,
 				PspID:          pspIDOf(subscription),
@@ -937,7 +987,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 				payment.TokenType = &tt
 			}
-			created, err := paymentService.CreateIfNotExists(ctx, payment)
+			recorded, err := renewalBill(ctx, db, params, subscription, payment, now)
+			created := recorded.PaymentCreated
 			if err != nil {
 				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
 			}
@@ -952,7 +1003,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				if existingPayment.CustomerID.String() != subscription.CustomerID.String() {
 					return fmt.Errorf("duplicate renewal payment marker belongs to a different user")
 				}
-				if existingPayment.PriceID != price.ID {
+				if err := paymentHasPrice(ctx, db, existingPayment, price.ID); err != nil {
 					return fmt.Errorf("duplicate renewal payment marker belongs to a different price")
 				}
 				if err := validateCompletedPayment(existingPayment, amount, currency); err != nil {

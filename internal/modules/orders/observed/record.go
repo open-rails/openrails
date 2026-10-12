@@ -116,6 +116,20 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			return result, err
 		}
 	}
+	if result.PaymentCreated && bill.SubscriptionID != nil {
+		sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid.UUID(), ID: *bill.SubscriptionID})
+		if err != nil {
+			return result, err
+		}
+		cancel := models.DerefStr(sub.CancelType)
+		if sub.Status == "canceled" && (bill.Owner == OwnerEngine || cancel == "user" || cancel == "merchant" || cancel == "chargeback") {
+			evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "payment_id": result.Payment.ID, "subscription_id": *bill.SubscriptionID})
+			action := "Review this confirmed charge after cancellation and refund it if appropriate; billing and access remain canceled."
+			if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "provider_charge_after_cancellation", SubjectKey: "payment:" + result.Payment.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+				return result, err
+			}
+		}
+	}
 	if !bill.Settled {
 		return result, nil
 	}
@@ -248,5 +262,11 @@ func sameJSON(a, b []byte) bool {
 }
 func sameID(a, b *uuid.UUID) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func samePayment(a, b *models.Payment) bool {
-	return sameID(a.OrderID, b.OrderID) && sameID(a.SubscriptionID, b.SubscriptionID) && sameID(a.PspID, b.PspID) && a.CustomerID == b.CustomerID && a.Amount == b.Amount && a.Currency == b.Currency && a.Rail == b.Rail && a.TransactionID == b.TransactionID && a.RefundedPaymentID == nil && a.MoneyMovement == b.MoneyMovement && (a.Status == "succeeded" || a.Status == "refunded")
+	return sameID(a.OrderID, b.OrderID) && sameID(a.SubscriptionID, b.SubscriptionID) && sameID(a.PspID, b.PspID) && a.CustomerID == b.CustomerID && a.Amount == b.Amount && a.ListAmount == b.ListAmount && sameGrant(a.CreditGrantSnapshot, b.CreditGrantSnapshot) && a.Currency == b.Currency && a.Rail == b.Rail && a.TransactionID == b.TransactionID && a.RefundedPaymentID == nil && a.MoneyMovement == b.MoneyMovement && (a.Status == "succeeded" || a.Status == "refunded")
+}
+
+func sameGrant(a, b *models.CreditGrantSnapshot) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return bytes.Equal(x, y)
 }
