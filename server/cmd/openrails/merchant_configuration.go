@@ -144,6 +144,9 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	}
 	cleanup = func() { closeConfig(); database.Close() }
 	rt := &app.Runtime{DB: database, Config: cfg, Merchants: merchantsSvc, MerchantConfig: merchantsSvc.Config(), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
+	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
+		return nil, cleanup, err
+	}
 	table := &router.Table{}
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/merchant/configuration")
 	return inprocessClient(inprocess.NewTransport(table.Handler()), selected.ID), cleanup, nil

@@ -67,7 +67,7 @@ func (a *Admissions) AdmitAutonomous(ctx context.Context, c Command, source stri
 		return Action{}, errors.New("verified command cannot become autonomous")
 	}
 	switch source {
-	case "startup_catalog", "startup_configuration", "reconciliation":
+	case "startup_catalog", "startup_configuration", "operator_catalog", "reconciliation":
 	default:
 		return Action{}, errors.New("unknown autonomous destructive source")
 	}
@@ -482,7 +482,26 @@ func (a *Admissions) ListHolds(ctx context.Context, mid uuid.UUID, limit int, af
 		return nil, errors.New("destructive admissions unavailable")
 	}
 	err := a.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(mid)), func(ctx context.Context) error {
-		rows, err := a.db.Gen(ctx).ListDestructiveHolds(ctx, gen.ListDestructiveHoldsParams{MerchantID: mid, AfterID: after, RowLimit: int32(limit)})
+		rows, err := a.db.Gen(ctx).ListDestructiveHolds(ctx, gen.ListDestructiveHoldsParams{MerchantID: mid, AfterID: after, RowLimit: int32(limit)}) // #nosec G115 -- limit is checked to 1..101 above
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			out = append(out, holdOf(r))
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ListHoldsByIDs reads named incidents that originated at this merchant.
+func (a *Admissions) ListHoldsByIDs(ctx context.Context, mid uuid.UUID, ids []uuid.UUID) ([]Hold, error) {
+	if a == nil || a.db == nil {
+		return nil, errors.New("destructive admissions unavailable")
+	}
+	out := []Hold{}
+	err := a.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(mid)), func(ctx context.Context) error {
+		rows, err := a.db.Gen(ctx).ListDestructiveHoldsByIDs(ctx, gen.ListDestructiveHoldsByIDsParams{MerchantID: mid, Ids: ids})
 		if err != nil {
 			return err
 		}
@@ -503,7 +522,7 @@ func (a *Admissions) ListOpenHoldsDirectory(ctx context.Context, limit int, afte
 	if a == nil || a.db == nil {
 		return nil, errors.New("destructive admissions unavailable")
 	}
-	rows, err := a.db.GenDirectory().ListOpenDestructiveHoldAddresses(ctx, gen.ListOpenDestructiveHoldAddressesParams{AfterID: after, RowLimit: int32(limit)})
+	rows, err := a.db.GenDirectory().ListOpenDestructiveHoldAddresses(ctx, gen.ListOpenDestructiveHoldAddressesParams{AfterID: after, RowLimit: int32(limit)}) // #nosec G115 -- limit is checked to 1..101 above
 	if err != nil {
 		return nil, err
 	}

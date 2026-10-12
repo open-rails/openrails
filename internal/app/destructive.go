@@ -6,11 +6,42 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
+
+// NewDestructiveAdmissions is the shared admission owner, projecting its
+// incidents through this runtime.
+func (r *Runtime) NewDestructiveAdmissions(clock clockwork.Clock) *destructive.Admissions {
+	return destructive.NewAdmissions(r.DB, clock, r.projectDestructiveHold)
+}
+
+// WireOneOffDestructiveAdmissions arms a one-off operator runtime (CLI tools
+// that write catalog or configuration without starting the server): the
+// admission owner, the River producer its incident alerts need, and a
+// writable Vault configuration's fingerprint key.
+func (r *Runtime) WireOneOffDestructiveAdmissions(ctx context.Context) error {
+	r.DestructiveAdmissions = r.NewDestructiveAdmissions(nil)
+	if err := r.BindRiverProducer(ctx); err != nil {
+		return fmt.Errorf("destructive admission: %w", err)
+	}
+	if r.MerchantConfig == nil {
+		return nil
+	}
+	vault, ok := r.MerchantConfig.Source().(*merchantdocs.VaultSource)
+	if !ok {
+		return nil
+	}
+	key, err := vault.FingerprintKey(ctx)
+	if err != nil {
+		return fmt.Errorf("configuration admission: %w", err)
+	}
+	return r.MerchantConfig.SetDestructiveAdmissions(r.DestructiveAdmissions, key)
+}
 
 // projectDestructiveHold is transactional: durable authority, the merchant's
 // finding, the host event and alert queue either commit together or not at all.

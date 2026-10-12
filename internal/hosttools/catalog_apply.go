@@ -67,7 +67,7 @@ func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billi
 	if err != nil {
 		return nil, err
 	}
-	receipt, err := svc.ApplyCatalog(ctx, *params, billing.ApplyCatalogParams{Force: opts.Force})
+	receipt, err := svc.ApplyOperatorCatalog(ctx, *params, billing.ApplyCatalogParams{Force: opts.Force})
 	if err != nil {
 		return nil, err
 	}

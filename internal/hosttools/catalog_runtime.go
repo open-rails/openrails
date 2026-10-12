@@ -88,6 +88,9 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		network = "devnet"
 	}
 	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants, environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}, rt.SolanaRPCResolver.ChainReader(), network, solanatokens.ForNetwork(network))
+	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
+		return fail(err)
+	}
 	svc, err := service.New(rt)
 	if err != nil {
 		return fail(err)

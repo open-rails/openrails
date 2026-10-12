@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
@@ -355,7 +354,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
-	runtime.DestructiveAdmissions = destructive.NewAdmissions(database, clock, runtime.projectDestructiveHold)
+	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
