@@ -180,6 +180,9 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if in.NewAmountBaseUnits == 0 || in.NewPeriodHours == 0 {
 		return nil, fmt.Errorf("recurring: invalid new plan terms (amount/period)")
 	}
+	if in.IsUpgrade && in.NewProductID == uuid.Nil {
+		return nil, fmt.Errorf("recurring: upgrade requires the new plan's product")
+	}
 	if !in.IsUpgrade && (in.OldPeriodEndsAt == nil || in.OldPeriodEndsAt.IsZero()) {
 		return nil, fmt.Errorf("recurring: downgrade requires the old period end (deferred first pull)")
 	}
@@ -268,9 +271,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		createParams.TransactionID = in.Signature
 		// The landed transfer is the verified bill: the new plan's prorated
 		// first period, settled by this on-chain charge.
-		if in.NewProductID == uuid.Nil {
-			return nil, fmt.Errorf("recurring: upgrade requires the new plan's product")
-		}
 		hours, err := safecast.Convert[int](in.NewPeriodHours)
 		if err != nil {
 			return nil, fmt.Errorf("recurring: confirm tier-change: new period hours overflow: %w", err)

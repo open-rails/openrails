@@ -151,7 +151,7 @@ func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput,
 	require.NoError(t, err)
 	oldEnd := c.now.Add(14 * 24 * time.Hour)
 	return ConfirmTierChangeInput{
-		OldSubscriptionID: c.old.SubscriptionID, UserID: "00000000-0000-0000-0000-000000000001", NewPriceID: uuid.New(),
+		OldSubscriptionID: c.old.SubscriptionID, UserID: "00000000-0000-0000-0000-000000000001", NewPriceID: uuid.New(), NewProductID: uuid.New(),
 		NewSubscriptionPDA: res.NewSubscriptionPDA, NewPlanID: 99, NewMintSymbol: "USDC",
 		NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
 		NewFiatAmount: 50_000_000, NewCurrency: "USD", IsUpgrade: upgrade, FirstChargeBaseUnits: tierCharge,
