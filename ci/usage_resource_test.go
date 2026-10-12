@@ -152,8 +152,8 @@ func TestUsageResourceBackfill(t *testing.T) {
 			metadata = &row.metadata
 		}
 		_, err := pool.Exec(t.Context(), `INSERT INTO `+table("usage_events")+` (merchant_id, customer_id, invoker_id, currency, resource, event_type,
-			dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount)
-			VALUES ($1, $2, $3, 'USD', $4, 'gpu', '{}', 10, 'worker', $5, 'host', $6::jsonb, now(), 'succeeded', 0)`,
+			dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount, charges)
+			VALUES ($1, $2, $3, 'USD', $4, 'gpu', '{}', 10, 'worker', $5, 'host', $6::jsonb, now(), 'succeeded', 0, '[]'::jsonb)`,
 			merchantID, customer, customer.String(), row.resource, sourceID, metadata)
 		require.NoError(t, err, sourceID)
 	}
