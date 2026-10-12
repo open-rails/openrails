@@ -19,7 +19,10 @@ import (
 //	           still unresolved;
 //	evidenced: every completed local rail payment is a provider charge;
 //	once:      an order's net captures and non-cash settlement do not exceed
-//	           its accepted total; separate adjustments and partials are valid;
+//	           its accepted total; separate adjustments and partials are valid,
+//	           a provider's extra capture counts once its excess is flagged for
+//	           refund review, and a usage order's rounded-up capture credits
+//	           the balance through the ledger;
 //	moved:     payments holds only money that moved: a declined charge is a
 //	           payment attempt, never a failed payments row.
 //
@@ -103,6 +106,9 @@ func (w *world) checkMoneyInvariants() {
 		    FROM `+schema+`.provider_bills GROUP BY merchant_id, order_id) b
 		  ON b.merchant_id=o.merchant_id AND b.order_id=o.id
 		WHERE p.status IN ('succeeded','refunded') AND p.money_movement='rail' AND p.deleted_at IS NULL
+		  AND o.origin <> 'usage'
+		  AND NOT EXISTS (SELECT 1 FROM `+schema+`.reconciliation_findings f
+		      WHERE f.merchant_id=o.merchant_id AND f.finding_type='pull.bill.overpaid' AND f.subject_key='order:'||o.id::text)
 		GROUP BY o.id, o.total, b.amount HAVING sum(p.amount) + coalesce(b.amount,0) > o.total`)
 	if err != nil {
 		t.Errorf("invariants: read order settlements: %v", err)
