@@ -47,10 +47,12 @@ test("owner composes Billing, Access and Account with a live merchant selector",
     navigation.getByRole("link", { name: "Access", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByLabel("Merchant", { exact: true }).locator("option")
+    page
+      .getByRole("combobox", { name: "Merchant", exact: true })
+      .locator("option")
   ).toHaveCount(2)
   await page
-    .getByLabel("Merchant", { exact: true })
+    .getByRole("combobox", { name: "Merchant", exact: true })
     .selectOption({ label: "beta" })
   await navigation.getByRole("link", { name: "Access", exact: true }).click()
   await expect(
@@ -64,7 +66,7 @@ test("owner composes Billing, Access and Account with a live merchant selector",
     page.getByRole("heading", { name: "Account security", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "Active sessions", exact: true })
+    page.getByRole("list", { name: "Active sessions", exact: true })
   ).toBeVisible()
   await page.getByRole("button", { name: "Dark theme", exact: true }).click()
   await expect(page.locator(".console-shell")).toHaveAttribute(
@@ -103,10 +105,14 @@ test("support sees its merchant and account, with no Access administration", asy
     navigation.getByRole("link", { name: "Access", exact: true })
   ).toHaveCount(0)
   await expect(
-    page.getByLabel("Merchant", { exact: true }).locator("option")
+    page
+      .getByRole("combobox", { name: "Merchant", exact: true })
+      .locator("option")
   ).toHaveCount(1)
   await expect(
-    page.getByLabel("Merchant", { exact: true }).locator("option")
+    page
+      .getByRole("combobox", { name: "Merchant", exact: true })
+      .locator("option")
   ).toHaveText("alpha")
   await navigation.getByRole("link", { name: "Account", exact: true }).click()
   await expect(
@@ -135,7 +141,7 @@ test("account security remains usable when billing permissions are unavailable",
     page.getByRole("heading", { name: "Account security", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "Active sessions", exact: true })
+    page.getByRole("list", { name: "Active sessions", exact: true })
   ).toBeVisible()
 })
 
@@ -164,12 +170,18 @@ test("a native AuthKit credential write asks for fresh sign-in and retries once"
     .getByRole("navigation", { name: "Console", exact: true })
     .getByRole("link", { name: "Access", exact: true })
     .click()
+  const merchant = await page
+    .getByRole("combobox", { name: "Merchant", exact: true })
+    .inputValue()
+  await page
+    .getByRole("combobox", { name: "Manage access for", exact: true })
+    .selectOption(merchant)
   await page.getByRole("link", { name: "API keys", exact: true }).click()
   await page.getByRole("button", { name: "New key", exact: true }).click()
   await page.getByLabel("Name", { exact: true }).fill("Browser proof")
   await page
     .getByRole("combobox", { name: "Role", exact: true })
-    .selectOption("root:merchant-directory-viewer")
+    .selectOption("merchant:viewer")
   await page
     .getByRole("button", { name: /Create key|Create API key/, exact: false })
     .last()
@@ -203,7 +215,7 @@ test("an emailed passwordless link uses its native confirmation endpoint once", 
   })
   expect(started.status(), await started.text()).toBe(202)
   const letter = await request.get(
-    `/__test/mail?kind=login_code&to=${encodeURIComponent(operator.email)}`
+    `/__test/mail?kind=verification&to=${encodeURIComponent(operator.email)}`
   )
   expect(letter.status()).toBe(200)
   const { link } = (await letter.json()) as { link: string }
@@ -233,11 +245,14 @@ test("a group invitation reaches enrollment through the shipped console", async 
   }
   const email = `invited-${Date.now()}@console.test`
   await page
+    .getByRole("combobox", { name: "Merchant", exact: true })
+    .selectOption(health.merchants[0])
+  await page
     .getByRole("navigation", { name: "Console", exact: true })
     .getByRole("link", { name: "Access", exact: true })
     .click()
   await page
-    .getByLabel("Manage access for", { exact: true })
+    .getByRole("combobox", { name: "Manage access for", exact: true })
     .selectOption(health.merchants[0])
   await page.getByRole("link", { name: "Invitations", exact: true }).click()
   await page.getByRole("textbox", { name: /Email/i }).fill(email)
@@ -300,10 +315,14 @@ test("a group invitation reaches enrollment through the shipped console", async 
       newcomer.getByRole("navigation", { name: "Console", exact: true })
     ).toBeVisible()
     await expect(
-      newcomer.getByLabel("Merchant", { exact: true }).locator("option")
+      newcomer
+        .getByRole("combobox", { name: "Merchant", exact: true })
+        .locator("option")
     ).toHaveCount(1)
     await expect(
-      newcomer.getByLabel("Merchant", { exact: true }).locator("option")
+      newcomer
+        .getByRole("combobox", { name: "Merchant", exact: true })
+        .locator("option")
     ).toHaveText("alpha")
   } finally {
     await guest.close()

@@ -5,7 +5,9 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   workers: 1,
   forbidOnly: !!process.env.CI,
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  reporter: process.env.CI
+    ? [["github"], ["list"], ["html", { open: "never" }]]
+    : "list",
   use: {
     baseURL: process.env.CONSOLE_E2E_BASE_URL,
     trace: "retain-on-failure",

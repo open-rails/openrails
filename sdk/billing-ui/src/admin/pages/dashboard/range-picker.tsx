@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { useRef } from "react"
 // Range picker for the dashboard and its reports: the presets, or a custom
 // start and end date. The choice lives in the URL, so a link shows the same
 // range.
@@ -21,6 +22,10 @@ export function RangePicker() {
   const { text: adminText } = useAdminUI()
 
   const [range, setRange] = useDashboardRange()
+  // A host router can publish its new URL after the next input edit. Read
+  // both live fields; the committed URL key resets them on back/forward.
+  const startInput = useRef<HTMLInputElement>(null)
+  const endInput = useRef<HTMLInputElement>(null)
   const custom = "from" in range
   const items = [
     ...RANGE_PRESETS.map((p) => ({ value: p.value, label: p.label })),
@@ -58,32 +63,34 @@ export function RangePicker() {
         </SelectContent>
       </Select>
       {custom && (
-        <>
+        <div key={`${range.from}/${range.to}`} className="contents">
           <label className="flex items-center gap-1.5 text-xs font-medium">
             <AdminMessage id={"Start"} />
             <Input
+              ref={startInput}
               type="date"
               className="h-8 w-auto"
-              value={range.from}
+              defaultValue={range.from}
               max={range.to}
               onChange={(e) => {
                 const from = e.target.value
-                if (from)
-                  setRange({ from, to: from > range.to ? from : range.to })
+                const to = endInput.current?.value || range.to
+                if (from) setRange({ from, to: from > to ? from : to })
               }}
             />
           </label>
           <label className="flex items-center gap-1.5 text-xs font-medium">
             <AdminMessage id={"End"} />
             <Input
+              ref={endInput}
               type="date"
               className="h-8 w-auto"
-              value={range.to}
+              defaultValue={range.to}
               min={range.from}
               onChange={(e) => {
                 const to = e.target.value
-                if (to)
-                  setRange({ from: to < range.from ? to : range.from, to })
+                const from = startInput.current?.value || range.from
+                if (to) setRange({ from: to < from ? to : from, to })
               }}
             />
           </label>
@@ -94,7 +101,7 @@ export function RangePicker() {
           >
             <AdminMessage id={"Reset"} />
           </Button>
-        </>
+        </div>
       )}
     </div>
   )
