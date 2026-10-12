@@ -216,7 +216,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        worker: [0, 1, 2, 3, 4, 5]
+        worker: [0, 1, 2, 3, 4, 5, 6, 7]
     timeout-minutes: 20
     env:
       OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
