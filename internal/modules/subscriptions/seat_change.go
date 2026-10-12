@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -197,10 +198,19 @@ func (r *SubscriptionRepo) ReplaceScheduledChange(ctx context.Context, id uuid.U
 			}
 		}
 		if clears {
-			return RefuseOwnedRebillTerms(ctx, d, sub)
+			if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
+				return err
+			}
+			if c.Staff == nil || pending == nil {
+				return nil
+			}
+			return queueScheduledStaffNotice(ctx, d, sub, c.PriceID, c.Quantity, "canceled:"+pending.ID.String(), now)
 		}
 		out, err = ScheduleChange(ctx, d, sub, NewScheduledChange{PriceID: c.PriceID, Quantity: CloneQuantity(c.Quantity), Source: billing.ScheduledChangeChange, Staff: c.Staff}, now)
-		return err
+		if err != nil || c.Staff == nil {
+			return err
+		}
+		return queueScheduledStaffNotice(ctx, d, sub, c.PriceID, c.Quantity, "scheduled:"+out.ID.String(), out.EffectiveAt)
 	})
 	return out, err
 }
@@ -238,7 +248,7 @@ type StaffChangeNotice struct {
 }
 
 // QueueStaffChangeNotice queues the notice once per change in the caller's
-// transaction; it is emailed after commit or by the notification sweep.
+// transaction; each application consumes that source fact independently.
 func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscription, n StaffChangeNotice) (*models.NotificationEvent, error) {
 	next, at := n.NextAmount, n.EffectiveAt.UTC()
 	data := billing.NotificationData{
@@ -255,4 +265,23 @@ func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscript
 		return nil, fmt.Errorf("queue staff change notice for %s: %w", sub.ID, err)
 	}
 	return notice, nil
+}
+
+// queueScheduledStaffNotice snapshots the committed schedule, without any
+// channel or presentation work after the transaction has ended.
+func queueScheduledStaffNotice(ctx context.Context, d *db.DB, sub *models.Subscription, priceID uuid.UUID, quantity *int, key string, at time.Time) error {
+	price, err := catalog.NewPriceService(d).GetByID(ctx, priceID)
+	if err != nil {
+		return err
+	}
+	product, err := catalog.NewProductService(d).GetByID(ctx, price.ProductID)
+	if err != nil {
+		return err
+	}
+	amount, err := SeatAmount(price.Amount, quantity)
+	if err != nil {
+		return err
+	}
+	_, err = QueueStaffChangeNotice(ctx, d, sub, StaffChangeNotice{Key: key, PriceID: priceID, ProductName: product.DisplayName, Quantity: quantity, Currency: price.Currency, NextAmount: amount, EffectiveAt: at})
+	return err
 }

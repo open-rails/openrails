@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -20,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Host-lifecycle event types emitted on a delinquency transition. One per
@@ -288,21 +286,17 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 		}); err != nil {
 			return err
 		}
-		return nil
+		return s.notify(ctx, s.db.NewWithPgxTx(tx), transition, exposure, now, uuid.NewSHA1(tid.UUID(), []byte(dedupe+":notification")))
 	})
 	if err != nil {
 		return Transition{}, false, err
-	}
-	if changed {
-		s.notify(ctx, transition, exposure, now)
 	}
 	return transition, changed, nil
 }
 
 // notify tells the payer on entering and leaving delinquent. Entering grace
-// is silent: collection already reported the failed charge. Never fatal: the
-// state and host signal are already durable.
-func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, now time.Time) {
+// is silent. The customer fact, state and existing host signal share a transaction.
+func (s *Service) notify(ctx context.Context, database *db.DB, t Transition, exposure Exposure, now time.Time, id uuid.UUID) error {
 	var eventType models.NotificationEventType
 	switch {
 	case t.To == StateDelinquent:
@@ -310,7 +304,7 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 	case t.To == StateCurrent && t.From == StateDelinquent:
 		eventType = models.NotificationAccountDelinquencyClosed
 	default:
-		return
+		return nil
 	}
 	overdue := exposure.OverdueAmount
 	data := billing.NotificationData{
@@ -321,17 +315,16 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 		since := exposure.OverdueStartedAt.UTC()
 		data.OverdueStartedAt = &since
 	}
-	if err := subscriptions.NewNotificationService(s.db).Create(ctx, &models.NotificationEvent{
-		ID:         uuidutil.NewV7(),
+	if err := subscriptions.NewNotificationService(database).CreateIfAbsent(ctx, &models.NotificationEvent{
+		ID:         id,
 		CustomerID: t.CustomerID,
 		EventType:  eventType,
 		Data:       data,
 		CreatedAt:  now,
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"customer_id": t.CustomerID, "currency": t.Currency, "event_type": eventType,
-		}).Error("failed to queue delinquency notification")
+		return fmt.Errorf("record delinquency notification: %w", err)
 	}
+	return nil
 }
 
 // IsDelinquent is the admission gate's question, answered conservatively: it

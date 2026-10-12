@@ -725,9 +725,9 @@ type BillingNotification struct {
 	CreatedAt     time.Time
 	MerchantID    uuid.UUID
 	CustomerID    *uuid.UUID
-	// When the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
+	// Unused legacy customer delivery marker; operator alerts do not set it.
 	EmailedAt *time.Time
-	// Until when one sender holds the undelivered email; another sends it only after this passes, so a sender that died is replaced.
+	// Unused legacy customer delivery lease; customer channels are application-owned.
 	EmailLeaseExpiresAt *time.Time
 }
 

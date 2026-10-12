@@ -25,7 +25,7 @@ most 100 events. There is no cursor: process the batch, then ask for pending
 facts again. An older transaction that commits later remains pending and is
 not skipped by an ID or timestamp watermark.
 
-A consumer name is 1–64 ASCII letters, digits, dots, underscores or hyphens.
+A consumer name is 1–64 ASCII letters, digits, dots, underscores or hyphens, excluding `.` and `..`.
 Up to 32 names may be registered per application and scope. Registration is
 idempotent and starts from the retained source history. Its identity is the
 verified application issuer and subject, merchant, and name—not the particular
@@ -33,10 +33,12 @@ API key. Credentials rotated for that same application retain the subscription;
 a distinct application cannot consume or retire it by choosing the same name.
 Native AuthKit group API keys share the group's stable application identity.
 
-Each event contains `id`, `merchant_id`, `customer_id`, `event_type`, raw JSON
+Each event contains `id`, `merchant_id`, `customer_id`, `event_type`, JSON object
 `data`, `created_at`, and optional `action_requested` and `optional` hints.
-Payloads preserve unknown future fields and event kinds. The immutable stored
-fact is its identity, kind, payload and occurrence time; classification hints
+Payloads preserve unknown future object fields and event kinds. The shared
+inbox consumers accept objects up to 64 KiB; applications should keep their
+notification payloads small and keep larger artifacts at their source. The
+immutable stored fact is its identity, kind, payload and occurrence time; classification hints
 come from the current source version. `action_requested` describes what the
 event originally asked, not whether an invoice is still unpaid today.
 Actions must re-read authoritative billing state.
@@ -49,8 +51,10 @@ and archive state. Multiple readers of one consumer may receive duplicates.
 Acknowledging one consumer never consumes another consumer's delivery.
 
 Retiring a consumer explicitly releases its retention claim and removes its
-acknowledgment history. Re-registering the same name replays whatever source
-facts remain retained. Stop using a principal's consumers before retiring that
+acknowledgment history. Retirement does not start a new grace period: if the
+remaining consumers' acknowledgments (or capture time with no consumers) already
+satisfy retention, the event may be pruned immediately. Re-registering the same
+name replays whatever source facts remain retained. Stop using a principal's consumers before retiring that
 application identity.
 
 ## Embedded hosts and cross-merchant portals

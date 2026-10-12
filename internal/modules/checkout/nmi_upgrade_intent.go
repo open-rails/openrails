@@ -566,7 +566,8 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 	database := h.Checkout.SubscriptionService.Database()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := database.NewWithPgxTx(tx)
-		if _, err := subscriptions.NewSubscriptionRepo(txDB).GetByIDForUpdate(ctx, p.OldSubscriptionID); err != nil {
+		sub, err := subscriptions.NewSubscriptionRepo(txDB).GetByIDForUpdate(ctx, p.OldSubscriptionID)
+		if err != nil {
 			return err
 		}
 		completion, err := prepareTierCompletion(ctx, txDB, in, outcome, h.Checkout.now())
@@ -586,6 +587,11 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 					return err
 				}
 			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		if p.Staff != nil && p.Downgrade() {
+			if _, err := subscriptions.QueueStaffChangeNotice(ctx, txDB, sub, subscriptions.StaffChangeNotice{Key: in.ID.String(), PriceID: p.PriceID, ProductName: p.ProductName, Currency: p.Currency, NextAmount: p.RecurringAmount, EffectiveAt: p.PeriodEnd}); err != nil {
 				return err
 			}
 		}

@@ -99,8 +99,12 @@ func (c *Consumer) Pending(ctx context.Context, limit int) ([]billing.Notificati
 		var policy struct {
 			DowngradeApplied bool `json:"downgrade_applied"`
 		}
-		if err := json.Unmarshal(row.Data, &policy); err != nil {
-			return nil, fmt.Errorf("decode notification event: %w", err)
+		// Only this known kind consumes a payload field for classification.
+		// Unknown event payloads pass through without imposing today's schema.
+		if row.EventType == "premium_renewed" {
+			if err := json.Unmarshal(row.Data, &policy); err != nil {
+				return nil, fmt.Errorf("decode renewal notification event: %w", err)
+			}
 		}
 		out = append(out, billing.NotificationEvent{ID: billing.NotificationID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), CustomerID: billing.CustomerID(row.CustomerID),
 			EventType: row.EventType, Data: json.RawMessage(row.Data), CreatedAt: row.CreatedAt, ActionRequested: billing.CustomerNotificationActionRequested(row.EventType), Optional: billing.CustomerNotificationOptional(row.EventType, billing.NotificationData{DowngradeApplied: policy.DowngradeApplied})})

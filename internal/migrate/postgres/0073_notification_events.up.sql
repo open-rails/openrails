@@ -185,3 +185,8 @@ END;
 $$;
 
 COMMENT ON TABLE billing.notification_events IS 'Immutable customer billing facts, independent of application inbox state. Retention: events are deleted 30 days after every active scoped and global consumer acknowledges; pending events never expire.';
+
+-- These old nullable columns remain on the operator-only legacy alert table;
+-- no customer email producer or worker reads them.
+COMMENT ON COLUMN billing.notifications.emailed_at IS 'Unused legacy customer delivery marker; operator alerts do not set it.';
+COMMENT ON COLUMN billing.notifications.email_lease_expires_at IS 'Unused legacy customer delivery lease; customer channels are application-owned.';

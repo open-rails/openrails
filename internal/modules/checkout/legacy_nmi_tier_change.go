@@ -218,7 +218,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if user.Email != nil {
 		email = strings.TrimSpace(*user.Email)
 	}
-	payload := subscriptions.NMIUpgradePayload{Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
+	payload := subscriptions.NMIUpgradePayload{Staff: staffChange(req), Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: instrument, PaymentMethodID: methodRow.ID,
 		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),

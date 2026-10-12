@@ -186,3 +186,66 @@ func TestSubscriptionChangeBack(t *testing.T) {
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
+
+// A source failure rolls back a no-charge staff schedule, so retry can capture
+// the schedule and its fact together. Replaying the successful operation is silent.
+func TestStaffScheduleNotificationRollback(t *testing.T) {
+	w := newWorld(t)
+	group := "g" + uuid.NewString()[:8]
+	basic := w.tierPrice(group, 1, 1000, monthHours, false)
+	pro := w.tierPrice(group, 2, 2000, monthHours, false)
+	c, sub := w.engineMember("stripe", embedded, pro)
+	ctx := t.Context()
+	_, err := w.pool.Exec(ctx, w.q(`CREATE FUNCTION billing.reject_staff_notice() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN IF NEW.event_type = 'subscription_changed' THEN RAISE EXCEPTION 'staff notice unavailable'; END IF; RETURN NEW; END $$;
+	CREATE TRIGGER reject_staff_notice BEFORE INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.reject_staff_notice();`))
+	require.NoError(t, err)
+	params := billing.ChangeSubscriptionParams{PriceID: priceRef(basic.ID), Reason: "customer requested downgrade", IdempotencyKey: "staff-" + uuid.NewString()}
+	_, err = w.client[embedded].ChangeSubscription(ctx, sub, params)
+	require.Error(t, err)
+	require.Nil(t, w.subscription(embedded, sub).ScheduledChange, "a schedule cannot commit without its fact")
+	_, err = w.pool.Exec(ctx, w.q(`DROP TRIGGER reject_staff_notice ON billing.notification_events`))
+	require.NoError(t, err)
+	params.IdempotencyKey = "staff-" + uuid.NewString()
+	changed, err := w.client[embedded].ChangeSubscription(ctx, sub, params)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", changed.Status)
+	w.requireStaffSchedule(c, sub, params.Reason)
+	count := func() int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.notification_events WHERE customer_id = $1 AND event_type = 'subscription_changed'`), c.cid().UUID()).Scan(&n))
+		return n
+	}
+	require.Equal(t, 1, count())
+	_, err = w.client[embedded].ChangeSubscription(ctx, sub, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, count())
+	params.PriceID, params.IdempotencyKey = priceRef(pro.ID), "staff-clear-"+uuid.NewString()
+	_, err = w.client[embedded].ChangeSubscription(ctx, sub, params)
+	require.NoError(t, err)
+	require.Nil(t, w.subscription(embedded, sub).ScheduledChange)
+	require.Equal(t, 2, count(), "canceling the schedule is a distinct fact")
+}
+
+// Provider completion also captures staff context from its frozen operation;
+// retries neither repeat the provider mutation nor publish a second fact.
+func TestProviderStaffDowngradeNotification(t *testing.T) {
+	w := newWorld(t)
+	w.armDestructive()
+	group := "g" + uuid.NewString()[:8]
+	pro := w.tierPrice(group, 2, 1999, monthHours, true)
+	basic := w.tierPrice(group, 1, 499, monthHours, true)
+	l := w.legacyOnTier(embedded, pro, 1999, monthHours, 10*day)
+	params := billing.ChangeSubscriptionParams{PriceID: priceRef(basic.ID), Reason: "requested provider downgrade", IdempotencyKey: "staff-provider-" + uuid.NewString()}
+	changed, err := w.client[embedded].ChangeSubscription(t.Context(), l.sub, params)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", changed.Status)
+	w.requireStaffNotice(l.c, "")
+	_, err = w.client[embedded].ChangeSubscription(t.Context(), l.sub, params)
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.notification_events WHERE customer_id = $1 AND event_type = 'subscription_changed'`), l.c.cid().UUID()).Scan(&count))
+	require.Equal(t, 1, count)
+	require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 1)
+	require.Equal(t, basic.ID, w.subscription(embedded, l.sub).ScheduledChange.PriceID)
+}

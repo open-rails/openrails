@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,21 +43,22 @@ const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
 // StripeTierChangePayload freezes the commercial decision before the first
 // provider request. Replays never recalculate proration, prices or dates.
 type StripeTierChangePayload struct {
-	AccessDurationHours  *int      `json:"access_duration_hours"`
-	RequestedPrice       string    `json:"requested_price"`
-	UserID               string    `json:"user_id"`
-	SubscriptionID       uuid.UUID `json:"subscription_id"`
-	StripeSubscriptionID string    `json:"stripe_subscription_id"`
-	StripeItemID         string    `json:"stripe_item_id"`
-	Action               string    `json:"action"`
-	OldPriceID           uuid.UUID `json:"old_price_id"`
-	OldStripePriceID     string    `json:"old_stripe_price_id"`
-	PriceID              uuid.UUID `json:"price_id"`
-	ProductID            uuid.UUID `json:"product_id"`
-	ProductName          string    `json:"product_name"`
-	StripePriceID        string    `json:"stripe_price_id"`
-	Currency             string    `json:"currency"`
-	RecurringAmount      int64     `json:"recurring_amount"`
+	Staff                *subscriptions.StaffChange `json:"staff,omitempty"`
+	AccessDurationHours  *int                       `json:"access_duration_hours"`
+	RequestedPrice       string                     `json:"requested_price"`
+	UserID               string                     `json:"user_id"`
+	SubscriptionID       uuid.UUID                  `json:"subscription_id"`
+	StripeSubscriptionID string                     `json:"stripe_subscription_id"`
+	StripeItemID         string                     `json:"stripe_item_id"`
+	Action               string                     `json:"action"`
+	OldPriceID           uuid.UUID                  `json:"old_price_id"`
+	OldStripePriceID     string                     `json:"old_stripe_price_id"`
+	PriceID              uuid.UUID                  `json:"price_id"`
+	ProductID            uuid.UUID                  `json:"product_id"`
+	ProductName          string                     `json:"product_name"`
+	StripePriceID        string                     `json:"stripe_price_id"`
+	Currency             string                     `json:"currency"`
+	RecurringAmount      int64                      `json:"recurring_amount"`
 	// AmountDueNow is the local Model B estimate for an upgrade (Stripe
 	// finalizes the exact proration) and 0 for a downgrade.
 	AmountDueNow       int64  `json:"amount_due_now"`
@@ -73,6 +75,9 @@ type StripeTierChangePayload struct {
 }
 
 func (p StripeTierChangePayload) validate() error {
+	if p.Staff != nil && (strings.TrimSpace(p.Staff.Invoker) == "" || strings.TrimSpace(p.Staff.Reason) == "") {
+		return errors.New("invalid staff change identity")
+	}
 	if p.SubscriptionID == uuid.Nil || p.StripeSubscriptionID == "" || p.OldPriceID == uuid.Nil || p.OldStripePriceID == "" || p.PriceID == uuid.Nil || p.StripePriceID == "" || p.UserID == "" || !p.PeriodEnd.After(p.PeriodStart) {
 		return errors.New("incomplete frozen tier change payload")
 	}
@@ -581,13 +586,21 @@ func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, i
 		if in.PspID == nil || sub.PspID != *in.PspID || sub.CustomerID.String() != p.UserID || sub.RailSubscriptionID != p.StripeSubscriptionID {
 			return errors.New("subscription no longer names accepted tier target")
 		}
+		commit := func() error {
+			if p.Staff != nil {
+				if _, err := subscriptions.QueueStaffChangeNotice(ctx, bound, sub, subscriptions.StaffChangeNotice{Key: in.ID.String(), PriceID: p.PriceID, ProductName: p.ProductName, Currency: p.Currency, NextAmount: p.RecurringAmount, EffectiveAt: p.PeriodEnd}); err != nil {
+					return err
+				}
+			}
+			return completion.commit(ctx)
+		}
 		pending, err := subscriptions.PendingChange(ctx, bound, sub.ID)
 		if err != nil {
 			return err
 		}
 		if pending != nil {
 			if pending.PriceID == p.PriceID {
-				return completion.commit(ctx)
+				return commit()
 			}
 			return fmt.Errorf("subscription %s already schedules price %s", sub.ID, pending.PriceID)
 		}
@@ -597,7 +610,7 @@ func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, i
 		if _, err := subscriptions.RecordProviderChange(ctx, bound, sub, p.PriceID, now); err != nil {
 			return err
 		}
-		return completion.commit(ctx)
+		return commit()
 	})
 }
 

@@ -594,19 +594,15 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	if params.InitialPaymentReversal == "" {
 		notification := &models.NotificationEvent{
-			ID:         uuidutil.NewV7(),
+			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
 			Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID)},
 		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			if params.Prepared != nil {
-				return nil, nil, fmt.Errorf("accepted membership notification: %w", err)
-			}
-			log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
-		} else {
-			notifications = append(notifications, notification)
+		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+			return nil, nil, fmt.Errorf("record membership started notification: %w", err)
 		}
+		notifications = append(notifications, notification)
 
 	}
 
@@ -1731,16 +1727,15 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		notification := &models.NotificationEvent{
-			ID:         uuidutil.NewV7(),
+			ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("expired:%d", subscription.LifecycleRev))),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
 			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired)},
 		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
-		} else {
-			notifications = append(notifications, notification)
+		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+			return fmt.Errorf("record membership expired notification: %w", err)
 		}
+		notifications = append(notifications, notification)
 
 		return nil
 	})
