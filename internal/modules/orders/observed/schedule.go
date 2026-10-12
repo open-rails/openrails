@@ -204,22 +204,27 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 			if candidate.PspID != sub.PspID || candidate.CustomerID != sub.CustomerID || terms.SubscriptionID == nil || *terms.SubscriptionID != sub.ID || terms.Owner != string(sub.CollectionPolicy) || attempt.Amount != terms.Total || !strings.EqualFold(attempt.Currency, terms.Currency) {
 				continue
 			}
-			if !attempt.Approved {
-				prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ScheduleSourceReference: candidate.SourceReference})
-				if err != nil && !db.IsNotFound(err) {
-					return Bill{}, err
-				}
-				attempt.NextBillingAt = candidate.FirstDueAt
-				if err == nil {
-					index, err := scheduleBoundaryIndex(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), prior)
-					if err != nil {
-						return Bill{}, err
-					}
-					attempt.NextBillingAt = scheduleBoundary(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), index+1)
+			hours, months := int(candidate.CadenceHours), int(candidate.CadenceMonths)
+			unpaid, err := firstUnsettledCycle(ctx, q, sub, candidate)
+			if err != nil {
+				return Bill{}, err
+			}
+			var candidateDue time.Time
+			if attempt.Approved {
+				candidateDue, err = approvedReceiptCycle(candidate, unpaid, attempt)
+			} else {
+				attempt.NextBillingAt = scheduleBoundary(candidate.FirstDueAt, hours, months, unpaid)
+				if candidateDue, err = scheduleReceiptCycle(candidate.FirstDueAt, hours, months, attempt); err != nil {
+					err = errNoCycle
 				}
 			}
-			candidateDue, err := scheduleReceiptCycle(candidate.FirstDueAt, int(candidate.CadenceHours), int(candidate.CadenceMonths), attempt)
-			if err != nil || i+1 < len(schedules) && !candidateDue.Before(schedules[i+1].FirstDueAt) {
+			if err != nil {
+				if !errors.Is(err, errNoCycle) {
+					return Bill{}, err
+				}
+				continue
+			}
+			if i+1 < len(schedules) && (!candidateDue.Before(schedules[i+1].FirstDueAt) || !receipt.OccurredAt.Before(schedules[i+1].FirstDueAt.UTC().Truncate(24*time.Hour))) {
 				continue
 			}
 			matches++
@@ -243,8 +248,7 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 	if schedule.PspID != sub.PspID || schedule.CustomerID != sub.CustomerID || bill.SubscriptionID == nil || *bill.SubscriptionID != sub.ID || bill.Owner != string(sub.CollectionPolicy) {
 		return Bill{}, ErrConflict
 	}
-	version := sha256.Sum256([]byte(schedule.SourceReference))
-	bill.SourceKey = fmt.Sprintf("%s:%x:%s", sub.ID, version[:16], due.UTC().Format(time.RFC3339Nano))
+	bill.SourceKey = cycleSourceKey(sub.ID, schedule.SourceReference, due)
 	bill.ProviderReference = schedule.ProviderReference
 	index, err := scheduleBoundaryIndex(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), due)
 	if err != nil {
@@ -252,6 +256,83 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 	}
 	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = due, scheduleBoundary(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), index+1), due
 	return bill, nil
+}
+
+var errNoCycle = errors.New("provider receipt matches no accepted cycle")
+
+// firstUnsettledCycle is the index of the earliest cycle after the latest one
+// an approved receipt settled, skipping cycles whose order another verified
+// payment (such as OpenRails' own decline recovery) completed.
+func firstUnsettledCycle(ctx context.Context, q *gen.Queries, sub *models.Subscription, schedule gen.BillingProviderSchedule) (int, error) {
+	hours, months := int(schedule.CadenceHours), int(schedule.CadenceMonths)
+	index := 0
+	prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ScheduleSourceReference: schedule.SourceReference})
+	switch {
+	case err == nil:
+		last, err := scheduleBoundaryIndex(schedule.FirstDueAt, hours, months, prior)
+		if err != nil {
+			return 0, err
+		}
+		index = last + 1
+	case !db.IsNotFound(err):
+		return 0, err
+	}
+	for ; index < maxCycleSkip+1; index++ {
+		complete, err := cycleComplete(ctx, q, sub, schedule, scheduleBoundary(schedule.FirstDueAt, hours, months, index))
+		if err != nil || !complete {
+			return index, err
+		}
+	}
+	return index, nil
+}
+
+// maxCycleSkip bounds how many recovered cycles one receipt may step over.
+const maxCycleSkip = 1 << 10
+
+func cycleComplete(ctx context.Context, q *gen.Queries, sub *models.Subscription, schedule gen.BillingProviderSchedule, due time.Time) (bool, error) {
+	mapped, err := q.GetProviderBill(ctx, gen.GetProviderBillParams{MerchantID: sub.MerchantID, PspID: sub.PspID, SourceKind: "provider_cycle", SourceKey: cycleSourceKey(sub.ID, schedule.SourceReference, due)})
+	if db.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: sub.MerchantID, ID: mapped.OrderID})
+	if err != nil {
+		return false, err
+	}
+	return order.Status == "complete", nil
+}
+
+func cycleSourceKey(subscriptionID uuid.UUID, scheduleSource string, due time.Time) string {
+	version := sha256.Sum256([]byte(scheduleSource))
+	return fmt.Sprintf("%s:%x:%s", subscriptionID, version[:16], due.UTC().Format(time.RFC3339Nano))
+}
+
+// approvedReceiptCycle applies an approved schedule charge to the earliest
+// unsettled cycle the provider has executed by its next boundary, the way
+// unattributed cash pays the oldest open bill. Receipts of one batch replay in
+// time order, so catch-up charges each settle their own cycle. When every
+// executed cycle is settled the charge is an extra capture of the newest one.
+func approvedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, receipt ScheduleReceipt) (time.Time, error) {
+	first, hours, months := schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths)
+	next, err := scheduleBoundaryIndex(first, hours, months, receipt.NextBillingAt)
+	if err != nil || next < 1 {
+		return time.Time{}, errNoCycle
+	}
+	day := receipt.OccurredAt.UTC().Truncate(24 * time.Hour)
+	if !day.Before(receipt.NextBillingAt.UTC().Truncate(24 * time.Hour)) {
+		return time.Time{}, errNoCycle
+	}
+	if unpaid < next {
+		if due := scheduleBoundary(first, hours, months, unpaid); !day.Before(due.Truncate(24 * time.Hour)) {
+			return due, nil
+		}
+	}
+	if newest := scheduleBoundary(first, hours, months, next-1); !day.Before(newest.Truncate(24 * time.Hour)) {
+		return newest, nil
+	}
+	return time.Time{}, errNoCycle
 }
 
 // NMI and CCBill expose billing days. Match that declared boundary to the

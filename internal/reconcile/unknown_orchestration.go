@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -295,7 +296,19 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 // are never charge rows. Bounded to lookbackCap. Returns the count inserted.
 func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, now time.Time, lookbackCap time.Duration) (int, error) {
 	inserted := 0
-	for i := range txns {
+	// Oldest first: schedule receipts settle cycles in the order they ran.
+	order := make([]int, len(txns))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		x, y := txns[order[a]], txns[order[b]]
+		if !x.OccurredAt.Equal(y.OccurredAt) {
+			return x.OccurredAt.Before(y.OccurredAt)
+		}
+		return x.TransactionID < y.TransactionID
+	})
+	for _, i := range order {
 		t := &txns[i]
 		if t.TransactionID == "" || t.OccurredAt.Before(now.Add(-lookbackCap)) {
 			continue

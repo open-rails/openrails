@@ -31,8 +31,10 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	if d.Kind == TransitionNone || d.stale(sub) {
 		return false, nil
 	}
+	// A provider renewal needs a settled renewal bill reaching past the paid
+	// period. The paid-through itself stays the provider's reported boundary.
 	if d.Kind == TransitionRenew && sub.CollectionPolicy != models.CollectionPolicyEngine && !d.Declared {
-		var verifiedEnd, verifiedStart time.Time
+		var verifiedStart, verifiedEnd time.Time
 		for _, receipt := range d.Backfill {
 			if bill := receipt.ObservedBill; bill != nil && bill.Kind != "adjustment" && bill.Settled && bill.PeriodEnd.After(verifiedEnd) {
 				verifiedStart, verifiedEnd = bill.PeriodStart, bill.PeriodEnd
@@ -41,7 +43,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if verifiedEnd.IsZero() || sub.CurrentPeriodEndsAt != nil && !verifiedEnd.After(*sub.CurrentPeriodEndsAt) {
 			return false, nil
 		}
-		d.NewPeriodStart, d.NewPeriodEnd = &verifiedStart, &verifiedEnd
+		if d.NewPeriodEnd == nil {
+			d.NewPeriodStart, d.NewPeriodEnd = &verifiedStart, &verifiedEnd
+		}
 	}
 	switch d.Kind {
 	case TransitionParkUnknown:
