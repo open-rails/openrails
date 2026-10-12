@@ -41,7 +41,7 @@ func (q *Queries) GetProviderCycleReceipt(ctx context.Context, arg GetProviderCy
 }
 
 const getProviderSchedule = `-- name: GetProviderSchedule :one
-SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND source_reference = $3::text FOR UPDATE
+SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND source_reference = $3::text FOR UPDATE
 `
 
 type GetProviderScheduleParams struct {
@@ -59,6 +59,7 @@ func (q *Queries) GetProviderSchedule(ctx context.Context, arg GetProviderSchedu
 		&i.CustomerID,
 		&i.PspID,
 		&i.InitialOrderID,
+		&i.AcceptedVersion,
 		&i.SourceReference,
 		&i.ProviderReference,
 		&i.FirstDueAt,
@@ -107,9 +108,11 @@ func (q *Queries) InsertProviderCycleReceipt(ctx context.Context, arg InsertProv
 }
 
 const insertProviderSchedule = `-- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-        $5::uuid, $6::text, $7::text, $8::timestamptz, $9::integer, $10::integer,
+        $5::uuid,
+        (SELECT COALESCE(MAX(accepted_version), 0) + 1 FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid),
+        $6::text, $7::text, $8::timestamptz, $9::integer, $10::integer,
         $11::jsonb, $12::timestamptz)
 ON CONFLICT (merchant_id, subscription_id, source_reference) DO NOTHING
 `
@@ -170,10 +173,10 @@ func (q *Queries) LatestSettledProviderCycle(ctx context.Context, arg LatestSett
 }
 
 const listProviderSchedules = `-- name: ListProviderSchedules :many
-SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules
+SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
   AND provider_reference = $3::text
-ORDER BY first_due_at ASC, source_reference ASC FOR UPDATE
+ORDER BY first_due_at ASC, accepted_version ASC FOR UPDATE
 `
 
 type ListProviderSchedulesParams struct {
@@ -197,6 +200,7 @@ func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSch
 			&i.CustomerID,
 			&i.PspID,
 			&i.InitialOrderID,
+			&i.AcceptedVersion,
 			&i.SourceReference,
 			&i.ProviderReference,
 			&i.FirstDueAt,
