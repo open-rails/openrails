@@ -64,7 +64,7 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 			_, err = a.ReleaseAdmissions(t.Context(), []string{string(state)})
 		}
 		if state == billing.AdmissionCaptured {
-			_, err = a.CaptureAdmission(t.Context(), string(state), billing.CaptureAdmissionParams{Amount: 50_000})
+			_, err = captureAdmission(t.Context(), a, string(state), 50_000, nil)
 		}
 		require.NoError(t, err)
 	}
