@@ -15220,6 +15220,149 @@
           }
         }
       },
+      "DeclaredProviderSchedule": {
+        "type": "object",
+        "properties": {
+          "source_reference": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "interval_hours": {
+            "type": "integer"
+          },
+          "interval_months": {
+            "type": "integer"
+          },
+          "first_due_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeclaredStripeInvoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_reference": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "total": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "amount_due": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "amount_paid": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "amount_remaining": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "amount_off_stripe": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "starting_balance": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "pre_payment_credit": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredStripeInvoiceLine"
+            }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredStripeInvoicePayment"
+            }
+          }
+        }
+      },
+      "DeclaredStripeInvoiceLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "price_reference": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeclaredStripeInvoicePayment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "charge_id": {
+            "type": "string"
+          },
+          "payment_intent_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "DeclaredSubscription": {
         "type": "object",
         "properties": {
@@ -15258,6 +15401,9 @@
           "payment_method": {
             "$ref": "#/components/schemas/PaymentMethodRef"
           },
+          "accepted_schedule": {
+            "$ref": "#/components/schemas/DeclaredProviderSchedule"
+          },
           "evidence": {}
         }
       },
@@ -15286,6 +15432,13 @@
           "occurred_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "next_billing_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_invoice": {
+            "$ref": "#/components/schemas/DeclaredStripeInvoice"
           }
         }
       },
@@ -17202,6 +17355,30 @@
               "void"
             ]
           },
+          "collection_owner": {
+            "type": "string",
+            "enum": [
+              "engine",
+              "nmi_schedule",
+              "provider"
+            ]
+          },
+          "collection_psp_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_bills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderProviderBill"
+            }
+          },
           "number": {
             "oneOf": [
               {
@@ -17340,6 +17517,9 @@
           "customer_id",
           "origin",
           "status",
+          "collection_owner",
+          "collection_psp_id",
+          "provider_bills",
           "number",
           "currency",
           "total",
@@ -17901,6 +18081,53 @@
           "refusal"
         ]
       },
+      "OrderProviderBill": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "settlement_source": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "non_cash_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "settled_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "psp_id",
+          "kind",
+          "reference",
+          "settlement_source",
+          "non_cash_amount",
+          "settled_at"
+        ]
+      },
       "OrderRenewal": {
         "type": "object",
         "properties": {
@@ -18459,36 +18686,6 @@
               }
             ]
           },
-          "price_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "price": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Price"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "product": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ProductSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "channel": {
             "type": "string",
             "enum": [
@@ -18581,9 +18778,6 @@
           "subscription_id",
           "order_id",
           "quantity",
-          "price_id",
-          "price",
-          "product",
           "channel",
           "rail",
           "psp_id",
@@ -19125,9 +19319,6 @@
             "type": "string"
           },
           "order_id": {
-            "type": "string"
-          },
-          "price_id": {
             "type": "string"
           },
           "subscription_id": {

@@ -783,6 +783,52 @@ export type DeclaredPaymentMethod = {
   created_at?: string
 }
 
+export type DeclaredProviderSchedule = {
+  source_reference?: string
+  amount?: string
+  currency?: string
+  quantity?: number
+  interval_hours?: number
+  interval_months?: number
+  first_due_at?: string
+}
+
+export type DeclaredStripeInvoice = {
+  id?: string
+  customer_reference?: string
+  status?: string
+  reason?: string
+  currency?: string
+  total?: string
+  amount_due?: string
+  amount_paid?: string
+  amount_remaining?: string
+  amount_off_stripe?: string
+  starting_balance?: string
+  pre_payment_credit?: string
+  due_at?: string
+  lines?: DeclaredStripeInvoiceLine[]
+  payments?: DeclaredStripeInvoicePayment[]
+}
+
+export type DeclaredStripeInvoiceLine = {
+  id?: string
+  price_reference?: string
+  description?: string
+  quantity?: number
+  amount?: string
+  period_start?: string
+  period_end?: string
+}
+
+export type DeclaredStripeInvoicePayment = {
+  id?: string
+  charge_id?: string
+  payment_intent_id?: string
+  amount?: string
+  paid_at?: string
+}
+
 export type DeclaredSubscription = {
   source_id?: string
   customer?: string
@@ -795,6 +841,7 @@ export type DeclaredSubscription = {
   cancel?: CancelEvidence
   dunning?: DunningEvidence
   payment_method?: PaymentMethodRef
+  accepted_schedule?: DeclaredProviderSchedule
   evidence?: unknown
 }
 
@@ -806,6 +853,8 @@ export type DeclaredTransaction = {
   amount?: string
   currency?: string
   occurred_at?: string
+  next_billing_at?: string
+  stripe_invoice?: DeclaredStripeInvoice
 }
 
 export type DefaultPaymentMethod = {
@@ -1216,6 +1265,9 @@ export type Order = {
   customer_id: string
   origin: "customer" | "merchant" | "subscription" | "usage"
   status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
+  collection_owner: "engine" | "nmi_schedule" | "provider"
+  collection_psp_id: string | null
+  provider_bills: OrderProviderBill[]
   number: string | null
   currency: string
   total: string
@@ -1334,6 +1386,15 @@ export type OrderPreviewLine = {
   refusal: OrderLineRefusal | null
 }
 
+export type OrderProviderBill = {
+  psp_id: string
+  kind: string
+  reference: string
+  settlement_source: string | null
+  non_cash_amount: string
+  settled_at: string | null
+}
+
 export type OrderRenewal = {
   subscription_id: string
   period_starts_at: string
@@ -1446,9 +1507,6 @@ export type Payment = {
   subscription_id: string | null
   order_id: string | null
   quantity: number | null
-  price_id: string | null
-  price: Price | null
-  product: ProductSummary | null
   channel: "manual" | "rail"
   rail: string | null
   psp_id: string | null
@@ -1557,7 +1615,6 @@ export type PaymentSettledEvent = {
   payment_id: string
   customer_id: string
   order_id?: string
-  price_id?: string
   subscription_id?: string
   amount: string
   currency: string

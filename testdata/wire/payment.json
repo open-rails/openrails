@@ -7,46 +7,8 @@
   "currency": "USD",
   "customer_id": "22222222-2222-2222-2222-222222222222",
   "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-  "order_id": null,
+  "order_id": "ord_77777777-7777-4777-8777-777777777777",
   "quantity": null,
-  "price_id": "pro:monthly:v1",
-  "price": {
-    "quantity": null,
-    "revision": 0,
-    "version": 1,
-    "id": "pro:monthly:v1",
-    "key": "monthly",
-    "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    "archived": false,
-    "unit_amount": "9223372036854775807",
-    "currency": "USD",
-    "access_duration_hours": 720,
-    "billing_interval_hours": 720,
-    "trial_unit_amount": null,
-    "trial_duration_hours": null,
-    "psps": {
-      "mobius": {
-        "status": "linked",
-        "ids": null,
-        "lookup_key": "",
-        "sync_status": "unknown",
-        "drift": null,
-        "message": ""
-      }
-    },
-    "pending_manual_actions": [],
-    "created_at": "2026-09-16T00:00:00.123456789Z",
-    "updated_at": "2026-09-16T00:00:00.123456789Z"
-  },
-  "product": {
-    "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    "key": "pro",
-    "display_name": "Pro",
-    "description": "",
-    "tier_group": null,
-    "tier_rank": 0,
-    "archived": false
-  },
   "channel": "rail",
   "rail": "nmi",
   "psp_id": "psp_55555555-5555-5555-5555-555555555555",
