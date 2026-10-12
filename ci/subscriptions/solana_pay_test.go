@@ -129,7 +129,22 @@ func (p *solanaPay) checkout(buyer *customer) transferRequest {
 // checkoutIn is buyer paying an order for the pass in token from a wallet:
 // the order awaits it, the wallet asks for the transaction and is handed it.
 func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
-	order := p.orderIn(buyer, token)
+	return p.walletCheckout(buyer, p.orderIn(buyer, token))
+}
+
+// merchantCheckout is buyer paying, from a wallet, an order of the pass the
+// merchant made for them: a second open order beside one of their own.
+func (p *solanaPay) merchantCheckout(buyer *customer) transferRequest {
+	t := p.w.t
+	made, err := p.w.client[embedded].CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: buyer.cid(),
+		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID(p.prices["DUSD"])}}, IdempotencyKey: uuid.NewString()})
+	require.NoError(t, err)
+	return p.walletCheckout(buyer, p.payFromWallet(buyer, made.ID, "DUSD", strconv.FormatInt(made.Total, 10)))
+}
+
+// walletCheckout is the wallet asking for order's transaction and being
+// handed it.
+func (p *solanaPay) walletCheckout(buyer *customer, order billing.OrderID) transferRequest {
 	wallet := solanago.NewWallet().PublicKey()
 	status, encoded := p.walletPost(order, wallet)
 	require.Equal(p.w.t, http.StatusOK, status, encoded)
@@ -148,8 +163,15 @@ func (p *solanaPay) orderIn(buyer *customer, token string) billing.OrderID {
 	require.Equal(t, http.StatusCreated, created.status, "%v", created.body)
 	id, err := billing.ParseOrderID(created.body["id"].(string))
 	require.NoError(t, err)
+	return p.payFromWallet(buyer, id, token, created.body["total"].(string))
+}
+
+// payFromWallet asks to pay buyer's order id in token from a Solana wallet:
+// it awaits the wallet with a solana_pay next action.
+func (p *solanaPay) payFromWallet(buyer *customer, id billing.OrderID, token, total string) billing.OrderID {
+	t := p.w.t
 	paid := buyer.order(http.MethodPost, "/orders/"+id.String()+"/pay", "sol-"+uuid.NewString(),
-		map[string]any{"payment": map[string]any{"token_symbol": token, "psp_id": p.rail.PSPID}, "expected_total": created.body["total"]})
+		map[string]any{"payment": map[string]any{"token_symbol": token, "psp_id": p.rail.PSPID}, "expected_total": total})
 	require.Equal(t, http.StatusOK, paid.status, "%v", paid.body)
 	require.Equal(t, "requires_action", paymentOf(paid)["status"], "%v", paid.body)
 	action := paymentOf(paid)["next_action"].(map[string]any)
@@ -554,8 +576,9 @@ func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 // order stays unpaid.
 func TestSolanaPayOneTransferCreditsOneCheckout(t *testing.T) {
 	p := newSolanaPay(t)
-	buyer := p.w.newCustomer()
-	a, b := p.checkout(buyer), p.checkout(buyer)
+	// Two buyers: one customer's request for the same lines answers its one
+	// open order.
+	a, b := p.checkout(p.w.newCustomer()), p.checkout(p.w.newCustomer())
 	require.Equal(t, a.amount, b.amount)
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: a.recipient, Mint: a.mint,
 		Amount: a.amount, Reference: a.reference, Also: []string{b.reference}, Memo: a.memo, BlockTime: p.w.clock.Now()})
@@ -923,7 +946,9 @@ func TestSolanaPayOrderRefusals(t *testing.T) {
 	status, _ = p.walletPost(open, wallet)
 	require.Equal(t, http.StatusConflict, status, "an order not paid from a wallet")
 
-	paid := p.checkout(buyer)
+	// Another buyer: this one's request for the same lines answers its open
+	// order above.
+	paid := p.checkout(p.w.newCustomer())
 	p.pay(paid, paid.amount)
 	p.until(func() bool { return p.status(paid) == "succeeded" }, "paid")
 	status, _ = p.walletPost(paid.order, wallet)
