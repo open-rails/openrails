@@ -80,6 +80,16 @@ func TestProviderArchiveIdentityAndSchedule(t *testing.T) {
 	fields["cadence_hours"] = "24"
 	p, values = row(t, "provider_schedules", fields)
 	require.ErrorContains(t, ValidateValues(p, values), "cadence")
+	bill.Lines[0].BillingIntervalHours = nil
+	raw, err = json.Marshal(bill)
+	require.NoError(t, err)
+	fields["accepted_bill"], fields["cadence_hours"], fields["cadence_months"] = string(raw), "0", "1"
+	delete(fields, "initial_order_id")
+	p, values = row(t, "provider_schedules", fields)
+	require.NoError(t, ValidateValues(p, values), "an explicit monthly forward agreement needs no invented initial order")
+	fields["cadence_hours"] = "720"
+	p, values = row(t, "provider_schedules", fields)
+	require.ErrorContains(t, ValidateValues(p, values), "cadence", "two schedule clocks cannot be accepted")
 }
 
 func TestProviderArchiveWireRetainsReplayIdentity(t *testing.T) {
