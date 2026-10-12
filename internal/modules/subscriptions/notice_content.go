@@ -19,7 +19,9 @@ var _ = template.Must(emailHTML.Parse(`
 <h2>Your bill: {{.Amount}}</h2>
 <p>Hi {{.Username}},</p>
 {{if .Automatic}}<p>We'll charge <strong>{{.Amount}}</strong> for your usage to your card on file on <strong>{{.Due}}</strong>. You don't need to do anything.</p>
-{{else}}<p>Your bill of <strong>{{.Amount}}</strong> for your usage is due on <strong>{{.Due}}</strong>. Please pay it by then.</p>
+{{else if .Invoice}}<p>Your bill of <strong>{{.Amount}}</strong> for your usage is due on <strong>{{.Due}}</strong>. Please pay it by then.</p>
+{{template "button" .Button}}
+{{else}}<p>Your bill of <strong>{{.Amount}}</strong> for your usage is due on <strong>{{.Due}}</strong>. View your billing account for payment details.</p>
 {{template "button" .Button}}{{end}}
 {{if .Automatic}}{{template "how_to_cancel" .}}{{end}}
 <p>The {{.Store}} Team</p>
@@ -137,19 +139,26 @@ func nonEmpty(lines ...string) []string {
 // its due date (with how to cancel that agreement), or the customer pays it.
 func RenderOrderDueEmail(storeName, billingURL, username string, data billing.NotificationData) EmailContent {
 	name, amount, due := noticeName(username), noticeAmount(data.AmountDue, data.Currency), noticeDate(data.DueAt)
-	automatic := data.CollectionMethod != billing.CollectSendInvoice
+	automatic := data.CollectionMethod == billing.CollectChargeAutomatically
+	invoiced := data.CollectionMethod == billing.CollectSendInvoice
+	button := emailButton{billingURL, "View bill"}
 	const what = "charges for your usage"
 	var lines []string
 	if automatic {
 		lines = []string{fmt.Sprintf("We'll charge %s for your usage to your card on file on %s. You don't need to do anything.", amount, due),
 			cancelPlain(storeName, billingURL, what)}
-	} else {
+	} else if invoiced {
+		button.Label = "Pay now"
 		lines = nonEmpty(fmt.Sprintf("Your bill of %s for your usage is due on %s. Please pay it by then.", amount, due), linkLine("Pay it here", billingURL))
+	} else {
+		// Older queued notices have no collection method. Do not promise a
+		// card charge or ask for manual payment when the notice cannot say.
+		lines = nonEmpty(fmt.Sprintf("Your bill of %s for your usage is due on %s. View your billing account for payment details.", amount, due), linkLine("View your bill", billingURL))
 	}
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s bill: %s due %s", storeName, amount, due),
-		HTML: renderEmailHTML("order_due", emailFields{"Username": name, "Amount": amount, "Due": due, "Automatic": automatic,
-			"Button": emailButton{billingURL, "Pay now"}, "CancelURL": billingURL, "CancelWhat": what, "Store": storeName}),
+		HTML: renderEmailHTML("order_due", emailFields{"Username": name, "Amount": amount, "Due": due, "Automatic": automatic, "Invoice": invoiced,
+			"Button": button, "CancelURL": billingURL, "CancelWhat": what, "Store": storeName}),
 		Plain: plainNotice("Your bill: "+amount, name, lines, storeName),
 	}
 }

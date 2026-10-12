@@ -1,4 +1,4 @@
--- parent: 73 sha256:cf82387a7355477b0ee7fefa074ddd0a5b15f16c6fbf19fc8ddc887612806342
+-- parent: 73 sha256:d84591d9a76c13d0e87cdb64f36c0a6d2b2d3f9306d97f54d97fe0d60e081184
 -- Repair: none-needed An overdue notice named its order by a bare id, which no reader decodes; the repair names it ord_<uuid>, as every notice does.
 -- An order_overdue notice names its order the way every notice does.
 UPDATE billing.notifications

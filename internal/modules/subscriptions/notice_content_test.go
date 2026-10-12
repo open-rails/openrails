@@ -19,6 +19,7 @@ func TestNoticeEmails(t *testing.T) {
 	const billingPage = "https://shop.test/billing"
 	order := billing.NotificationData{OrderID: billing.OrderID(uuid.New()), AmountDue: &amount, Currency: "USD", DueAt: &due}
 	automatic, invoiced, retried := order, order, order
+	automatic.CollectionMethod = billing.CollectChargeAutomatically
 	invoiced.CollectionMethod = billing.CollectSendInvoice
 	retried.NextAttemptAt = &due
 	stopped := order
@@ -36,6 +37,7 @@ func TestNoticeEmails(t *testing.T) {
 		cancel  string
 	}{
 		"due, charged":          {RenderOrderDueEmail("Shop", billingPage, "ada", automatic), []string{"42.50 USD", "November 5, 2026", "card on file"}, cancelUsage},
+		"due, legacy":           {RenderOrderDueEmail("Shop", billingPage, "ada", order), []string{"42.50 USD", "November 5, 2026", "View your billing account for payment details", billingPage}, ""},
 		"due, invoiced":         {RenderOrderDueEmail("Shop", billingPage, "ada", invoiced), []string{"42.50 USD", "November 5, 2026", "Please pay it by then", billingPage}, ""},
 		"overdue":               {RenderOrderOverdueEmail("Shop", billingPage, "ada", order), []string{"42.50 USD", "November 5, 2026", "still unpaid", billingPage}, ""},
 		"card failed":           {RenderOrderCardFailedEmail("Shop", billingPage, "ada", retried), []string{"42.50 USD", "try again on", "November 5, 2026", billingPage}, ""},
@@ -63,6 +65,12 @@ func TestNoticeEmails(t *testing.T) {
 		}
 		require.Contains(t, c.Plain, tc.cancel, name)
 		require.Contains(t, c.HTML, `visit <a href="https://shop.test/billing">`, name)
+	}
+
+	legacy := RenderOrderDueEmail("Shop", billingPage, "ada", order)
+	for _, body := range []string{legacy.HTML, legacy.Plain} {
+		require.NotContains(t, body, "We'll charge")
+		require.NotContains(t, body, "Please pay it")
 	}
 
 	without := RenderOrderDueEmail("Shop", "", "", automatic)
