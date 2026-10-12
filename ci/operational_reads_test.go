@@ -53,6 +53,7 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 	}
 
 	admittedAt := clock.Now()
+	var capturedUsage billing.UsageEventID
 	states := []billing.AdmissionState{billing.AdmissionOpen, billing.AdmissionExpired, billing.AdmissionReleased, billing.AdmissionCaptured}
 	for _, state := range states {
 		deadline := admittedAt.Add(time.Hour)
@@ -66,7 +67,11 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 			_, err = a.ReleaseAdmissions(t.Context(), []string{string(state)})
 		}
 		if state == billing.AdmissionCaptured {
-			_, err = captureAdmission(t.Context(), a, string(state), 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
+			var receipt *billing.CaptureReceipt
+			receipt, err = captureAdmission(t.Context(), a, string(state), 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
+			require.NoError(t, err)
+			require.NotNil(t, receipt.UsageEventID)
+			capturedUsage = *receipt.UsageEventID
 		}
 		require.NoError(t, err)
 	}
@@ -142,7 +147,7 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 			}
 			params.Cursor = page.Next
 		}
-		require.ElementsMatch(t, []billing.UsageEventID{events[0].ID, events[1].ID, events[2].ID, events[3].ID}, ids)
+		require.ElementsMatch(t, []billing.UsageEventID{capturedUsage, events[0].ID, events[1].ID, events[2].ID, events[3].ID}, ids, "captured usage is inspectable alongside recorded usage")
 		page, err := client.ListUsageEvents(t.Context(), billing.UsageEventListParams{CustomerID: customer, Currency: "usd", Source: "jobs", SourceID: "first", EventType: "tokens", Outcome: billing.UsageSucceeded})
 		require.NoError(t, err)
 		require.Len(t, page.Items, 1)
