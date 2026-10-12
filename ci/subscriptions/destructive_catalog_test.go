@@ -79,7 +79,9 @@ func TestDestructiveConfigurationLostReplyReusesAdmission(t *testing.T) {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	var lose atomic.Bool
 	proxy.ModifyResponse = func(response *http.Response) error {
-		if lose.Load() && response.Request.Method == http.MethodPost && strings.HasSuffix(response.Request.URL.Path, "/merchant") {
+		// Vault's client writes with PUT.
+		write := response.Request.Method == http.MethodPut || response.Request.Method == http.MethodPost
+		if lose.Load() && write && strings.HasSuffix(response.Request.URL.Path, "/merchant") {
 			return fmt.Errorf("simulated lost Vault write response")
 		}
 		return nil
