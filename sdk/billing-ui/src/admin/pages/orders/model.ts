@@ -19,7 +19,7 @@ export const usageActionDescriptions: Record<UsageAction, string> = {
 // order in its state: none while a collection is in progress.
 export function usageActions(order: Order): UsageAction[] {
   const usage = order.usage
-  if (!usage || BigInt(usage.amount_due) <= 0n) return []
+  if (order.collection_owner !== "engine" || !usage || BigInt(usage.amount_due) <= 0n) return []
   switch (order.status) {
     case "open":
       return ["record_payment", "mark_uncollectible", "waive_balance"]

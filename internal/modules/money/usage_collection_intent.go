@@ -118,6 +118,24 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 	if outcome, done := h.finalizeFromEvidence(ctx, intent, p); done {
 		return outcome
 	}
+	// Admission is not authority to send forever: recheck the frozen
+	// collection owner under the order lock before dispatch or replay.
+	var owned bool
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := h.DB.NewWithPgxTx(tx).Gen(ctx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
+		var err error
+		owned, err = collectionOwned(ctx, q, intent, p)
+		return err
+	})
+	if err != nil {
+		return intents.Parked("check order collection authority: " + err.Error())
+	}
+	if !owned {
+		return intents.Parked("order is not owned by this engine collection")
+	}
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
 		// Resumed after a possible submission. Stripe replays its idempotent
 		// sequence; NMI-family rails may only read.
@@ -769,7 +787,8 @@ func collectionOwned(ctx context.Context, q *gen.Queries, in gen.BillingProvider
 
 // collectionLive reports whether operation is the order's live collection.
 func collectionLive(order gen.BillingOrder, operation uuid.UUID) bool {
-	return order.Status == string(billing.OrderProcessing) && order.AttemptID != nil && *order.AttemptID == operation
+	return order.CollectionOwner == string(billing.OrderCollectionEngine) && order.Origin == string(billing.OrderOriginUsage) &&
+		order.Status == string(billing.OrderProcessing) && order.AttemptID != nil && *order.AttemptID == operation
 }
 
 func derefInt32(v *int32) int32 {

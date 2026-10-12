@@ -335,19 +335,18 @@ describe("SubscriptionsPanel", () => {
 })
 
 describe("PaymentHistory", () => {
-  it("names what was bought, falling back before OpenRails sends product", async () => {
+  it("names payment purpose without reading retired price or product projections", async () => {
     const server = fakeBilling({
       payments: [
         payment({
-          price: price(168, 168),
-          product: { id: "prod_1", display_name: "Weekly pass" },
+          order_id: "ord_weekly",
+          subscription_id: "sub_weekly",
         }),
-        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720, 720) }),
-        payment({ id: "pay_3", price: price(null, null) }),
+        payment({ id: "pay_2", subscription_id: "sub_1" }),
+        payment({ id: "pay_3" }),
         payment({
           id: "pay_4",
-          price: price(null, null),
-          product: { id: "prod_2", display_name: "Post purchase" },
+          order_id: "ord_post",
         }),
       ],
     })
@@ -357,31 +356,29 @@ describe("PaymentHistory", () => {
     const period = (i: number) =>
       within(rows[i]).queryByTestId("payment-period")?.textContent ?? null
     expect(rows.map((_, i) => item(i).textContent)).toEqual([
-      "Weekly pass",
+      "Subscription",
       "Subscription",
       "Purchase",
-      "Post purchase",
+      "Purchase",
     ])
     expect(rows.map((_, i) => period(i))).toEqual([
-      "every week",
-      "every 30 days",
+      null,
+      null,
       null,
       null,
     ])
   })
 
-  it("localizes the fallback name and period", async () => {
+  it("localizes payment purpose without inventing a cadence", async () => {
     const server = fakeBilling({
-      payments: [payment({ subscription_id: "sub_1", price: price(720, 720) })],
+      payments: [payment({ subscription_id: "sub_1" })],
     })
     mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
     const row = await screen.findByTestId("payment-row")
     expect(within(row).getByTestId("payment-item")).toHaveTextContent(
       "サブスクリプション"
     )
-    expect(within(row).getByTestId("payment-period")).toHaveTextContent(
-      "30日ごと"
-    )
+    expect(within(row).queryByTestId("payment-period")).toBeNull()
   })
 })
 

@@ -340,6 +340,9 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	if err != nil {
 		return OrderAnswer{}, err
 	}
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return OrderAnswer{}, orders.ErrNotPayable
+	}
 	// A usage order's collection is a durable operation that waits out
 	// disabled writes and provider recovery itself.
 	if order.Origin != string(billing.OrderOriginUsage) {
@@ -390,6 +393,9 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 // payOrder pays a purchase. A saved card awaiting the customer's consent
 // (its brand changed) is verified with them present first.
 func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, error) {
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return checkout.OrderCharge{}, orders.ErrNotPayable
+	}
 	quote, err := s.frozenQuote(ctx, order)
 	if err != nil {
 		return checkout.OrderCharge{}, err
@@ -416,6 +422,9 @@ func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id.UUID())
 	if err != nil {
 		return OrderAnswer{}, err
+	}
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return OrderAnswer{}, orders.ErrNotPayable
 	}
 	var signature string
 	if params.Signature != nil {
@@ -563,7 +572,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 		return nil, err
 	}
 	var next *billing.NextAction
-	if order.AwaitsCustomer() {
+	if order.CollectionOwner == string(billing.OrderCollectionEngine) && order.AwaitsCustomer() {
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
 		if next, err = rt.Checkout.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
 			return nil, err
@@ -580,6 +589,8 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 // openOrderOptions are what can pay an open order; none for any other.
 func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
 	switch {
+	case order.CollectionOwner != string(billing.OrderCollectionEngine):
+		return nil, nil
 	case order.Status != string(billing.OrderOpen):
 		return nil, nil
 	case order.Origin == string(billing.OrderOriginSubscription):
@@ -722,6 +733,9 @@ func (s *Service) RecordPayment(ctx context.Context, params billing.RecordExtern
 	order, err := rt.Orders.Get(ctx, params.OrderID.UUID())
 	if err != nil {
 		return nil, false, err
+	}
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return nil, false, orders.ErrNotPayable
 	}
 	if order.Origin == string(billing.OrderOriginUsage) {
 		payment, created, err = s.moneyService().RecordUsageRemittance(ctx, money.UsageRemittance{OrderID: order.ID, Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})

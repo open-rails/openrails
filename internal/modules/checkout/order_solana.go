@@ -116,6 +116,8 @@ func (s *CheckoutAttemptService) openOrderSolana(ctx context.Context, order *ord
 		now := s.now().UTC().Truncate(time.Microsecond)
 		awaiting := current.PaymentStatus == string(billing.OrderPaymentRequiresAction)
 		switch {
+		case current.CollectionOwner != string(billing.OrderCollectionEngine):
+			return orders.ErrNotPayable
 		case current.Status != string(billing.OrderOpen) && current.Status != string(billing.OrderProcessing), current.ExpiresAt != nil && !current.ExpiresAt.After(now):
 			return orders.ErrNotPayable
 		case replaces == uuid.Nil && (current.Status == string(billing.OrderProcessing) || awaiting):

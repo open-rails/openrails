@@ -226,6 +226,21 @@ export function OrderDetail({ order }: { order: Order }) {
             <AdminMessage id={"Status: "} />
             <StatusBadge status={order.payment.status} />
           </p>
+          {order.collection_owner !== "engine" && (
+            <p>
+              {order.collection_owner === "nmi_schedule"
+                ? "Collection follows the NMI schedule. Recovery is coordinated through the subscription."
+                : "The payment provider collects this bill. Payment activity appears in the history below."}
+            </p>
+          )}
+          {order.provider_bills.map((bill, index) => (
+            <p key={`${bill.psp_id}:${bill.kind}:${bill.reference}:${index}`}>
+              {bill.reference || bill.kind}
+              {bill.settled_at
+                ? ` · Settled via ${bill.settlement_source} · ${formatDate(bill.settled_at)}`
+                : " · Settlement not yet verified"}
+            </p>
+          ))}
           {failure && (
             <p>
               <AdminMessage id={"Last failure: "} />

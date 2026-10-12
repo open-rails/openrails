@@ -107,6 +107,8 @@ func (s *CheckoutAttemptService) payOrderHosted(ctx context.Context, in OrderPay
 		switch {
 		case current.Status == string(billing.OrderProcessing) || current.PaymentStatus == string(billing.OrderPaymentRequiresAction):
 			return orders.ErrInProgress
+		case current.CollectionOwner != string(billing.OrderCollectionEngine):
+			return orders.ErrNotPayable
 		case !orders.Payable(current, now):
 			return orders.ErrNotPayable
 		}

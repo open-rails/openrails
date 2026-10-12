@@ -266,7 +266,11 @@ func lockUsageOrder(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUI
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: row.CustomerID}); err != nil {
 		return row, err
 	}
-	return q.LockUsageOrder(ctx, gen.LockUsageOrderParams{MerchantID: merchantID, CustomerID: row.CustomerID, ID: id})
+	row, err = q.LockUsageOrder(ctx, gen.LockUsageOrderParams{MerchantID: merchantID, CustomerID: row.CustomerID, ID: id})
+	if err == nil && row.CollectionOwner != string(billing.OrderCollectionEngine) {
+		return row, ErrUsageActionNotAllowed
+	}
+	return row, err
 }
 
 // VoidUsageOrder voids an unpaid usage order and writes off what it still

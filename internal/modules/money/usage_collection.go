@@ -242,7 +242,7 @@ func scheduledUsageCollectionKey(orderID uuid.UUID, ordinal int64) string {
 
 func scheduledUsageCollectionEligible(order gen.BillingOrder, minThreshold int64, now time.Time) bool {
 	due := usage.Due(order)
-	if order.Status != string(billing.OrderOpen) || order.CollectionMethod == nil || *order.CollectionMethod != CollectionChargeAutomatically ||
+	if order.CollectionOwner != string(billing.OrderCollectionEngine) || order.Status != string(billing.OrderOpen) || order.CollectionMethod == nil || *order.CollectionMethod != CollectionChargeAutomatically ||
 		due <= 0 || (minThreshold > 0 && due < minThreshold) {
 		return false
 	}
@@ -289,6 +289,12 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		}
 		if err != nil {
 			return fmt.Errorf("lock usage order: %w", err)
+		}
+		if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+			if opts.manual {
+				return ErrUsageActionNotAllowed
+			}
+			return nil
 		}
 		if opts.operationKey != "" {
 			prior, err := q.GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
