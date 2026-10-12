@@ -8,7 +8,7 @@ CREATE TABLE billing.destructive_actions (
  target text NOT NULL CHECK (btrim(target) <> '' AND octet_length(target)<=2048),
  action_key text NOT NULL CHECK (btrim(action_key) <> '' AND octet_length(action_key)<=2048),
  request_digest text NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
- origin text NOT NULL CHECK (origin IN ('staff','host')),
+ origin text NOT NULL CHECK (origin IN ('staff','host','automation')),
  actor_issuer text NOT NULL CHECK (btrim(actor_issuer) <> ''),
  actor_id text NOT NULL CHECK (btrim(actor_id) <> ''),
  actor_key text NOT NULL CHECK (actor_key ~ '^[0-9a-f]{64}$'),
@@ -18,12 +18,13 @@ CREATE TABLE billing.destructive_actions (
  state text NOT NULL CHECK (state IN ('reserved','started','succeeded','no_effect','uncertain')),
  started_at timestamptz,
  finished_at timestamptz,
+ completion_sequence bigint,
  result text CHECK (result <> '' AND octet_length(result)<=2048),
  PRIMARY KEY(merchant_id,id),
  CONSTRAINT destructive_actions_lifecycle_check CHECK (
    (state='reserved' AND started_at IS NULL AND finished_at IS NULL)
    OR (state IN ('started','uncertain') AND started_at IS NOT NULL AND finished_at IS NULL)
-   OR (state='succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL)
+   OR (state='succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND completion_sequence IS NOT NULL)
    OR (state='no_effect' AND finished_at IS NOT NULL))
 );
 CREATE UNIQUE INDEX destructive_actions_live_key ON billing.destructive_actions(merchant_id,action_key) WHERE state<>'no_effect';
@@ -31,9 +32,10 @@ CREATE INDEX destructive_actions_key_history_idx ON billing.destructive_actions(
 CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions(actor_key,admitted_at) INCLUDE (units) WHERE state='succeeded';
 CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions(merchant_id,admitted_at) INCLUDE (units) WHERE state='succeeded';
 CREATE INDEX destructive_actions_recent_idx ON billing.destructive_actions(admitted_at) INCLUDE (units) WHERE state='succeeded';
+CREATE INDEX destructive_actions_pending_target_idx ON billing.destructive_actions(merchant_id,target,actor_issuer,actor_id,request_digest) WHERE state IN ('reserved','started','uncertain');
 CREATE INDEX destructive_actions_pending_idx ON billing.destructive_actions(merchant_id,actor_key) INCLUDE (units) WHERE state IN ('reserved','started','uncertain');
 CREATE TRIGGER destructive_actions_immutable BEFORE UPDATE ON billing.destructive_actions
- FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','started_at','finished_at','result');
+ FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','started_at','finished_at','completion_sequence','result');
 CREATE FUNCTION billing.guard_destructive_action_state() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF OLD.state IN ('succeeded','no_effect') AND NEW IS DISTINCT FROM OLD THEN
@@ -41,6 +43,12 @@ BEGIN
  END IF;
  IF OLD.started_at IS NOT NULL AND NEW.started_at IS DISTINCT FROM OLD.started_at THEN
    RAISE EXCEPTION 'destructive action start is immutable' USING ERRCODE='23514';
+ END IF;
+ IF OLD.completion_sequence IS NOT NULL AND NEW.completion_sequence IS DISTINCT FROM OLD.completion_sequence THEN
+   RAISE EXCEPTION 'destructive action outcome order is immutable' USING ERRCODE='23514';
+ END IF;
+ IF NEW.state<>'succeeded' AND NEW.completion_sequence IS NOT NULL THEN
+   RAISE EXCEPTION 'only successful actions have a completion sequence' USING ERRCODE='23514';
  END IF;
  IF OLD.state <> 'reserved' AND NEW.state='reserved' THEN
    RAISE EXCEPTION 'destructive action cannot be unstarted' USING ERRCODE='23514';
@@ -104,7 +112,7 @@ CREATE INDEX provider_intents_destructive_action_idx ON billing.provider_intents
 COMMENT ON COLUMN billing.provider_intents.destructive_action_id IS 'Original admitted command; recovery and necessary consequences reuse its authority and never spend another unit.';
 
 CREATE INDEX subscriptions_destructive_scale_idx ON billing.subscriptions(merchant_id,customer_id,price_id) WHERE status IN ('active','past_due') AND deleted_at IS NULL;
-CREATE INDEX payments_destructive_scale_idx ON billing.payments(purchased_at,merchant_id,customer_id) WHERE status='succeeded' AND amount>0 AND refunded_payment_id IS NULL AND deleted_at IS NULL;
+CREATE INDEX payments_destructive_scale_idx ON billing.payments(merchant_id,customer_id,purchased_at) WHERE status='succeeded' AND amount>0 AND refunded_payment_id IS NULL AND deleted_at IS NULL;
 
 ALTER TABLE billing.host_outbox DROP CONSTRAINT host_outbox_currency_check;
 ALTER TABLE billing.host_outbox ADD CONSTRAINT host_outbox_currency_check CHECK ((currency IS NULL) = (event_type IN ('product.entitlements_changed', 'customer.network_linked', 'customer.network_unlinked', 'mandate.revoked', 'destructive.hold_opened', 'destructive.hold_cleared')) AND (currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$'));
@@ -122,3 +130,7 @@ ALTER TABLE billing.host_outbox ADD CONSTRAINT host_outbox_payload_check CHECK (
     OR (event_type = 'mandate.revoked' AND subject_type = 'mandate' AND payment_id IS NULL AND amount IS NULL)
     OR (event_type IN ('destructive.hold_opened','destructive.hold_cleared') AND subject_type='destructive_hold' AND payment_id IS NULL AND amount IS NULL AND currency IS NULL AND jsonb_typeof(data)='object')
 );
+
+-- Provider-origin facts are distinct from operator commands and autonomous maintenance.
+ALTER TABLE billing.provider_intents DROP CONSTRAINT provider_intents_origin_check;
+ALTER TABLE billing.provider_intents ADD CONSTRAINT provider_intents_origin_check CHECK (origin IN ('user','admin','system','provider'));

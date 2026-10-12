@@ -57,6 +57,25 @@ func (a *Admissions) Admit(ctx context.Context, c Command) (Action, error) {
 	return actions[0], nil
 }
 
+// AdmitAutonomous admits explicitly named internal maintenance. An HTTP or
+// host principal cannot relabel itself as automation to borrow this budget.
+func (a *Admissions) AdmitAutonomous(ctx context.Context, c Command, source string) (Action, error) {
+	if _, ok := billingauth.StaffFromContext(ctx); ok {
+		return Action{}, errors.New("staff command cannot become autonomous")
+	}
+	if _, ok := billingauth.IdentityFromContext(ctx); ok {
+		return Action{}, errors.New("verified command cannot become autonomous")
+	}
+	switch source {
+	case "startup_catalog", "startup_configuration", "reconciliation":
+	default:
+		return Action{}, errors.New("unknown autonomous destructive source")
+	}
+	c.Actor = Actor{Issuer: "openrails:automation", ID: source}
+	c.origin = "automation"
+	return a.Admit(ctx, c)
+}
+
 // AdmitBatch atomically reserves all fresh commands of one admitted principal
 // and merchant. Existing replays cost zero; no fresh receipt survives a trip.
 func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Action, error) {
@@ -69,7 +88,7 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 		if err := c.validate(); err != nil {
 			return nil, err
 		}
-		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID {
+		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID || c.origin != first.origin {
 			return nil, errors.New("destructive batch must share merchant and actor")
 		}
 		if keysSeen[c.Key] {
@@ -85,7 +104,7 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 		for i, c := range commands {
 			old, err := q.GetDestructiveActionByKey(ctx, gen.GetDestructiveActionByKeyParams{MerchantID: c.MerchantID, ActionKey: c.Key})
 			if err == nil {
-				if old.RequestDigest != c.Digest || old.Kind != string(c.Kind) || old.Target != c.Target || old.Units != c.Units || old.ActorIssuer != c.Actor.Issuer || old.ActorID != c.Actor.ID {
+				if old.RequestDigest != c.Digest || old.Kind != string(c.Kind) || old.Target != c.Target || old.Units != c.Units || old.ActorIssuer != c.Actor.Issuer || old.ActorID != c.Actor.ID || (old.Origin == "automation") != (c.origin == "automation") {
 					return ErrConflict
 				}
 				if old.State != string(StateNoEffect) {
@@ -111,11 +130,18 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 		now := a.clock.Now().UTC()
 		for _, i := range fresh {
 			c := commands[i]
-			origin := "staff"
+			origin := c.origin
+			if origin == "" {
+				origin = "staff"
+			}
 			if c.Actor.Issuer == billingauth.HostIssuer {
 				origin = "host"
 			}
-			row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: uuid.New(), Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: origin, ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.Actor.key(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
+			id, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: origin, ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.Actor.key(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
 			if err != nil {
 				return err
 			}
@@ -133,17 +159,18 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 }
 func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, c Command, units int64) (*HeldError, error) {
 	keys := scopeKeys(c.Actor, c.MerchantID)
+	scopes := []Scope{ScopeActor, ScopeMerchant, ScopeDeployment}
+	if c.origin == "automation" {
+		keys = []string{"automation:" + c.MerchantID.String()}
+		scopes = []Scope{ScopeMerchant}
+	}
 	if h, err := q.FindOpenDestructiveHold(ctx, keys); err == nil {
 		return &HeldError{Hold: holdOf(h)}, nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 	now := a.clock.Now().UTC()
-	scale, err := q.DestructiveActiveCustomerScale(ctx, gen.DestructiveActiveCustomerScaleParams{MerchantID: c.MerchantID, Since: now.Add(-30 * 24 * time.Hour)})
-	if err != nil {
-		return nil, err
-	}
-	for i, scope := range []Scope{ScopeActor, ScopeMerchant, ScopeDeployment} {
+	for i, scope := range scopes {
 		after, err := q.DestructiveScopeClearEpoch(ctx, keys[i])
 		if err != nil {
 			return nil, err
@@ -158,11 +185,19 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			}
 			hourly, daily = n.Hourly, n.Daily
 		case ScopeMerchant:
-			n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
-			if err != nil {
-				return nil, err
+			if c.origin == "automation" {
+				n, err := q.CountDestructiveUnitsForAutomation(ctx, gen.CountDestructiveUnitsForAutomationParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+				if err != nil {
+					return nil, err
+				}
+				hourly, daily = n.Hourly, n.Daily
+			} else {
+				n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+				if err != nil {
+					return nil, err
+				}
+				hourly, daily = n.Hourly, n.Daily
 			}
-			hourly, daily = n.Hourly, n.Daily
 		case ScopeDeployment:
 			n, err := q.CountDestructiveUnitsForDeployment(ctx, gen.CountDestructiveUnitsForDeploymentParams{HourSince: hourSince, DaySince: daySince, ClearAfter: after})
 			if err != nil {
@@ -170,7 +205,34 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			}
 			hourly, daily = n.Hourly, n.Daily
 		}
-		hourLimit, dayLimit := limits(scope, scale.MerchantActive, scale.DeploymentActive)
+		hourLimit, dayLimit := limits(scope, 0, 0)
+		if c.origin == "automation" {
+			hourLimit, dayLimit = 50, 25
+		}
+		required := int64(0)
+		if scope != ScopeActor {
+			if hourly+units > hourLimit && c.origin != "automation" {
+				required = (hourly+units-1)*400 + 1
+			}
+			if daily+units > dayLimit {
+				required = max(required, (daily+units-1)*100+1)
+			}
+			if required > 0 && !(c.origin == "automation" && hourly+units > hourLimit) {
+				var active int64
+				if scope == ScopeMerchant {
+					active, err = q.DestructiveMerchantActivityAtLeast(ctx, gen.DestructiveMerchantActivityAtLeastParams{MerchantID: c.MerchantID, Since: now.Add(-30 * 24 * time.Hour), Required: required})
+				} else {
+					active, err = q.DestructiveDeploymentActivityAtLeast(ctx, gen.DestructiveDeploymentActivityAtLeastParams{Since: now.Add(-30 * 24 * time.Hour), Required: required})
+				}
+				if err != nil {
+					return nil, err
+				}
+				hourLimit, dayLimit = limits(scope, active, active)
+				if c.origin == "automation" {
+					hourLimit, dayLimit = 50, max(int64(25), ceil(active, 100))
+				}
+			}
+		}
 		window, count, limit := "hour", hourly, hourLimit
 		if hourly+units <= hourLimit {
 			window, count, limit = "day", daily, dayLimit
@@ -178,7 +240,11 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 		if count+units <= limit {
 			continue
 		}
-		row, err := q.CreateDestructiveHold(ctx, gen.CreateDestructiveHoldParams{MerchantID: c.MerchantID, ID: uuid.New(), Scope: string(scope), ScopeKey: keys[i], ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, Credential: optional(c.Actor.Credential), ActionKind: string(c.Kind), Target: c.Target, WindowName: window, Observed: count, Requested: units, Ceiling: limit, OpenedAt: now})
+		id, err := uuid.NewV7()
+		if err != nil {
+			return nil, err
+		}
+		row, err := q.CreateDestructiveHold(ctx, gen.CreateDestructiveHoldParams{MerchantID: c.MerchantID, ID: id, Scope: string(scope), ScopeKey: keys[i], ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, Credential: optional(c.Actor.Credential), ActionKind: string(c.Kind), Target: c.Target, WindowName: window, Observed: count, Requested: units, Ceiling: limit, OpenedAt: now})
 		if err != nil {
 			return nil, err
 		}
@@ -194,6 +260,16 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 // Start is the first-effect fence. Once a local or provider effect started,
 // recovery and required consequences keep that admission through later holds.
 func (a *Admissions) Start(ctx context.Context, mid, id uuid.UUID) (Action, error) {
+	return a.start(ctx, mid, id, false)
+}
+
+// StartPending is only for a canonical provider result proving that the
+// previous attempt sent nothing. It rechecks holds even on a started receipt;
+// a possibly submitted operation uses Start and its verification path instead.
+func (a *Admissions) StartPending(ctx context.Context, mid, id uuid.UUID) (Action, error) {
+	return a.start(ctx, mid, id, true)
+}
+func (a *Admissions) start(ctx context.Context, mid, id uuid.UUID, provenUnsent bool) (Action, error) {
 	var out Action
 	var held *HeldError
 	err := a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, _ pgx.Tx) error {
@@ -204,16 +280,25 @@ func (a *Admissions) Start(ctx context.Context, mid, id uuid.UUID) (Action, erro
 		if row.State == string(StateNoEffect) {
 			return ErrActionFinal
 		}
-		if row.State != string(StateReserved) {
+		if row.State != string(StateReserved) && !provenUnsent {
 			out = actionOf(row)
 			out.Replayed = true
 			return nil
 		}
-		if h, err := q.FindOpenDestructiveHold(ctx, scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)); err == nil {
+		keys := scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
+		if row.Origin == "automation" {
+			keys = []string{"automation:" + mid.String()}
+		}
+		if h, err := q.FindOpenDestructiveHold(ctx, keys); err == nil {
 			held = &HeldError{Hold: holdOf(h)}
 			return nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if row.State != string(StateReserved) {
+			out = actionOf(row)
+			out.Replayed = true
+			return nil
 		}
 		row, err = q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: mid, ID: id, Now: a.clock.Now().UTC()})
 		if err == nil {
@@ -266,7 +351,7 @@ func (a *Admissions) FinishTx(ctx context.Context, tx pgx.Tx, mid, id uuid.UUID,
 	if err != nil {
 		return err
 	}
-	if outcome == OutcomeNoEffect && (provider.Pending || provider.Attempted) {
+	if outcome == OutcomeNoEffect && (provider.Pending || provider.Succeeded) {
 		return errors.New("provider effects cannot be declared absent")
 	}
 	if outcome == OutcomeSucceeded && row.State == string(StateReserved) {
@@ -326,7 +411,7 @@ func text(p *string) string {
 	return *p
 }
 func actionOf(r gen.BillingDestructiveAction) Action {
-	return Action{ID: r.ID, MerchantID: r.MerchantID, Kind: Kind(r.Kind), Target: r.Target, Key: r.ActionKey, Digest: r.RequestDigest, Units: r.Units, Actor: Actor{Issuer: r.ActorIssuer, ID: r.ActorID, Credential: text(r.Credential)}, State: State(r.State), AdmittedAt: r.AdmittedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, Result: text(r.Result)}
+	return Action{Origin: r.Origin, ID: r.ID, MerchantID: r.MerchantID, Kind: Kind(r.Kind), Target: r.Target, Key: r.ActionKey, Digest: r.RequestDigest, Units: r.Units, Actor: Actor{Issuer: r.ActorIssuer, ID: r.ActorID, Credential: text(r.Credential)}, State: State(r.State), AdmittedAt: r.AdmittedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, Result: text(r.Result)}
 }
 
 // Clear is called only after the boundary proves root human authority, or by
@@ -427,4 +512,32 @@ func (a *Admissions) ListOpenHoldsDirectory(ctx context.Context, limit int, afte
 		out = append(out, HoldAddress{r.MerchantID, r.ID})
 	}
 	return out, nil
+}
+
+// FindPending returns an earlier unresolved external command for a retry whose
+// latest document revision may already include a successful-but-unacknowledged
+// write. The caller must read back its exact safe terms before another write.
+func (a *Admissions) FindPending(ctx context.Context, mid uuid.UUID, target string, actor Actor, digest string) (Action, bool, error) {
+	if err := actor.validate(); err != nil {
+		return Action{}, false, err
+	}
+	if a == nil || a.db == nil {
+		return Action{}, false, errors.New("destructive admissions unavailable")
+	}
+	var out Action
+	found := false
+	err := a.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(mid)), func(ctx context.Context) error {
+		row, err := a.db.Gen(ctx).FindPendingDestructiveAction(ctx, gen.FindPendingDestructiveActionParams{MerchantID: mid, Target: target, ActorIssuer: actor.Issuer, ActorID: actor.ID, RequestDigest: digest})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out = actionOf(row)
+		out.Replayed = true
+		found = true
+		return nil
+	})
+	return out, found, err
 }

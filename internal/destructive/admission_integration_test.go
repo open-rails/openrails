@@ -230,6 +230,30 @@ func TestDestructiveAdmissionScopesAndClearEpoch(t *testing.T) {
 	require.Equal(t, destructive.ScopeActor, held(t, err).Scope)
 }
 
+func TestDestructiveAdmissionPendingCompletionConsumesClearEpoch(t *testing.T) {
+	w := newAdmissionsWorld(t)
+	mid := w.merchant()
+	var admitted []destructive.Action
+	for range 5 {
+		a, err := w.gate.Admit(t.Context(), command(mid, "late"))
+		require.NoError(t, err)
+		admitted = append(admitted, a)
+	}
+	_, err := w.gate.Admit(t.Context(), command(mid, "late"))
+	h := held(t, err)
+	_, err = w.gate.Clear(t.Context(), mid, h.ID, operator, "keep earlier reservations")
+	require.NoError(t, err)
+	// Every receipt preceded clear, but all its effects complete afterwards at
+	// the same clock instant. Their units still consume the new epoch.
+	for _, a := range admitted {
+		_, err = w.gate.Start(t.Context(), mid, a.ID)
+		require.NoError(t, err)
+		require.NoError(t, w.gate.Finish(t.Context(), mid, a.ID, destructive.OutcomeSucceeded, "late receipt"))
+	}
+	_, err = w.gate.Admit(t.Context(), command(mid, "late"))
+	require.Equal(t, destructive.ScopeActor, held(t, err).Scope)
+}
+
 func TestDestructiveAdmissionDeploymentBudget(t *testing.T) {
 	w := newAdmissionsWorld(t)
 	for i := range 50 {

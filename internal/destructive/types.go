@@ -78,6 +78,7 @@ func Digest(terms any) string {
 // Command is a validated logical action. Key binds its existing idempotency
 // key or target lifecycle revision; a re-cancel after resume uses a new key.
 type Command struct {
+	origin     string
 	MerchantID uuid.UUID
 	Kind       Kind
 	Target     string
@@ -123,6 +124,7 @@ const (
 
 // Action is the durable admission, reused by its provider and local effects.
 type Action struct {
+	Origin     string     `json:"origin"`
 	ID         uuid.UUID  `json:"id"`
 	MerchantID uuid.UUID  `json:"merchant_id"`
 	Kind       Kind       `json:"kind"`
