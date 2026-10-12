@@ -306,12 +306,15 @@ test("a group invitation reaches enrollment through the shipped console", async 
         `/__test/mail?kind=verification&to=${encodeURIComponent(email)}`
       )
     ).json()) as { code: string }
+    const verified = newcomer.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/auth/v1/verify/confirm")
+    )
     await newcomer
       .getByRole("textbox", { name: /code/i })
       .fill(verification.code)
-    await newcomer
-      .getByRole("button", { name: /Verify|Continue/, exact: false })
-      .click()
+    expect((await verified).status()).toBe(200)
     await expect(
       newcomer.getByRole("navigation", { name: "Console", exact: true })
     ).toBeVisible()
