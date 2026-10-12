@@ -92,7 +92,11 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 
 	// A correct digest does not make a different accepted customer/price safe.
 	for _, field := range []string{"CustomerID", "PriceID", "Quantity"} {
-		tampered := rewriteProviderArchive(t, artifact.Bytes(), func(snapshot map[string]any) {
+		tampered := rewriteProviderArchiveField(t, artifact.Bytes(), "provider_bills", "snapshot", func(raw string) string {
+			var snapshot map[string]any
+			d := json.NewDecoder(strings.NewReader(raw))
+			d.UseNumber()
+			require.NoError(t, d.Decode(&snapshot))
 			if field == "CustomerID" {
 				snapshot[field] = uuid.NewString()
 			} else if field == "Quantity" {
@@ -100,6 +104,9 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 			} else {
 				snapshot["Lines"].([]any)[0].(map[string]any)[field] = uuid.NewString()
 			}
+			changed, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			return string(changed)
 		})
 		_, err = merchantarchive.Restore(ctx, destination, mid, bytes.NewReader(tampered))
 		require.Error(t, err, field)
@@ -136,7 +143,7 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	require.Equal(t, setups, gotSetups)
 }
 
-func rewriteProviderArchive(t *testing.T, input []byte, edit func(map[string]any)) []byte {
+func rewriteProviderArchiveField(t *testing.T, input []byte, targetTable, targetColumn string, edit func(string) string) []byte {
 	t.Helper()
 	var output bytes.Buffer
 	var writer *archivewire.Writer
@@ -150,23 +157,16 @@ func rewriteProviderArchive(t *testing.T, input []byte, edit func(map[string]any
 			table = record.Table
 			return writer.Table(table)
 		}
-		if table == "provider_bills" {
+		if table == targetTable {
 			for _, profile := range contract.Profiles {
 				if profile.Name != table {
 					continue
 				}
 				for i, col := range profile.Columns {
-					if col.Name != "snapshot" {
+					if col.Name != targetColumn {
 						continue
 					}
-					var snapshot map[string]any
-					d := json.NewDecoder(strings.NewReader(*record.Values[i]))
-					d.UseNumber()
-					require.NoError(t, d.Decode(&snapshot))
-					edit(snapshot)
-					raw, err := json.Marshal(snapshot)
-					require.NoError(t, err)
-					record.Values[i] = new(string(raw))
+					record.Values[i] = new(edit(*record.Values[i]))
 				}
 			}
 		}
@@ -219,6 +219,12 @@ func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
 	require.NoError(t, err)
 	destination, err := db.NewWithPGXPool(w.pool, destinationSchema)
 	require.NoError(t, err)
+	wrongVersion := rewriteProviderArchiveField(t, artifact.Bytes(), "provider_cycle_receipts", "schedule_source_reference", func(string) string { return "another-accepted-version" })
+	_, err = merchantarchive.Restore(ctx, destination, mid, bytes.NewReader(wrongVersion))
+	require.Error(t, err, "a valid digest cannot rebind a receipt to an unaccepted schedule version")
+	var restoredSchedules int
+	require.NoError(t, w.pool.QueryRow(ctx, "SELECT count(*) FROM "+quoted+".provider_schedules").Scan(&restoredSchedules))
+	require.Zero(t, restoredSchedules, "invalid schedule binding rolls the entire restore back")
 	_, err = merchantarchive.Restore(ctx, destination, mid, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err, "restore: %v", errors.Unwrap(err))
 	for _, table := range []string{"provider_schedules", "provider_cycle_receipts", "provider_bills"} {
