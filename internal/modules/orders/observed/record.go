@@ -112,7 +112,7 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	if captured > bill.Total {
 		evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "billed_amount": bill.Total, "captured_amount": captured})
 		action := "Review the distinct captured payments and refund any excess; do not collect this order again."
-		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "provider_bill_overpaid", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.bill.overpaid", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return result, err
 		}
 	}
@@ -125,7 +125,7 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		if sub.Status == "canceled" && (bill.Owner == OwnerEngine || cancel == "user" || cancel == "merchant" || cancel == "chargeback") {
 			evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "payment_id": result.Payment.ID, "subscription_id": *bill.SubscriptionID})
 			action := "Review this confirmed charge after cancellation and refund it if appropriate; billing and access remain canceled."
-			if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "provider_charge_after_cancellation", SubjectKey: "payment:" + result.Payment.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+			if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.charge.after_cancellation", SubjectKey: "payment:" + result.Payment.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 				return result, err
 			}
 		}
