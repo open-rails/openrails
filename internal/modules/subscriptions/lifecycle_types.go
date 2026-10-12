@@ -14,6 +14,9 @@ import (
 type CreateMembershipParams struct {
 	// ProviderBill is finalized evidence; its payment and order are recorded atomically with these local effects.
 	ProviderBill *observed.Bill
+	// ExistingOrderID is the billing order being fulfilled, when one already
+	// exists. Provider correlation references in metadata are not order IDs.
+	ExistingOrderID *uuid.UUID
 
 	// InitialPaymentReversal records a captured initial engine payment whose
 	// refund/dispute already exists at first readback. It creates accounting and
