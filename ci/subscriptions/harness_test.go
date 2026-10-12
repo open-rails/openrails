@@ -424,6 +424,10 @@ func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configu
 		nmi:    newNMIFake(clock.Now),
 		auth:   &verifier{secret: []byte("e2e-subscriptions-" + uuid.NewString())},
 	}
+	// Provider receipts and engine decisions share the scenario's timeline.
+	// A wall-clock payment would falsely look like a renewal years after the
+	// historical period being imported.
+	w.stripe.SetClock(clock.Now)
 	if len(configure) > 0 {
 		w.cfg = configure[0]
 	}
