@@ -671,8 +671,8 @@ func (q *Queries) GetDestructiveHold(ctx context.Context, arg GetDestructiveHold
 }
 
 const hasDestructiveArchiveBarrier = `-- name: HasDestructiveArchiveBarrier :one
-SELECT EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND admitted_at>$2::timestamptz)))
- OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=$1::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=$1::uuid))) AS held
+SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND admitted_at>$2::timestamptz)))
+ OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=$1::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=$1::uuid))))::boolean AS held
 `
 
 type HasDestructiveArchiveBarrierParams struct {
@@ -680,9 +680,9 @@ type HasDestructiveArchiveBarrierParams struct {
 	Since      time.Time
 }
 
-func (q *Queries) HasDestructiveArchiveBarrier(ctx context.Context, arg HasDestructiveArchiveBarrierParams) (*bool, error) {
+func (q *Queries) HasDestructiveArchiveBarrier(ctx context.Context, arg HasDestructiveArchiveBarrierParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasDestructiveArchiveBarrier, arg.MerchantID, arg.Since)
-	var held *bool
+	var held bool
 	err := row.Scan(&held)
 	return held, err
 }
