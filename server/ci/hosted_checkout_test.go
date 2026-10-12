@@ -177,7 +177,11 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	require.Equal(t, s.clock.Now().Add(hostedcheckout.DefaultLifetime), order.Checkout.ExpiresAt)
 	require.NotNil(t, order.ExpiresAt)
 	require.Equal(t, order.Checkout.ExpiresAt, *order.ExpiresAt, "the order expires with its checkout")
-	again := decode[billing.Order](t, s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body))
+	replay := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body)
+	require.Equal(t, http.StatusOK, replay.Code, replay.Body.String())
+	again := decode[billing.Order](t, replay)
+	require.NotNil(t, again.Checkout, "durable replay retains checkout settings")
+	require.NotNil(t, again.Checkout.URL, "a lost creation response must recover the checkout link")
 	require.Equal(t, order.ID, again.ID)
 	require.Equal(t, *order.Checkout.URL, *again.Checkout.URL)
 
