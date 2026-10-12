@@ -39,9 +39,9 @@ type StripeLivenessRecord struct {
 	Metadata   map[string]string
 	PriceID    string
 	// Latest invoice evidence (zero values when no invoice is attached).
-	// LatestInvoiceTransactionID follows the webhook's transaction-id
-	// precedence (charge > payment_intent > invoice id) so a probe-driven
-	// repair and a late-arriving invoice.paid webhook dedupe on the same key.
+	// LatestInvoiceTransactionID is the charge, else the PaymentIntent; an
+	// invoice id names the bill, never a money movement. LatestBill is the
+	// finalized invoice read in full.
 	LatestBill                 *StripeBill
 	LatestInvoicePaid          bool
 	LatestInvoiceID            string

@@ -294,10 +294,10 @@ func TestParseStripeLivenessSubscription(t *testing.T) {
 	}{
 		{"legacy shape, charge wins", `{"id":"sub_1","status":"active","current_period_end":1782592000,"latest_invoice":{"id":"in_1","status":"paid","charge":"ch_1","payment_intent":"pi_1","amount_paid":999,"currency":"usd"}}`, "active", "ch_1", true, false, time.Unix(1782592000, 0).UTC()},
 		{"intent fallback", `{"id":"sub_1","status":"active","latest_invoice":{"id":"in_1","status":"paid","payment_intent":"pi_2"}}`, "active", "pi_2", true, false, time.Time{}},
-		{"invoice fallback", `{"id":"sub_1","status":"active","latest_invoice":{"id":"in_1","paid":true}}`, "active", "in_1", true, false, time.Time{}},
+		{"a paid flag is no transaction", `{"id":"sub_1","status":"active","latest_invoice":{"id":"in_1","paid":true}}`, "active", "", true, false, time.Time{}},
 		{"pinned shape: item period, paid payment", `{"id":"sub_1","status":"ACTIVE","items":{"data":[{"current_period_end":1782592000,"price":{"id":"price_1"}}]},"latest_invoice":{"id":"in_1","status":"paid","payments":{"data":[{"status":"failed","payment":{"charge":"ch_failed"}},{"status":"paid","payment":{"charge":"ch_paid","payment_intent":"pi_paid"}}]}}}`, "active", "ch_paid", true, false, time.Unix(1782592000, 0).UTC()},
-		{"open invoice after attempt", `{"id":"sub_1","status":"past_due","latest_invoice":{"id":"in_1","status":"open","attempt_count":2}}`, "past_due", "in_1", false, true, time.Time{}},
-		{"open invoice not yet attempted", `{"id":"sub_1","status":"active","latest_invoice":{"id":"in_1","status":"open"}}`, "active", "in_1", false, false, time.Time{}},
+		{"open invoice after attempt", `{"id":"sub_1","status":"past_due","latest_invoice":{"id":"in_1","status":"open","attempt_count":2}}`, "past_due", "", false, true, time.Time{}},
+		{"open invoice not yet attempted", `{"id":"sub_1","status":"active","latest_invoice":{"id":"in_1","status":"open"}}`, "active", "", false, false, time.Time{}},
 		{"no invoice", `{"id":"sub_1","status":"canceled"}`, "canceled", "", false, false, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
