@@ -23,8 +23,8 @@ import (
 )
 
 // A usage order (origin usage) bills owed usage in arrears. Its customer
-// pays what it still owes with a saved card, present; the merchant retries
-// its collection, voids it, writes it off or records a remittance.
+// explicitly pays what it still owes; automatic billing follows its agreement
+// and policy. Staff can stop collection, waive the debt or record a remittance.
 
 var (
 	errUsageSavedCard      = apperr.Invalidf("a usage order is paid with a saved card: payment.payment_method_id").WithParam("payment")
@@ -117,8 +117,8 @@ func (s *Service) VoidMerchantOrder(ctx context.Context, id billing.OrderID) (*b
 	return s.usageAction(ctx, id, s.moneyService().VoidUsageOrder)
 }
 
-// MarkMerchantOrderUncollectible writes an open usage order off: the debt
-// stands, and collecting the order again reopens it.
+// MarkMerchantOrderUncollectible stops scheduled collection while retaining
+// the debt. A customer payment can reopen it.
 func (s *Service) MarkMerchantOrderUncollectible(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
 	return s.usageAction(ctx, id, s.moneyService().MarkUsageOrderUncollectible)
 }

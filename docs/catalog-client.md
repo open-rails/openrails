@@ -125,5 +125,6 @@ Database UUIDs remain private foreign keys so upgrades preserve accepted
 financial facts, provider identities, and historical references. Migration
 0073 derives public IDs from existing immutable keys and the stored revision.
 It does not reprice existing purchases or contact payment providers. Existing
-applications must switch stored public IDs to the IDs returned by the updated
-catalog API when upgrading their client and server together.
+applications must migrate their own stored price IDs along with the client and
+server. See the [price-ID cutover](migrating-to-v1.md#price-id-cutover) for mapping
+old references, including archived prices.

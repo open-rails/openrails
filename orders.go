@@ -104,8 +104,8 @@ func (c *Client) WaiveOrderBalance(ctx context.Context, id billing.OrderID, requ
 	return c.adminOrderPost(ctx, id, "waive-balance", nil, nil, requestOptions)
 }
 
-// MarkOrderUncollectible writes an open usage order off; collecting it
-// again reopens it. Repeating it changes nothing.
+// MarkOrderUncollectible stops scheduled collection while retaining the debt.
+// A customer payment can reopen it. Repeating it changes nothing.
 func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error) {
 	return c.adminOrderPost(ctx, id, "mark-uncollectible", nil, nil, requestOptions)
 }

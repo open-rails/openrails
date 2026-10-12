@@ -56,6 +56,40 @@ executing the operation (`412 merchant_mismatch`). The optional expectation
 never selects a merchant, and older servers may ignore it; response-header
 checking alone cannot prevent an already-executed write on those servers.
 
+## Price-ID cutover
+
+For an existing database on the current migration chain, migration 0073 replaces
+public `price_<uuid>` spellings with `product-key:price-key:v1` spellings. Private
+database foreign keys and immutable financial terms stay unchanged. This is
+separate from importing a historical v0 baseline described above.
+
+Preserve a mapping for every merchant before switching application references:
+
+1. Before upgrading, export all pages of prices, including archived versions,
+   and their products. Retain each old price ID, product key, price key and old
+   zero-based `Price.Version`. The new SDK's
+   `billing.NewPriceID(productKey, priceKey, oldVersion+1)` constructs the new ID
+   with canonical escaping; do not concatenate unescaped keys yourself.
+2. Upgrade the server and SDK together. For a self-hosted database, an operator
+   can alternatively obtain the exact mapping after migration with the read-only
+   query below. Hosted operators can provide the equivalent merchant export.
+3. Translate the host application's stored IDs and queued requests using that
+   merchant's mapping, then resume requests. Regenerate cached browser catalog
+   data. Historical prices retain their original version even when archived.
+
+```sql
+SELECT merchant_id, 'price_' || id::text AS old_price_id, public_id AS price_id
+FROM billing.prices
+WHERE merchant_id = $1::uuid;
+```
+
+Use the configured billing schema if it differs from `billing`. The new public
+API deliberately refuses UUID aliases; it cannot look up an old UUID-only host
+reference. Do not change provider-issued price IDs, OpenRails' private database
+references or arbitrary metadata that happens to contain a similar string.
+Retries keep their original operation identity; accepted order receipts continue
+to match after the mapped price ID is supplied.
+
 ## 1. Configuration
 
 ### `openrails.Config` and `Deps`
@@ -387,7 +421,7 @@ fields (`400 unknown_field`), and every error code is in
 
 | Before | After |
 |---|---|
-| `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
+| `/v1/merchant/…` (mixed staff and configuration routes) | Customer billing operations use `/v1/admin/…`; deployment and merchant configuration use `/v1/merchant/…`; catalog uses `/v1/catalog/…`. The [route inventory](api/routes.md) lists each path |
 | The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential bound to no merchant here is `403 merchant_unresolved`; a missing permission `403 permission_required` |
 | The `OpenRails-Merchant` header (a merchant's slug or `id:<uuid>`) and its codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | Removed: the credential binds the merchant, by its group (the merchant id), its declared issuer or the OpenRails object it was issued for; anything else is `403 merchant_unresolved`. A customer of another issuer whose subject is already taken is `403 customer_issuer_mismatch` |
 | `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; rails in `GET /v1/config` |
@@ -400,6 +434,9 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/metrics/query` |
 | `/v1/merchant/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
 | `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |
+| `VoidOrder`, `POST /v1/admin/orders/{id}/void` | `WaiveOrderBalance`, `POST /v1/admin/orders/{id}/waive-balance`: explicitly forgives outstanding usage debt. `CancelOrder` cancels an unpaid purchase; `MarkOrderUncollectible` stops collection and retains debt |
+| `CreatePayment` (merchant API) | `RecordExternalPayment`, still `POST /v1/admin/payments`: records money already received outside OpenRails |
+| `RetryOrderCollection`, `POST /v1/admin/orders/{id}/retry-collection` | Removed. Customers explicitly pay; the automatic worker collects under their agreement and retry policy |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…`, `/v1/me/payment-method-setups…` | `POST /v1/me/payment-methods` with a Stripe `pm_` as `token`; `/v1/me/payment-methods/{id}/confirm` after 3-D Secure |
