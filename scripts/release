@@ -3,8 +3,8 @@
 #
 #   scripts/release vX.Y.Z ["note"]
 #
-# On master's head it pins server/go.mod's require of the root to vX.Y.Z (the
-# replace keeps in-repository builds on the root's source), commits that, tags
+# On master's head it pins the server and console browser fixture's root require
+# to vX.Y.Z (replaces keep in-repository builds on local source), commits that, tags
 # the commit vX.Y.Z and server/vX.Y.Z (signed, annotated) and pushes master and
 # both tags at once. The vX.Y.Z tag runs release.yaml and docker-publish.yaml.
 set -euo pipefail
@@ -32,13 +32,17 @@ for tag in "$version" "server/$version"; do
   fi
 done
 
-# A failed build leaves master as it was.
-trap 'git checkout --quiet -- server/go.mod' ERR
-(cd server && go mod edit -require="github.com/open-rails/openrails@$version" && go build ./...)
+# The browser fixture imports both modules, so its direct root requirement
+# must advance with the server's. A failed build leaves these manifests as they were.
+release_manifests=(server/go.mod server/web/console/e2e/server/go.mod)
+trap 'git checkout --quiet -- "${release_manifests[@]}"' ERR
+for manifest in "${release_manifests[@]}"; do
+  (cd "${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
+done
 trap - ERR
-if ! git diff --quiet -- server/go.mod; then
-  git add server/go.mod
-  git commit --quiet -S -m "Release $version: server requires the root at $version"
+if ! git diff --quiet -- "${release_manifests[@]}"; then
+  git add "${release_manifests[@]}"
+  git commit --quiet -S -m "Release $version: pin server and browser fixture to the paired root"
 fi
 git tag -s -a "$version" -m "$message"
 git tag -s -a "server/$version" -m "server/$message"
