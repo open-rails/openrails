@@ -277,6 +277,9 @@ func TestHostedCheckoutReplayUsesCurrentState(t *testing.T) {
 
 	for _, closeOrder := range []string{"pay", "cancel"} {
 		t.Run(closeOrder, func(t *testing.T) {
+			// Expiry checks advanced the first shop's clock. Payment timestamps
+			// must stay aligned with PostgreSQL's real clock.
+			s := newCheckoutShop(t)
 			otherKey := uuid.NewString()
 			request := map[string]any{"customer_id": billing.CustomerID(uuid.New()), "lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}}
 			response := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, otherKey, request)
@@ -288,6 +291,11 @@ func TestHostedCheckoutReplayUsesCurrentState(t *testing.T) {
 				_, secret, _ := strings.Cut(*first.Checkout.URL, "#")
 				paid := s.pay(secret, first, map[string]any{"token": s.gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), "psp_id": s.psp})
 				require.Equal(t, http.StatusOK, paid.Code, paid.Body.String())
+				shop := handle(t, s.srv, s.mid)
+				require.Eventually(t, func() bool {
+					order, err := shop.GetOrder(t.Context(), first.ID)
+					return err == nil && order.Status == billing.OrderComplete
+				}, 10*time.Second, 20*time.Millisecond, "payment must complete before checking the creation replay")
 				want = billing.OrderComplete
 			} else {
 				canceled := s.call(serverHost, http.MethodPost, "/v1/app/orders/"+first.ID.String()+"/cancel", s.backend, "", nil)
