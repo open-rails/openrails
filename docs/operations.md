@@ -1319,14 +1319,21 @@ one pull anchored at the pull moment.
 ## The destructive-action kill switch and first-enforce gate
 
 `provider_write_mode` is a boot setting: changing it needs a deploy. The kill
-switch is the runtime brake — a single DB row, read at the top of every
-destructive plane (converge sweep, provider refresh, intent executor), so one
-`UPDATE` halts every node at its next gate check.
+switch is the runtime brake — a single DB row, read before each destructive
+act, so one `UPDATE` halts every node at its next gate check.
 
 **It ships OFF.** A fresh deployment converges nothing destructive — no local
 cancellation, no entitlement revocation, no provider delete — until an operator
 arms it. That is deliberate: the first pass against an imported legacy book is
 exactly when a bad roster does the most damage.
+
+What it stops: the converge sweep's own retractions (cancel, revoke, close),
+the provider refresh's overwrites, and provider deletes and cancels. What keeps
+running: detection, findings and their alerts, additive repairs and
+access-ended notices. A retraction the sweep holds stays `reconcile_required`,
+with `held_by: kill_switch` and the reason in its evidence, until the first
+sweep after the switch is on. The inline convergence after a change is not
+held: its retractions finish a command already admitted.
 
 ### Stop everything, now
 
@@ -1358,8 +1365,8 @@ SELECT status, count(*) FROM billing.provider_intents
  WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
 ```
 
-Worker logs name the gate explicitly: `destructive actions gated — instance kill
-switch is OFF`.
+Worker logs name the gate explicitly: `retractions held — instance kill switch
+is OFF`.
 
 ### Arming a merchant (the first-enforce gate)
 

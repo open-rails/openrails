@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -142,4 +144,57 @@ func TestLegacyImportConvergesAtCommit(t *testing.T) {
 	}
 	require.Empty(t, w.findingsAbout(l.sub))
 	require.True(t, l.c.entitled(l.ent))
+}
+
+// sweep runs the scheduled converge sweep once.
+func (w *world) sweep() {
+	w.t.Helper()
+	res, err := w.jobs.Insert(w.t.Context(), convergeSweep{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(w.t, err)
+	w.waitJob(res.Job.ID)
+}
+
+// The kill switch holds only the retractions the sweep would make on its own.
+// Off, the sweep still detects and notifies: a staff revoke's access-ended
+// notice is queued, and a revoke whose effect never reached its window is a
+// finding naming the switch, the window left open. On, the sweep retracts it.
+func TestKillSwitchHoldsOnlySweepRetractions(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t) // a fresh deployment: the switch is off
+	key := "held:" + uuid.NewString()[:8]
+	product := w.giftProduct(key)
+	revoked, drifted := w.newCustomer(), w.newCustomer()
+	access := revoked.grant(product, nil, nil)
+	open := drifted.grant(product, nil, nil)
+	require.Equal(t, http.StatusNoContent, w.staffCall(http.MethodPost, "/v1/admin/product-access/"+access.ID.String()+"/revoke", map[string]any{"reason": "support"}, nil))
+	var grant uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, source_id, event, supersedes_id, starts_at, reason)
+		SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, 'revoke', g.id, $2, 'support'
+		FROM billing.grants g JOIN billing.product_access pa ON pa.merchant_id = g.merchant_id AND pa.grant_id = g.id WHERE pa.id = $1
+		RETURNING supersedes_id`), open.ID.UUID(), w.clock.Now()).Scan(&grant))
+	w.advance(time.Minute)
+	excess := func() (status string, evidence map[string]any) {
+		t.Helper()
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status, evidence->'local' FROM billing.reconciliation_findings
+			WHERE finding_type = 'derive.grant_effect.excess' AND subject_key = $1`), "grant_effect:"+grant.String()).Scan(&status, &evidence))
+		return status, evidence
+	}
+
+	w.sweep()
+	require.Equal(t, 1, w.accessEndedNotices(revoked.id), "the revoke's notice is queued with the switch off")
+	status, evidence := excess()
+	require.Equal(t, "reconcile_required", status)
+	require.Equal(t, "kill_switch", evidence["held_by"])
+	require.Contains(t, evidence["held_reason"], "kill switch is OFF")
+	require.True(t, drifted.entitled(key), "the sweep retracted nothing")
+	require.Zero(t, w.accessEndedNotices(drifted.id))
+
+	w.armDestructive()
+	w.sweep()
+	status, evidence = excess()
+	require.Equal(t, "auto_fixed", status)
+	require.NotContains(t, evidence, "held_by")
+	require.False(t, drifted.entitled(key), "the switch on, the sweep retracts")
+	require.Equal(t, 1, w.accessEndedNotices(drifted.id))
+	require.Equal(t, 1, w.accessEndedNotices(revoked.id))
 }

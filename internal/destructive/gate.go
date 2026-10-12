@@ -1,6 +1,6 @@
 // Package destructive is the brake on destructive convergence (mass local
 // cancellation, entitlement revocation, the provider deletes they queue): a
-// DB-backed switch read at the top of every destructive plane, default safe.
+// DB-backed switch read before each destructive act, default safe.
 package destructive
 
 import (

@@ -60,6 +60,9 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		// would panic on first use.
 		engine.Notifier = w.Alerts
 	}
+	// The kill switch, read per merchant, holds only the retractions the sweep
+	// would make on its own; detection, findings and notices always run.
+	engine.Retractions = destructive.New(w.DB)
 	logger := log.WithContext(ctx).WithField("worker", KindConvergeSweep)
 
 	// merchants is the global directory; per-merchant work runs inside
@@ -69,22 +72,15 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		return fmt.Errorf("converge sweep: list merchants: %w", err)
 	}
 
-	// The kill switch is read per merchant: one merchant's stop does not halt
-	// the fleet, and the fleet-wide stop halts every merchant.
-	gate := destructive.New(w.DB)
 	postures := writeposture.View{Config: w.Config, DB: w.DB}
 
-	var swept, findings, autoFixed, reconcileRequired, adminRequired, gated int
+	var swept, findings, autoFixed, reconcileRequired, adminRequired, held, readOnly int
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "converge sweep merchant "+mid.String())
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		var res converge.ConvergeResult
 		var blocked string
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			if v := gate.Check(ctx, mid); !v.Allowed {
-				blocked = v.Reason
-				return nil
-			}
 			if p := postures.Posture(ctx, mid); p.ReadOnly() {
 				blocked = p.Reason
 				return nil
@@ -99,20 +95,24 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 			continue
 		}
 		if blocked != "" {
-			gated++
-			logger.WithField("merchant_id", mid).Warn("converge sweep: destructive actions gated — " + blocked)
+			readOnly++
+			logger.WithField("merchant_id", mid).Warn("converge sweep: merchant skipped — " + blocked)
 			continue
 		}
+		if res.Held > 0 {
+			logger.WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).Warn("converge sweep: retractions held — " + res.HeldReason)
+		}
 		swept++
+		held += res.Held
 		findings += res.Findings
 		autoFixed += res.AutoFixed
 		reconcileRequired += res.ReconcileRequired
 		adminRequired += res.AdminRequired
 	}
-	if findings > 0 || gated > 0 {
+	if findings > 0 || readOnly > 0 {
 		logger.WithFields(log.Fields{
-			"merchants": swept, "gated": gated, "findings": findings, "auto_fixed": autoFixed,
-			"reconcile_required": reconcileRequired, "admin_required": adminRequired,
+			"merchants": swept, "read_only": readOnly, "findings": findings, "auto_fixed": autoFixed,
+			"reconcile_required": reconcileRequired, "admin_required": adminRequired, "held": held,
 		}).Info("converge sweep completed")
 	}
 	return nil

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -150,6 +151,12 @@ type ConvergeEngine struct {
 	// store. Optional; nil is a no-op. Set directly on the constructed engine.
 	Notifier reconcile.FindingNotifier
 
+	// Retractions, when set, is asked before each retraction repair (cancel,
+	// revoke, close); one it refuses stays reconcile_required, the reason in
+	// evidence. The sweep sets it. Inline convergence leaves it nil: its
+	// retractions finish a command already admitted.
+	Retractions *destructive.Gate
+
 	// notify is not in passes: it detects on the state the repairs just left
 	// (a window DERIVE re-projected this run never emails), so Converge runs it
 	// after the remediation loop.
@@ -180,7 +187,10 @@ type ConvergeResult struct {
 	RequiresReview    int
 	AdminRequired     int
 	Operator          int
-	RunID             *uuid.UUID
+	// Held counts the retractions Retractions refused; HeldReason is why.
+	Held       int
+	HeldReason string
+	RunID      *uuid.UUID
 }
 
 // AfterMutation runs Converge for a customer inline, right after a state mutation
@@ -250,11 +260,13 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 		summary, _ := json.Marshal(map[string]any{
 			"findings": res.Findings, "auto_fixed": res.AutoFixed,
 			"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
+			"held": res.Held,
 		})
 		if err := (&reconcile.PGStore{DB: e.DB}).FinishRun(ctx, *runID, status, summary, reason); err != nil {
 			runErr = errors.Join(runErr, fmt.Errorf("converge: finish run: %w", err))
 		}
 	}()
+	hold := &retractionHold{gate: e.Retractions, merchant: scope.Merchant.UUID()}
 	apply := func(findings []ConvergeFinding) error {
 		if len(findings) == 0 {
 			return nil
@@ -268,11 +280,15 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 			res.RunID = runID
 		}
 		for i := range findings {
-			status, err := e.remediate(ctx, scope, findings[i])
+			status, held, err := e.remediate(ctx, scope, hold, findings[i])
 			if err != nil {
 				return err
 			}
-			row, perr := e.persist(ctx, q, scope, *runID, findings[i], status)
+			if held != "" {
+				res.Held++
+				res.HeldReason = held
+			}
+			row, perr := e.persist(ctx, q, scope, *runID, findings[i], status, held)
 			if perr != nil {
 				return perr
 			}
@@ -351,52 +367,80 @@ func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, sco
 // findingKeySep joins a finding's type and subject (ResolveClearedFindings).
 const findingKeySep = "\x1f"
 
+// retractionHold reads the Retractions gate at most once per run.
+type retractionHold struct {
+	gate     *destructive.Gate
+	merchant uuid.UUID
+	read     bool
+	reason   string
+}
+
+// why is the reason the merchant's retractions are held, or "".
+func (h *retractionHold) why(ctx context.Context) string {
+	if h.gate == nil {
+		return ""
+	}
+	if !h.read {
+		if v := h.gate.Check(ctx, h.merchant); !v.Allowed {
+			h.reason = v.Reason
+		}
+		h.read = true
+	}
+	return h.reason
+}
+
 // remediate decides a finding's ledger status and applies its repair. The
 // confirmed-absence gate keeps a destructive EXCESS repair in
-// reconcile_required until its source domain is proven fully reconciled.
-func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeFinding) (string, error) {
+// reconcile_required until its source domain is proven fully reconciled, and
+// the Retractions gate keeps it there while it refuses; held is its reason.
+func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retractionHold, f ConvergeFinding) (status, held string, err error) {
 	// Every retraction passes the gate, including
 	// life.subscription.pending_stale, which cancels off a timeout.
 	if f.Shape == ShapeExcess && !f.Ungated {
 		if f.SourceDomain == DomainNone {
 			// A retraction that names no source of truth cannot prove the thing
 			// it is retracting is really gone. That is a human decision.
-			return "requires_review", nil
+			return "requires_review", "", nil
 		}
 		reconciled, err := e.DB.Gen(ctx).IsSourceDomainReconciled(ctx, gen.IsSourceDomainReconciledParams{
 			MerchantID: scope.Merchant.UUID(), SourceDomain: string(f.SourceDomain),
 		})
 		if err != nil {
-			return "", fmt.Errorf("converge: gate check %s: %w", f.SourceDomain, err)
+			return "", "", fmt.Errorf("converge: gate check %s: %w", f.SourceDomain, err)
 		}
 		if reconciled == nil || !*reconciled {
-			return "reconcile_required", nil // confirmed-absence gate: do not retract yet
+			return "reconcile_required", "", nil // confirmed-absence gate: do not retract yet
 		}
 	}
 
 	switch f.Class {
 	case ClassAuto:
 		if f.Repair != nil {
+			if f.Shape == ShapeExcess {
+				if why := hold.why(ctx); why != "" {
+					return "reconcile_required", why, nil
+				}
+			}
 			if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeRepair, Kind: f.Type, Subscription: subjectSubscription(f.SubjectKey)}); err != nil {
-				return "", err
+				return "", "", err
 			}
 			if err := f.Repair(ctx); err != nil {
-				return "", fmt.Errorf("converge: repair %s (%s): %w", f.Type, f.SubjectKey, err)
+				return "", "", fmt.Errorf("converge: repair %s (%s): %w", f.Type, f.SubjectKey, err)
 			}
-			return "auto_fixed", nil
+			return "auto_fixed", "", nil
 		}
-		return "reconcile_required", nil
+		return "reconcile_required", "", nil
 	case ClassAdmin, ClassOperator:
-		return "requires_review", nil // queued for human review
+		return "requires_review", "", nil // queued for human review
 	default:
-		return "requires_review", nil
+		return "requires_review", "", nil
 	}
 }
 
 // persist upserts a finding into the shared ledger and returns the row for a
-// FindingNotifier. finding_type is the qualified slug; shape/class and details
-// ride in evidence.
-func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) (gen.BillingReconciliationFinding, error) {
+// FindingNotifier. finding_type is the qualified slug; shape/class, the hold
+// and details ride in evidence.
+func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status, held string) (gen.BillingReconciliationFinding, error) {
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),
 	}
@@ -405,6 +449,9 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 	}
 	for k, v := range f.Evidence {
 		meta[k] = v
+	}
+	if held != "" {
+		meta["held_by"], meta["held_reason"] = "kill_switch", held
 	}
 	payload := map[string]any{"local": meta}
 	if f.Provider != "" && f.Provider != "self" {

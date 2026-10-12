@@ -246,9 +246,7 @@ func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
 	w.seedAttempts(c.id, approved)
 	w.seedAttempts(c.id, refused)
 	// The scheduled sweep, which notifies, finds the refused account.
-	res, err := w.jobs.Insert(t.Context(), convergeSweep{}, &river.InsertOpts{Queue: openrails.QueueBilling})
-	require.NoError(t, err)
-	w.waitJob(res.Job.ID)
+	w.sweep()
 	require.Equal(t, "critical", w.findings("life.payments.system_errors")[0].severity)
 
 	require.Eventually(t, func() bool { return len(mail.all()) > 0 }, 10*time.Second, 50*time.Millisecond)
