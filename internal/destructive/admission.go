@@ -47,6 +47,18 @@ func scopeKeys(actor Actor, mid uuid.UUID) []string {
 	return []string{"actor:" + actor.key(), "merchant:" + mid.String(), "deployment"}
 }
 
+// holdKeys are the scopes whose hold fences an admitted action's start; the
+// host's own work has none.
+func holdKeys(row gen.BillingDestructiveAction, mid uuid.UUID) []string {
+	switch row.Origin {
+	case "host":
+		return nil
+	case "automation":
+		return []string{"automation:" + mid.String()}
+	}
+	return scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
+}
+
 // Admit reserves the entire validated command. A trip is committed before
 // HeldError escapes. A proven no-effect retry creates a fresh immutable attempt.
 func (a *Admissions) Admit(ctx context.Context, c Command) (Action, error) {
@@ -130,18 +142,11 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 		now := a.clock.Now().UTC()
 		for _, i := range fresh {
 			c := commands[i]
-			origin := c.origin
-			if origin == "" {
-				origin = "staff"
-			}
-			if c.Actor.Issuer == billingauth.HostIssuer {
-				origin = "host"
-			}
 			id, err := uuid.NewV7()
 			if err != nil {
 				return err
 			}
-			row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: origin, ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.Actor.key(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
+			row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: c.originName(), ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.Actor.key(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
 			if err != nil {
 				return err
 			}
@@ -158,6 +163,10 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 	return out, nil
 }
 func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, c Command, units int64) (*HeldError, error) {
+	if c.originName() == "host" {
+		// The host's own work is trusted: audited, but never counted or held.
+		return nil, nil
+	}
 	keys := scopeKeys(c.Actor, c.MerchantID)
 	scopes := []Scope{ScopeActor, ScopeMerchant, ScopeDeployment}
 	if c.origin == "automation" {
@@ -285,15 +294,13 @@ func (a *Admissions) start(ctx context.Context, mid, id uuid.UUID, provenUnsent 
 			out.Replayed = true
 			return nil
 		}
-		keys := scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
-		if row.Origin == "automation" {
-			keys = []string{"automation:" + mid.String()}
-		}
-		if h, err := q.FindOpenDestructiveHold(ctx, keys); err == nil {
-			held = &HeldError{Hold: holdOf(h)}
-			return nil
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		if keys := holdKeys(row, mid); keys != nil {
+			if h, err := q.FindOpenDestructiveHold(ctx, keys); err == nil {
+				held = &HeldError{Hold: holdOf(h)}
+				return nil
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 		}
 		if row.State != string(StateReserved) {
 			out = actionOf(row)

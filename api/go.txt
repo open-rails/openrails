@@ -19,6 +19,7 @@ pkg openrails, func NewRemoteMerchant(string, RemoteCredential, ...RemoteMerchan
 pkg openrails, func ParseMerchantDeclaration([]byte) (MerchantDeclaration, error)
 pkg openrails, func ReadMerchantFile(string) (MerchantDeclaration, error)
 pkg openrails, func WithIdempotencyKey(string) RequestOption
+pkg openrails, func WithInvoker(context.Context, Invoker) context.Context
 pkg openrails, func WithRiverClient(*river.Client[pgx.Tx]) StartOption
 pkg openrails, method (*BoundMerchantError) Error() string
 pkg openrails, method (*Client) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)

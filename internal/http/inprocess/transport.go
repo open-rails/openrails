@@ -8,11 +8,13 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 type merchantKey struct{}
+type invokerKey struct{}
 
 // WithMerchant names the merchant a handle's call acts on. Only code holding
 // the engine can set it, and no network request carries it: it is the
@@ -21,10 +23,16 @@ func WithMerchant(ctx context.Context, id billing.MerchantID) context.Context {
 	return context.WithValue(ctx, merchantKey{}, id)
 }
 
+// WithInvoker names the person a handle's call acts for. Like the merchant,
+// only in-process code can set it; without it the call is the host's own.
+func WithInvoker(ctx context.Context, invoker billingauth.Invoker) context.Context {
+	return context.WithValue(ctx, invokerKey{}, invoker)
+}
+
 // NewTransport dispatches a handle's calls into handler as the host itself,
-// bound to the merchant WithMerchant names. The route gate reads that
-// merchant live on every call: one that is not live is 403
-// merchant_unresolved.
+// bound to the merchant WithMerchant names and acting for the person
+// WithInvoker names, if any. The route gate reads that merchant live on every
+// call: one that is not live is 403 merchant_unresolved.
 func NewTransport(handler http.Handler) http.RoundTripper {
 	return &inprocessTransport{handler: handler}
 }
@@ -44,10 +52,14 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		defer stop()
 		defer req.Body.Close()
 	}
-	mid, _ := req.Context().Value(merchantKey{}).(billing.MerchantID)
-	// Only the caller's cancellation and deadline reach the engine; every host
-	// context value is dropped (engineContext).
-	ctx := requestauth.WithHostPrincipal(engineContext(req.Context()), &requestauth.HostPrincipal{MerchantID: mid})
+	principal := &requestauth.HostPrincipal{}
+	principal.MerchantID, _ = req.Context().Value(merchantKey{}).(billing.MerchantID)
+	if invoker, ok := req.Context().Value(invokerKey{}).(billingauth.Invoker); ok {
+		principal.Invoker = &invoker
+	}
+	// Only the caller's cancellation and deadline reach the engine; every other
+	// host context value is dropped (engineContext).
+	ctx := requestauth.WithHostPrincipal(engineContext(req.Context()), principal)
 	if stream {
 		return streamInprocessResponse(t.handler, req.Clone(ctx))
 	}

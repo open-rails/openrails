@@ -128,7 +128,8 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "concurrent", DisplayName: "Concurrent"})
 	require.NoError(t, err)
 	// Each round races three writers of equal terms; each later round moves the
-	// key to new terms once (a counted change, within one actor's allowance).
+	// key to new terms once. Writers racing different terms keep moving the
+	// catalog under each other's edits, which then answer 409.
 	const rounds, writers = 3, 3
 	for round := range rounds {
 		results := make([]*billing.Price, writers)

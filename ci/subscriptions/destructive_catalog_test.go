@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/engine"
@@ -20,17 +22,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// catalogEditor is a signed-in staff member the host names on its calls.
+func catalogEditor(t *testing.T) context.Context {
+	return openrails.WithInvoker(t.Context(), openrails.Invoker{Issuer: "https://staff.example", ID: "catalog-editor"})
+}
+
 func TestDestructiveCatalogBatchRefusedBeforeAnyChange(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
 	doc := &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{}}
 	for i := range 6 {
 		key := fmt.Sprintf("guard-product-%d", i)
-		_, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key})
+		_, err := client.CreateProduct(catalogEditor(t), billing.CreateProductParams{Key: key, DisplayName: key})
 		require.NoError(t, err, "creating a product is additive and spends no unit")
 		doc.Products[key] = catalog.ApplyProduct{DisplayName: catalog.Value(key), Entitlements: catalog.Value([]string{"guard:batch"})}
 	}
-	_, err := client.ApplyCatalog(t.Context(), doc, billing.ApplyCatalogParams{})
+	_, err := client.ApplyCatalog(catalogEditor(t), doc, billing.ApplyCatalogParams{})
 	require.Error(t, err)
 	require.Equal(t, "rate_limit_exceeded", codeOf(err))
 	for key := range doc.Products {
@@ -39,34 +46,38 @@ func TestDestructiveCatalogBatchRefusedBeforeAnyChange(t *testing.T) {
 		require.Empty(t, product.Entitlements, "a refused whole batch changes no target")
 	}
 	var count int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+w.schema+".destructive_actions WHERE origin='host'").Scan(&count))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+w.schema+".destructive_actions").Scan(&count))
 	require.Zero(t, count, "refused batch leaves no partly admitted command")
+	_, err = client.ApplyCatalog(t.Context(), doc, billing.ApplyCatalogParams{})
+	require.NoError(t, err, "the host's own work is neither limited nor held")
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT sum(units) FROM "+w.schema+".destructive_actions WHERE origin='host'").Scan(&count))
+	require.Equal(t, 6, count, "and stays in the audit")
 }
 
 func TestDestructiveCatalogNoopAndCosmeticSurviveHold(t *testing.T) {
 	w := newWorld(t)
-	client := w.client[embedded]
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "guard-product", DisplayName: "Guard product"})
+	client, staff := w.client[embedded], catalogEditor(t)
+	product, err := client.CreateProduct(staff, billing.CreateProductParams{Key: "guard-product", DisplayName: "Guard product"})
 	require.NoError(t, err)
 	for i := range 5 {
-		product, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{fmt.Sprintf("guard:%d", i)})})
+		product, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{fmt.Sprintf("guard:%d", i)})})
 		require.NoError(t, err)
 	}
-	_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"guard:blocked"})})
+	_, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"guard:blocked"})})
 	require.Error(t, err)
 	require.Equal(t, "rate_limit_exceeded", codeOf(err))
 	var units int64
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT coalesce(sum(units),0) FROM "+w.schema+".destructive_actions WHERE origin='host' AND state='succeeded'").Scan(&units))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT coalesce(sum(units),0) FROM "+w.schema+".destructive_actions WHERE origin='staff' AND actor_id='catalog-editor' AND state='succeeded'").Scan(&units))
 	require.EqualValues(t, 5, units)
 	// Time does not clear a hold, but unchanged/cosmetic writes need no new unit.
 	w.clock.Advance(25 * time.Hour)
-	_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value(product.Entitlements)})
+	_, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value(product.Entitlements)})
 	require.NoError(t, err)
-	got, err := client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("New title")})
+	got, err := client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("New title")})
 	require.NoError(t, err)
 	require.Equal(t, "New title", got.DisplayName)
 	require.Equal(t, product.Entitlements, got.Entitlements)
-	_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
+	_, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 	require.Error(t, err)
 	require.Equal(t, "rate_limit_exceeded", codeOf(err))
 }

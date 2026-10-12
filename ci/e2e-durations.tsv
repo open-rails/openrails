@@ -31,7 +31,7 @@ ci	TestDailyCheckpointPostsThroughMidnight	11.5
 ci	TestDeclaredRedisOutageDegrades	11.8
 ci	TestDefaultRunwayIsADay	10.2
 ci	TestDepositMovesRunOut	7.4
-ci	TestDestructiveCreditRevokesCoverHostAndApplication	20.4
+ci	TestDestructiveCreditRevokesHoldActorsNotTheHost	24.0
 ci	TestDynamicAndCatalogCardsOnOneEventTypeEachCharge	11.0
 ci	TestDynamicCaptureSettlesTheStatedAmount	6.0
 ci	TestDynamicCardChargesTheEventAmount	11.9

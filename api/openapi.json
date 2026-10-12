@@ -23551,7 +23551,7 @@
     "host_principal_invalid": {
       "status": 401,
       "type": "authentication_error",
-      "meaning": "The in-process host principal is bound to no merchant."
+      "meaning": "The in-process host principal is bound to no merchant, or names an invalid invoker."
     },
     "hosted_checkout_unavailable": {
       "status": 400,

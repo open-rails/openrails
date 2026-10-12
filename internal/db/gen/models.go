@@ -397,13 +397,14 @@ type BillingDashboardConfig struct {
 
 // Admitted destructive command audit, immutable authority and admission facts with explicit outcome; not a counter or request-body store. Proven no-effect retries create another immutable attempt. Retention: permanent, never pruned.
 type BillingDestructiveAction struct {
-	MerchantID         uuid.UUID
-	ID                 uuid.UUID
-	AdmissionSequence  *int64
-	Kind               string
-	Target             string
-	ActionKey          string
-	RequestDigest      string
+	MerchantID        uuid.UUID
+	ID                uuid.UUID
+	AdmissionSequence *int64
+	Kind              string
+	Target            string
+	ActionKey         string
+	RequestDigest     string
+	// staff: a staff or application actor, counted and held. host: the embedded host's own in-process work, audited but never counted or held. automation: named autonomous work on its own budget.
 	Origin             string
 	ActorIssuer        string
 	ActorID            string

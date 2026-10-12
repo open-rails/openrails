@@ -83,27 +83,27 @@ SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WH
 
 -- name: CountDestructiveUnitsForActor :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin<>'automation' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForMerchant :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin<>'automation' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForDeployment :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin<>'automation' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin<>'automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;

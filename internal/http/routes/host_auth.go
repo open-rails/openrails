@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	auth "github.com/open-rails/authkit/auth"
 
@@ -15,8 +16,8 @@ import (
 // HostAuth is the in-process transport's Authenticator: the embedding host's
 // own principal, a context value the transport attaches and no network
 // request can carry. It is an application bound to the merchant of its
-// handle, holding every permission there and in its root scope. It admits no
-// customer.
+// handle, holding every permission there and in its root scope, invoked by
+// itself or by the person the host named. It admits no customer.
 type HostAuth struct{}
 
 var (
@@ -42,14 +43,28 @@ func (HostAuth) Authenticate(r *http.Request) (billingauth.Verified, error) {
 	case hp.MerchantID.IsZero():
 		return nil, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
 	}
-	id := hp.Subject
-	if id == "" {
-		id = "host"
+	// The host is the subject; a person it names is the invoker, so the call
+	// counts as theirs. It never becomes a customer or OpenRails' own work.
+	invoker := billingauth.Invoker{Issuer: billingauth.HostIssuer, ID: hostSubject}
+	if hp.Invoker != nil {
+		if !namedPerson(*hp.Invoker) {
+			return nil, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
+		}
+		invoker = *hp.Invoker
 	}
 	return hostVerified{MerchantBinding: billingauth.BindsMerchant(billingauth.Target{MerchantID: hp.MerchantID}), id: billingauth.Identity{
-		Issuer: billingauth.HostIssuer, Subject: id, SubjectKind: billingauth.SubjectApplication,
-		Invoker: billingauth.Invoker{Issuer: billingauth.HostIssuer, ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "in-process"},
+		Issuer: billingauth.HostIssuer, Subject: hostSubject, SubjectKind: billingauth.SubjectApplication,
+		Invoker: invoker, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "in-process"},
 	}}, nil
+}
+
+const hostSubject = "host"
+
+// namedPerson is an issuer-qualified id outside OpenRails' own issuers.
+func namedPerson(who billingauth.Invoker) bool {
+	issuer, id := strings.TrimSpace(who.Issuer), strings.TrimSpace(who.ID)
+	return issuer != "" && id != "" && issuer == who.Issuer && id == who.ID &&
+		len(issuer) <= 2048 && len(id) <= 2048 && !strings.HasPrefix(issuer, "openrails:")
 }
 
 type hostVerified struct {

@@ -84,6 +84,7 @@ migration 0080_destructive_admissions.up.sql sha256:bdbc16c09250b9feaabfa55fc72e
 migration 0081_provider_bill_orders.up.sql sha256:9f078e9bbbe589bd3991ce13ee40db0853d4041b0ca43aa691c75726ae2b8d58
 migration 0082_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
 migration 0083_payment_order_identity.up.sql sha256:7757d34110d14ad4a3a1793d1f474ef1fd6f10e499164da351bcc530fd8a66e9
+migration 0084_destructive_staff_counts.up.sql sha256:bc91316e0ba297ddb4b371ef499766e7bede845fdb9d5cdb6a881dfaff4439b3
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -638,16 +639,16 @@ table billing.destructive_actions
   constraint destructive_actions_state_check CHECK ((state = ANY (ARRAY['reserved'::text, 'started'::text, 'succeeded'::text, 'no_effect'::text, 'uncertain'::text])))
   constraint destructive_actions_target_check CHECK (((btrim(target) <> ''::text) AND (octet_length(target) <= 2048)))
   constraint destructive_actions_units_check CHECK (((units > 0) AND (units <= 1000000000)))
-  index CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions USING btree (actor_key, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  index CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions USING btree (actor_key, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((state = 'succeeded'::text) AND (origin = 'staff'::text))
   index CREATE UNIQUE INDEX destructive_actions_admission_sequence_key ON billing.destructive_actions USING btree (admission_sequence)
   index CREATE INDEX destructive_actions_completion_sequence_idx ON billing.destructive_actions USING btree (completion_sequence) WHERE (completion_sequence IS NOT NULL)
   index CREATE INDEX destructive_actions_key_history_idx ON billing.destructive_actions USING btree (merchant_id, action_key, admitted_at DESC, id DESC)
   index CREATE UNIQUE INDEX destructive_actions_live_key ON billing.destructive_actions USING btree (merchant_id, action_key) WHERE (state <> 'no_effect'::text)
-  index CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions USING btree (merchant_id, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  index CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions USING btree (merchant_id, origin, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
   index CREATE INDEX destructive_actions_pending_idx ON billing.destructive_actions USING btree (merchant_id, actor_key) INCLUDE (units) WHERE (state = ANY (ARRAY['reserved'::text, 'started'::text, 'uncertain'::text]))
   index CREATE INDEX destructive_actions_pending_target_idx ON billing.destructive_actions USING btree (merchant_id, target, actor_issuer, actor_id, request_digest) WHERE (state = ANY (ARRAY['reserved'::text, 'started'::text, 'uncertain'::text]))
   index CREATE UNIQUE INDEX destructive_actions_pkey ON billing.destructive_actions USING btree (merchant_id, id)
-  index CREATE INDEX destructive_actions_recent_idx ON billing.destructive_actions USING btree (GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  index CREATE INDEX destructive_actions_recent_idx ON billing.destructive_actions USING btree (GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((state = 'succeeded'::text) AND (origin = 'staff'::text))
   trigger CREATE TRIGGER destructive_actions_immutable BEFORE UPDATE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'started_at', 'finished_at', 'completion_sequence', 'result')
   trigger CREATE TRIGGER destructive_actions_no_delete BEFORE DELETE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER destructive_actions_state BEFORE UPDATE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.guard_destructive_action_state()

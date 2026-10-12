@@ -183,7 +183,7 @@ var errorCodes = []ErrorCode{
 	// Authentication.
 	{CodeCredentialExpired, 401, authn, "The credential has expired."},
 	{CodeCredentialRevoked, 401, authn, "The credential or its session was revoked."},
-	{CodeHostPrincipalInvalid, 401, authn, "The in-process host principal is bound to no merchant."},
+	{CodeHostPrincipalInvalid, 401, authn, "The in-process host principal is bound to no merchant, or names an invalid invoker."},
 	{CodeAuthenticationUnavailable, 503, fault, "The credential could not be verified right now; retry."},
 	{CodeStepUpRequired, 401, authn, "The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge."},
 

@@ -249,7 +249,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
-  host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
+  host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant, or names an invalid invoker." },
   hosted_checkout_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no hosted checkout, or the order cannot take one." },
   idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },

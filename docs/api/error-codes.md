@@ -61,7 +61,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
-| `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
+| `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant, or names an invalid invoker. |
 | `hosted_checkout_unavailable` | 400 | `invalid_request_error` | This deployment serves no hosted checkout, or the order cannot take one. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |

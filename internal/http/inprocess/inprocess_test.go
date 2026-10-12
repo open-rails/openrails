@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
@@ -91,6 +92,15 @@ func TestTransportBindsTheHandlesMerchant(t *testing.T) {
 		require.NoError(t, res.Body.Close())
 		require.Equal(t, observed{host: &requestauth.HostPrincipal{MerchantID: bound}}, got)
 	}
+
+	// A named person reaches the engine with the merchant; nothing else does.
+	person := billingauth.Invoker{Issuer: "https://staff.example", ID: "alice"}
+	req, err := http.NewRequestWithContext(WithInvoker(WithMerchant(hostContext(t, ambient), bound), person), http.MethodGet, "http://openrails.invalid/v1/admin/payments", nil)
+	require.NoError(t, err)
+	res, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, observed{host: &requestauth.HostPrincipal{MerchantID: bound, Invoker: &person}}, got)
 }
 
 // Archive exports stream through a pipe: the book is never buffered, and a

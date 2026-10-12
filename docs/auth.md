@@ -19,7 +19,9 @@ and the scopes come from the Authenticator's `RootScope` (authkit/auth `Root`).
 AuthKit provides one as `ak.Authenticator()`; a host without AuthKit writes
 its own ([below](#your-own-auth)). The standalone server mounts its routes
 with its own AuthKit's, exactly like an embedded host, and the in-process Go
-client brings its own host authority.
+client brings its own host authority: its subject is the host application, and
+`openrails.WithInvoker` names the signed-in person a call acts for as its
+invoker ([destructive actions](destructive-actions.md)).
 
 | Route tier | What OpenRails asks | Who it admits |
 | --- | --- | --- |

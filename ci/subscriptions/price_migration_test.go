@@ -161,10 +161,8 @@ func TestPriceMigrationOfEveryVersion(t *testing.T) {
 	product, err := client.GetProduct(ctx, v1.ProductID)
 	require.NoError(t, err)
 	hours := monthHours
-	// Staff version the price; the host's own allowance covers the migration
-	// and its cancellation.
 	version := func(amount int64) *billing.Price {
-		p, err := w.client[remote].CreatePrice(ctx, billing.CreatePriceParams{ProductID: v1.ProductID, Key: v1.Key, UnitAmount: amount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
+		p, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: v1.ProductID, Key: v1.Key, UnitAmount: amount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		return p
 	}

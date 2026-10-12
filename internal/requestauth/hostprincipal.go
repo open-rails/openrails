@@ -6,15 +6,18 @@ import (
 	"context"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // HostPrincipal is the identity the in-process transport attaches when an
 // embedding host calls its own engine through the Go client. A context value,
 // never a header, so it cannot arrive over the network and needs no shared
 // secret. It is bound to the merchant of the handle that made the call.
+// Invoker is the person the host named for the call; nil is the host's own
+// work.
 type HostPrincipal struct {
 	MerchantID billing.MerchantID
-	Subject    string
+	Invoker    *billingauth.Invoker
 }
 
 type hostPrincipalCtxKey struct{}

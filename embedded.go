@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/http/inprocess"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -92,6 +93,17 @@ func (e *Engine) MerchantBySlug(slug string) (*Client, error) {
 		return nil, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
 	}
 	return e.Merchant(id)
+}
+
+// WithInvoker names the signed-in person an in-process call acts for, by
+// issuer and subject as the host's identity provider verified them. The call
+// is then theirs: their destructive-action ceilings and holds apply, as to
+// their own HTTP call. A call naming no one is the host's own work: recorded
+// in the destructive-action audit, but never counted or held. An issuer
+// beginning "openrails:" or an empty name is refused (host_principal_invalid).
+// A remote handle ignores it; its credential names the caller.
+func WithInvoker(ctx context.Context, invoker Invoker) context.Context {
+	return inprocess.WithInvoker(ctx, invoker)
 }
 
 // StartOption adjusts Start.

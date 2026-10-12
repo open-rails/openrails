@@ -2,10 +2,22 @@
 
 Merchant refunds, cancellations, payment-method removal, access/credit revocation,
 write-offs and substantive catalog/configuration changes share one admission policy.
-It counts logical actions across HTTP and the in-process Client. The verified
-issuer and invoker identify a staff or application actor; credential rotation does
-not create a new allowance. The embedded host has its own application identity.
-Customer self-service and autonomous maintenance keep separate policies.
+It counts the logical actions of each staff member and application. The verified
+issuer and invoker identify the actor; credential rotation does not create a new
+allowance. Customer self-service and autonomous maintenance keep separate policies.
+
+An in-process Client call that names no person is the embedded host's own work.
+It is recorded in the action audit with origin `host`, but spends no allowance,
+counts toward no actor, merchant or deployment limit, and an incident does not
+hold it. A host acting for a signed-in staff member names that person on the call:
+
+```go
+ctx = openrails.WithInvoker(ctx, openrails.Invoker{Issuer: issuer, ID: subject})
+_, err := client.RefundPayment(ctx, paymentID, params)
+```
+
+The call is then that person's, with every limit and incident applying exactly as
+to their own HTTP call. Over HTTP the credential alone names the caller.
 
 A denied admission returns HTTP 429. The incident persists until explicit review
 and clearance: waiting, restarting, rotating a key or ignoring a finding does not

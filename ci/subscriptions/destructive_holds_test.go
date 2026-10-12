@@ -79,6 +79,10 @@ func TestDestructiveIncidentProjectsAndRetriesAlert(t *testing.T) {
 	// interactive human authorized to clear an incident over the merchant API.
 	_, err = w.client[embedded].ClearDestructiveHold(ctx, billing.DestructiveHoldID(trip.Hold.ID), billing.ClearDestructiveHoldParams{Reason: "application refused"})
 	require.Error(t, err)
+	// Nor is a person the host names: the subject is still the host application.
+	reviewer := openrails.WithInvoker(ctx, openrails.Invoker{Issuer: "https://operators.example", ID: "reviewer"})
+	_, err = w.client[embedded].ClearDestructiveHold(reviewer, billing.DestructiveHoldID(trip.Hold.ID), billing.ClearDestructiveHoldParams{Reason: "delegated refused"})
+	require.Error(t, err)
 	w.restart()
 	gate = engine.Graph(w.rt).Runtime.DestructiveAdmissions
 	_, err = gate.Admit(ctx, command(6))

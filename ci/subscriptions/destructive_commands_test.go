@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"context"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/engine"
 	"net/http"
@@ -97,9 +98,10 @@ func TestDestructiveHoldAfterRefundSendPreservesFinalizationAndReplay(t *testing
 			close(gate.release)
 		}
 	})
+	staff := openrails.WithInvoker(context.WithoutCancel(t.Context()), openrails.Invoker{Issuer: "https://staff.example", ID: "refunder"})
 	done := make(chan error, 1)
 	go func() {
-		_, err := w.client[embedded].RefundPayment(context.WithoutCancel(t.Context()), payment.ID, params)
+		_, err := w.client[embedded].RefundPayment(staff, payment.ID, params)
 		done <- err
 	}()
 	select {
@@ -112,7 +114,7 @@ func TestDestructiveHoldAfterRefundSendPreservesFinalizationAndReplay(t *testing
 	require.NoError(t, <-done)
 	w.stripe.unhold()
 	w.settle()
-	_, err := w.client[embedded].RefundPayment(t.Context(), payment.ID, params)
+	_, err := w.client[embedded].RefundPayment(staff, payment.ID, params)
 	require.NoError(t, err, "a completed request replays through a later actor hold")
 	got, err := w.client[embedded].GetPayment(t.Context(), payment.ID)
 	require.NoError(t, err)

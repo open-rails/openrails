@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // Kind identifies the admitted command, not its provider's internal effects.
@@ -39,8 +40,10 @@ type Actor struct {
 	Credential string
 }
 
-// ActorFromContext reads only an identity admitted by OpenRails' route gate.
-// Autonomous work has a separate policy and never borrows a staff identity.
+// ActorFromContext reads only an identity admitted by OpenRails' route gate:
+// its invoker, so a person the in-process host names is the actor. The host's
+// own work is the host actor. Autonomous work has a separate policy and never
+// borrows a staff identity.
 func ActorFromContext(ctx context.Context) (Actor, error) {
 	var who billingauth.Identity
 	if staff, ok := billingauth.StaffFromContext(ctx); ok {
@@ -53,6 +56,9 @@ func ActorFromContext(ctx context.Context) (Actor, error) {
 	actor := Actor{Issuer: who.Invoker.Issuer, ID: who.Invoker.ID, Credential: billingauth.CredentialName(who)}
 	if err := actor.validate(); err != nil {
 		return Actor{}, err
+	}
+	if _, host := requestauth.HostPrincipalFromContext(ctx); actor.Issuer == billingauth.HostIssuer && !host {
+		return Actor{}, errors.New("only the in-process host acts as the host")
 	}
 	return actor, nil
 }
@@ -86,6 +92,18 @@ type Command struct {
 	Digest     string
 	Units      int64
 	Actor      Actor
+}
+
+// originName is the audit origin: named automation, the in-process host's own
+// work, or a staff or application actor (including a person the host names).
+func (c Command) originName() string {
+	switch {
+	case c.origin != "":
+		return c.origin
+	case c.Actor.Issuer == billingauth.HostIssuer:
+		return "host"
+	}
+	return "staff"
 }
 
 func (c Command) validate() error {
