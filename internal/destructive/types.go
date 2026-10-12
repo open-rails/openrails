@@ -92,7 +92,7 @@ func (c Command) validate() error {
 		return errors.New("invalid destructive command")
 	}
 	b, err := hex.DecodeString(c.Digest)
-	if err != nil || len(b) != 32 {
+	if err != nil || len(b) != 32 || c.Digest != strings.ToLower(c.Digest) {
 		return errors.New("destructive command requires a SHA256 digest")
 	}
 	switch c.Kind {
