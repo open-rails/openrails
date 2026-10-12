@@ -77,7 +77,7 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	}
 	if bill.Payment != nil {
 		payment := *bill.Payment
-		payment.OrderID, payment.PriceID = &result.Order.ID, uuid.Nil
+		payment.OrderID = &result.Order.ID
 		payment.PspID = &bill.PSPID
 		if payment.ID == uuid.Nil {
 			payment.ID = uuidutil.NewV7()

@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,13 +33,7 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 	if b.Lines[0].Description == "" {
 		b.Lines[0].Description = "Subscription enrollment"
 	}
-	if raw, ok := params.PaymentMetadata["order_id"].(string); ok {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return observed.Result{}, fmt.Errorf("initial order id: %w", err)
-		}
-		b.ExistingOrderID = &id
-	}
+	b.ExistingOrderID = params.ExistingOrderID
 	recorded, err := observed.Record(ctx, d, b, now)
 	if err != nil {
 		return recorded, err

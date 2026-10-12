@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -1566,45 +1567,41 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID); err != nil {
 			return fmt.Errorf("failed to get subscription for renewal: %w", err)
 		}
-		if sub.Price == nil {
-			if sub.Price, err = catalog.NewPriceService(d).GetByID(ctx, sub.PriceID); err != nil {
-				return fmt.Errorf("load price for CCBill renewal: %w", err)
-			}
+		at := ccbillEventPurchasedAt(data.Timestamp)
+		if at == nil || announced == nil {
+			return errors.New("CCBill renewal requires its actual receipt time and next billing boundary")
 		}
-		fields := map[string]interface{}{"price_id": sub.Price.ID.String(), "rail_subscription_id": railSubID, "subscription_id": sub.ID.String(), "transaction_id": transactionID}
-		if err := validateCCBillCurrencyMatches(currencyValue, sub.Price.Currency, fields); err != nil {
-			return err
-		}
-		if err := validateCCBillBilledAmount(ctx, s, sub.Price.Currency, billedAmountCents, moneyutil.Micros(sub.Price.Amount), fields,
-			log.Fields{"transaction_id": transactionID, "rail_subscription_id": railSubID, "subscription_id": sub.ID}); err != nil {
-			return err
-		}
-		periodEnd, err := boundCCBillPeriodEnd(announced, sub, s.now())
+		amount, err := moneyutil.RailMinorToNative(currencyValue, billedAmountCents)
 		if err != nil {
 			return err
 		}
-		params := &subscriptions.RenewMembershipParams{
-			Rail: models.RailCCBill, RailSubscriptionID: railSubID, CurrentPeriodEndsAt: periodEnd, TransactionID: transactionID,
-			Amount: int64(moneyutil.CentsToMicros(billedAmountCents)), AmountProvided: true, Currency: currencyValue,
-			PurchasedAt: ccbillEventPurchasedAt(data.Timestamp),
-		}
-		lc := s.lifecycleIn(d)
-		if periodEnd != nil && sub.CurrentPeriodEndsAt != nil && !periodEnd.After(*sub.CurrentPeriodEndsAt) {
-			return lc.RecordConfirmedChargeWithoutRenewal(ctx, params) // a replay, or a period already paid
-		}
-		if sub.CurrentPeriodEndsAt != nil {
-			if err := s.recordCCBillAttempt(ctx, d, sub, sub.CurrentPeriodEndsAt.UTC(), transactionID, true, decline.Evidence{}); err != nil {
-				return err
-			}
-		}
-		err = lc.RenewMembership(ctx, params)
-		if !subscriptions.IsTerminalTransitionBlocked(err) && !errors.Is(err, lifecycle.ErrTerminal) {
+		bill, err := observed.ScheduleBill(ctx, d, sub, observed.ScheduleReceipt{TransactionID: transactionID, Amount: amount,
+			Currency: currencyValue, OccurredAt: *at, NextBillingAt: *announced, Approved: true})
+		if err != nil {
 			return err
 		}
-		blocked = err // a decided cancellation: the charge goes to refund review
-		return lc.RecordConfirmedChargeWithoutRenewal(ctx, params)
+		bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: models.RailCCBill,
+			TransactionID: transactionID, Amount: amount, ListAmount: amount, Currency: currencyValue,
+			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: *at, CreatedAt: s.now()}
+		bill.Settled, bill.SettlementSource = true, "cash"
+		params := &subscriptions.RenewMembershipParams{ProviderBill: &bill,
+			Rail: models.RailCCBill, RailSubscriptionID: railSubID, CurrentPeriodStartsAt: &bill.PeriodStart, CurrentPeriodEndsAt: &bill.PeriodEnd,
+			TransactionID: transactionID, Amount: amount, AmountProvided: true, Currency: currencyValue, PurchasedAt: at}
+		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
+			blocked = subscriptions.ErrTerminalTransitionBlocked
+		}
+		if err := attempts.Record(ctx, d.Gen(ctx), attempts.Attempt{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(models.RailCCBill), Kind: attempts.Rebill, Owner: attempts.OwnerProvider, ProviderSchedule: true, ObservedVia: "webhook", Approved: true, TransactionID: transactionID, Amount: bill.Total, Currency: bill.Currency, At: *at, SubscriptionID: &sub.ID, Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: bill.PeriodStart}, OrderID: nil}); err != nil {
+			return err
+		}
+		return s.lifecycleIn(d).RenewMembership(ctx, params)
+
 	})
 	if err != nil {
+		if holdErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{Provider: string(models.RailCCBill),
+			Operation: "provider_bill_unresolved", TransactionID: transactionID, Err: err,
+			Metadata: map[string]any{"rail_subscription_id": railSubID, "next_renewal_date": data.NextRenewalDate}}); holdErr != nil {
+			return holdErr
+		}
 		return err
 	}
 	if blocked == nil {
@@ -1636,7 +1633,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRetryDate '%s': %w", data.NextRetryDate, err)
 	}
-	renewalAt, err := parseCCBillDateUsingTimestamp(data.RenewalDate)
+	_, err = parseCCBillDateUsingTimestamp(data.RenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse renewalDate '%s': %w", data.RenewalDate, err)
 	}
@@ -1648,7 +1645,18 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 		now := s.now().UTC()
-		period := ccbillDeclinedPeriod(sub, renewalAt)
+		at := ccbillEventPurchasedAt(data.Timestamp)
+		if at == nil {
+			return errors.New("CCBill decline requires its actual receipt time")
+		}
+		bill, err := observed.ScheduleBill(ctx, d, sub, observed.ScheduleReceipt{TransactionID: transactionID, OccurredAt: *at})
+		if err != nil {
+			return err
+		}
+		if _, err := observed.Record(ctx, d, bill, now); err != nil {
+			return err
+		}
+		period := bill.PeriodStart
 		unpaid := lifecycle.Status(sub.Status).Live() && sub.CurrentPeriodEndsAt != nil && period.Equal(sub.CurrentPeriodEndsAt.UTC())
 		if _, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.RenewalDeclined{PeriodStart: period, Bucket: lifecycle.Retry, At: now}, ccbillNotice{suppressNotices: true}); err != nil {
 			return err

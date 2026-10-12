@@ -2,7 +2,10 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"slices"
 	"time"
 
@@ -290,96 +293,80 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 // successful charges we are missing, idempotent by transaction id (ON CONFLICT
 // DO NOTHING). Declines are attempts, not payments; refunds and chargebacks
 // are never charge rows. Bounded to lookbackCap. Returns the count inserted.
-func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time, lookbackCap time.Duration) (int, error) {
-	floor := now.Add(-lookbackCap)
+func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, now time.Time, lookbackCap time.Duration) (int, error) {
 	inserted := 0
 	for i := range txns {
-		t := txns[i]
-		if t.TransactionID == "" || t.OccurredAt.Before(floor) {
+		t := &txns[i]
+		if t.TransactionID == "" || t.OccurredAt.Before(now.Add(-lookbackCap)) {
 			continue
 		}
-		if !chargeAttempt(t.Type) {
-			// Refunds and chargebacks move money OUT of the merchant: they are
-			// never a charge row. The refund plane records pulled refunds
-			// against their sale; one that arrives here without its sale is
-			// surfaced for review instead of inflating revenue.
+		if t.StripeBill == nil && !chargeAttempt(t.Type) {
 			if t.Type == TransactionTypeRefund || t.Type == TransactionTypeChargeback {
-				recordUnlinkedReversalFinding(ctx, q, sub, t)
+				recordUnlinkedReversalFinding(ctx, database.Gen(ctx), sub, *t)
 			}
 			continue
 		}
-		if !t.Success {
-			continue // a decline is an attempt (recordScheduleAttempts), never a payment
-		}
-		// A provider ingestion boundary (Stripe sends lower-case): canonicalise
-		// before the value lands in payments.currency.
-		currency := money.NormalizeCurrency(t.Currency)
-		// A charge without a currency inherits the subscription's billing
-		// currency (the roster reports it for this subscription). That is an
-		// inference, so metadata and the log record its provenance.
-		currencyInherited := false
-		if currency == "" && sub.Price != nil {
-			currency = money.NormalizeCurrency(sub.Price.Currency)
-			currencyInherited = currency != ""
-		}
-		if currency == "" {
-			// Genuinely unknown currency (transaction and subscription both lack one):
-			// skip + warn rather than guess.
-			log.WithContext(ctx).WithFields(log.Fields{
-				"transaction_id":  t.TransactionID,
-				"subscription_id": sub.ID,
-			}).Warn("reconcile backfill: transaction and subscription both lack a currency; skipping row")
-			continue
-		}
-		subID := sub.ID
-		// RemoteTransaction amounts are rail minor units; the payments ledger
-		// is native units of the row's currency.
-		amount, err := t.nativeIn(currency)
+		var result observed.Result
+		err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := database.NewWithPgxTx(tx)
+			current, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, sub.ID)
+			if err != nil {
+				return err
+			}
+			if t.StripeBill != nil {
+				bill, _, err := subscriptions.StripeBillObservation(ctx, d, current, *t.StripeBill)
+				if err != nil {
+					return err
+				}
+				result, err = subscriptions.RecordStripeBill(ctx, d, current, *t.StripeBill, now)
+				if err == nil {
+					t.ObservedBill = &bill
+				}
+				return err
+			}
+			currency := money.NormalizeCurrency(t.Currency)
+			if currency == "" {
+				return fmt.Errorf("provider receipt %s has no billed currency", t.TransactionID)
+			}
+			amount, err := t.nativeIn(currency)
+			if err != nil {
+				return err
+			}
+			var next time.Time
+			if t.NextBillingAt != nil {
+				next = *t.NextBillingAt
+			}
+			bill, err := observed.ScheduleBill(ctx, d, current, observed.ScheduleReceipt{TransactionID: t.TransactionID, Amount: amount,
+				Currency: currency, OccurredAt: t.OccurredAt, NextBillingAt: next, Approved: t.Success})
+			if err != nil {
+				return err
+			}
+			if t.Success {
+				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
+					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
+					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now}
+				bill.Settled, bill.SettlementSource = true, "cash"
+			}
+			result, err = observed.Record(ctx, d, bill, now)
+			if err == nil {
+				t.ObservedBill = &bill
+			}
+			return err
+		})
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"transaction_id":  t.TransactionID,
-				"subscription_id": sub.ID,
-			}).Warn("reconcile backfill: amount is not exact in the row's currency; skipping row")
-			continue
+			evidence, _ := json.Marshal(map[string]any{"transaction_id": t.TransactionID, "subscription_id": sub.ID, "error": err.Error()})
+			action := "Resolve the accepted provider bill or cycle evidence, then replay this observation. No collection or entitlement was inferred."
+			_, findingErr := database.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
+				PspID: &sub.PspID, FindingType: "pull.bill.unresolved", SubjectKey: "receipt:" + t.TransactionID,
+				Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+			if findingErr != nil {
+				return inserted, fmt.Errorf("retain unresolved provider bill: %w", findingErr)
+			}
+			return inserted, fmt.Errorf("provider bill receipt %s unresolved: %w", t.TransactionID, err)
 		}
-		params := gen.CreatePaymentIfNotExistsParams{
-			ID:             uuid.New(),
-			MerchantID:     sub.MerchantID,
-			PriceID:        &sub.PriceID,
-			Channel:        string(models.ChannelRail),
-			Rail:           new(string(sub.Rail)),
-			TransactionID:  t.TransactionID,
-			Amount:         amount,
-			ListAmount:     amount,
-			Currency:       currency,
-			Status:         "succeeded",
-			SubscriptionID: &subID,
-			PurchasedAt:    t.OccurredAt,
-			CustomerID:     sub.CustomerID,
-			// A charge belongs to the account that took it: the one owning the
-			// subscription it renewed.
-			PspID: &sub.PspID,
-			// A mirrored success is money the rail moved.
-			MoneyMovement: string(models.MoneyMovementRail),
+		if result.PaymentCreated {
+			inserted++
 		}
-		if currencyInherited {
-			params.Metadata = []byte(`{"currency_provenance":"inherited_from_subscription_price"}`)
-			log.WithContext(ctx).WithFields(log.Fields{
-				"transaction_id":  t.TransactionID,
-				"subscription_id": sub.ID,
-				"currency":        currency,
-			}).Warn("reconcile backfill: transaction reported no currency; denominating the attempt in the subscription's billing currency and recording the inheritance as provenance (CUR-9)")
-		}
-		// NMI can only rebill a card it holds, so the custody fact is stated,
-		// not guessed.
-		if tt := payments.DefaultTokenType(string(sub.Rail), models.CustodianPSP); tt != "" {
-			params.TokenType = &tt
-		}
-		n, err := q.CreatePaymentIfNotExists(ctx, params)
-		if err != nil {
-			return inserted, fmt.Errorf("backfill payment %s: %w", t.TransactionID, err)
-		}
-		inserted += int(n)
 	}
 	return inserted, nil
 }

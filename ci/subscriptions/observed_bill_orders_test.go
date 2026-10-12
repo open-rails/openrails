@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/engine"
@@ -192,4 +194,42 @@ func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
 	grants = count()
 	require.NoError(t, lifecycle.RenewMembership(ctx, params))
 	require.Equal(t, grants, count(), "completed receipt replay repeats no access effects")
+}
+
+func TestObservedLateBillKeepsCancellation(t *testing.T) {
+	w := newWorld(t)
+	w.waive("evidenced", "normalized authenticated late receipt exercises local accounting without issuing another gateway charge")
+	l := importLegacy(t, w, "nmi", embedded)
+	w.refreshProviders()
+	l.c.must(http.MethodPost, "/subscriptions/"+l.sub.String()+"/cancel", "", map[string]any{"reason": "finished"})
+	w.settle()
+	before := w.subscription(embedded, l.sub)
+	require.Equal(t, billing.SubscriptionCanceled, before.Status)
+	ctx := db.WithPSPID(merchant.WithID(t.Context(), w.client[embedded].MerchantID()), w.psp["nmi"].UUID())
+	start := *before.CurrentPeriodEndsAt
+	end := start.Add(monthHours * time.Hour)
+	priceID, productID, subID := w.priceStorageID(l.price.ID), l.price.ProductID.UUID(), l.sub.UUID()
+	hours := monthHours
+	pspID := w.psp["nmi"].UUID()
+	payment := &models.Payment{ID: uuid.New(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Rail: models.RailNMI, PspID: &pspID, TransactionID: "late-canceled-capture", Amount: l.price.UnitAmount, ListAmount: l.price.UnitAmount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail}
+	bill := observed.Bill{PSPID: *payment.PspID, CustomerID: payment.CustomerID, SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "late-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "cash", Payment: payment, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount, BillingIntervalHours: &hours, AccessDurationHours: &hours}}}
+	countGrants := func() int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.grants WHERE customer_id=$1`), payment.CustomerID).Scan(&n))
+		return n
+	}
+	grants := countGrants()
+	lifecycle := engine.Graph(w.rt).Runtime.SubscriptionLifecycleService
+	params := &subscriptions.RenewMembershipParams{ProviderBill: &bill, Rail: models.RailNMI, RailSubscriptionID: l.railSub, TransactionID: payment.TransactionID, Amount: bill.Total, AmountProvided: true, Currency: bill.Currency}
+	require.NoError(t, lifecycle.RenewMembership(ctx, params))
+	require.NoError(t, lifecycle.RenewMembership(ctx, params))
+	after := w.subscription(embedded, l.sub)
+	require.Equal(t, billing.SubscriptionCanceled, after.Status)
+	require.True(t, before.CurrentPeriodEndsAt.Equal(*after.CurrentPeriodEndsAt), "the late capture never advances the canceled period")
+	require.Equal(t, grants, countGrants(), "the late capture grants no access")
+	var recorded, findings int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.payments p JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id WHERE p.transaction_id=$1 AND p.amount=$2 AND o.total=$2`), payment.TransactionID, bill.Total).Scan(&recorded))
+	require.Equal(t, 1, recorded, "the real late capture remains linked to its bill exactly once")
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='pull.charge.after_cancellation' AND subject_key=$1`), "payment:"+payment.ID.String()).Scan(&findings))
+	require.Equal(t, 1, findings, "the late capture requires refund review")
 }

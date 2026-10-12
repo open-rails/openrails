@@ -3,11 +3,13 @@
 package subscriptions_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -16,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -166,11 +169,26 @@ func TestPendingSubscriptionAccessFollowsTheProduct(t *testing.T) {
 			pending, err := lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{Prepared: accepted, UserID: buyer.id, PriceID: w.priceStorageID(price.ID), Rail: models.RailNMI, RailSubscriptionID: &railSub})
 			require.NoError(t, err)
 			require.Equal(t, models.StatusPending, pending.Status)
+			var zeroDueOrders, payments int
+			require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.orders WHERE subscription_id=$1 AND total=0 AND status='complete'`), pending.ID).Scan(&zeroDueOrders))
+			require.Equal(t, 1, zeroDueOrders, "the accepted zero-due enrollment is an order")
+			require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1`), pending.ID).Scan(&payments))
+			require.Zero(t, payments, "pending enrollment does not manufacture a gateway payment")
+			pending, err = engine.Graph(w.rt).Runtime.SubscriptionService.GetByID(ctx, pending.ID)
+			require.NoError(t, err)
 			_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{editedCatalogBenefit})})
 			require.NoError(t, err)
 			w.advance(day)
 			sale := w.nmi.RenewSchedule(railSub, true)
-			active, err := lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{UserID: buyer.id, PriceID: w.priceStorageID(price.ID), Rail: models.RailNMI, RailSubscriptionID: &railSub,
+			var bill observed.Bill
+			database := engine.Graph(w.rt).Runtime.DB
+			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				var err error
+				bill, err = observed.ScheduleBill(ctx, database.NewWithPgxTx(tx), pending, observed.ScheduleReceipt{TransactionID: sale.TransactionID, Amount: price.UnitAmount, Currency: "USD", OccurredAt: start, NextBillingAt: w.nmi.Schedule(railSub).NextBilling, Approved: true})
+				return err
+			}))
+			bill.Settled, bill.SettlementSource = true, "cash"
+			active, err := lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{ProviderBill: &bill, UserID: buyer.id, PriceID: w.priceStorageID(price.ID), Rail: models.RailNMI, RailSubscriptionID: &railSub,
 				CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &end, TransactionID: sale.TransactionID, Amount: price.UnitAmount, AmountProvided: true, Currency: "USD", PurchasedAt: &start})
 			require.NoError(t, err)
 			require.Equal(t, pending.ID, active.ID)

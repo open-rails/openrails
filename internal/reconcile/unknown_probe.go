@@ -114,6 +114,9 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 			}
 		}
 		snap.Subscriptions = []RemoteSubscription{sub}
+		for i := range snap.Transactions {
+			snap.Transactions[i].NextBillingAt = sub.NextBillingAt
+		}
 	}
 	return snap, nil
 }
@@ -232,40 +235,12 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 		sub.PeriodStart = &start
 	}
 	snap.Subscriptions = []RemoteSubscription{sub}
-	// The latest PAID invoice is charge evidence; it bills at the period start
-	// it opens — the deterministic timestamp Stripe exposes here.
-	if rec.LatestInvoicePaid && rec.LatestInvoiceTransactionID != "" && !rec.CurrentPeriodStart.IsZero() {
-		snap.Transactions = []RemoteTransaction{{
-			TransactionID:  rec.LatestInvoiceTransactionID,
-			SubscriptionID: railSubID,
-			Type:           TransactionTypeSale,
-			Success:        true,
-			AmountCents:    rec.LatestInvoiceAmountPaid,
-			Currency:       rec.LatestInvoiceCurrency,
-			OccurredAt:     rec.CurrentPeriodStart,
-		}}
+	// Invoice settlement is an obligation fact, not a fabricated Charge.
+	// Actual cash is verified and recorded from each invoice payment.
+	if rec.LatestBill != nil {
+		snap.Transactions = append(snap.Transactions, stripeBillFact(*rec.LatestBill))
 	}
-	// An unpaid latest invoice with an amount due is decline evidence, the
-	// fetch-sourced replacement for invoice.payment_failed's payload. The
-	// "failed:" transaction-id prefix keeps a backfilled failed attempt and the
-	// eventual success from colliding. Recorded only with the invoice's own
-	// created time (no fabricated instants). A dead subscription's failed
-	// invoice is no decline in progress (it would hold the row in dunning
-	// against Stripe's final word), and an unpaid proration (a tier change) is
-	// no declined renewal: the paid period stands.
-	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 && sub.Status != SubscriptionStatusExpired &&
-		!strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") &&
-		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
-		snap.Transactions = append(snap.Transactions, RemoteTransaction{
-			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,
-			SubscriptionID: railSubID,
-			Type:           TransactionTypeDecline,
-			Success:        false,
-			AmountCents:    rec.LatestInvoiceAmountDue,
-			Currency:       rec.LatestInvoiceCurrency,
-			OccurredAt:     rec.LatestInvoiceCreated,
-		})
-	}
+
 	return snap
 }
 

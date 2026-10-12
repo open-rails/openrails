@@ -57,7 +57,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID,
-		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: orderID, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
+		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,43 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if err != nil {
 		return err
 	}
-	if stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+		return ErrConflict
+	}
+	return nil
+}
+
+// DeclareSchedule accepts an operator-verified forward import agreement. No
+// order, cash movement or historical settlement is invented by this declaration.
+func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, firstDue time.Time, cadenceHours, cadenceMonths int, now time.Time) error {
+	if bill.SubscriptionID == nil || firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || strings.TrimSpace(source) == "" || len(source) > 512 {
+		return errors.New("declared provider schedule is incomplete")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	bill.Kind, bill.SourceKind = "renewal", "provider_cycle"
+	bill.SourceKey, bill.ProviderReference = "", ""
+	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = time.Time{}, time.Time{}, time.Time{}
+	if bill.Payment != nil || bill.Settled || bill.Total <= 0 || len(bill.Lines) != 1 || bill.Lines[0].Amount != bill.Total {
+		return errors.New("declared schedule is an accepted agreement, not historical money")
+	}
+	raw, err := json.Marshal(bill)
+	if err != nil {
+		return err
+	}
+	q := d.Gen(ctx)
+	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID,
+		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), CadenceMonths: int32(cadenceMonths), AcceptedBill: raw, Now: now})
+	if err != nil {
+		return err
+	}
+	stored, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID})
+	if err != nil {
+		return err
+	}
+	if stored.CadenceMonths != int32(cadenceMonths) || stored.SourceReference != source || stored.CustomerID != bill.CustomerID || stored.PspID != bill.PSPID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
 		return ErrConflict
 	}
 	return nil
@@ -98,6 +134,9 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 	if err := json.Unmarshal(schedule.AcceptedBill, &bill); err != nil {
 		return Bill{}, err
 	}
+	if !receipt.Approved && receipt.Amount == 0 {
+		receipt.Amount, receipt.Currency = bill.Total, bill.Currency
+	}
 	if schedule.PspID != sub.PspID || schedule.CustomerID != sub.CustomerID || bill.SubscriptionID == nil || *bill.SubscriptionID != sub.ID || bill.Owner != string(sub.CollectionPolicy) || receipt.Amount != bill.Total || !strings.EqualFold(receipt.Currency, bill.Currency) {
 		return Bill{}, ErrConflict
 	}
@@ -110,7 +149,24 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 		}
 		due = bound.DueAt
 	case db.IsNotFound(err):
-		due, err = scheduleReceiptCycle(schedule.FirstDueAt, int(schedule.CadenceHours), receipt)
+		if !receipt.Approved {
+			// A declined execution belongs to the next accepted unpaid cycle,
+			// anchored by enrollment and actual prior receipts. A changed
+			// next-retry date supplies no obligation identity.
+			prior, err := q.LatestSettledProviderCycle(ctx, gen.LatestSettledProviderCycleParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			if err != nil && !db.IsNotFound(err) {
+				return Bill{}, err
+			}
+			receipt.NextBillingAt = schedule.FirstDueAt
+			if err == nil {
+				index, err := scheduleBoundaryIndex(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), prior)
+				if err != nil {
+					return Bill{}, err
+				}
+				receipt.NextBillingAt = scheduleBoundary(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), index+1)
+			}
+		}
+		due, err = scheduleReceiptCycle(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), receipt)
 		if err != nil {
 			return Bill{}, err
 		}
@@ -124,38 +180,75 @@ func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, recei
 	}
 	bill.SourceKey = sub.ID.String() + ":" + due.UTC().Format(time.RFC3339Nano)
 	bill.ProviderReference = sub.RailSubscriptionID
-	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = due, due.Add(time.Duration(schedule.CadenceHours)*time.Hour), due
+	index, err := scheduleBoundaryIndex(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), due)
+	if err != nil {
+		return Bill{}, err
+	}
+	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = due, scheduleBoundary(schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths), index+1), due
 	return bill, nil
 }
 
 // NMI and CCBill expose billing days. Match that declared boundary to the
 // immutable accepted cadence; do not round an arbitrary changed retry date or
 // infer from the subscription's mutable paid-through value.
-func scheduleReceiptCycle(firstDue time.Time, cadenceHours int, receipt ScheduleReceipt) (time.Time, error) {
-	if cadenceHours <= 0 || cadenceHours%24 != 0 || int64(cadenceHours) > math.MaxInt64/int64(time.Hour) || receipt.NextBillingAt.IsZero() {
-		return time.Time{}, errors.New("provider receipt lacks a verified accepted schedule boundary")
+func validCadence(hours, months int) bool {
+	return hours > 0 && hours <= math.MaxInt32 && hours%24 == 0 && months == 0 || hours == 0 && months > 0 && months <= 1200
+}
+
+// Calendar boundaries retain the original day (clamped in shorter months), so
+// a January 31 schedule returns to March 31 after February's shorter month.
+func scheduleBoundary(first time.Time, hours, months, index int) time.Time {
+	first = first.UTC()
+	if months == 0 {
+		return first.Add(time.Duration(index) * time.Duration(hours) * time.Hour)
 	}
-	period := time.Duration(cadenceHours) * time.Hour
-	anchor := firstDue.UTC().Truncate(24 * time.Hour)
-	next := receipt.NextBillingAt.UTC().Truncate(24 * time.Hour)
-	delta := next.Sub(anchor)
-	if delta < 0 || delta%period != 0 {
-		return time.Time{}, errors.New("provider schedule boundary differs from the accepted cadence")
+	monthStart := time.Date(first.Year(), first.Month()+time.Month(index*months), 1, first.Hour(), first.Minute(), first.Second(), first.Nanosecond(), time.UTC)
+	lastDay := monthStart.AddDate(0, 1, -1).Day()
+	day := min(first.Day(), lastDay)
+	return monthStart.AddDate(0, 0, day-1)
+}
+
+func scheduleBoundaryIndex(first time.Time, hours, months int, boundary time.Time) (int, error) {
+	if !validCadence(hours, months) || boundary.IsZero() {
+		return 0, errors.New("provider receipt lacks a verified accepted schedule boundary")
 	}
-	index := delta/period - 1
+	anchor, target := first.UTC().Truncate(24*time.Hour), boundary.UTC().Truncate(24*time.Hour)
+	index := 0
+	if months > 0 {
+		delta := (target.Year()-anchor.Year())*12 + int(target.Month()-anchor.Month())
+		if delta < 0 || delta%months != 0 {
+			return 0, errors.New("provider schedule boundary differs from accepted calendar cadence")
+		}
+		index = delta / months
+	} else {
+		period := time.Duration(hours) * time.Hour
+		delta := target.Sub(anchor)
+		if delta < 0 || delta%period != 0 {
+			return 0, errors.New("provider schedule boundary differs from accepted cadence")
+		}
+		index = int(delta / period)
+	}
+	if !scheduleBoundary(first, hours, months, index).Truncate(24 * time.Hour).Equal(target) {
+		return 0, errors.New("provider schedule boundary differs from accepted billing day")
+	}
+	return index, nil
+}
+
+func scheduleReceiptCycle(firstDue time.Time, cadenceHours, cadenceMonths int, receipt ScheduleReceipt) (time.Time, error) {
+	index, err := scheduleBoundaryIndex(firstDue, cadenceHours, cadenceMonths, receipt.NextBillingAt)
+	if err != nil {
+		return time.Time{}, err
+	}
 	day := receipt.OccurredAt.UTC().Truncate(24 * time.Hour)
-	// On a decline the provider may leave the next billing boundary unchanged.
-	// The executed receipt and the accepted schedule must still agree on one
-	// half-open cycle; a scheduled retry timestamp cannot supply this boundary.
-	if !receipt.Approved && !day.Before(next) && day.Before(next.Add(period)) {
-		index++
+	if receipt.Approved {
+		index--
 	}
 	if index < 0 {
 		return time.Time{}, errors.New("provider receipt predates the first accepted renewal")
 	}
-	due := firstDue.UTC().Add(index * period)
-	start := due.Truncate(24 * time.Hour)
-	if day.Before(start) || !day.Before(start.Add(period)) {
+	due := scheduleBoundary(firstDue, cadenceHours, cadenceMonths, index)
+	end := scheduleBoundary(firstDue, cadenceHours, cadenceMonths, index+1)
+	if day.Before(due.Truncate(24*time.Hour)) || !day.Before(end.Truncate(24*time.Hour)) {
 		return time.Time{}, errors.New("provider receipt and schedule cannot prove one accepted cycle")
 	}
 	return due, nil

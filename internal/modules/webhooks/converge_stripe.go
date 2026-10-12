@@ -108,7 +108,6 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 	}
 
 	snap := reconcile.StripeSnapshotFromLiveness(railSubID, rec, now)
-	snap.BillsRecorded = true
 	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("stripe converge: %w", err)

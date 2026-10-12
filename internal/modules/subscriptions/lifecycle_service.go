@@ -553,6 +553,15 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	subscription.Price = price
 
+	if params.Prepared != nil && params.Prepared.Amount == 0 && params.ExistingOrderID == nil {
+		// A free or pending accepted enrollment is still an order. Its
+		// zero-due settlement creates no payment, while a provider schedule
+		// freezes the explicitly accepted future cadence for its first bill.
+		if _, err := initialBill(ctx, dbb, params, subscription, nil, now); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if params.Prepared != nil && params.Prepared.Pending {
 		return subscription, nil, nil
 	}

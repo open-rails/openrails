@@ -49,25 +49,25 @@ func TestMoneyMovementIsDeclared(t *testing.T) {
 // Every minted payment row carries the canonical upper-case currency, or none is minted.
 func TestPaymentInsertParamsCanonicalize(t *testing.T) {
 	t.Parallel()
-	params, err := paymentInsertParams(&models.Payment{ID: uuid.New(), Amount: 1_000_000, Currency: " usd ", Status: "succeeded", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
+	params, err := paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), ID: uuid.New(), Amount: 1_000_000, Currency: " usd ", Status: "succeeded", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
 	require.NoError(t, err)
 	require.Equal(t, "USD", params.Currency)
 	require.Equal(t, string(models.MoneyMovementRail), params.MoneyMovement)
 	require.Equal(t, "rail", params.Channel)
 	require.Equal(t, "nmi", *params.Rail)
 
-	manual, err := paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, MoneyMovement: models.MoneyMovementNone})
+	manual, err := paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, MoneyMovement: models.MoneyMovementNone})
 	require.NoError(t, err)
 	require.Equal(t, "manual", manual.Channel)
 	require.Nil(t, manual.Rail, "a manual payment has no rail")
-	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, Rail: "nmi", MoneyMovement: models.MoneyMovementNone})
+	_, err = paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, Rail: "nmi", MoneyMovement: models.MoneyMovementNone})
 	require.ErrorContains(t, err, "names no rail")
-	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
+	_, err = paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), Amount: 1_000_000, Currency: "USD", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
 	require.ErrorContains(t, err, "status required", "no status is invented")
 
-	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, MoneyMovement: models.MoneyMovementRail})
+	_, err = paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), Amount: 1_000_000, MoneyMovement: models.MoneyMovementRail})
 	require.ErrorContains(t, err, "currency required")
-	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD"})
+	_, err = paymentInsertParams(&models.Payment{OrderID: new(uuid.New()), Amount: 1_000_000, Currency: "USD"})
 	require.ErrorContains(t, err, "must be declared")
 }
 

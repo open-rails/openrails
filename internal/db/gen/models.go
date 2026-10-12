@@ -1313,15 +1313,17 @@ type BillingProviderMutationLog struct {
 }
 
 type BillingProviderSchedule struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-	CustomerID     uuid.UUID
-	PspID          uuid.UUID
-	InitialOrderID uuid.UUID
-	FirstDueAt     time.Time
-	CadenceHours   int32
-	AcceptedBill   []byte
-	CreatedAt      time.Time
+	MerchantID      uuid.UUID
+	SubscriptionID  uuid.UUID
+	CustomerID      uuid.UUID
+	PspID           uuid.UUID
+	InitialOrderID  *uuid.UUID
+	SourceReference string
+	FirstDueAt      time.Time
+	CadenceHours    int32
+	CadenceMonths   int32
+	AcceptedBill    []byte
+	CreatedAt       time.Time
 }
 
 // Bearer tokens a merchant's directory presents at /scim/v2, stored as their SHA-256. Revoking deletes the row.

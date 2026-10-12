@@ -12,6 +12,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -58,8 +60,10 @@ func LocalMaterializeStatus(remote SubscriptionStatus) (models.SubscriptionStatu
 type TransactionType string
 
 const (
-	TransactionTypeUnknown    TransactionType = "unknown"
-	TransactionTypeSale       TransactionType = "sale"
+	TransactionTypeUnknown TransactionType = "unknown"
+	TransactionTypeSale    TransactionType = "sale"
+	// Settlement names a paid obligation, never a gateway money movement.
+	TransactionTypeSettlement TransactionType = "settlement"
 	TransactionTypeAuth       TransactionType = "auth"
 	TransactionTypeRefund     TransactionType = "refund"
 	TransactionTypeVoid       TransactionType = "void"
@@ -125,6 +129,10 @@ type RemoteSubscription struct {
 
 // RemoteTransaction is one charge-level event as the rail declares it.
 type RemoteTransaction struct {
+	ObservedBill                   *observed.Bill            `json:"-"`
+	StripeBill                     *subscriptions.StripeBill `json:"stripe_bill,omitempty"`
+	NextBillingAt                  *time.Time                `json:"next_billing_at,omitempty"`
+	BillPeriodStart, BillPeriodEnd *time.Time                `json:"-"`
 	// TransactionID is the rail transaction identifier (NMI
 	// transaction_id, CCBill transaction id, Stripe ch_/re_/dp_..., Solana tx
 	// signature).

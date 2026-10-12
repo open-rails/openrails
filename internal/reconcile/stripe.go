@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // StripeFetcher pulls Stripe state with raw GETs, always through the stripeapi
@@ -92,6 +93,27 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	}
 	for _, obj := range charges {
 		snap.Transactions = append(snap.Transactions, normalizeStripeCharge(obj))
+	}
+
+	reader := &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+	for _, subscription := range snap.Subscriptions {
+		if err := reader.VisitSubscriptionBills(ctx, subscription.RailSubscriptionID, func(bill subscriptions.StripeBill) error {
+			if bill.CustomerID != subscription.CustomerID {
+				return fmt.Errorf("Stripe invoice %s belongs to another customer", bill.ID)
+			}
+			for _, payment := range bill.Payments {
+				for i := range snap.Transactions {
+					if payment.ChargeID != "" && snap.Transactions[i].TransactionID == payment.ChargeID {
+						copy := bill
+						snap.Transactions[i].StripeBill = &copy
+					}
+				}
+			}
+			snap.Transactions = append(snap.Transactions, stripeBillFact(bill))
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("Stripe finalized invoice history: %w", err)
+		}
 	}
 
 	refunds, err := f.listRaw(ctx, "/v1/refunds", params, nil)
