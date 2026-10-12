@@ -1232,6 +1232,7 @@ type BillingProviderBill struct {
 	CreatedAt         time.Time
 }
 
+// Verified provider transactions bound once to one due cycle of an accepted schedule version. Retention: permanent, never pruned.
 type BillingProviderCycleReceipt struct {
 	MerchantID              uuid.UUID
 	PspID                   uuid.UUID
@@ -1312,6 +1313,7 @@ type BillingProviderMutationLog struct {
 	CustodianID *uuid.UUID
 }
 
+// Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.
 type BillingProviderSchedule struct {
 	MerchantID        uuid.UUID
 	SubscriptionID    uuid.UUID
