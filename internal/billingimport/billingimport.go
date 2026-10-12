@@ -212,6 +212,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 
 		// Transactions → the declared snapshot's charge events.
 		txns := make([]reconcile.RemoteTransaction, 0, len(opts.Book.Transactions))
+		invoiceSnapshots := map[string][]byte{}
 		for _, t := range opts.Book.Transactions {
 			typ := reconcile.TransactionType(t.Type)
 			if t.Type == "" {
@@ -221,7 +222,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if err != nil {
 				return apperr.Invalidf("transaction %s amount: %v", t.TransactionID, err).WithParam("transactions")
 			}
+			invoice, err := declaredStripeBill(opts.Book, t, invoiceSnapshots)
+			if err != nil {
+				return apperr.Invalidf("transaction %s invoice: %v", t.TransactionID, err).WithParam("transactions")
+			}
 			txns = append(txns, reconcile.RemoteTransaction{
+				StripeBill:     invoice,
 				TransactionID:  t.TransactionID,
 				SubscriptionID: t.RailSubscriptionID,
 				Type:           typ,

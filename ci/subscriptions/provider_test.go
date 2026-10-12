@@ -10,10 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"encoding/json"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
+	subscriptionmodule "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -71,6 +73,9 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
 		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
+	}
+	if rail == "stripe" {
+		attachDeclaredStripeInvoice(t, w, &book)
 	}
 	for _, apply := range configure {
 		apply(&book)
@@ -487,4 +492,36 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 // schedule's signup sale.
 func declareRecurringAnchor(book *billing.DeclaredBilling) {
 	book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
+}
+
+// Import the provider fixture's complete invoice, fetched before the import
+// transaction, instead of inventing a bill from a charge and today's price.
+func attachDeclaredStripeInvoice(t *testing.T, w *world, book *billing.DeclaredBilling) {
+	t.Helper()
+	raw, err := json.Marshal(w.stripe.Subscription(book.Subscriptions[0].RailSubscriptionID))
+	require.NoError(t, err)
+	var head struct {
+		Invoice struct {
+			ID string `json:"id"`
+		} `json:"latest_invoice"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &head))
+	reader := &subscriptionmodule.HTTPStripeLivenessProber{SecretKey: "sk_test_e2e", HTTPClient: &http.Client{Transport: w.stripe}}
+	bill, err := reader.ReadBill(t.Context(), head.Invoice.ID)
+	require.NoError(t, err)
+	invoice := &billing.DeclaredStripeInvoice{ID: bill.ID, CustomerReference: bill.CustomerID, Status: bill.Status, Reason: bill.Reason, Currency: bill.Currency, Total: bill.Total * 10_000, AmountDue: bill.AmountDue * 10_000, AmountPaid: bill.AmountPaid * 10_000, AmountRemaining: bill.AmountRemaining * 10_000, AmountOffStripe: bill.AmountOffStripe * 10_000, StartingBalance: bill.StartingBalance * 10_000, PrePaymentCredit: bill.PrePaymentCredit * 10_000, DueAt: bill.DueAt}
+	for _, line := range bill.Lines {
+		invoice.Lines = append(invoice.Lines, billing.DeclaredStripeInvoiceLine{ID: line.ID, PriceReference: line.PriceID, Description: line.Description, Quantity: line.Quantity, Amount: line.Amount * 10_000, PeriodStart: line.PeriodStart, PeriodEnd: line.PeriodEnd})
+	}
+	for _, p := range bill.Payments {
+		invoice.Payments = append(invoice.Payments, billing.DeclaredStripeInvoicePayment{ID: p.ID, ChargeID: p.ChargeID, PaymentIntentID: p.PaymentIntentID, Amount: p.Amount * 10_000, PaidAt: p.PaidAt})
+	}
+	for i := range book.Transactions {
+		book.Transactions[i].StripeInvoice = invoice
+		for _, p := range invoice.Payments {
+			if p.ChargeID == book.Transactions[i].TransactionID {
+				book.Transactions[i].OccurredAt = p.PaidAt
+			}
+		}
+	}
 }

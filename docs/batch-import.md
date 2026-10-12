@@ -264,3 +264,36 @@ OpenRails.
    admitted by v0.178.0 on a named-plan schedule) re-reads the schedule on
    every retry: link the target price to an NMI plan of its amount and cycle
    and the operation switches the plan and completes without charging again.
+
+### Accepted bills and provider schedules
+
+Imports now require the accepted obligation behind each provider receipt. They
+never construct historical orders from a transaction amount and today's price.
+This is a forward import contract; old prelaunch data needs an explicit reset or
+a book that carries these verified facts.
+
+For live NMI and CCBill subscriptions, supply `accepted_schedule` with a stable
+`source_reference`, recurring `amount` in native currency units, `currency`,
+`first_due_at`, and exactly one of `interval_hours` (whole days) or
+`interval_months` (calendar months). The anchor preserves its accepted time of
+day. A monthly January 31 anchor yields February's last day and then March 31.
+`paid_through` and a changed retry date cannot supply this evidence. Approved
+transactions also carry the provider-confirmed `next_billing_at` boundary.
+An unchanged transaction receipt remains bound to its original cycle on replay.
+
+For Stripe cash receipts, supply a complete `stripe_invoice` on each declared
+transaction. It contains invoice identity, customer reference, finalized status,
+billing reason, billed currency, totals and settlement amounts, all finalized
+lines with their provider references and service periods, and the actual
+invoice-payment/Charge allocations with amounts and payment timestamps. Amounts
+use native currency units, as other import amounts do. The invoice customer
+must match the subscription's declared payment-method customer reference.
+If several receipts settle one invoice, repeat the identical full invoice
+snapshot; a different subset or changed monetary facts is refused. There is a
+limit of 1000 lines and 1000 payment allocations per invoice.
+
+Hosts should fetch and verify this evidence before submitting the book. Import
+performs no provider request inside its database transaction. The amount of a
+cash receipt must match one actual allocation; credits, zero-due invoices and
+out-of-band settlement do not authorize a fabricated cash receipt. Ordinary
+provider observation can record those non-cash bills without any payment row.

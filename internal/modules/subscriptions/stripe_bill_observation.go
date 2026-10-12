@@ -189,12 +189,20 @@ func RecordStripeBill(ctx context.Context, d *db.DB, sub *models.Subscription, i
 	settled, source, noncash := bill.Settled, bill.SettlementSource, bill.NonCashAmount
 	bill.Settled, bill.SettlementSource, bill.NonCashAmount = false, "", 0
 	var result observed.Result
+	var created, paymentCreated, completed bool
 	for _, receipt := range receipts {
 		bill.Payment = receipt
 		if result, err = observed.Record(ctx, d, bill, now); err != nil {
 			return result, err
 		}
+		created = created || result.Created
+		paymentCreated = paymentCreated || result.PaymentCreated
+		completed = completed || result.Completed
 	}
 	bill.Settled, bill.SettlementSource, bill.NonCashAmount = settled, source, noncash
-	return observed.Record(ctx, d, bill, now)
+	result, err = observed.Record(ctx, d, bill, now)
+	result.Created = result.Created || created
+	result.PaymentCreated = result.PaymentCreated || paymentCreated
+	result.Completed = result.Completed || completed
+	return result, err
 }
