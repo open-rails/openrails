@@ -481,10 +481,8 @@ func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListPar
 			return params, false
 		}
 	}
-	if merchant {
-		if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
-			return params, false
-		}
+	if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
+		return params, false
 	}
 	return params, true
 }

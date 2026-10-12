@@ -269,6 +269,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {

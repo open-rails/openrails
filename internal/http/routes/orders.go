@@ -27,7 +27,7 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
 		Request: billing.CreateMyOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}}, Errors: orderCreateErrors, Handler: h(handlers.CreateMyOrder)},
 	{Method: GET, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer,
-		Query: params(cursorPage, text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
+		Query: params(cursorPage, idsParam, text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
 	{Method: GET, Path: "/v1/me/orders/{id}", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder, IdempotencyKey: true,
