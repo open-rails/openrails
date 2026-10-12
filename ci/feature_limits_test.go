@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 )
@@ -29,7 +28,7 @@ func (l *featureLimitLLM) CompleteTools(context.Context, string, []copilot.ToolD
 // Real feature handlers accept two requests in total across host mounts,
 // then refuse before calling the model. The merchant directory, catalog and
 // request scopes use PostgreSQL; only authentication and the LLM are supplied
-// by this host fixture. Trusted Client calls keep the ordinary host boundary.
+// by this host fixture. The assistant has no merchant Client operation.
 func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
@@ -39,7 +38,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "test-site", SecretKey: "test-secret"}
 	cfg.LLM = &openrails.LLMConfig{APIKey: "test", CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
-	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
+	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	catalogLLM := &featureLimitLLM{}
 	graph := engine.Graph(bill)
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
@@ -63,12 +62,8 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	for _, feature := range []struct {
 		path, body string
 		calls      *int
-		trusted    func() error
 	}{
-		{"/v1/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
-			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
-			return err
-		}},
+		{"/v1/console/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks},
 	} {
 		t.Run(feature.path, func(t *testing.T) {
 			oneMinute(t, 5*time.Second)
@@ -92,12 +87,6 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 					require.Equal(t, 2, *feature.calls, "a refusal never calls the model")
 				}
 			}
-			// Direct Client calls remain trusted host operations, as for other
-			// merchant features, without a separate AI-only usage quota.
-			for range 3 {
-				require.NoError(t, feature.trusted())
-			}
-			require.Equal(t, 5, *feature.calls)
 		})
 	}
 }

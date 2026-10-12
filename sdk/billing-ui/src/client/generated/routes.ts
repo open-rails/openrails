@@ -14,6 +14,8 @@ export type OpenRailsRoute = {
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null
+  // Optional console assistance, outside the merchant Go client.
+  consoleOnly?: true
   // wire.ts type names: the JSON body, and each success by status.
   request: string | null
   responses: Readonly<Record<number, string | null>>

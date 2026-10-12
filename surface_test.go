@@ -22,9 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
-// The Go client is the admin API: every merchant route has exactly one
-// Client method and every Client method is exactly one merchant route. The
-// two lists below are every exception, each with its reason.
+// The Go client covers merchant operations: every regular merchant route
+// has exactly one Client method and each method one route. Optional console
+// assistance explicitly declares ConsoleOnly; the lists below name local
+// helpers and embedded-only operations with their reasons.
 
 // handleMethods say what a handle is or ask the token endpoint, which is no
 // merchant route.

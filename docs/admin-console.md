@@ -334,6 +334,14 @@ the UI shows a pointed empty-state instead of a broken button:
 | Catalog copilot Q&A (read-only catalog/subscriber aggregates) | Catalog | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
 | Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | Catalog, with catalog updates | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
 
+Catalog Q&A belongs to the optional console API:
+`POST /v1/console/catalog/ask`. It is outside the merchant Go `Client`, while
+retaining the same merchant binding and catalog authorization as catalog
+reads, the opt-in model capability, and the `catalog-ask` request limit. It
+can serve an embedded host's own console as well as the bundled console;
+turning on assistance does not grant authority to edit products or prices.
+Drafts still require a separate, authorized catalog action by the operator.
+
 Lists page by cursor: the pager announces the rows shown and offers rows
 per page, first, previous and next. A plain confirmation is the console's
 one confirm dialog; destructive acts ask for a typed word. After a deploy, a
