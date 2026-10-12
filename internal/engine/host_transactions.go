@@ -17,7 +17,7 @@ import (
 
 // The Tx methods run the same commands as the Client inside tx, a
 // transaction from the host's pool on this engine's database, for running
-// charges that must commit atomically with host rows.
+// charges and admissions that must commit atomically with host rows.
 // OpenRails binds mid, the handle's merchant, to tx and never commits or rolls
 // it back; after an error the host rolls back.
 

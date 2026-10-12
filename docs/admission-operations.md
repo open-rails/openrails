@@ -37,7 +37,8 @@ charged) and `replayed`.
 
 ## In the host's transaction
 
-Embedded, `AdmitTx`, `CaptureAdmissionsTx` and `ReleaseAdmissionsTx` take a
+`Engine.LocalMerchant(merchantID)` returns the embedded `*LocalClient`. Its
+`AdmitTx`, `CaptureAdmissionsTx` and `ReleaseAdmissionsTx` methods take a
 transaction from the host's pool on the engine's database: the host's request
 row and its hold, or its finished state and its capture, commit together. No
 outbox, no orphan hold, no ambiguous admit. OpenRails never commits or rolls

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -17,22 +15,6 @@ func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requ
 		return nil, err
 	}
 	return out.Items, nil
-}
-
-// AdmitTx is Admit inside tx, a transaction from the host's pool on the
-// engine's database, so an admission and its hold commit with the host's
-// request row, or not at all: no outbox and no orphan hold. OpenRails binds
-// the handle's merchant and never commits or rolls tx back; after an error
-// the host rolls back. Embedded only: a remote client returns ErrRemoteClient.
-func (c *Client) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
-	if err := batchSize(len(requests), billing.MaxAdmissionBatchItems); err != nil {
-		return nil, err
-	}
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.AdmitTx(ctx, c.merchantID, tx, requests)
 }
 
 // CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted
@@ -49,32 +31,6 @@ func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureA
 		return nil, err
 	}
 	return out.Items, nil
-}
-
-// CaptureAdmissionsTx is CaptureAdmissions inside tx (see AdmitTx), so a
-// capture commits with the host's record of the finished work. Embedded only.
-func (c *Client) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
-	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
-		return nil, err
-	}
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.CaptureAdmissionsTx(ctx, c.merchantID, tx, items)
-}
-
-// ReleaseAdmissionsTx is ReleaseAdmissions inside tx (see AdmitTx), so a
-// release commits with the host's record of the failed work. Embedded only.
-func (c *Client) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
-	if err := batchSize(len(requestIDs), billing.MaxAdmissionBatchItems); err != nil {
-		return nil, err
-	}
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.ReleaseAdmissionsTx(ctx, c.merchantID, tx, requestIDs)
 }
 
 // ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems
