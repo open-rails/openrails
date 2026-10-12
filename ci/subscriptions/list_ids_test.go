@@ -17,6 +17,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -184,6 +186,21 @@ func TestListsReadNamedRecords(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Two incidents, each opened by a fixture actor's sixth refund.
+	gate := engine.Graph(w.rt).Runtime.DestructiveAdmissions
+	for _, who := range []string{"ids-one", "ids-two"} {
+		actor := destructive.Actor{Issuer: "https://staff.example", ID: who}
+		for i := range 6 {
+			key := fmt.Sprintf("ids-refund-%s-%d", who, i)
+			_, err := gate.Admit(ctx, destructive.Command{MerchantID: client.MerchantID().UUID(), Kind: destructive.Refund, Target: key, Key: key, Digest: destructive.Digest(key), Units: 1, Actor: actor})
+			if i < 5 {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, destructive.ErrHeld)
+			}
+		}
+	}
+
 	customer, funded := "/v1/admin/customers/"+c.id, "/v1/admin/customers/"+d.id
 	fixtures := map[string]struct{ path, query, table, set, key string }{
 		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
@@ -204,6 +221,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/merchant/provisioning-tokens":                       {"/v1/merchant/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/merchant/findings":                                  {"/v1/merchant/findings", "", "reconciliation_findings", "", ""},
+		"GET /v1/merchant/destructive-holds":                         {"/v1/merchant/destructive-holds", "", "destructive_holds", ", scope_key = scope_key || ':elsewhere'", ""},
 	}
 	listed := 0
 	for _, route := range routes.Catalog() {
