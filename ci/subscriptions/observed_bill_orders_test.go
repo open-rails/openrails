@@ -36,8 +36,7 @@ func TestObservedBillMoneyFidelity(t *testing.T) {
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
-	quantity := 1
-	base := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(c.id), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "verified_invoice", SourceKey: "invoice-1", ProviderReference: "invoice-1", Currency: "USD", Total: 100, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted goods", Quantity: &quantity, UnitAmount: 100, Amount: 100}}}
+	base := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(c.id), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "verified_invoice", SourceKey: "invoice-1", ProviderReference: "invoice-1", Currency: "USD", Total: 100, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted goods", UnitAmount: 100, Amount: 100}}}
 	capture := func(id string, amount int64) *models.Payment {
 		return &models.Payment{ID: uuid.New(), CustomerID: base.CustomerID, Rail: models.RailNMI, PspID: &base.PSPID, TransactionID: id, Amount: amount, ListAmount: 100, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail}
 	}
@@ -79,6 +78,9 @@ func TestObservedBillMoneyFidelity(t *testing.T) {
 	}
 	require.Equal(t, 1, created)
 	require.Equal(t, 1, paymentCreated)
+	var storedQuantity int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT quantity FROM billing.order_lines WHERE order_id=$1`), order).Scan(&storedQuantity))
+	require.Equal(t, 1, storedQuantity, "a catalog line without fixed hourly cadence stores its implicit single unit")
 	second := base
 	second.Payment = capture("observed-partial-2", 40)
 	second.Settled = true

@@ -121,6 +121,11 @@ func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uu
 	if err != nil {
 		return err
 	}
+	// A calendar schedule has no fixed hourly interval. Its implicit single
+	// catalog unit is still quantified; never turn a month into fixed hours.
+	if quantity == nil && interval == nil && l.Source == "" {
+		quantity = new(int32(1))
+	}
 	access, err := int32Ptr(l.AccessDurationHours)
 	if err != nil {
 		return err
