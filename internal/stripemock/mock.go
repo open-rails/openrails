@@ -69,6 +69,7 @@ type Mock struct {
 	refunds         map[string]Object
 	refundOrder     []string
 	subs            map[string]Object
+	invoices        map[string]Object
 	sessions        map[string]Object
 	sessionOrder    []string
 	idem            map[string]*idempotentRequest
@@ -105,7 +106,7 @@ func NewUnstarted(opts Options) *Mock {
 		opts.Clock = time.Now
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
-		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, sessions: map[string]Object{},
+		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}}
 }
 
@@ -285,6 +286,8 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
 	case seg[0] == "payment_method_domains":
 		return m.paymentMethodDomain(r, form, seg)
+	case r.Method == http.MethodGet && (seg[0] == "invoices" || seg[0] == "invoice_payments"):
+		return m.invoiceRead(seg, q)
 	case r.Method == http.MethodGet && p == "/v1/customers/search":
 		data := []any{}
 		for _, c := range m.customers {
