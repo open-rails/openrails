@@ -193,6 +193,8 @@ var captureJSON = object(map[string]jsonRule{
 })
 
 var jsonRules = map[string]jsonRule{
+	"provider_bills.snapshot":                           providerBillJSON(false),
+	"provider_schedules.accepted_bill":                  providerBillJSON(true),
 	"products.credit_grant":                             nullable(object(map[string]jsonRule{"currency": textValue, "amount": nullable(moneyStringValue), "from_payment": booleanValue, "expires_after_days": integerValue})),
 	"prices.customer_amount":                            nullable(object(map[string]jsonRule{"min_amount": moneyStringValue, "max_amount": moneyStringValue})),
 	"prices.quantity":                                   nullable(object(map[string]jsonRule{"min": integerValue, "max": integerValue})),

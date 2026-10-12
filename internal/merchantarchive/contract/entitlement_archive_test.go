@@ -2,14 +2,13 @@ package contract
 
 import (
 	"bytes"
-	"io"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
+func TestReadHistoricalCatalogRefusesOrderlessPayment(t *testing.T) {
 	const priceID = "10000000-0000-0000-0000-000000000003"
 	const legacy = `{"service:z":null,"article:42":48,"permanent":0}`
 	product := legacyProduct(map[string]string{"merchant_id": testMerchant, "revision": "0", "id": "10000000-0000-0000-0000-000000000002", "created_at": "2026-09-01 00:00:00+00", "entitlements": legacy})
@@ -42,10 +41,8 @@ func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
 		}
 	}
 	require.NoError(t, writer.Close())
-	wire, err := archivewire.CopyVerified(io.Discard, bytes.NewReader(artifact.Bytes()))
-	require.NoError(t, err)
 	var keys []string
-	info, err := Read(bytes.NewReader(artifact.Bytes()), nil, func(p Profile, values []*string) error {
+	_, err = Read(bytes.NewReader(artifact.Bytes()), nil, func(p Profile, values []*string) error {
 		switch p.Name {
 		case "products":
 			require.Len(t, values, len(p.Columns))
@@ -60,9 +57,8 @@ func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
 		}
 		return nil
 	})
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "payments without order identity")
 	require.Equal(t, []string{"article:42", "permanent", "service:z"}, keys)
-	require.Equal(t, wire.Digest, info.Digest, "normalization preserves the original archive identity")
 }
 
 // legacyProduct fills a products row of an archive preceding product_entitlements.

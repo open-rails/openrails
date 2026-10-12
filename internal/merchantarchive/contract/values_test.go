@@ -108,7 +108,7 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 	done := "2026-01-01 00:00:00+00"
 	checkRows(t, []rowCase{
 		{"pending payment", "payments", map[string]string{"status": "pending"}, false},
-		{"settled payment", "payments", map[string]string{"status": "succeeded"}, true},
+		{"settled payment", "payments", map[string]string{"status": "succeeded", "order_id": testMerchant}, true},
 		{"open checkout", "checkout_attempts", map[string]string{"status": "open"}, false},
 		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired", "order_id": testMerchant, "amount": "100", "currency": "USD"}, true},
 		{"admitted admission", "admission_operations", map[string]string{"state": "admitted"}, false},
@@ -268,7 +268,7 @@ func TestPurchasedCreditSnapshotRequiresFulfillmentDates(t *testing.T) {
 		{`{"amount":"120000000","currency":"USD","expires_after_days":365,"starts_at":"2026-01-01T00:00:00Z","expires_at":"2026-02-01T00:00:00Z"}`, false},
 		{`{"amount":"120000000","currency":"EUR","expires_after_days":365,"starts_at":"2026-01-01T00:00:00Z","expires_at":"2027-01-01T00:00:00Z"}`, false},
 	} {
-		p, v := row(t, "payments", map[string]string{"currency": "USD", "status": "succeeded", "credit_grant_snapshot": tc.snapshot})
+		p, v := row(t, "payments", map[string]string{"currency": "USD", "status": "succeeded", "order_id": testMerchant, "credit_grant_snapshot": tc.snapshot})
 		err := ValidateValues(p, v)
 		if (err == nil) != tc.valid {
 			t.Errorf("snapshot %s valid=%v: %v", tc.snapshot, tc.valid, err)

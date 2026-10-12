@@ -133,8 +133,8 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		// Orders before usage orders had none of their columns; before ui_mode
 		// hosted checkouts only; before renewals none of their columns; before
 		// hosted checkout none of its; before the payment axis one status.
-		if p.Name == "orders" {
-			missing := len(p.Columns) - len(r.Values)
+		if p.Name == "orders" && len(r.Values) < len(p.Columns) {
+			missing := len(p.Columns) - 2 - len(r.Values)
 			if missing == orderUsageColumns+1+orderRenewalColumns+orderCheckoutColumns+1 {
 				r.Values = splitOrderStatus(p, r.Values)
 				missing--
@@ -147,10 +147,18 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				r.Values = append(r.Values, hostedIfCheckout(p, r.Values))
 				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
 			}
+			if len(r.Values) == len(p.Columns)-2 {
+				r.Values = append(r.Values, new("engine"), nil)
+			}
 		}
 		// Order lines before usage orders named no accrual source.
-		if p.Name == "order_lines" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, nil)
+		if p.Name == "order_lines" {
+			if len(r.Values) == len(p.Columns)-2 {
+				r.Values = append(r.Values, nil)
+			}
+			if len(r.Values) == len(p.Columns)-1 {
+				r.Values = append(r.Values, new("false"))
+			}
 		}
 		// Rate cards before migration 66 carried a customer, set on a rate
 		// override, which that migration deletes, and later a revision.

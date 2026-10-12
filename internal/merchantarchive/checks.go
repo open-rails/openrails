@@ -339,6 +339,9 @@ var referenceChecks = []rowCheck{
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
+	if err := validateProviderBillReferences(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := validateSubscriptionCollectionReferences(ctx, tx, id); err != nil {
 		return err
 	}

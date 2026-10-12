@@ -23,6 +23,11 @@ func ValidateValues(p Profile, values []*string) error {
 	if len(values) != len(p.Columns) {
 		return fmt.Errorf("invalid row width for %s", p.Name)
 	}
+	if p.Name == "provider_bills" || p.Name == "provider_schedules" {
+		if err := validateProviderBillValues(p, values); err != nil {
+			return err
+		}
+	}
 	for _, field := range []string{"entitlements", "entitlements_snapshot"} {
 		if raw := value(p, values, field); raw != nil {
 			var names []string
