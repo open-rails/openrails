@@ -613,11 +613,15 @@ func derivedSchedule(f *DeclaredSubscriptionFact, price gen.BillingPrice, txns [
 	return &billing.DeclaredProviderSchedule{SourceReference: "import:" + f.SourceID, Amount: amount, Currency: currency, IntervalHours: hours, FirstDueAt: first}, ""
 }
 
+// FindingScheduleUnresolved is an imported live provider schedule whose
+// accepted terms the book neither declares nor proves.
+const FindingScheduleUnresolved = "life.import.schedule_unresolved"
+
 func recordUnresolvedSchedule(ctx context.Context, q *gen.Queries, sub *models.Subscription, reason string) error {
-	evidence, _ := json.Marshal(map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String(), "reason": reason})
+	evidence, _ := json.Marshal(map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String(), "psp_id": billing.PSPID(sub.PspID).String(), "reason": reason})
 	action := "Declare this provider schedule's accepted terms (accepted_schedule) and import it again; until then its receipts stay unresolved and no renewal is inferred."
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
-		PspID: &sub.PspID, FindingType: "import.schedule.unresolved", SubjectKey: "subscription:" + sub.ID.String(),
+		FindingType: FindingScheduleUnresolved, SubjectKey: "subscription:" + sub.ID.String(),
 		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 	return err
 }

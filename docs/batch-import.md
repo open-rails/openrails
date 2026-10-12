@@ -285,7 +285,7 @@ Without `accepted_schedule`, the import derives the terms from the book the way
 enrollment freezes them: the declared price's whole-day cadence, a first due one
 cycle before `paid_through`, and the book's approved charge of the price's
 amount inside that cycle. A book that does not prove them still imports the
-subscription, with an `import.schedule.unresolved` finding; its receipts stay
+subscription, with a `life.import.schedule_unresolved` finding; its receipts stay
 `pull.bill.unresolved` findings until the terms are declared and the book is
 imported again. A receipt no accepted bill can hold never fails the import.
 
