@@ -224,6 +224,8 @@ func TestAccessCutoverScaleBenchmark(t *testing.T) {
 	preflight := time.Since(began)
 	require.Empty(t, report.Changes)
 	began = time.Now()
-	require.NoError(t, migrateAll(ctx, pool, schema))
+	// The cutover converts; the later order-only payment migration then
+	// refuses this pre-order book's price-only payments, by design.
+	require.ErrorContains(t, migrateAll(ctx, pool, schema), "price-only payment history cannot be upgraded")
 	t.Logf("cutover of %d per-key windows (50,001 customers, one with 50,000 keys): preflight %s, migration %s", windows, preflight, time.Since(began))
 }
