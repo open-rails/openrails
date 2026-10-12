@@ -44,8 +44,9 @@ func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle
 		Customers:      []billing.DeclaredCustomer{{Customer: customerID}},
 		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
-			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, Amount: cents * 10_000, Currency: "USD", OccurredAt: start}},
+			StartedAt: start, PaidThrough: &end, PaymentMethod: method,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + railSub, Amount: cents * 10_000, Currency: "USD", IntervalHours: cycle, FirstDueAt: start}}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, Amount: cents * 10_000, Currency: "USD", OccurredAt: start, NextBillingAt: &end}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
