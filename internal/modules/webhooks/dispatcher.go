@@ -28,12 +28,6 @@ import (
 type CheckoutAttemptStore = webhookCheckoutAttemptStore
 
 type webhookCheckoutAttemptStore interface {
-	FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutAttempt, error)
-	FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutAttempt, error)
-	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
-	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
-	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
-	MarkProviderCheckoutClosed(ctx context.Context, sessionID uuid.UUID, status models.CheckoutAttemptStatus) error
 	// SettleOrderCheckout completes the order a paid Stripe Checkout Session
 	// pays; CloseOrderCheckout returns it to requires_payment_method when the
 	// session expired or its delayed payment failed.

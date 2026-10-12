@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,76 +35,6 @@ func checkoutAttemptJSONB(s *models.CheckoutAttempt) (meta, fields, state []byte
 	return meta, fields, state, nil
 }
 
-func (r *CheckoutAttemptRepo) Create(ctx context.Context, session *models.CheckoutAttempt) error {
-	if session.PriceID != nil {
-		id, err := r.db.PriceReference(ctx, *session.PriceID)
-		if err != nil {
-			return err
-		}
-		session.PublicPriceID = id
-	}
-	if err := session.ValidateTerms(); err != nil {
-		return err
-	}
-	var currency *string
-	if session.Currency != nil {
-		value := strings.TrimSpace(*session.Currency)
-		currency = &value
-	}
-	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
-		return err
-	}
-	meta, fields, state, err := checkoutAttemptJSONB(session)
-	if err != nil {
-		return err
-	}
-	var routingReason []byte
-	if session.RoutingReason != nil {
-		if routingReason, err = json.Marshal(session.RoutingReason); err != nil {
-			return fmt.Errorf("encode checkout attempt routing reason: %w", err)
-		}
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	// checkout_attempts.psp_id is NOT NULL; this guard names the reason
-	// instead of surfacing a NOT NULL error.
-	if session.PspID == uuid.Nil {
-		return fmt.Errorf("create checkout attempt %s: %w", session.ID, db.ErrNoPSPInContext)
-	}
-	rows, err := r.db.Gen(ctx).CreateCheckoutAttempt(ctx, gen.CreateCheckoutAttemptParams{
-		ID:             session.ID,
-		MerchantID:     tid.UUID(),
-		CustomerID:     session.CustomerID,
-		PriceID:        session.PriceID,
-		Mode:           string(session.Mode),
-		Rail:           string(session.Rail),
-		Status:         string(session.Status),
-		Amount:         session.Amount,
-		Currency:       currency,
-		ExpiresAt:      session.ExpiresAt,
-		Reference:      session.Reference,
-		TransactionID:  session.TransactionID,
-		PaymentID:      session.PaymentID,
-		SubscriptionID: session.SubscriptionID,
-		Metadata:       meta,
-		RailFields:     fields,
-		RailState:      state,
-		RoutingReason:  routingReason,
-		PspID:          session.PspID,
-		CreatedAt:      session.CreatedAt,
-		UpdatedAt:      session.UpdatedAt,
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 func (r *CheckoutAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutAttempt, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -116,7 +45,7 @@ func (r *CheckoutAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*model
 	if err != nil {
 		return nil, err
 	}
-	return r.fromGen(ctx, row)
+	return models.CheckoutAttemptFromGen(row)
 }
 
 func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.CheckoutAttempt) error {
@@ -125,30 +54,17 @@ func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.Checko
 		return queryScopeErr
 	}
 
-	if session.PriceID != nil {
-		id, err := r.db.PriceReference(ctx, *session.PriceID)
-		if err != nil {
-			return err
-		}
-		session.PublicPriceID = id
-	}
 	if err := session.ValidateTerms(); err != nil {
 		return err
-	}
-	// Setup bindings and secret erasure have dedicated conditional writes.
-	// Generic checkout progress must not replace accepted capture authority.
-	if session.Mode == models.CheckoutAttemptModePaymentMethod {
-		return fmt.Errorf("payment-method setup requires captured completion or expiry")
 	}
 	meta, fields, state, err := checkoutAttemptJSONB(session)
 	if err != nil {
 		return err
 	}
 	rows, err := r.db.Gen(ctx).UpdateCheckoutAttempt(ctx, gen.UpdateCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
-		ID:             session.ID,
-		CustomerID:     session.CustomerID,
-		PriceID:        session.PriceID,
-		Mode:           string(session.Mode),
+		ID:         session.ID,
+		CustomerID: session.CustomerID,
+
 		Rail:           string(session.Rail),
 		Status:         string(session.Status),
 		Amount:         session.Amount,
@@ -228,41 +144,5 @@ func (r *CheckoutAttemptRepo) GetByReference(ctx context.Context, reference stri
 	if err != nil {
 		return nil, err
 	}
-	return r.fromGen(ctx, row)
-}
-
-func (r *CheckoutAttemptRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutAttempt, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutAttempt(ctx, gen.GetLatestOpenCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
-		CustomerID: tsid,
-		PriceID:    &priceID,
-		Rail:       string(rail),
-		Now:        now,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.fromGen(ctx, row)
-}
-
-func (r *CheckoutAttemptRepo) fromGen(ctx context.Context, row gen.BillingCheckoutAttempt) (*models.CheckoutAttempt, error) {
-	session, err := models.CheckoutAttemptFromGen(row)
-	if err != nil {
-		return nil, err
-	}
-	if session.PriceID != nil {
-		session.PublicPriceID, err = r.db.PriceReference(ctx, *session.PriceID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return session, nil
+	return models.CheckoutAttemptFromGen(row)
 }

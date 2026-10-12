@@ -1,10 +1,8 @@
 package checkout
 
 import (
-	"encoding/json"
 	"testing"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -41,30 +39,14 @@ func TestCustomerAmountSelection(t *testing.T) {
 	require.ErrorIs(t, err, ErrCheckoutAttemptValidation)
 }
 
-func TestCustomerAmountBoundToAttemptReplay(t *testing.T) {
-	request := &CheckoutAttemptCreateRequest{PriceID: testPriceID, Amount: new(int64(100_000_000)), Payment: CheckoutAttemptPaymentRequest{Rail: "stripe"}}
-	response := &CheckoutAttemptResponse{Amount: new(int64(100_000_000)), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"}}
-	payload, err := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: checkoutAttemptRequestFingerprint(request), Response: response})
-	require.NoError(t, err)
-	replay, err := decodeCheckoutAttemptIdempotencyResult(payload, request)
-	require.NoError(t, err)
-	require.Equal(t, response, replay)
-	request.Amount = new(int64(200_000_000))
-	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request)
-	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-	request.Amount = nil
-	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request)
-	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-}
-
 func TestCustomerAmountOnlyAdvertisesSupportedRails(t *testing.T) {
 	price := &models.Price{Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}}
 	service := &CheckoutAttemptService{}
 	for _, rail := range []string{"nmi", "stripe"} {
 		cfg := &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "test"}, Stripe: &config.StripeRailConfig{SecretKey: "test"}}
-		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, cfg, models.CheckoutAttemptModeOneOff))
+		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, cfg, models.PurchaseOneOff))
 	}
 	for _, rail := range []string{"solana", "ccbill"} {
-		require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, &config.ResolvedPSP{}, models.CheckoutAttemptModeOneOff))
+		require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, &config.ResolvedPSP{}, models.PurchaseOneOff))
 	}
 }

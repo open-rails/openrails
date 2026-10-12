@@ -9,8 +9,7 @@ A stored card has two independent owners, and OpenRails records them separately.
 
 They are orthogonal. The card can sit inside the processor that charges it
 (Stripe, an NMI gateway vault) or in a neutral third-party vault that proxies
-the PAN to whichever processor you point it at (Basis Theory today;
-HyperSwitch / JusPay / Spreedly are the same shape). Custody is not a property
+the PAN to the selected processor (Basis Theory and HyperSwitch on NMI). Custody is not a property
 of the gateway, so it does not belong in the rail value.
 
 `custodian` is never empty. "Stored at the processor itself" is the stated
@@ -31,7 +30,8 @@ charges through that PSP, provided it still reaches the custodian.
 | `psp` | `nmi` | `customer_vault_id` (`rail_customer_ref`) | yes |
 | `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
-| third-party (HyperSwitch, JusPay, Spreedly) | any | provider token | not built |
+| `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
+| JusPay / Spreedly | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
 | — no row — | `solana` | an on-chain delegation, not a stored instrument | yes |
 
@@ -155,6 +155,43 @@ Custody values are a closed set (`models.Custodians()`, mirrored by the
 `payment_methods_custodian_check` constraint). Adding one is a migration plus a
 constant — deliberately, so an unknown custodian cannot arrive silently on a
 money path.
+
+## Saving a HyperSwitch card
+
+`POST /v1/me/payment-methods` names the NMI PSP whose configured custodian is
+HyperSwitch. Send `psp_id`, optional `billing_details`, and a stable
+`Idempotency-Key`; omit `token` and `card`. The response is the customer's
+pending payment method, with `status: "requires_action"` and
+`next_action.type: "capture"`.
+
+The action's payload initializes the vendor-owned fields: `custodian_id`,
+`session_id`, `customer_id`, `api_base_url`, `sdk_url`, `public_api_key`,
+`sdk_authorization`, and `expires_at`. Keep this short-lived response private.
+Card data goes to the custodian. After its fields return the session token,
+confirm the same pending resource:
+
+```http
+POST /v1/me/payment-methods/{id}/confirm
+Content-Type: application/json
+
+{"capture":{"custodian_id":"…","session_id":"…","token":"…"}}
+```
+
+OpenRails verifies the token with that vendor session and customer before
+attaching the permanent instrument. Retrying the original key returns the
+accepted setup; retrying confirmation with its accepted token returns the
+saved method. Another customer's method, a different token, or a changed
+custodian account is refused. Saving creates no payment or mandate: a later
+order charges the card. If the instrument is already saved for this customer,
+confirmation returns that method and marks the pending resource as replaced.
+
+The SDK authorization is encrypted at rest and erased on confirmation or
+expiry. The normal cleanup sweep removes expired setups. A captured card has
+no holding PSP (`psp_id: null`); its orders and recurring agreements select the
+processor that can reach its custodian.
+
+Checkout creation no longer accepts a price or a mode. New payments are order
+attempts. Prelaunch checkout history is not migrated or reconstructed.
 
 ## Choosing a card
 

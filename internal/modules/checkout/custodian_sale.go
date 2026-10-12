@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
-	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -72,7 +71,6 @@ type CheckoutCustodianSaleService struct {
 	DB                   *db.DB
 	PurchaseService      *CheckoutPurchaseService
 	PaymentMethodService custodianInstrumentStore
-	IdempotencyStore     idempotencyStore
 	Rails                railresolve.Source
 	Config               *config.Config
 	Intents              intentExecutor
@@ -186,127 +184,6 @@ func (s *CheckoutCustodianSaleService) basisTheory(ctx context.Context, psp uuid
 		return nil, nil, nil, err
 	}
 	return cfg, proxy, bt, nil
-}
-
-// Process runs the custodian-held-card one-time sale as a write-through intent,
-// mirroring CheckoutNMISaleService.Process.
-func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
-	const idempOp = "custodian_sale"
-	if s == nil || s.Intents == nil {
-		return nil, errors.New("custodian checkout not wired")
-	}
-	// PAN firewall (SAQ A): the engine accepts ONLY the token-intent handle.
-	if err := RejectPANShapedFields(req); err != nil {
-		return nil, err
-	}
-	intentID := strings.TrimSpace(req.BTTokenIntentID)
-	if intentID == "" {
-		return nil, errors.New("bt_token_intent_id is required for custodian-held card checkout (collect via BT Elements)")
-	}
-	if _, err := s.resolveConfig(ctx); err != nil {
-		return nil, fmt.Errorf("custodian checkout is not configured: %w", err)
-	}
-	if _, err := customerIDFromUser(user.ID); err != nil {
-		return nil, err
-	}
-
-	claim, rec, err := s.IdempotencyStore.Begin(ctx, idempOp, idempotencyKey)
-	if err != nil {
-		return nil, fmt.Errorf("idempotency check failed: %w", err)
-	}
-	if claim == nil {
-		if rec.Status == idempotency.StatusSucceeded {
-			var cached checkoutSaleIdempotencyResult
-			if err := json.Unmarshal(rec.Result, &cached); err == nil {
-				return saleResponse(cached, "Purchase already completed"), nil
-			}
-			return &CheckoutResponse{Status: "success", Action: "new", Message: "Purchase already completed"}, nil
-		}
-		return nil, errors.New("checkout already in progress, please wait")
-	}
-	work, stop := claim.Hold(ctx)
-	defer stop()
-	work = db.WithCommitGuard(work, claim.InTx)
-
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		stop()
-		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-	var checkoutAttemptID uuid.UUID
-	if req.CheckoutAttemptID != "" {
-		id, err := billing.ParseCheckoutAttemptID(req.CheckoutAttemptID)
-		if err != nil {
-			return nil, err
-		}
-		checkoutAttemptID = id.UUID()
-	} else if product.CreditGrant != nil {
-		return nil, errors.New("purchased credit requires a checkout attempt with accepted terms")
-	}
-	params := intents.EnqueueParams{
-		MerchantID: tid.UUID(),
-		Provider:   string(models.RailNMI),
-		IntentType: TypeCustodianSale,
-		PspID:      db.PSPIDFromContext(ctx),
-		PriceID:    &price.ID,
-		Payload: CustodianSalePayload{
-			CheckoutAttemptID: checkoutAttemptID,
-			TokenIntentID:     intentID,
-			AmountMicros:      price.Amount,
-			Currency:          price.Currency,
-			Description:       fmt.Sprintf("Purchase: %s", product.DisplayName),
-			UserID:            user.ID,
-			PriceID:           price.ID,
-			E2ERunID:          strings.TrimSpace(req.Metadata["e2e_run_id"]),
-		},
-		IdempotencyKey: CustodianSaleIdempotencyKey(idempotencyKey),
-		NextAttemptAt:  time.Now().UTC(),
-		Origin:         intents.OriginUser,
-		OriginReason:   "checkout one-time sale (custodian-held card)",
-	}
-	// Admitted under the session's lock, like the native sale.
-	if req.CheckoutAttemptID != "" && s.DB != nil {
-		err = s.DB.MerchantTx(work, func(ctx context.Context, tx pgx.Tx) error {
-			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
-				return err
-			}
-			_, err := intents.NewStore(s.DB.NewWithPgxTx(tx)).Enqueue(ctx, params)
-			return err
-		})
-		if err != nil {
-			stop()
-			failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
-			return nil, err
-		}
-	}
-	intent, err := s.Intents.EnqueueAndExecute(work, params)
-	if err != nil {
-		stop()
-		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("post custodian sale intent: %w", err)
-	}
-
-	stop()
-	switch intent.Status {
-	case intents.StatusSucceeded:
-		cached, derr := saleResultFromIntent(intent)
-		if derr != nil {
-			failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, derr)
-			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
-		}
-		payload, _ := json.Marshal(cached)
-		completeCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, payload)
-		return saleResponse(cached, "Purchase completed successfully"), nil
-	case intents.StatusFailedTerminal:
-		failErr := terminalCheckoutError(intent, "payment failed")
-		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, failErr)
-		return nil, failErr
-	default:
-		// The intent owns the outcome; a retry re-reads it by the same key.
-		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, ErrCheckoutProcessing)
-		return nil, ErrCheckoutProcessing
-	}
 }
 
 // CustodianSaleIntentHandler: money-mover semantics mirror the NMI sale
@@ -655,16 +532,15 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		metadata["e2e_run_id"] = p.E2ERunID
 	}
 	result, err := h.Sale.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		CheckoutAttemptID: p.CheckoutAttemptID,
-		UserID:            p.UserID,
-		PriceID:           p.PriceID,
-		Rail:              nmiproxy.Rail,
-		TransactionID:     res.TransactionID,
-		Amount:            p.AmountMicros,
-		Currency:          p.Currency,
-		Metadata:          metadata,
-		AttemptKind:       payments.AttemptInitial,
-		TokenType:         res.TokenType,
+		UserID:        p.UserID,
+		PriceID:       p.PriceID,
+		Rail:          nmiproxy.Rail,
+		TransactionID: res.TransactionID,
+		Amount:        p.AmountMicros,
+		Currency:      p.Currency,
+		Metadata:      metadata,
+		AttemptKind:   payments.AttemptInitial,
+		TokenType:     res.TokenType,
 	})
 	if err != nil {
 		return intents.Ambiguous("sale charged, but purchase registration failed: " + err.Error())

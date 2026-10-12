@@ -1,9 +1,10 @@
 package app
 
 import (
-	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
 	"net/http"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
 
@@ -692,7 +693,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		entitlementService,
 		paymentMethodService,
 		railPMService,
-		idempotencyService,
 		railCustomerService,
 		cfg,
 		railConfigs,
@@ -707,7 +707,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		priceService,
 		productService,
 		paymentMethodService,
-		idempotencyService,
 		checkoutService,
 		solanaPayService,
 		solanaTransactionService,

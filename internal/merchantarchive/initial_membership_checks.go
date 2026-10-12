@@ -43,19 +43,6 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	if err != nil {
 		return err
 	}
-	if p.CheckoutAttemptID != nil {
-		session, err := q.GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: op.MerchantID, ID: *p.CheckoutAttemptID})
-		if err != nil {
-			return err
-		}
-		var state map[string]json.RawMessage
-		if err := json.Unmarshal(session.RailState, &state); err != nil {
-			return err
-		}
-		if _, quoted := state["initial_membership_quote"]; !quoted || session.CustomerID != p.Terms.CustomerID || session.PspID != p.Terms.PSPID || session.PriceID == nil || *session.PriceID != p.Terms.PriceID || session.Rail != op.Rail || session.Mode != "subscription" {
-			return errors.New("initial membership session binding differs from retained checkout")
-		}
-	}
 	var evidence struct {
 		TransactionID          string `json:"transaction_id"`
 		ProviderSubscriptionID string `json:"provider_subscription_id"`

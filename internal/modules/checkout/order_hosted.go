@@ -135,8 +135,8 @@ func (s *CheckoutAttemptService) payOrderHosted(ctx context.Context, in OrderPay
 		return OrderCharge{}, err
 	}
 	session, err := checkout.createStripeCheckoutSession(db.WithPSPID(ctx, option.PSPID), stripeCheckoutParams{
-		Mode: "payment", InlinePrice: &stripeCheckoutInlinePrice{Name: order.Items(), Currency: order.Currency, AmountMinor: moneyutil.Cents(minor)},
-		SuccessURL: returnURL, CancelURL: returnURL, UserID: order.CustomerID.String(), CustomerEmail: userEmail(in.User),
+		InlinePrice: stripeCheckoutInlinePrice{Name: order.Items(), Currency: order.Currency, AmountMinor: moneyutil.Cents(minor)},
+		SuccessURL:  returnURL, CancelURL: returnURL, UserID: order.CustomerID.String(), CustomerEmail: userEmail(in.User),
 		CheckoutAttemptID: billing.CheckoutAttemptID(attemptID).String(), OrderID: billing.OrderID(order.ID).String(), IdempotencyKey: "order:" + attemptID.String(),
 	})
 	if err != nil {

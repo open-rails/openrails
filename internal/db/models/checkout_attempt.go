@@ -2,21 +2,19 @@ package models
 
 import (
 	"fmt"
-	"github.com/open-rails/openrails/billing"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-type CheckoutAttemptMode string
+// PurchaseKind is the offer category used by processor routing policies.
+// Checkout attempts themselves are owned by orders and carry no mode.
+type PurchaseKind string
 
 const (
-	CheckoutAttemptModeOneOff        CheckoutAttemptMode = "one_off"
-	CheckoutAttemptModePaymentMethod CheckoutAttemptMode = "payment_method"
-	CheckoutAttemptModeSubscription  CheckoutAttemptMode = "subscription"
-	// CheckoutAttemptModeOrder pays an order (OrderID): its total, no price.
-	CheckoutAttemptModeOrder CheckoutAttemptMode = "order"
+	PurchaseOneOff       PurchaseKind = "one_off"
+	PurchaseSubscription PurchaseKind = "subscription"
 )
 
 type CheckoutAttemptStatus string
@@ -35,10 +33,7 @@ type CheckoutAttempt struct {
 	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
-	PriceID       *uuid.UUID          `json:"price_id"`
-	PublicPriceID billing.PriceID     `json:"-"`
-	OrderID       *uuid.UUID          `json:"order_id,omitempty"`
-	Mode          CheckoutAttemptMode `json:"mode"`
+	OrderID *uuid.UUID `json:"order_id,omitempty"`
 
 	Rail   Rail                  `json:"rail"`
 	Status CheckoutAttemptStatus `json:"status"`
@@ -146,26 +141,13 @@ type CheckoutRoutingSkip struct {
 	Reason   string `json:"reason"`
 }
 
-// ValidateTerms keeps setup sessions free of monetary terms while preserving
-// the required price/amount/currency contract of every priced/lifecycle mode.
+// ValidateTerms checks the order's frozen payment amount and currency.
 func (s *CheckoutAttempt) ValidateTerms() error {
-	if s == nil {
-		return fmt.Errorf("checkout attempt is required")
+	if s == nil || s.OrderID == nil || *s.OrderID == uuid.Nil {
+		return fmt.Errorf("payment attempt requires its order")
 	}
-	if s.Mode == CheckoutAttemptModePaymentMethod {
-		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || (s.Rail != RailNMI && s.Rail != RailStripe) {
-			return fmt.Errorf("payment-method setup cannot carry monetary terms")
-		}
-		return nil
-	}
-	if s.Mode == CheckoutAttemptModeOrder {
-		if s.OrderID == nil || *s.OrderID == uuid.Nil || s.PriceID != nil || s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
-			return fmt.Errorf("an order's attempt requires its order, amount and currency")
-		}
-		return nil
-	}
-	if s.PriceID == nil || *s.PriceID == uuid.Nil || s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
-		return fmt.Errorf("priced checkout attempt requires price, amount and currency")
+	if s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
+		return fmt.Errorf("payment attempt requires amount and currency")
 	}
 	return nil
 }

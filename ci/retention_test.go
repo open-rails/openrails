@@ -65,6 +65,15 @@ func (w *retentionWorld) count(sql string, args ...any) int {
 	return n
 }
 
+// unpaidOrder is the payable an attempt belongs to; card setups live on
+// payment_methods and no longer provide checkout-attempt retention fixtures.
+func (w *retentionWorld) unpaidOrder(customer uuid.UUID) uuid.UUID {
+	id := uuid.New()
+	w.exec(`INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,expires_at)
+        VALUES($1,$2,$3,'merchant','open','requires_payment_method','USD',1000000,now()+interval '24 hours')`, w.merchant, id, customer)
+	return id
+}
+
 // sweep runs one cleanup pass; budget caps one merchant's rows for the pass.
 func (w *retentionWorld) sweep(budget int) riverjobs.CleanupResult {
 	w.t.Helper()
@@ -374,8 +383,8 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	// one that failed long ago and is kept.
 	attempt := func(status string, expiredAgo time.Duration) uuid.UUID {
 		var id uuid.UUID
-		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.checkout_attempts (merchant_id, customer_id, psp_id, mode, rail, status, expires_at)
-			VALUES ($1, $2, $3, 'payment_method', 'stripe', $4, now() - $5::interval) RETURNING id`), w.merchant, customer.UUID(), psp, status, expiredAgo).Scan(&id))
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.checkout_attempts (merchant_id, customer_id, psp_id, order_id, rail, status, amount, currency, expires_at)
+            VALUES ($1,$2,$3,$4,'stripe',$5,1000000,'USD',now()-$6::interval) RETURNING id`), w.merchant, customer.UUID(), psp, w.unpaidOrder(customer.UUID()), status, expiredAgo).Scan(&id))
 		return id
 	}
 	staleAttempt := attempt("expired", retention.ExpiredCheckoutAttempts+day)
@@ -521,14 +530,15 @@ func TestProviderWriteRetention(t *testing.T) {
 	pendingCancel := intent("stripe_cancel_subscription", "pending", old, map[string]any{})
 	// Records of money, a membership and an erasure, just as old.
 	collection := intent("subscription_collection", "succeeded", old, map[string]any{"previous_period_end": "2020-01-01T00:00:00Z", "attempt": 1})
-	refusedEnrollment := intent("initial_membership", "failed_terminal", old, map[string]any{"checkout_attempt_id": attemptID})
+	refusedEnrollment := intent("initial_membership", "failed_terminal", old, map[string]any{})
+	refusedSale := intent("nmi_sale", "failed_terminal", old, map[string]any{"checkout_attempt_id": attemptID})
 	refund := intent("stripe_refund", "succeeded", old, map[string]any{})
 	erasure := intent("nmi_vault_delete", "succeeded", old, map[string]any{"rail_customer_ref": "vault-1"})
 
 	// An attempt that expired long ago, but that an intent names: it reached a
-	// provider, and its enrollment's outcome is read against it.
-	w.exec(`INSERT INTO billing.checkout_attempts (id, merchant_id, customer_id, psp_id, mode, rail, status, expires_at)
-		VALUES ($1, $2, $3, $4, 'payment_method', 'stripe', 'expired', now() - $5::interval)`, attemptID, w.merchant, customer.UUID(), psp, retention.ExpiredCheckoutAttempts+30*day)
+	// provider, and its sale's outcome is read against it.
+	w.exec(`INSERT INTO billing.checkout_attempts (id,merchant_id,customer_id,psp_id,order_id,rail,status,amount,currency,expires_at)
+        VALUES($1,$2,$3,$4,$5,'stripe','expired',1000000,'USD',now()-$6::interval)`, attemptID, w.merchant, customer.UUID(), psp, w.unpaidOrder(customer.UUID()), retention.ExpiredCheckoutAttempts+30*day)
 
 	// The mutation log: two old entries (one names an intent that is deleted,
 	// one an intent that is kept) and a recent one naming the deleted intent.
@@ -560,7 +570,7 @@ func TestProviderWriteRetention(t *testing.T) {
 	}
 	for name, id := range map[string]uuid.UUID{
 		"recent cancel": youngCancel, "pending cancel": pendingCancel, "collection": collection,
-		"refused enrollment": refusedEnrollment, "refund": refund, "erasure": erasure,
+		"refused enrollment": refusedEnrollment, "refused sale": refusedSale, "refund": refund, "erasure": erasure,
 	} {
 		require.True(t, exists("provider_intents", id), "%s must be kept", name)
 	}

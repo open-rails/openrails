@@ -276,11 +276,11 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(c
 -- A card attempt starts created; a Solana one requires_action, with its
 -- reference.
 INSERT INTO billing.checkout_attempts (
-    id, merchant_id, customer_id, order_id, mode, rail, status, reference, amount, currency,
+    id, merchant_id, customer_id, order_id, rail, status, reference, amount, currency,
     expires_at, rail_state, psp_id, created_at, updated_at
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(order_id)::uuid,
-    'order', sqlc.arg(rail)::text, sqlc.arg(status)::text, sqlc.narg(reference)::text, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text,
+    sqlc.arg(rail)::text, sqlc.arg(status)::text, sqlc.narg(reference)::text, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text,
     sqlc.arg(expires_at)::timestamptz, sqlc.arg(rail_state)::jsonb, sqlc.arg(psp_id)::uuid,
     sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );

@@ -31,8 +31,8 @@ import (
 // SetupAbandonAfter is how long a card being saved waits for the customer.
 const SetupAbandonAfter = 24 * time.Hour
 
-// StripeCardSaved is a saved (or still authenticating) Stripe card.
-type StripeCardSaved struct {
+// SavedCard is a saved card or the next action needed to finish storing it.
+type SavedCard struct {
 	Method *models.PaymentMethod
 	// NextAction is the bank's authentication while the method requires
 	// action; its client secret is never stored.
@@ -89,34 +89,34 @@ func StripeCardID(merchantID, customer uuid.UUID, token string) uuid.UUID {
 
 // SaveStripeCard saves the card behind token, a pm_ the page's Stripe fields
 // made, to the customer.
-func (s *CheckoutService) SaveStripeCard(ctx context.Context, psp uuid.UUID, token string, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (StripeCardSaved, error) {
+func (s *CheckoutService) SaveStripeCard(ctx context.Context, psp uuid.UUID, token string, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
 	token = strings.TrimSpace(token)
 	account, err := s.stripeCardAccount(ctx, psp, user, resolver)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	d := s.SubscriptionService.Database()
 	id := StripeCardID(account.params.MerchantID, account.customer, token)
 	if existing, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: account.params.MerchantID, ID: id}); err == nil {
 		return s.ConfirmStripeCard(ctx, existing.ID, user, resolver)
 	} else if !db.IsNotFound(err) {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	read, err := account.service.ReadPaymentMethodCard(ctx, token)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	if read == nil || read.Card == nil || read.CustomerID != "" && read.CustomerID != account.params.CustomerRef {
-		return StripeCardSaved{}, fmt.Errorf("%w: Stripe has no card %s for this customer", ErrPaymentMethodStale, token)
+		return SavedCard{}, fmt.Errorf("%w: Stripe has no card %s for this customer", ErrPaymentMethodStale, token)
 	}
 	account.params.SessionID = id
 	setup, err := account.service.ConfirmEngineSetup(ctx, account.params, token)
 	var declined *subscriptions.StripeSetupDeclined
 	if errors.As(err, &declined) {
-		return StripeCardSaved{}, &paymentmethods.PaymentMethodError{Err: err, LocalizationID: declined.DeclineCode, Message: "card verification failed", Rail: string(models.RailStripe)}
+		return SavedCard{}, &paymentmethods.PaymentMethodError{Err: err, LocalizationID: declined.DeclineCode, Message: "card verification failed", Rail: string(models.RailStripe)}
 	}
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	now := s.now().UTC()
 	method := &models.PaymentMethod{ID: id, CustomerID: account.customer, PspID: &account.psp, Rail: models.RailStripe, Custodian: models.CustodianPSP,
@@ -126,7 +126,7 @@ func (s *CheckoutService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 	case "requires_action":
 		method.SetupRef = setup.ID
 	default:
-		return StripeCardSaved{}, &paymentmethods.PaymentMethodError{Err: errors.New("the bank did not save the card"), Message: "card verification failed", Rail: string(models.RailStripe)}
+		return SavedCard{}, &paymentmethods.PaymentMethodError{Err: errors.New("the bank did not save the card"), Message: "card verification failed", Rail: string(models.RailStripe)}
 	}
 	err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		td := d.NewWithPgxTx(tx)
@@ -139,9 +139,9 @@ func (s *CheckoutService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 		return recordStripeCardStored(ctx, td.Gen(ctx), method, setup.ID, now)
 	})
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
-	out := StripeCardSaved{Method: method}
+	out := SavedCard{Method: method}
 	if method.SetupRef != "" {
 		method.Status = paymentmethods.StatusRequiresAction
 		out.NextAction = stripeSetupAction(account.psp, setup)
@@ -154,39 +154,39 @@ func (s *CheckoutService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 // ConfirmStripeCard reads the SetupIntent of a card the bank asked to
 // authenticate: succeeded saves it; still waiting answers its next action; a
 // refusal removes it.
-func (s *CheckoutService) ConfirmStripeCard(ctx context.Context, methodID uuid.UUID, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (StripeCardSaved, error) {
+func (s *CheckoutService) ConfirmStripeCard(ctx context.Context, methodID uuid.UUID, user *UserIdentity, resolver intents.StripeEngineServiceResolver) (SavedCard, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	d := s.SubscriptionService.Database()
 	row, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID})
 	if db.IsNotFound(err) || err == nil && row.CustomerID.String() != user.ID {
-		return StripeCardSaved{}, paymentmethods.ErrPaymentMethodNotFound
+		return SavedCard{}, paymentmethods.ErrPaymentMethodNotFound
 	}
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	method, err := models.PaymentMethodFromGen(row)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	if row.Status != paymentmethods.StatusRequiresAction || row.Rail != string(models.RailStripe) || row.PspID == nil {
-		return StripeCardSaved{Method: method}, nil
+		return SavedCard{Method: method}, nil
 	}
 	account, err := s.stripeCardAccount(ctx, *row.PspID, user, resolver)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	account.params.SessionID = row.ID
 	setup, found, err := account.service.ReadEngineSetup(ctx, account.params, method.SetupRef)
 	if err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
 	now := s.now().UTC()
 	switch {
 	case found && setup.Status == "requires_action":
-		return StripeCardSaved{Method: method, NextAction: stripeSetupAction(account.psp, setup)}, nil
+		return SavedCard{Method: method, NextAction: stripeSetupAction(account.psp, setup)}, nil
 	case found && setup.Status == "succeeded":
 		err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
@@ -197,15 +197,15 @@ func (s *CheckoutService) ConfirmStripeCard(ctx context.Context, methodID uuid.U
 			return recordStripeCardStored(ctx, q, method, setup.ID, now)
 		})
 		if err != nil {
-			return StripeCardSaved{}, err
+			return SavedCard{}, err
 		}
 		method.Status, method.SetupRef = paymentmethods.StatusActive, ""
-		return StripeCardSaved{Method: method}, nil
+		return SavedCard{Method: method}, nil
 	}
 	if _, err := d.Gen(ctx).AbandonPaymentMethodSetup(ctx, gen.AbandonPaymentMethodSetupParams{MerchantID: mid.UUID(), ID: row.ID, Now: now}); err != nil {
-		return StripeCardSaved{}, err
+		return SavedCard{}, err
 	}
-	return StripeCardSaved{}, &paymentmethods.PaymentMethodError{Err: errors.New("the card's authentication failed"), LocalizationID: "authentication_required",
+	return SavedCard{}, &paymentmethods.PaymentMethodError{Err: errors.New("the card's authentication failed"), LocalizationID: "authentication_required",
 		Message: "card verification failed", Rail: string(models.RailStripe), Reason: billing.DeclineAuthenticationRequired}
 }
 

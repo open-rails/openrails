@@ -238,92 +238,34 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 	}
+	if p.Name == "payment_methods" {
+		if raw := value(p, values, "capture"); raw != nil && *raw != "null" {
+			var capture models.CheckoutCapture
+			if json.Unmarshal([]byte(*raw), &capture) != nil {
+				return fmt.Errorf("invalid card capture binding")
+			}
+			owner, customer := uuid.Nil, uuid.Nil
+			if v := value(p, values, "merchant_id"); v != nil {
+				owner, _ = uuid.Parse(*v)
+			}
+			if v := value(p, values, "customer_id"); v != nil {
+				customer, _ = uuid.Parse(*v)
+			}
+			status := models.CheckoutAttemptStatusExpired
+			if capture.PaymentMethodID != uuid.Nil {
+				status = models.CheckoutAttemptStatusSucceeded
+			}
+			if _, err := models.DecodeCheckoutCapture([]byte(*raw), owner, customer, capture.PSPID, status, &capture.ExpiresAt); err != nil {
+				return err
+			}
+		}
+	}
 	if p.Name == "checkout_attempts" {
-		field := func(name string) string {
-			if v := value(p, values, name); v != nil {
-				return *v
-			}
-			return ""
+		if id := value(p, values, "order_id"); id == nil || !uuidPattern.MatchString(*id) {
+			return fmt.Errorf("checkout attempt requires its order")
 		}
-		var state struct {
-			Purchase        json.RawMessage `json:"accepted_purchase"`
-			Submitted       bool            `json:"purchase_submitted"`
-			Closed          bool            `json:"provider_closed"`
-			Capture         json.RawMessage `json:"capture"`
-			Kind            string          `json:"kind"`
-			CustomerRef     string          `json:"customer_ref"`
-			Consent         string          `json:"consent"`
-			PaymentMethodID string          `json:"payment_method_id"`
-			Quote           string          `json:"initial_membership_quote"`
-		}
-		if raw := value(p, values, "rail_state"); raw != nil && json.Unmarshal([]byte(*raw), &state) != nil {
-			return fmt.Errorf("invalid checkout state")
-		}
-		if len(state.Purchase) > 0 {
-			var terms struct {
-				PriceID          uuid.UUID `json:"price_id"`
-				ProductID        uuid.UUID `json:"product_id"`
-				PaymentID        uuid.UUID `json:"payment_id"`
-				Amount           int64     `json:"amount,string"`
-				Currency         string
-				AcceptedAt       time.Time                   `json:"accepted_at"`
-				EntitlementStart time.Time                   `json:"entitlement_start"`
-				Duration         *int                        `json:"access_duration_hours"`
-				CreditGrant      *models.CreditGrantSnapshot `json:"credit_grant"`
-			}
-
-			if json.Unmarshal(state.Purchase, &terms) != nil || terms.PriceID.String() != field("price_id") || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || terms.Amount < 0 || strconv.FormatInt(terms.Amount, 10) != field("amount") || terms.Currency != field("currency") || field("mode") != "one_off" || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.Duration != nil && *terms.Duration <= 0 {
-				return fmt.Errorf("invalid retained purchase checkout terms")
-			}
-			if terms.CreditGrant != nil && (terms.CreditGrant.Validate() != nil || terms.CreditGrant.Currency != terms.Currency) {
-				return fmt.Errorf("invalid retained purchase credit terms")
-			}
-			if field("rail") == "stripe" && state.Submitted && !state.Closed && field("status") != "succeeded" {
-				return fmt.Errorf("submitted Stripe checkout outcome is unresolved")
-			}
-		}
-		if state.Quote != "" {
-			var quote subscriptions.InitialMembershipTerms
-			if json.Unmarshal([]byte(state.Quote), &quote) != nil || quote.Validate() != nil || quote.CollectionPolicy != models.CollectionPolicyEngine || quote.CustomerID.String() != field("customer_id") || quote.PSPID.String() != field("psp_id") || quote.PriceID.String() != field("price_id") || strconv.FormatInt(quote.Amount, 10) != field("amount") || quote.Currency != field("currency") || field("mode") != "subscription" || (field("rail") != "nmi" && field("rail") != "stripe") {
-				return fmt.Errorf("invalid retained engine checkout quote")
-			}
-		}
-		if field("mode") == string(models.CheckoutAttemptModePaymentMethod) && field("rail") == "stripe" {
-			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
-				if value(p, values, name) != nil {
-					return fmt.Errorf("Stripe setup contains monetary terms")
-				}
-			}
-			if len(state.Capture) != 0 || state.Quote != "" || state.Kind != "stripe_engine_setup" || state.Consent != "save_for_agreed_off_session_payments_v1" || !strings.HasPrefix(state.CustomerRef, "cus_") {
-				return fmt.Errorf("invalid Stripe setup binding")
-			}
-			if field("reference") != "" && !strings.HasPrefix(field("reference"), "seti_") {
-				return fmt.Errorf("invalid Stripe setup identity")
-			}
-			if field("status") == "succeeded" && (field("reference") == "" || !uuidPattern.MatchString(state.PaymentMethodID)) {
-				return fmt.Errorf("completed Stripe setup lacks retained method")
-			}
-		} else if field("mode") == string(models.CheckoutAttemptModePaymentMethod) {
-			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
-				if value(p, values, name) != nil {
-					return fmt.Errorf("capture setup contains monetary/provider payment terms")
-				}
-			}
-			if field("rail") != "nmi" {
-				return fmt.Errorf("unsupported capture rail")
-			}
-			expiry, err := time.Parse("2006-01-02 15:04:05.999999-07", field("expires_at"))
-			if err != nil {
-				return fmt.Errorf("invalid capture expiry")
-			}
-			owner, _ := uuid.Parse(field("merchant_id"))
-			customer, _ := uuid.Parse(field("customer_id"))
-			psp, _ := uuid.Parse(field("psp_id"))
-			if _, err = models.DecodeCheckoutCapture(state.Capture, owner, customer, psp, models.CheckoutAttemptStatus(field("status")), &expiry); err != nil {
-				return fmt.Errorf("invalid terminal capture binding: %w", err)
-			}
-		} else if len(state.Capture) != 0 {
-			return fmt.Errorf("capture binding on priced checkout")
+		if value(p, values, "amount") == nil || value(p, values, "currency") == nil {
+			return fmt.Errorf("checkout attempt requires its monetary terms")
 		}
 	}
 

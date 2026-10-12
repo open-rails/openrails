@@ -195,7 +195,6 @@ SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
-    OR EXISTS (SELECT 1 FROM billing.checkout_attempts WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND to_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))

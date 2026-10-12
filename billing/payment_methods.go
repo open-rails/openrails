@@ -139,7 +139,10 @@ type CardDetails struct {
 // card itself (Card). OpenRails reads the saved card's display facts from the
 // provider. When the bank asks for 3-D Secure the method answers
 // requires_action with a next_action; POST
-// /v1/me/payment-methods/{id}/confirm finishes it.
+// /v1/me/payment-methods/{id}/confirm finishes it. For HyperSwitch custody,
+// omit Token and Card and supply Idempotency-Key: the pending method returns
+// a capture next_action for vendor-owned fields. Confirm with the vendor
+// session token; saving the method never charges it.
 type CreatePaymentMethodParams struct {
 	PSPID          PSPID           `json:"psp_id"`
 	Token          string          `json:"token,omitempty"`
@@ -180,3 +183,20 @@ type DefaultPaymentMethod struct {
 	Currency        string          `json:"currency"`
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
+
+// ConfirmPaymentMethodParams finishes a pending card save. Capture is required
+// for custodian-owned fields; Stripe confirms the bank's setup without it.
+type ConfirmPaymentMethodParams struct {
+	Capture *CustodianCaptureReference `json:"capture,omitempty"`
+}
+
+// CustodianCaptureReference binds a vendor token to the owned pending method.
+// It is not payment authority and never contains card details.
+type CustodianCaptureReference struct {
+	CustodianID string `json:"custodian_id"`
+	SessionID   string `json:"session_id"`
+	Token       string `json:"token"`
+}
+
+func (CustodianCaptureReference) String() string   { return "[private custodian capture reference]" }
+func (CustodianCaptureReference) GoString() string { return "[private custodian capture reference]" }

@@ -63,10 +63,10 @@ A customer acting on its own account.
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
 | PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
-| POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` |  |
+| POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | `Idempotency-Key` |
 | PATCH | `/v1/me/payment-methods/{id}` | customer | — | `UpdatePaymentMethodParams` | 200 `PaymentMethod` |  |
 | DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 202 —<br>204 — |  |
-| POST | `/v1/me/payment-methods/{id}/confirm` | customer | — | — | 200 `PaymentMethod` |  |
+| POST | `/v1/me/payment-methods/{id}/confirm` | customer | — | `ConfirmPaymentMethodParams` | 200 `PaymentMethod` |  |
 | POST | `/v1/me/stripe/billing-portal-sessions` | customer | — | — | 200 `StripePortalSession` | when `stripe_portal` |
 | GET | `/v1/me/agreements` | customer | — | — | 200 `ListPage<Agreement>` |  |
 | POST | `/v1/me/agreements/{id}/revoke` | customer | — | — | 200 `AgreementRevocation` |  |
@@ -253,7 +253,7 @@ The openrails.dev account across the merchants it is linked at, where the standa
 | POST | `/v1/network/links/{link_id}/subscriptions/{id}/resume` | network | — | — | 200 `Subscription` | when `customer_network`; sensitive |
 | PUT | `/v1/network/links/{link_id}/subscriptions/{id}/payment-method` | network | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/payment-methods` | network | — | — | 200 `ListPage<PaymentMethod>` | when `customer_network` |
-| POST | `/v1/network/links/{link_id}/payment-methods` | network | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | when `customer_network`; sensitive |
+| POST | `/v1/network/links/{link_id}/payment-methods` | network | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | when `customer_network`; sensitive; `Idempotency-Key` |
 | DELETE | `/v1/network/links/{link_id}/payment-methods/{id}` | network | — | — | 202 —<br>204 — | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/orders/{id}` | network | — | — | 200 `Order` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/orders/{id}/pay` | network | — | `PayOrderParams` | 200 `Order` | when `customer_network`; sensitive; `Idempotency-Key` |

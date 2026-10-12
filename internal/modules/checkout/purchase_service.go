@@ -206,7 +206,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	if req == nil {
 		return nil, errors.New("purchase is required")
 	}
-	if req.CheckoutAttemptID == uuid.Nil && s.database != nil && s.transactionDB == nil {
+	if s.database != nil && s.transactionDB == nil {
 		var result *payments.RegisterPurchaseResponse
 		err := s.database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
@@ -214,9 +214,6 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 			return err
 		})
 		return result, err
-	}
-	if req != nil && req.CheckoutAttemptID != uuid.Nil {
-		return s.registerSessionPurchase(ctx, req)
 	}
 	if req.UserID == "" {
 		return nil, errors.New("user_id is required")

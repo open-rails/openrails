@@ -60,7 +60,7 @@ func captureScopedID(domain string, owner billing.MerchantID, customer uuid.UUID
 	}
 	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, input, 8)
 }
-func captureSessionID(owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
+func captureMethodID(owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
 	return captureScopedID("openrails/payment-method-setup/v1", owner, customer, key)
 }
 func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) string {
@@ -95,18 +95,6 @@ func (s *CheckoutAttemptService) captureAccounts(ctx context.Context, owner bill
 	}
 	return psp, custodian, nil
 }
-func (s *CheckoutAttemptService) captureFromSession(ctx context.Context, session *models.CheckoutAttempt) (models.CheckoutCapture, []byte, error) {
-	owner, err := merchant.Require(ctx)
-	if err != nil {
-		return models.CheckoutCapture{}, nil, err
-	}
-	raw, err := json.Marshal(session.RailState["capture"])
-	if err != nil {
-		return models.CheckoutCapture{}, nil, err
-	}
-	state, err := models.DecodeCheckoutCapture(raw, owner.UUID(), session.CustomerID, session.PspID, session.Status, session.ExpiresAt)
-	return state, raw, err
-}
 func (s *CheckoutAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUID) (models.CheckoutCapture, *hyperswitch.Client, *crypto.Sealer, error) {
 	var state models.CheckoutCapture
 	owner, err := merchant.Require(ctx)
@@ -134,14 +122,18 @@ func sameCaptureAccount(a, b models.CheckoutCapture) bool {
 	return a.MerchantID == b.MerchantID && a.PSPID == b.PSPID && a.CustodianID == b.CustodianID && a.AccountID == b.AccountID && a.Environment == b.Environment && a.ProfileID == b.ProfileID && a.PublicAPIKey == b.PublicAPIKey && a.APIBaseURL == b.APIBaseURL && a.SDKURL == b.SDKURL
 }
 
-// Contact data satisfies the vendor's customer schema. It never selects an
-// account: only authenticated merchant/payer ids derive the exact reference.
-func captureContact(req *CheckoutAttemptCreateRequest, user *UserIdentity) (string, string, error) {
-	name := strings.TrimSpace(user.Username)
-	if name == "" {
-		name = strings.TrimSpace(req.Payment.NameOnCard)
+// captureContact uses authenticated contact facts when available; the request
+// supplies billing contact details only, never the vendor customer identity.
+func captureContact(details *billing.BillingDetails, user *UserIdentity) (string, string, error) {
+	name, email := strings.TrimSpace(user.Username), ""
+	if details != nil {
+		if name == "" && details.Name != nil {
+			name = strings.TrimSpace(*details.Name)
+		}
+		if details.Email != nil {
+			email = strings.TrimSpace(*details.Email)
+		}
 	}
-	email := strings.TrimSpace(req.Payment.Email)
 	if user.Email != nil && strings.TrimSpace(*user.Email) != "" {
 		email = strings.TrimSpace(*user.Email)
 	}
@@ -152,262 +144,255 @@ func captureContact(req *CheckoutAttemptCreateRequest, user *UserIdentity) (stri
 	return name, email, nil
 }
 
-func (s *CheckoutAttemptService) createPaymentMethodSetup(ctx context.Context, req *CheckoutAttemptCreateRequest, user *UserIdentity) (*CheckoutAttemptResponse, error) {
-	if err := rejectCheckoutAttemptPAN(req); err != nil {
-		return nil, err
+func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (models.CheckoutCapture, error) {
+	var state models.CheckoutCapture
+	if err := json.Unmarshal(method.Capture, &state); err != nil {
+		return state, err
 	}
-	if strings.TrimSpace(req.IdempotencyKey) == "" || cardguard.ContainsPAN(req.IdempotencyKey) || req.Payment.PSPID == uuid.Nil {
-		return nil, fmt.Errorf("%w: setup requires PSP id and Idempotency-Key", ErrCheckoutAttemptValidation)
+	status := models.CheckoutAttemptStatusRequiresAction
+	switch {
+	case state.PaymentMethodID != uuid.Nil:
+		status = models.CheckoutAttemptStatusSucceeded
+	case method.Status == "removed":
+		status = models.CheckoutAttemptStatusExpired
 	}
-	payment := req.Payment
-	payment.PSPID = uuid.Nil
-	payment.Rail = ""
-	payment.Email = ""
-	payment.NameOnCard = ""
-	if payment != (CheckoutAttemptPaymentRequest{}) || req.PriceID != "" || req.SuccessURL != "" || req.CancelURL != "" || (req.Payment.Rail != "" && req.Payment.Rail != "nmi") {
-		return nil, fmt.Errorf("%w: setup accepts no purchase, token or redirect fields", ErrCheckoutAttemptValidation)
-	}
-	name, email, err := captureContact(req, user)
+	decoded, err := models.DecodeCheckoutCapture(method.Capture, owner.UUID(), method.CustomerID, state.PSPID, status, &state.ExpiresAt)
 	if err != nil {
-		return nil, err
+		return state, err
+	}
+	if method.Status == "requires_action" && (method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || *method.CustodianID != state.CustodianID || method.PspID != nil || method.SetupRef != state.VendorSessionID) {
+		return state, models.ErrCheckoutCaptureBinding
+	}
+	return decoded, nil
+}
+
+// SaveCustodianCard opens hosted card fields for this customer's pending
+// payment method. Only the first accepted vendor session is exposed. Competing
+// vendor preparations may expire unused; none can charge a card.
+func (s *CheckoutAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
+	if strings.TrimSpace(key) == "" || cardguard.ContainsPAN(key) || req.Token != "" || req.Card != nil || req.PSPID.IsZero() {
+		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrCheckoutAttemptValidation)
+	}
+	name, email, err := captureContact(req.BillingDetails, user)
+	if err != nil {
+		return SavedCard{}, err
 	}
 	customer, err := customerIDFromUser(user.ID)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
 	owner, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	canonical := *req
-	canonical.Payment.Rail = "nmi"
-	canonical.Payment.Email = email
-	canonical.Payment.NameOnCard = name
-	fingerprint := checkoutAttemptRequestFingerprint(&canonical)
-	id := captureSessionID(owner, customer, req.IdempotencyKey)
-	session, err := s.repo.GetByID(ctx, id)
-	if err == nil {
-		if session.CustomerID != customer || session.Mode != models.CheckoutAttemptModePaymentMethod || session.RailState[checkoutAttemptFingerprintKey] != fingerprint {
-			return nil, ErrCheckoutAttemptConflict
+	request, _ := json.Marshal([]any{req.PSPID, name, email, req.BillingDetails})
+	fingerprint := captureTokenHash(string(request))
+	id := captureMethodID(owner, customer, key)
+	repo := paymentmethods.NewPaymentMethodRepo(s.db)
+	if method, err := repo.GetByID(ctx, id); err == nil {
+		state, err := captureFromMethod(owner, method)
+		if err != nil {
+			return SavedCard{}, err
 		}
-		if session.Status != models.CheckoutAttemptStatusCreated {
-			return s.renderPaymentMethodSetup(ctx, session)
+		if method.CustomerID != customer || state.RequestFingerprint != fingerprint {
+			return SavedCard{}, ErrCheckoutAttemptConflict
 		}
-	} else if !db.IsNotFound(err) {
-		return nil, err
+		return s.renderCapturedCard(ctx, method)
+	} else if !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
+		return SavedCard{}, err
 	}
 	if err = s.requireProviderWrites(ctx); err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	pending, client, sealer, err := s.resolveCapture(ctx, req.Payment.PSPID)
+	state, client, sealer, err := s.resolveCapture(ctx, req.PSPID.UUID())
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
 	if err = client.CheckCaptureContract(ctx); err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
-	}
-	if session == nil {
-		now := s.now().UTC().Truncate(time.Microsecond)
-		pending.CustomerID = customer
-		pending.ExpiresAt = now.Add(defaultCheckoutAttemptTTL)
-		state := map[string]any{checkoutAttemptFingerprintKey: fingerprint, "capture": pending}
-		raw, _ := json.Marshal(state)
-		metadata, _ := json.Marshal(normalizeMetadata(req.Metadata))
-		if err = db.EnsureCustomerRow(ctx, s.db.Qx(ctx), uuid.Nil, customer); err != nil {
-			return nil, err
-		}
-		_, err = s.db.Gen(ctx).CreatePaymentMethodSetupSession(ctx, gen.CreatePaymentMethodSetupSessionParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, PspID: req.Payment.PSPID, ExpiresAt: new(pending.ExpiresAt), RailState: raw, Metadata: metadata, Now: now})
-		if err != nil {
-			return nil, err
-		}
-		session, err = s.repo.GetByID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if session.CustomerID != customer || session.RailState[checkoutAttemptFingerprintKey] != fingerprint {
-			return nil, ErrCheckoutAttemptConflict
-		}
-		if session.Status != models.CheckoutAttemptStatusCreated {
-			return s.renderPaymentMethodSetup(ctx, session)
-		}
-	}
-	accepted, previous, err := s.captureFromSession(ctx, session)
-	if err != nil {
-		return nil, err
-	}
-	if !sameCaptureAccount(accepted, pending) {
-		return nil, ErrCheckoutAttemptConflict
-	}
-	if !s.now().Before(accepted.ExpiresAt) {
-		return s.renderPaymentMethodSetup(ctx, session)
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
 	vendorCustomer, err := client.EnsureCustomer(ctx, captureCustomerReference(owner, customer), name, email)
 	if err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
 	vendorSession, err := client.CreateSession(ctx, vendorCustomer.ID)
 	if err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
-	accepted.VendorCustomerID = vendorCustomer.ID
-	accepted.VendorSessionID = vendorSession.ID
-	if vendorSession.ExpiresAt.Before(accepted.ExpiresAt) {
-		accepted.ExpiresAt = vendorSession.ExpiresAt.UTC().Truncate(time.Microsecond)
+	now := s.now().UTC().Truncate(time.Microsecond)
+	state.CustomerID, state.RequestFingerprint = customer, fingerprint
+	state.ExpiresAt = now.Add(defaultCheckoutAttemptTTL)
+	if vendorSession.ExpiresAt.Before(state.ExpiresAt) {
+		state.ExpiresAt = vendorSession.ExpiresAt.UTC().Truncate(time.Microsecond)
 	}
-	accepted.SecretCiphertext, err = sealer.Seal(captureAAD(owner, id, accepted), []byte(vendorSession.SDKAuthorization))
+	state.VendorCustomerID, state.VendorSessionID = vendorCustomer.ID, vendorSession.ID
+	state.SecretCiphertext, err = sealer.Seal(captureAAD(owner, id, state), []byte(vendorSession.SDKAuthorization))
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	encoded, _ := json.Marshal(accepted)
-	_, err = s.db.Gen(ctx).AcceptPaymentMethodSetupSession(ctx, gen.AcceptPaymentMethodSetupSessionParams{ID: id, MerchantID: owner.UUID(), Capture: encoded, Previous: previous, ExpiresAt: new(accepted.ExpiresAt), Now: s.now().UTC()})
+	raw, _ := json.Marshal(state)
+	details, _ := json.Marshal(metadata)
+	if err = db.EnsureCustomerRow(ctx, s.db.Qx(ctx), owner.UUID(), customer); err != nil {
+		return SavedCard{}, err
+	}
+	_, err = s.db.Gen(ctx).CreateCapturedPaymentMethod(ctx, gen.CreateCapturedPaymentMethodParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, CustodianID: state.CustodianID, SetupRef: state.VendorSessionID, Capture: raw, Metadata: details, Now: now})
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	// A competing preparation may have won; expose only the accepted row.
-	session, err = s.repo.GetByID(ctx, id)
+	method, err := repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	return s.renderPaymentMethodSetup(ctx, session)
+	accepted, err := captureFromMethod(owner, method)
+	if err != nil {
+		return SavedCard{}, err
+	}
+	if method.CustomerID != customer || accepted.RequestFingerprint != fingerprint {
+		return SavedCard{}, ErrCheckoutAttemptConflict
+	}
+	return s.renderCapturedCard(ctx, method)
 }
 
-func (s *CheckoutAttemptService) renderPaymentMethodSetup(ctx context.Context, session *models.CheckoutAttempt) (*CheckoutAttemptResponse, error) {
+func (s *CheckoutAttemptService) renderCapturedCard(ctx context.Context, method *models.PaymentMethod) (SavedCard, error) {
 	owner, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	if s.isExpired(session) && !s.isTerminal(session.Status) {
-		if err = s.MarkExpired(ctx, session.ID, "capture session expired"); err != nil {
-			return nil, err
-		}
-		session, err = s.repo.GetByID(ctx, session.ID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	state, _, err := s.captureFromSession(ctx, session)
+	state, err := captureFromMethod(owner, method)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	response := s.sessionToResponse(session)
 	if state.PaymentMethodID != uuid.Nil {
-		method := billing.PaymentMethodID(state.PaymentMethodID)
-		response.PaymentMethodID = &method
+		if state.PaymentMethodID != method.ID {
+			method, err = paymentmethods.NewPaymentMethodRepo(s.db).GetByID(ctx, state.PaymentMethodID)
+			if err != nil {
+				return SavedCard{}, err
+			}
+		}
+		return SavedCard{Method: method}, nil
 	}
-	if session.Status != models.CheckoutAttemptStatusRequiresAction {
-		return response, nil
+	if method.Status != "requires_action" || !s.now().Before(state.ExpiresAt) {
+		_, err = s.db.Gen(ctx).ExpireCapturedPaymentMethod(ctx, gen.ExpireCapturedPaymentMethodParams{MerchantID: owner.UUID(), ID: method.ID, Now: s.now()})
+		if err != nil {
+			return SavedCard{}, err
+		}
+		return SavedCard{}, ErrCheckoutAttemptExpired
 	}
-	if s.config == nil || s.config.HyperSwitch == nil || state.APIBaseURL != strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/") || state.SDKURL != s.config.HyperSwitch.SDKURL {
-		return nil, ErrCheckoutCaptureUnavailable
-	}
-	current, client, sealer, err := s.resolveCapture(ctx, session.PspID)
+	current, client, sealer, err := s.resolveCapture(ctx, state.PSPID)
 	if err != nil || !sameCaptureAccount(state, current) {
-		return nil, ErrCheckoutCaptureUnavailable
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
 	if err = client.CheckCaptureContract(ctx); err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
-	secret, err := sealer.Open(captureAAD(owner, session.ID, state), state.SecretCiphertext)
+	secret, err := sealer.Open(captureAAD(owner, method.ID, state), state.SecretCiphertext)
 	if err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
-	if !s.now().Before(state.ExpiresAt) {
-		return nil, ErrCheckoutAttemptExpired
-	}
-	response.Capture = &CustodianCaptureAction{Kind: models.CustodianHyperSwitch, CustodianID: state.CustodianID, SessionID: state.VendorSessionID, CustomerID: state.VendorCustomerID, APIBaseURL: state.APIBaseURL, SDKURL: state.SDKURL, PublicAPIKey: state.PublicAPIKey, SDKAuthorization: string(secret), ExpiresAt: state.ExpiresAt}
-	return response, nil
+	psp := billing.PSPID(state.PSPID)
+	return SavedCard{Method: method, NextAction: &billing.NextAction{Type: "capture", PSPID: &psp, Transactions: []string{}, Payload: map[string]string{
+		"kind": models.CustodianHyperSwitch, "custodian_id": state.CustodianID.String(), "session_id": state.VendorSessionID, "customer_id": state.VendorCustomerID,
+		"api_base_url": state.APIBaseURL, "sdk_url": state.SDKURL, "public_api_key": state.PublicAPIKey, "sdk_authorization": string(secret), "expires_at": state.ExpiresAt.Format(time.RFC3339Nano),
+	}}}, nil
 }
 
-func (s *CheckoutAttemptService) confirmPaymentMethodSetup(ctx context.Context, session *models.CheckoutAttempt, req *CheckoutAttemptConfirmRequest) (*CheckoutAttemptResponse, error) {
-	if req == nil || req.Payment.Capture == nil {
-		return nil, fmt.Errorf("%w: capture reference required", ErrCheckoutAttemptValidation)
+// ConfirmCustodianCard reads the token back from its exact vendor session,
+// then attaches the instrument under the customer and custodian handle locks.
+// It never charges or creates a card-on-file mandate.
+func (s *CheckoutAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.UUID, user *UserIdentity, reference *billing.CustodianCaptureReference) (SavedCard, error) {
+	if reference == nil {
+		return SavedCard{}, fmt.Errorf("%w: capture reference required", ErrCheckoutAttemptValidation)
 	}
-	reference := req.Payment.Capture
-	state, _, err := s.captureFromSession(ctx, session)
+	owner, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	if reference.CustodianID != state.CustodianID || reference.SessionID != state.VendorSessionID || reference.Token == "" || cardguard.ContainsPAN(reference.Token) || req.Payment.Signature != "" || req.Payment.Wallet != "" || (req.Payment.Rail != "" && req.Payment.Rail != "nmi") {
-		return nil, ErrCheckoutAttemptConflict
+	repo := paymentmethods.NewPaymentMethodRepo(s.db)
+	method, err := repo.GetByID(ctx, id)
+	if err != nil {
+		return SavedCard{}, err
+	}
+	if method.CustomerID.String() != user.ID {
+		return SavedCard{}, paymentmethods.ErrPaymentMethodNotFound
+	}
+	state, err := captureFromMethod(owner, method)
+	if err != nil {
+		return SavedCard{}, err
+	}
+	if reference.CustodianID != state.CustodianID.String() || reference.SessionID != state.VendorSessionID || reference.Token == "" || cardguard.ContainsPAN(reference.Token) {
+		return SavedCard{}, ErrCheckoutAttemptConflict
 	}
 	tokenHash := captureTokenHash(reference.Token)
-	if session.Status == models.CheckoutAttemptStatusSucceeded {
+	if state.PaymentMethodID != uuid.Nil {
 		if state.AcceptedTokenHash != tokenHash {
-			return nil, ErrCheckoutAttemptConflict
+			return SavedCard{}, ErrCheckoutAttemptConflict
 		}
-		return s.renderPaymentMethodSetup(ctx, session)
+		return s.renderCapturedCard(ctx, method)
 	}
-	if s.isExpired(session) || session.Status != models.CheckoutAttemptStatusRequiresAction {
-		return nil, ErrCheckoutAttemptExpired
+	if method.Status != "requires_action" || !s.now().Before(state.ExpiresAt) {
+		return s.renderCapturedCard(ctx, method)
 	}
-	current, client, _, err := s.resolveCapture(ctx, session.PspID)
+	current, client, _, err := s.resolveCapture(ctx, state.PSPID)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
 	if !sameCaptureAccount(state, current) {
-		return nil, ErrCheckoutAttemptConflict
+		return SavedCard{}, ErrCheckoutAttemptConflict
 	}
-	if err := client.CheckCaptureContract(ctx); err != nil {
-		return nil, ErrCheckoutCaptureUnavailable
+	if err = client.CheckCaptureContract(ctx); err != nil {
+		return SavedCard{}, ErrCheckoutCaptureUnavailable
 	}
 	vendorSession, err := client.GetSession(ctx, state.VendorSessionID, state.VendorCustomerID)
 	if err != nil || !vendorSession.OwnsToken(reference.Token) || !s.now().Before(vendorSession.ExpiresAt.Time) {
-		return nil, ErrCheckoutAttemptConflict
+		return SavedCard{}, ErrCheckoutAttemptConflict
 	}
-	method, err := client.GetMethod(ctx, reference.Token, state.VendorCustomerID)
+	instrument, err := client.GetMethod(ctx, reference.Token, state.VendorCustomerID)
 	if err != nil {
-		return nil, ErrCheckoutAttemptConflict
-	}
-	owner, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
+		return SavedCard{}, ErrCheckoutAttemptConflict
 	}
 	err = s.db.MerchantTx(ctx, func(c context.Context, tx pgx.Tx) error {
-		queries := s.db.NewWithPgxTx(tx).Gen(c)
-		if _, err := queries.LockCustomerForSpend(c, gen.LockCustomerForSpendParams{MerchantID: owner.UUID(), ID: session.CustomerID}); err != nil {
+		q := s.db.NewWithPgxTx(tx).Gen(c)
+		if _, err := q.LockCustomerForSpend(c, gen.LockCustomerForSpendParams{MerchantID: owner.UUID(), ID: method.CustomerID}); err != nil {
 			return err
 		}
-		handle := paymentmethods.CustodianHandle{Custodian: state.CustodianID, Method: method.ID}
-		if err := paymentmethods.LockCustodianHandles(c, queries, owner.UUID(), handle); err != nil {
+		handle := paymentmethods.CustodianHandle{Custodian: state.CustodianID, Method: instrument.ID}
+		if err := paymentmethods.LockCustodianHandles(c, q, owner.UUID(), handle); err != nil {
 			return err
 		}
-		if err := paymentmethods.RequireCustodianHandleAvailable(c, queries, owner.UUID(), handle); err != nil {
+		if err := paymentmethods.RequireCustodianHandleAvailable(c, q, owner.UUID(), handle); err != nil {
 			if errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing) || errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe) {
 				return ErrCheckoutAttemptConflict
 			}
 			return err
 		}
-		row, err := queries.GetPaymentMethodSetupSessionForUpdate(c, gen.GetPaymentMethodSetupSessionForUpdateParams{ID: session.ID, MerchantID: owner.UUID()})
+		row, err := q.GetCapturedPaymentMethodForUpdate(c, gen.GetCapturedPaymentMethodForUpdateParams{MerchantID: owner.UUID(), ID: id})
 		if err != nil {
 			return err
 		}
-		locked, err := models.CheckoutAttemptFromGen(row)
+		locked, err := models.PaymentMethodFromGen(row)
 		if err != nil {
 			return err
 		}
-		canonical, _, err := s.captureFromSession(c, locked)
+		canonical, err := captureFromMethod(owner, locked)
 		if err != nil {
 			return err
 		}
 		if canonical.VendorSessionID != state.VendorSessionID || !sameCaptureAccount(canonical, state) {
 			return ErrCheckoutAttemptConflict
 		}
-		if locked.Status == models.CheckoutAttemptStatusSucceeded {
+		if canonical.PaymentMethodID != uuid.Nil {
 			if canonical.AcceptedTokenHash == tokenHash {
 				return nil
 			}
 			return ErrCheckoutAttemptConflict
 		}
-		if locked.Status != models.CheckoutAttemptStatusRequiresAction || !s.now().Before(canonical.ExpiresAt) {
+		if locked.Status != "requires_action" || !s.now().Before(canonical.ExpiresAt) {
 			return ErrCheckoutAttemptExpired
 		}
-		if _, err := queries.GetCheckoutCaptureAccountsForShare(c, gen.GetCheckoutCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: locked.PspID, CustodianID: canonical.CustodianID}); err != nil {
-			if db.IsNotFound(err) {
-				return ErrCheckoutAttemptConflict
-			}
+		if _, err = q.GetCheckoutCaptureAccountsForShare(c, gen.GetCheckoutCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: canonical.PSPID, CustodianID: canonical.CustodianID}); err != nil {
 			return err
 		}
-		psp, custodian, err := s.captureAccounts(c, owner, locked.PspID)
+		psp, custodian, err := s.captureAccounts(c, owner, canonical.PSPID)
 		if err != nil {
 			return ErrCheckoutAttemptConflict
 		}
@@ -415,31 +400,39 @@ func (s *CheckoutAttemptService) confirmPaymentMethodSetup(ctx context.Context, 
 		if err != nil || !sameCaptureAccount(canonical, current) {
 			return ErrCheckoutAttemptConflict
 		}
-		brand, last4, month, year := models.ParseCard(method.Data.Card.Brand, method.Data.Card.Last4, method.MaskedExpiry()).Columns()
-		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, Now: s.now().UTC()})
-		if err != nil {
+		canonical.PaymentMethodID = id
+		var replacement *uuid.UUID
+		existing, err := q.GetCapturedInstrument(c, gen.GetCapturedInstrumentParams{MerchantID: owner.UUID(), CustodianID: canonical.CustodianID, VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: instrument.ID})
+		if err == nil {
+			if existing.CustomerID != method.CustomerID {
+				return ErrCheckoutAttemptConflict
+			}
+			if existing.Status != "active" || existing.ParkReason != nil {
+				return ErrPaymentMethodStale
+			}
+			canonical.PaymentMethodID = existing.ID
+			replacement = &existing.ID
+		} else if !db.IsNotFound(err) {
 			return err
 		}
-		canonical.PaymentMethodID = attached.ID
-		canonical.VendorMethodID = method.ID
-		canonical.AcceptedTokenHash = tokenHash
-		canonical.SecretCiphertext = ""
+		canonical.VendorMethodID, canonical.AcceptedTokenHash, canonical.SecretCiphertext = instrument.ID, tokenHash, ""
 		raw, _ := json.Marshal(canonical)
-		affected, err := queries.CompletePaymentMethodSetupSession(c, gen.CompletePaymentMethodSetupSessionParams{ID: locked.ID, MerchantID: owner.UUID(), Capture: raw, Now: s.now().UTC()})
+		brand, last4, month, year := models.ParseCard(instrument.Data.Card.Brand, instrument.Data.Card.Last4, instrument.MaskedExpiry()).Columns()
+		changed, err := q.CompleteCapturedPaymentMethod(c, gen.CompleteCapturedPaymentMethodParams{ID: id, MerchantID: owner.UUID(), Replacement: replacement, Capture: raw, VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: instrument.ID, CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, Now: s.now().UTC()})
 		if err != nil {
 			return err
 		}
-		if affected != 1 {
+		if changed != 1 {
 			return ErrCheckoutAttemptConflict
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	session, err = s.repo.GetByID(ctx, session.ID)
+	method, err = repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return SavedCard{}, err
 	}
-	return s.renderPaymentMethodSetup(ctx, session)
+	return s.renderCapturedCard(ctx, method)
 }

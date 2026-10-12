@@ -13,8 +13,8 @@ import (
 // boots cannot be a policy the API would have refused.
 
 var validRoutingModes = map[string]struct{}{
-	string(models.CheckoutAttemptModeOneOff):       {},
-	string(models.CheckoutAttemptModeSubscription): {},
+	string(models.PurchaseOneOff):       {},
+	string(models.PurchaseSubscription): {},
 }
 
 // NormalizeCheckoutRouting validates a declared policy and returns it in

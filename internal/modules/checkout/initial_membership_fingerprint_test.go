@@ -53,18 +53,9 @@ func TestInitialMembershipReplayPreservesLegacyFingerprint(t *testing.T) {
 		Rail: "nmi", PspID: &accepted.PSPID, PriceID: &accepted.PriceID,
 		IdempotencyKey: subscriptions.TypeInitialMembership + ":" + key, Payload: payload,
 	}
-	session := models.CheckoutAttempt{
-		ID: sessionID, CustomerID: accepted.CustomerID, PspID: accepted.PSPID, PriceID: &accepted.PriceID,
-		Mode: models.CheckoutAttemptModeSubscription, Rail: models.RailNMI,
-		Amount: &accepted.Amount, Currency: &accepted.Currency,
-		RailState: map[string]any{initialMembershipQuoteKey: legacyTerms},
-	}
-	stored, err := json.Marshal(session)
+	decoded, err := subscriptions.DecodeInitialMembershipPayload(operation)
 	require.NoError(t, err)
-	var restored models.CheckoutAttempt
-	require.NoError(t, json.Unmarshal(stored, &restored))
-	quote, err := readInitialMembershipQuote(&restored)
-	require.NoError(t, err)
+	quote := decoded.Terms
 	fingerprint := initialMembershipQuoteFingerprint(quote)
 	require.Equal(t, legacyFingerprint, fingerprint, "a deployment must not strand the accepted operation")
 	require.NoError(t, ownsInitialMembership(operation, accepted.CustomerID.String(), accepted.PriceID, fingerprint, &sessionID))

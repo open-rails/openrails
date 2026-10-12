@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/hostedcheckout"
@@ -115,6 +116,40 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	pspID := req.PSPID.UUID()
+	if mid, err := merchant.Require(r.Request.Context()); err == nil && merchants.Of(r.State.DB) != nil {
+		registry := merchants.Of(r.State.DB)
+		psp, found, readErr := registry.PSPScopeByID(r.Request.Context(), mid, pspID)
+		if readErr != nil {
+			r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
+			return
+		}
+		custodianKind := ""
+		if found && psp.CustodianID != nil {
+			custodian, found, readErr := registry.CustodianScopeByID(r.Request.Context(), mid, *psp.CustodianID)
+			if readErr != nil || !found {
+				r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
+				return
+			}
+			custodianKind = custodian.Kind
+		}
+		if custodianKind == models.CustodianHyperSwitch {
+			for _, value := range billingDetailStrings(req.BillingDetails) {
+				if cardguard.ContainsPAN(value) {
+					r.ErrorCode(billing.CodeInvalidParam, "card details must be entered in the custodian fields")
+					return
+				}
+			}
+			if r.State.CheckoutAttemptService == nil {
+				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
+				return
+			}
+			ctx, cancel := r.Budget(createPaymentMethodTimeout)
+			defer cancel()
+			saved, err := r.State.CheckoutAttemptService.SaveCustodianCard(ctx, req, r.Header("Idempotency-Key"), user, billingDetailsInput(req.BillingDetails).metadata())
+			writeSavedCard(r, user, http.StatusCreated, saved, err)
+			return
+		}
+	}
 	if req.Card != nil {
 		if !cardFieldAdmitted(r, strings.TrimSpace(req.Token) != "", billingDetailStrings(req.BillingDetails)...) {
 			return
@@ -220,7 +255,7 @@ func saveStripeCard(r *httprequest.Request, user *checkout.UserIdentity, psp uui
 	ctx, cancel := r.Budget(createPaymentMethodTimeout)
 	defer cancel()
 	saved, err := r.State.CheckoutService.SaveStripeCard(ctx, psp, token, user, resolver)
-	writeStripeCard(r, user, http.StatusCreated, saved, err)
+	writeSavedCard(r, user, http.StatusCreated, saved, err)
 }
 
 // ConfirmPaymentMethod (POST /me/payment-methods/{id}/confirm) finishes a
@@ -236,16 +271,40 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 		return
 	}
+	method, err := paymentmethods.NewPaymentMethodRepo(r.State.DB).GetByID(r.Request.Context(), id.UUID())
+	if err != nil || method.CustomerID.String() != user.ID {
+		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
+		return
+	}
+	var req billing.ConfirmPaymentMethodParams
+	if r.Request.ContentLength != 0 && !r.BindJSON(&req) {
+		return
+	}
+	if method.Custodian == models.CustodianHyperSwitch {
+		if r.State.CheckoutAttemptService == nil {
+			r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
+			return
+		}
+		ctx, cancel := r.Budget(createPaymentMethodTimeout)
+		defer cancel()
+		saved, err := r.State.CheckoutAttemptService.ConfirmCustodianCard(ctx, id.UUID(), user, req.Capture)
+		writeSavedCard(r, user, http.StatusOK, saved, err)
+		return
+	}
+	if req.Capture != nil {
+		r.ErrorCode(billing.CodeInvalidParam, "capture belongs to a custodian payment method")
+		return
+	}
 	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
 	if !ok || r.State.CheckoutService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
 		return
 	}
 	saved, err := r.State.CheckoutService.ConfirmStripeCard(r.Request.Context(), id.UUID(), user, resolver)
-	writeStripeCard(r, user, http.StatusOK, saved, err)
+	writeSavedCard(r, user, http.StatusOK, saved, err)
 }
 
-func writeStripeCard(r *httprequest.Request, user *checkout.UserIdentity, status int, saved checkout.StripeCardSaved, err error) {
+func writeSavedCard(r *httprequest.Request, user *checkout.UserIdentity, status int, saved checkout.SavedCard, err error) {
 	var refused *paymentmethods.PaymentMethodError
 	switch {
 	case errors.As(err, &refused):
@@ -259,7 +318,16 @@ func writeStripeCard(r *httprequest.Request, user *checkout.UserIdentity, status
 		writePaymentMethodStale(r)
 		return
 	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
-		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name an armed Stripe PSP").WithParam("psp_id"))
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid card save request").WithParam("psp_id"))
+		return
+	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
+		r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
+		return
+	case errors.Is(err, checkout.ErrCheckoutAttemptConflict):
+		r.ErrorCode(billing.CodeResourceConflict, "card save conflicts with its accepted request")
+		return
+	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
+		r.ErrorCode(billing.CodePaymentMethodStale, "card save expired")
 		return
 	case err != nil:
 		writeRefusal(r, err, "failed to save the card")

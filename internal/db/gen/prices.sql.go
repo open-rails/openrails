@@ -1264,7 +1264,6 @@ SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
-    OR EXISTS (SELECT 1 FROM billing.checkout_attempts WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND from_price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND to_price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))

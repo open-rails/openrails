@@ -501,7 +501,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 				return errors.New("initial terminal replay conflicts")
 			}
 			outcome.Evidence = saleResultEvidence(evidence)
-			return h.projectInitialMembershipSession(ctx, d, current, p, success)
+			return nil
 
 		}
 		if success && p.Terms.Adds != nil {
@@ -589,9 +589,6 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
-		}
-		if err := h.projectInitialMembershipSession(ctx, d, current, p, success); err != nil {
-			return err
 		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
@@ -733,38 +730,6 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 		return err
 	})
 	return proof, submitted, err
-}
-
-func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p InitialMembershipPayload, success bool) error {
-	if p.CheckoutAttemptID == nil {
-		return nil
-	}
-	id := *p.CheckoutAttemptID
-	params := gen.CompleteInitialMembershipSessionParams{ID: id, MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: p.Terms.PSPID, Rail: in.Rail, Status: "failed", Now: h.Checkout.now().UTC()}
-	if success {
-		params.Status = "succeeded"
-		params.SubscriptionID = &p.Terms.SubscriptionID
-		if p.Terms.Amount > 0 {
-			receipt, paid, err := intents.LoadCollectedReceipt(in)
-			if err != nil {
-				return err
-			}
-			if !paid {
-				return errors.New("initial checkout projection has no paid receipt")
-			}
-			params.PaymentID = &p.Terms.PaymentID
-			transaction := receipt.TransactionID()
-			params.TransactionID = &transaction
-		}
-	}
-	rows, err := d.Gen(ctx).CompleteInitialMembershipSession(ctx, params)
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return errors.New("initial checkout projection differs from accepted session")
-	}
-	return nil
 }
 
 func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context.Context, in gen.BillingProviderIntent, proof intents.InitialMembershipNonexecutionProof) intents.Outcome {

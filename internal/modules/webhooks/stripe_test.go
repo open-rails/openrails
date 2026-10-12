@@ -113,36 +113,16 @@ type recordingCheckoutAttemptStore struct {
 	closedStatus models.CheckoutAttemptStatus
 }
 
-func (*recordingCheckoutAttemptStore) FindOpenCCBillReservation(context.Context, string, string, uuid.UUID) (*models.CheckoutAttempt, error) {
-	return nil, nil
-}
-
-func (*recordingCheckoutAttemptStore) FindOpenByUserPriceRail(context.Context, string, uuid.UUID, models.Rail) (*models.CheckoutAttempt, error) {
-	return nil, nil
-}
-
-func (*recordingCheckoutAttemptStore) MarkSucceeded(context.Context, uuid.UUID, uuid.UUID, string) error {
-	return nil
-}
-
-func (*recordingCheckoutAttemptStore) MarkSucceededWithSubscription(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) error {
-	return nil
-}
-
-func (*recordingCheckoutAttemptStore) MarkFailed(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-
-func (s *recordingCheckoutAttemptStore) MarkProviderCheckoutClosed(_ context.Context, id uuid.UUID, status models.CheckoutAttemptStatus) error {
-	s.closedID, s.closedStatus = id, status
-	return nil
-}
-
 func (s *recordingCheckoutAttemptStore) SettleOrderCheckout(context.Context, uuid.UUID, string, string, string, int64) error {
 	return nil
 }
 
-func (s *recordingCheckoutAttemptStore) CloseOrderCheckout(context.Context, uuid.UUID, bool) error {
+func (s *recordingCheckoutAttemptStore) CloseOrderCheckout(_ context.Context, id uuid.UUID, failed bool) error {
+	s.closedID = id
+	s.closedStatus = models.CheckoutAttemptStatusExpired
+	if failed {
+		s.closedStatus = models.CheckoutAttemptStatusFailed
+	}
 	return nil
 }
 
@@ -209,7 +189,7 @@ func TestStripeWebhookRouting(t *testing.T) {
 	sessionID := uuid.New()
 	store := &recordingCheckoutAttemptStore{}
 	svc := &StripeWebhookService{CheckoutAttemptService: store}
-	meta := map[string]any{"metadata": map[string]string{"checkout_attempt_id": billing.CheckoutAttemptID(sessionID).String()}}
+	meta := map[string]any{"metadata": map[string]string{"checkout_attempt_id": billing.CheckoutAttemptID(sessionID).String(), "order_id": billing.OrderID(uuid.New()).String()}}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.async_payment_failed", meta)))
 	require.Equal(t, sessionID, store.closedID)
 	require.Equal(t, models.CheckoutAttemptStatusFailed, store.closedStatus)

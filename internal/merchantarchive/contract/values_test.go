@@ -110,7 +110,7 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 		{"pending payment", "payments", map[string]string{"status": "pending"}, false},
 		{"settled payment", "payments", map[string]string{"status": "succeeded"}, true},
 		{"open checkout", "checkout_attempts", map[string]string{"status": "open"}, false},
-		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired"}, true},
+		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired", "order_id": testMerchant, "amount": "100", "currency": "USD"}, true},
 		{"admitted admission", "admission_operations", map[string]string{"state": "admitted"}, false},
 		{"captured admission", "admission_operations", map[string]string{"state": "captured"}, true},
 		{"claimed intent", "provider_intents", map[string]string{"status": "claimed"}, false},

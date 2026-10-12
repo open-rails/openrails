@@ -195,7 +195,6 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
 	}).Info("stripe converge: membership created from fetched record")
 
-	s.markCheckoutAttemptSucceeded(ctx, rec, userID, priceID, transactionID, sub.ID)
 	return sub.CustomerID, nil
 }
 
@@ -284,34 +283,6 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 		}
 	}
 	return false, nil
-}
-
-// markCheckoutAttemptSucceeded closes the open checkout attempt that started
-// this subscription (creation leg only — renewals have no open session).
-func (s *StripeConvergeService) markCheckoutAttemptSucceeded(ctx context.Context, rec subscriptions.StripeLivenessRecord, userID string, priceID uuid.UUID, transactionID string, subscriptionID uuid.UUID) {
-	if s.CheckoutAttemptService == nil {
-		return
-	}
-	sessionID := parseCheckoutAttemptID(rec.Metadata)
-	if sessionID == uuid.Nil {
-		if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
-			sessionID = session.ID
-		}
-	}
-	if sessionID == uuid.Nil {
-		return
-	}
-	paymentID := uuid.Nil
-	if s.PaymentService != nil && transactionID != "" {
-		if payment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, transactionID); err == nil {
-			paymentID = payment.ID
-		}
-	}
-	if err := s.CheckoutAttemptService.MarkSucceededWithSubscription(ctx, sessionID, paymentID, transactionID, subscriptionID); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"checkout_attempt_id": sessionID, "transaction_id": transactionID,
-		}).Warn("stripe converge: failed to update checkout session")
-	}
 }
 
 // applyFetchedMirrorFacts mirrors the Stripe facts outside the decider's

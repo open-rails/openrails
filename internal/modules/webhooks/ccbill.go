@@ -3,7 +3,6 @@ package webhooks
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -573,19 +572,6 @@ func ccbillEventPurchasedAt(ts string) *time.Time {
 	return &p
 }
 
-func (s *CCBillWebhookService) findCCBillCheckoutAttempt(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutAttempt, error) {
-	if s.CheckoutAttemptService == nil {
-		return nil, sql.ErrNoRows
-	}
-	if strings.TrimSpace(reservationID) != "" {
-		session, err := s.CheckoutAttemptService.FindOpenCCBillReservation(ctx, reservationID, userID, priceID)
-		if err == nil || !db.IsNotFound(err) {
-			return session, err
-		}
-	}
-	return s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailCCBill)
-}
-
 func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	log.WithContext(ctx).
 		WithField("eventType", s.Data.EventType).
@@ -646,28 +632,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				Amount: price.Amount, Currency: price.Currency, At: s.now(),
 			}); err != nil {
 				return fmt.Errorf("record CCBill new-sale decline: %w", err)
-			}
-		}
-
-		if s.CheckoutAttemptService != nil && price != nil {
-			session, err := s.findCCBillCheckoutAttempt(ctx, data.ReservationID, userID, price.ID)
-			if err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"user_id":        userID,
-					"price_id":       price.ID,
-					"reservation_id": data.ReservationID,
-				}).Warn("failed to locate checkout session for CCBill failure")
-			} else if session != nil {
-				message := strings.TrimSpace(failureReason)
-				if message == "" {
-					message = "payment failed"
-				}
-				if err := s.CheckoutAttemptService.MarkFailed(ctx, session.ID, message, failureCode); err != nil {
-					log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-						"checkout_attempt_id": session.ID,
-						"transaction_id":      transactionID,
-					}).Warn("failed to update checkout session from CCBill failure")
-				}
 			}
 		}
 

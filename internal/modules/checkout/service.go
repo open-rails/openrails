@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -123,7 +122,6 @@ func NewCheckoutService(
 	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	railPMService *paymentmethods.RailPaymentMethodService,
-	idempotencyService idempotencyStore,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
 	railSet railresolve.Source,
@@ -153,7 +151,6 @@ func NewCheckoutService(
 	service.CustodianSaleService = &CheckoutCustodianSaleService{
 		PurchaseService:      service.PurchaseService,
 		PaymentMethodService: paymentMethodService,
-		IdempotencyStore:     idempotencyService,
 		Rails:                railSet,
 		Config:               cfg,
 	}
@@ -164,165 +161,11 @@ func NewCheckoutService(
 	return service
 }
 
-// getIdempotencyKey returns the idempotency key to use for a checkout operation.
-// If the request contains a client-provided key, use it. Otherwise generate one.
-func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string, priceID uuid.UUID, operation string) string {
-	if req.IdempotencyKey != "" {
-		return req.IdempotencyKey
-	}
-	// Fall back to generated key based on operation type
-	switch operation {
-	case "nmi_sale":
-		return GenerateKeyForSale(userID, priceID)
-	case "nmi_subscription":
-		return GenerateKeyForSubscription(userID, priceID)
-	default:
-		return GenerateKeyForSale(userID, priceID)
-	}
-}
-
-// CheckPurchaseEligibility reports whether a user may buy a price (allowed,
-// blocked as already owned, or an upgrade or downgrade within a tier group).
-// Call it before generating payment URLs or charging cards.
 func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
 	}
 	return s.PurchaseService.CheckPurchaseEligibility(ctx, userID, priceID)
-}
-
-// Checkout processes a unified checkout request
-func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
-	if response, found, err := s.replayInitialMembership(ctx, req, user); found || err != nil {
-		return response, err
-	}
-	if req.acceptedPurchase != nil {
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, err
-		}
-		price, product := req.acceptedPurchase.catalog(mid.UUID())
-		return s.processOneTimePurchase(ctx, req, user, price, product, &CoverageInfo{}, req.Rail)
-	}
-	price, err := resolveCheckoutPrice(ctx, s.PriceService, req.PriceID, req.ProductKey, req.PriceKey)
-	if err != nil {
-		return nil, fmt.Errorf("price not found: %w", err)
-	}
-	price, err = CheckoutPriceForAmount(price, req.Amount)
-	if err != nil {
-		return nil, err
-	}
-	if !price.IsPurchasable() {
-		return nil, errors.New("price is not available for purchase")
-	}
-
-	product, err := s.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return nil, fmt.Errorf("product not found: %w", err)
-	}
-	if !product.IsPurchasable() {
-		return nil, errors.New("product is not available for purchase")
-	}
-	if s.PurchaseService != nil {
-		if err := s.PurchaseService.checkPermanentOwnership(ctx, user.ID, price, product); err != nil {
-			return nil, err
-		}
-	}
-
-	rail := strings.TrimSpace(strings.ToLower(req.Rail))
-	if rail == "" {
-		return nil, errors.New("rail is required")
-	}
-
-	// Pin the active PSP for this rail so the rows this flow creates carry
-	// psp_id (nil when unresolvable, never invented).
-	ctx = s.stampPSP(ctx, rail)
-
-	// Check for tier group conflicts (upgrade/downgrade scenarios)
-	// This must happen BEFORE the general coverage check
-	if product.TierGroup != nil && *product.TierGroup != "" {
-		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, user.ID, *product.TierGroup)
-		if err != nil && !db.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to check tier group: %w", err)
-		}
-
-		if existingSub != nil {
-			// User has an active subscription in the same tier group
-			existingProduct := existingSub.Price.Product
-			if existingProduct == nil {
-				return nil, errors.New("failed to load existing product for tier comparison")
-			}
-
-			if existingProduct.ID == product.ID {
-				// Same product - the user already has this exact plan. Recurring
-				// tier subscriptions must not be bought twice; block it rather
-				// than create a second parallel subscription in the tier group.
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Message: "You already have an active subscription to this plan",
-				}, nil
-			} else if existingProduct.TierRank < product.TierRank {
-				// Upgrade detected - direct to the change endpoint
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Message: "Use POST /v1/me/subscriptions/{id}/change for tier upgrades",
-				}, nil
-			} else if existingProduct.TierRank > product.TierRank {
-				// Downgrade detected - direct to the change endpoint
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Message: "Use POST /v1/me/subscriptions/{id}/change for tier downgrades",
-				}, nil
-			} else {
-				// Same tier rank but different product - treat as duplicate
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Message: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
-				}, nil
-			}
-		}
-	}
-
-	// Check for existing coverage and determine if purchase is allowed
-	var coverage *CoverageInfo
-	if product.CreditGrant != nil && !price.IsRecurring() {
-		coverage = &CoverageInfo{}
-	} else if permanentPurchase(price) && s.PurchaseService != nil {
-		coverage, err = s.PurchaseService.purchaseCoverage(ctx, user.ID, price, product)
-	} else {
-		coverage, err = s.GetUserProductCoverage(ctx, user.ID, product)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
-	}
-
-	if coverage.HasCoverage {
-		if coverage.IsIndefinite {
-			// User has indefinite coverage - block purchase
-			return &CheckoutResponse{
-				Status:  "blocked",
-				Message: "You already have active access to this product",
-			}, nil
-		}
-
-		// User has coverage with an end date
-		// CCBill cannot schedule future start dates - block
-		if rail == "ccbill" {
-			return &CheckoutResponse{
-				Status:  "blocked",
-				Message: "You already have active access. CCBill subscriptions cannot be scheduled for future start. Please try again when your current access expires.",
-			}, nil
-		}
-
-		// Other rails: allow with delayed start
-	}
-
-	isSubscription := price.IsRecurring()
-
-	if isSubscription {
-		return s.processSubscription(ctx, req, user, price, product, coverage, rail)
-	}
-	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, rail)
 }
 
 // GetUserProductCoverage reports a user's coverage of a product: an active or
@@ -345,50 +188,6 @@ func (s *CheckoutService) processSubscription(
 	rail string,
 ) (*CheckoutResponse, error) {
 	return nil, errors.New("new engine subscriptions require a saved-method checkout attempt and explicit agreement confirmation")
-}
-
-// processOneTimePurchase handles one-time purchases
-func (s *CheckoutService) processOneTimePurchase(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-	rail string,
-) (*CheckoutResponse, error) {
-	// The requested name is a payment PROVIDER (account key) or a rail;
-	// dispatch on the resolved rail, hand the provider to the leg.
-	target, err := s.resolveRailTarget(ctx, rail)
-	if err != nil {
-		return nil, err
-	}
-	if target.Rail != string(models.RailSolana) {
-		if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
-			return nil, err
-		}
-	}
-
-	if (price.CustomerAmount != nil || req.Amount != nil) && target.Rail != "nmi" && target.Rail != "stripe" {
-		return nil, fmt.Errorf("%w: customer-selected deposits require NMI or Stripe", ErrCheckoutAttemptValidation)
-	}
-	price = priceForCheckoutTarget(price, target)
-	switch {
-	case rails.IsNMI(models.Rail(target.Rail)) && custodianHeld(target):
-		// Same rail and gateway, but a custodian holds the card, so the sale
-		// goes through its detokenizing proxy. The PSP decides this.
-		if s.CustodianSaleService == nil {
-			return nil, errors.New("custodian-held card checkout is not configured")
-		}
-		ctx = db.WithCustodianID(ctx, *target.Scope.CustodianID)
-		idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "custodian_sale")
-		return s.CustodianSaleService.Process(ctx, req, user, price, product, idempotencyKey)
-	case target.Rail == "solana":
-		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
-	default:
-		// A card on a PSP's own vault buys through an order.
-		return nil, fmt.Errorf("%w: a card purchase is an order", ErrCheckoutAttemptValidation)
-	}
 }
 
 // processCCBillUpgrade handles CCBill subscription upgrades
@@ -517,18 +316,6 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Che
 	return resp, nil
 }
 
-// processSolanaPurchase handles Solana one-time purchases
-func (s *CheckoutService) processSolanaPurchase(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
-	return nil, errors.New("solana checkout is handled via /v1/checkout attempts")
-}
-
 // railCustomerStore is the slice of RailCustomerService used for
 // Stripe customer resolution. Defined as an interface so the resolution logic
 // is unit-testable without a database.
@@ -621,17 +408,12 @@ type stripeCheckoutInlinePrice struct {
 }
 
 type stripeCheckoutParams struct {
-	AcceptedPurchase  bool
-	InlinePrice       *stripeCheckoutInlinePrice
-	Mode              string
-	PriceID           string
+	InlinePrice       stripeCheckoutInlinePrice
 	SuccessURL        string
 	CancelURL         string
 	UserID            string
 	CustomerID        string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
 	CustomerEmail     string
-	InternalPriceID   string
-	TrialEnd          int64
 	CheckoutAttemptID string
 	// OrderID names the order a payment-mode session pays.
 	OrderID        string
@@ -650,17 +432,15 @@ type stripeCheckoutSession struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (stripeCheckoutSession, error) {
-	if params.InlinePrice != nil {
-		if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
-			return stripeCheckoutSession{}, err
-		}
+	if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
+		return stripeCheckoutSession{}, err
 	}
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}
 	values := url.Values{}
-	values.Set("mode", params.Mode)
+	values.Set("mode", "payment")
 	values.Set("success_url", params.SuccessURL)
 	values.Set("cancel_url", params.CancelURL)
 	values.Set("client_reference_id", params.UserID)
@@ -672,36 +452,19 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
 		values.Set("customer_email", email)
 	}
-	if params.InlinePrice != nil {
-		if params.Mode != "payment" || params.PriceID != "" || params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" {
-			return stripeCheckoutSession{}, errors.New("invalid inline checkout price")
-		}
-		values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
-		values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
-		values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
-	} else {
-		values.Set("line_items[0][price]", params.PriceID)
+	if params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" || params.OrderID == "" {
+		return stripeCheckoutSession{}, errors.New("invalid order checkout price")
 	}
+	values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
+	values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
+	values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
-	if params.InternalPriceID != "" {
-		values.Set("metadata[internal_price_id]", params.InternalPriceID)
-	}
 	if strings.TrimSpace(params.CheckoutAttemptID) != "" {
 		values.Set("metadata[checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
 	}
 	if params.OrderID != "" {
 		values.Set("metadata[order_id]", params.OrderID)
-	}
-	if params.Mode == "subscription" {
-		values.Set("subscription_data[metadata][user_id]", params.UserID)
-		values.Set("subscription_data[metadata][internal_price_id]", params.InternalPriceID)
-		if strings.TrimSpace(params.CheckoutAttemptID) != "" {
-			values.Set("subscription_data[metadata][checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
-		}
-		if params.TrialEnd > 0 {
-			values.Set("subscription_data[trial_end]", strconv.FormatInt(params.TrialEnd, 10))
-		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
@@ -713,26 +476,6 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
 	client := s.StripeClients.Client(s.Config, 0)
-	if params.AcceptedPurchase {
-		if s.PurchaseService == nil || s.PurchaseService.database == nil {
-			return stripeCheckoutSession{}, errors.New("accepted checkout dispatch database unavailable")
-		}
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		id, err := billing.ParseCheckoutAttemptID(params.CheckoutAttemptID)
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		claimed, err := s.PurchaseService.database.Gen(ctx).ClaimHostedPurchaseDispatch(ctx, gen.ClaimHostedPurchaseDispatchParams{MerchantID: mid.UUID(), ID: id.UUID()})
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		if claimed == 0 {
-			return stripeCheckoutSession{}, ErrCheckoutAttemptPending
-		}
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout failed: %w", err)

@@ -10,19 +10,19 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-func checkoutModeForRail(price *models.Price, rail string) models.CheckoutAttemptMode {
+func checkoutModeForRail(price *models.Price, rail string) models.PurchaseKind {
 	_ = rail
 	if price != nil && price.IsRecurring() {
-		return models.CheckoutAttemptModeSubscription
+		return models.PurchaseSubscription
 	}
-	return models.CheckoutAttemptModeOneOff
+	return models.PurchaseOneOff
 }
 
 // checkoutRailSkipReason reports why this PSP cannot serve the price under
 // mode, or "" when it can. It is the one readiness verdict behind both the
 // option list and routing's fallback classes, so they never disagree. Which
 // sale kinds a rail supports is the rail registry's capability.
-func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.CheckoutAttemptMode) string {
+func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.PurchaseKind) string {
 	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
@@ -41,7 +41,7 @@ func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, tar
 	if price.CustomerAmount != nil && rail != models.RailNMI && rail != models.RailStripe {
 		return models.CheckoutRoutingSkipModeUnsupported
 	}
-	subscription := mode == models.CheckoutAttemptModeSubscription
+	subscription := mode == models.PurchaseSubscription
 	if subscription && (price.Amount <= 0 || price.RecurringCycleHours() == nil) {
 		return models.CheckoutRoutingSkipModeUnsupported
 	}

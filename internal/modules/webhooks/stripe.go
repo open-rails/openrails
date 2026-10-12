@@ -739,26 +739,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		return s.CheckoutAttemptService.CloseOrderCheckout(ctx, parseCheckoutAttemptID(sess.Metadata), false)
 	}
 
-	sessionID := parseCheckoutAttemptID(sess.Metadata)
-	if sessionID == uuid.Nil {
-		userID := normalize.FirstNonEmpty(sess.Metadata["user_id"], sess.Metadata["userId"], sess.Metadata["uid"])
-		if userID == "" {
-			return nil
-		}
-		priceID, _, err := s.resolvePriceFromMetadata(ctx, sess.Metadata, nil)
-		if err != nil {
-			return nil
-		}
-		if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
-			sessionID = session.ID
-		}
-	}
-
-	if sessionID == uuid.Nil {
-		return nil
-	}
-
-	return s.CheckoutAttemptService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutAttemptStatusExpired)
+	return nil
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Context, obj json.RawMessage) error {
@@ -795,75 +776,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 		return s.CheckoutAttemptService.SettleOrderCheckout(ctx, parseCheckoutAttemptID(sess.Metadata), sess.ID, sess.PaymentIntent, sess.Currency, sess.AmountTotal)
 	}
-	priceID, price, err := s.resolvePriceFromMetadata(ctx, sess.Metadata, nil)
-	if err != nil {
-		return err
-	}
-	if price == nil {
-		price, err = s.PriceService.GetByID(ctx, priceID)
-		if err != nil {
-			return fmt.Errorf("price lookup failed: %w", err)
-		}
-	}
-	amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sess.AmountTotal)))
-	if !chargeable(price, amountMicros) {
-		return fmt.Errorf("stripe checkout amount mismatch: got %s, want %s", moneyutil.FormatRailMinor(moneyutil.Cents(sess.AmountTotal), sess.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
-	}
-	if !strings.EqualFold(strings.TrimSpace(sess.Currency), strings.TrimSpace(price.Currency)) {
-		return fmt.Errorf("stripe checkout currency mismatch: got %s, want %s", sess.Currency, price.Currency)
-	}
-	paymentTransactionID := normalize.FirstNonEmpty("", sess.PaymentIntent)
-	if paymentTransactionID == "" {
-		if sess.AmountTotal != 0 || strings.TrimSpace(sess.ID) == "" {
-			return fmt.Errorf("stripe checkout session missing payment_intent")
-		}
-		paymentTransactionID = strings.TrimSpace(sess.ID)
-	}
-
-	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		CheckoutAttemptID: parseCheckoutAttemptID(sess.Metadata),
-		UserID:            userID,
-		PriceID:           priceID,
-		Rail:              string(models.RailStripe),
-		TransactionID:     paymentTransactionID,
-		Amount:            amountMicros,
-		AmountProvided:    true,
-		Currency:          sess.Currency,
-		Metadata:          stripeCheckoutPaymentMetadata(sess),
-		AttemptKind:       payments.AttemptInitial,
-	})
-	if err != nil {
-		return fmt.Errorf("register purchase: %w", err)
-	}
-
-	if s.CheckoutAttemptService != nil {
-		sessionID := parseCheckoutAttemptID(sess.Metadata)
-		if sessionID == uuid.Nil {
-			if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
-				sessionID = session.ID
-			}
-		}
-		if sessionID != uuid.Nil {
-			if err := s.CheckoutAttemptService.MarkSucceeded(ctx, sessionID, result.PaymentID, paymentTransactionID); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"checkout_attempt_id": sessionID,
-					"transaction_id":      paymentTransactionID,
-				}).Warn("failed to update checkout session from stripe checkout")
-			}
-		}
-	}
-
 	return nil
-}
-
-// chargeable reports an amount price can be paid with: its own, or for a
-// customer-chosen deposit one within its bounds, which the checkout's
-// accepted terms then fix exactly.
-func chargeable(price *models.Price, amount int64) bool {
-	if c := price.CustomerAmount; c != nil {
-		return amount >= c.MinAmount && amount <= c.MaxAmount
-	}
-	return amount == price.Amount
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx context.Context, obj json.RawMessage) error {
@@ -880,9 +793,6 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	}
 	if orderCheckout(sess) {
 		return s.CheckoutAttemptService.CloseOrderCheckout(ctx, sessionID, true)
-	}
-	if err := s.CheckoutAttemptService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutAttemptStatusFailed); err != nil {
-		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil
 }
@@ -1333,14 +1243,4 @@ func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, met
 		}
 	}
 	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
-}
-
-func stripeCheckoutPaymentMetadata(sess stripeCheckoutSession) map[string]any {
-	metadata := map[string]any{
-		"stripe_checkout_session_id": strings.TrimSpace(sess.ID),
-	}
-	if paymentIntentID := strings.TrimSpace(sess.PaymentIntent); paymentIntentID != "" {
-		metadata["stripe_payment_intent_id"] = paymentIntentID
-	}
-	return metadata
 }

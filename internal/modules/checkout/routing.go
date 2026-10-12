@@ -35,7 +35,7 @@ type RoutingInput struct {
 	Price   *models.Price
 	Product *models.Product
 	// Mode is the checkout mode this price implies (one_off | subscription).
-	Mode models.CheckoutAttemptMode
+	Mode models.PurchaseKind
 	// Country is the payer's country when the request carries one, else "".
 	Country string
 	// Selector is an EXPLICIT client preference (the wire payment.rail). When
@@ -316,7 +316,7 @@ func (s *CheckoutAttemptService) evaluateCandidate(ctx context.Context, targets 
 // creating anything. It resolves the price/product exactly as checkout does and
 // runs the SAME Route call, so the trace it returns is the decision a real
 // session would record — not a re-implementation that can drift.
-func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, productKey, priceKey, country, selector string) (*RoutingDecision, models.CheckoutAttemptMode, error) {
+func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, productKey, priceKey, country, selector string) (*RoutingDecision, models.PurchaseKind, error) {
 	if err := validateCheckoutPriceSelector(priceID, productKey, priceKey); err != nil {
 		return nil, "", err
 	}
