@@ -137,22 +137,24 @@ func TestMountNeedsARootAuthenticator(t *testing.T) {
 }
 
 // Findings are an operator inbox. Billing read/manage grants open neither
-// reads nor resolutions; either correctly scoped config grant opens all three,
-// and resolving a finding does not require a recent sign-in.
+// reads nor resolutions. ConfigRead opens inspection and ConfigManage opens
+// resolution; resolving a finding does not require a recent sign-in.
 func TestFindingsRequireMerchantConfiguration(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	mid := w.client[embedded].MerchantID()
 	for _, tc := range []struct {
-		name, role string
-		allowed    bool
+		name, role   string
+		read, manage bool
 	}{
-		{"billing reader", heldIn(mid.String(), billing.MerchantCustomerRead), false},
-		{"billing manager", heldIn(mid.String(), billing.MerchantCustomerManage), false},
-		{"root billing manager", "only:" + string(billing.RootCustomerManage), false},
-		{"other merchant config", heldIn(uuid.NewString(), billing.MerchantConfigManage), false},
-		{"merchant config", heldIn(mid.String(), billing.MerchantConfigManage), true},
-		{"root config", "only:" + string(billing.RootConfigManage), true},
+		{"billing reader", heldIn(mid.String(), billing.MerchantCustomerRead), false, false},
+		{"billing manager", heldIn(mid.String(), billing.MerchantCustomerManage), false, false},
+		{"root billing manager", "only:" + string(billing.RootCustomerManage), false, false},
+		{"other merchant config", heldIn(uuid.NewString(), billing.MerchantConfigManage), false, false},
+		{"merchant config read", heldIn(mid.String(), billing.MerchantConfigRead), true, false},
+		{"merchant config manage", heldIn(mid.String(), billing.MerchantConfigManage), false, true},
+		{"root config read", "only:" + string(billing.RootConfigRead), true, false},
+		{"root config manage", "only:" + string(billing.RootConfigManage), false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var id string
@@ -170,12 +172,16 @@ func TestFindingsRequireMerchantConfiguration(t *testing.T) {
 				{http.MethodPost, "/v1/merchant/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
 			} {
 				status, body := w.merchantJSON(token, op.method, op.path, op.body)
+				allowed := tc.read
+				if op.method == http.MethodPost {
+					allowed = tc.manage
+				}
 				want := http.StatusForbidden
-				if tc.allowed {
+				if allowed {
 					want = http.StatusOK
 				}
 				require.Equal(t, want, status, "%s %s: %v", op.method, op.path, body)
-				if !tc.allowed {
+				if !allowed {
 					require.Equal(t, billing.CodePermissionRequired, body["error"].(map[string]any)["code"])
 				}
 			}

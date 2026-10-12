@@ -64,6 +64,8 @@ The default scope is `openrails:merchant`. Token acquisition uses the caller's c
 - `scope_id`: the merchant's own AuthKit group.
 
 The `catalog` and `merchant_config` fields previously were booleans; consumers must compare the level explicitly rather than treating any nonempty string as access.
+These console section levels require the read permission: a manage-only grant
+does not expose a section, and `update` means both read and manage are held.
 
 The access route is mounted when any staff or programmatic group is enabled, including a programmatic-only deployment. It is an advisory snapshot: each operation authenticates and authorizes its own request. Public feature flags distinguish deployment availability from credential authority.
 
