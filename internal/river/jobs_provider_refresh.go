@@ -48,9 +48,9 @@ const (
 	QueueProviderRefresh = "provider_refresh"
 
 	providerRefreshDomainEvents = "events"
-	defaultRefreshWindow        = 24 * time.Hour
+	defaultRefreshOverlap       = 24 * time.Hour
 	defaultRefreshSafetyLag     = 5 * time.Minute
-	defaultRefreshMaxWindows    = 8
+	defaultRefreshBatch         = 8 * 24 * time.Hour
 	// defaultRefreshStagger spreads the scheduler's fan-out so merchant pull
 	// windows don't align on the tick instant.
 	defaultRefreshStagger = 30 * time.Minute
@@ -285,9 +285,11 @@ type ProviderRefreshWorker struct {
 	// Positive usage-order recovery does not authorize provider or lifecycle writes.
 	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
 
-	Window     time.Duration
-	SafetyLag  time.Duration
-	MaxWindows int
+	// Overlap is re-read for late provider indexing; Batch bounds the span
+	// of one read, the rest continuing in the next job.
+	Overlap   time.Duration
+	SafetyLag time.Duration
+	Batch     time.Duration
 }
 
 func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshMerchant }
@@ -553,7 +555,6 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
 	pspID := binding.ID
-	bindings := map[reconcile.Provider]reconcile.PSPBinding{provider: binding}
 	now := w.now()
 	horizon := now.Add(-w.safetyLag())
 	if !horizon.After(time.Time{}) {
@@ -578,10 +579,10 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
 		return out
 	}
-	// Repeat a bounded window for late provider indexing. This is recovery
+	// Repeat a bounded overlap for late provider indexing. This is recovery
 	// overlap, not a claim that the provider can never publish older history.
 	if qualifiedRecovery {
-		since = since.Add(-w.window())
+		since = since.Add(-w.overlap())
 	}
 	if !since.Before(horizon) {
 		return out
@@ -593,25 +594,23 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // nil-check: see runConvergence
 	}
-	maxWindows := w.maxWindows()
-	for i := 0; i < maxWindows && since.Before(horizon); i++ {
-		until := since.Add(w.window())
-		if until.After(horizon) {
-			until = horizon
-		}
-		if !until.After(since) {
-			break
-		}
-		progress.Mark(ctx, fmt.Sprintf("refresh %s window %s..%s", provider, since.Format(time.RFC3339), until.Format(time.RFC3339)))
-		params := reconcile.RunParams{
-			Mode:        mode,
-			Mutations:   mutations,
-			Providers:   []reconcile.Provider{provider},
-			PSPs:        bindings,
-			PSPCoverage: coverage,
-			Since:       since,
-			Until:       until,
-		}
+	// A run reads the account's whole roster, so one run covers the batch: a
+	// run per day would read the roster once per day of backlog.
+	until := since.Add(w.batch())
+	if until.After(horizon) {
+		until = horizon
+	}
+	progress.Mark(ctx, fmt.Sprintf("refresh %s window %s..%s", provider, since.Format(time.RFC3339), until.Format(time.RFC3339)))
+	params := reconcile.RunParams{
+		Mode:        mode,
+		Mutations:   mutations,
+		Providers:   []reconcile.Provider{provider},
+		PSPs:        map[reconcile.Provider]reconcile.PSPBinding{provider: binding},
+		PSPCoverage: coverage,
+		Since:       since,
+		Until:       until,
+	}
+	applied := func() bool {
 		res, err := engine.Run(ctx, params)
 		if err != nil {
 			out.ProviderErrors++
@@ -622,7 +621,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 				"since":    since,
 				"until":    until,
 			}).Warn("Provider Refresh: provider event window failed; watermark unchanged")
-			break
+			return false
 		}
 		out.Windows++
 		if rep := res.Summary.Providers[string(provider)]; rep != nil {
@@ -644,18 +643,21 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until); err != nil {
 			out.WatermarkErrors++
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
-			break
+			return false
 		}
 		if qualifiedRecovery {
 			if !res.AppliedEventCoverage(provider, since, until) {
 				out.ProviderErrors++
-				break
+				return false
 			}
 			if err := w.DB.Gen(ctx).UpsertPSPAppliedRefreshWatermark(ctx, gen.UpsertPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: until}); err != nil {
 				out.WatermarkErrors++
-				break
+				return false
 			}
 		}
+		return true
+	}()
+	if applied {
 		since = until
 	}
 	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0
@@ -745,11 +747,11 @@ func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid 
 	return w.DB.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: watermark.UTC()})
 }
 
-func (w *ProviderRefreshWorker) window() time.Duration {
-	if w.Window > 0 {
-		return w.Window
+func (w *ProviderRefreshWorker) overlap() time.Duration {
+	if w.Overlap > 0 {
+		return w.Overlap
 	}
-	return defaultRefreshWindow
+	return defaultRefreshOverlap
 }
 
 func (w *ProviderRefreshWorker) safetyLag() time.Duration {
@@ -759,11 +761,11 @@ func (w *ProviderRefreshWorker) safetyLag() time.Duration {
 	return defaultRefreshSafetyLag
 }
 
-func (w *ProviderRefreshWorker) maxWindows() int {
-	if w.MaxWindows > 0 {
-		return w.MaxWindows
+func (w *ProviderRefreshWorker) batch() time.Duration {
+	if w.Batch > 0 {
+		return w.Batch
 	}
-	return defaultRefreshMaxWindows
+	return defaultRefreshBatch
 }
 
 type providerRefreshStats struct {

@@ -149,8 +149,12 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	// Armed, the next pass reads the few rows left in one batch: NMI ended
 	// the gone schedules; the silent ones stay unverified.
 	w.armDestructive()
+	reads = w.nmi.Reads()
 	require.NoError(t, w.jobs.Start(t.Context()))
 	w.pullWithin(3 * time.Minute) // the pull also mirrors the whole 1,000-schedule roster
+	// The oldest unverified period began 32 days ago: with a day's overlap the
+	// catch-up is five eight-day batches, each reading the roster once.
+	require.LessOrEqual(t, w.nmi.Reads()["v5:subscriptions"]-reads["v5:subscriptions"], 5*pages, "one roster read per batch, not per day of backlog")
 	states = w.rowStates()
 	for _, r := range gone {
 		require.Equal(t, "canceled", states[r.schedule].status, r.source)
