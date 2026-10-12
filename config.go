@@ -77,6 +77,8 @@ type (
 	// HyperSwitchConfig is Config.HyperSwitch: the host's HyperSwitch
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
+	// PlatformVaultConfig is Config.PlatformVault: the operator's card vault.
+	PlatformVaultConfig = config.PlatformVaultConfig
 
 	// EmailSender is Deps.Email: it delivers OpenRails' rendered email.
 	EmailSender = config.EmailSender

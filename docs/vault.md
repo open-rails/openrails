@@ -41,12 +41,15 @@ it):
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/psps/<key>
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/custodians/<key>
 <kv_mount>/<scope_prefix>/credential_fingerprint_key
+<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>
 ```
 
 `scope_prefix` defaults to `openrails`. A key (the PSP or custodian name
 checkout and the catalog use) matches `^[a-z0-9][a-z0-9_-]{0,62}$`.
 `credential_fingerprint_key` is created by OpenRails on first start; it keys
 the fingerprints that catch one gateway account declared twice. Keep it.
+`platform_vault/<tenant_id>` holds the platform vault's keys when the
+deployment configures one ([payment-method custody](payment-method-custody.md)).
 
 ```sh
 id=$(openrails merchants get shop | jq -r .id)

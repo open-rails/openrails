@@ -49,7 +49,7 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB) (*M
 	}
 	cache := merchantdocs.NewCache(source)
 	closeAll := func() { cache.Close(); conn.Close() }
-	svc, err := merchants.NewService(database.DataPool(), cache, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
+	svc, err := merchants.NewService(database.DataPool(), cache, cfg)
 	if err != nil {
 		closeAll()
 		return nil, err

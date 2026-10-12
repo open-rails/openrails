@@ -88,6 +88,8 @@ func writeMerchantArchiveError(r *httprequest.Request, err error) {
 			status, detail.Message = http.StatusConflict, "destination billing state must be empty"
 		case "unsupported_state":
 			status, detail.Message = http.StatusConflict, "merchant has state that cannot safely be moved"
+		case "platform_cards":
+			status, detail.Message = http.StatusConflict, "the merchant holds cards in the platform vault; export or remove them first"
 		case "integrity":
 			status, detail.Message = http.StatusUnprocessableEntity, "billing archive integrity validation failed"
 		default:

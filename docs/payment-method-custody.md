@@ -31,6 +31,7 @@ charges through that PSP, provided it still reaches the custodian.
 | `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
+| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | schema and configuration only |
 | JusPay / Spreedly | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
 | — no row — | `solana` | an on-chain delegation, not a stored instrument | yes |
@@ -60,6 +61,48 @@ is presented to the network* at charge time:
 A Basis-Theory-held card can be charged either way, so the two fields stay
 separate. `payments.token_type` records which form actually went out
 (`pan_via_proxy` / `network_token` / `psp_token`).
+
+## Where new cards go: `settings.card_custody`
+
+A merchant setting chooses who holds the cards it saves from now on:
+
+| `card_custody` | New cards are held by |
+|---|---|
+| `merchant` (or absent) | the merchant's own vault: its PSP, or the custodian a PSP names |
+| `platform` | the deployment's platform vault, in the merchant's partition; the merchant's own PSP accounts still charge them |
+| `hosted` | reserved for a private vault the platform hosts: `400 card_custody_reserved` |
+
+Changing it moves no existing card. `platform` is refused with:
+
+- `409 platform_vault_unavailable` while the deployment configures no
+  `platform_vault` for its posture;
+- `409 platform_vault_unreachable` while a live card PSP cannot charge the
+  vault's cards: Stripe (its own fields take the card) or `card_entry: server`.
+  Archive that PSP, or keep `merchant`. Creating such a PSP for a `platform`
+  merchant is refused the same way.
+
+A merchant or PSP document written into Vault directly that breaks these rules
+is not served. `GET /v1/merchant/configuration` reports `platform_vault:
+{available}`.
+
+The platform vault is operator configuration, not a merchant custodian:
+
+```yaml
+platform_vault:
+  kind: basis_theory
+  tenant_id: <the vault tenant of this deployment's posture>
+```
+
+It needs `vault.kv_mount`: its keys are at
+`<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`. When a merchant chooses
+`platform`, OpenRails records the merchant's identity in it once, as a
+`billing.custodians` row it owns: kind and key `platform`, account
+`<tenant_id>/<merchant_id>`, no credentials. Platform cards name that row as
+their `custodian_id`, so the custodian checks hold for them as for any
+custodian. The key `platform` is reserved: no merchant custodian takes it.
+
+`payment_methods.wallet_card_id` names the customer wallet card a merchant's
+copy was made from; it is NULL for a card given to the merchant.
 
 ## Declaring a custodian
 

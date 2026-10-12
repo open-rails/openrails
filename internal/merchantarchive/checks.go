@@ -231,12 +231,16 @@ func refuseQuery(table, predicate string) string {
 }
 
 func refuseRows(ctx context.Context, tx pgx.Tx, id billing.MerchantID, table, predicate string) error {
+	return refuseRowsAs(ctx, tx, id, "unsupported_state", table, predicate)
+}
+
+func refuseRowsAs(ctx context.Context, tx pgx.Tx, id billing.MerchantID, code, table, predicate string) error {
 	var count int64
 	if err := tx.QueryRow(ctx, refuseQuery(table, predicate), id.UUID()).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
-		return &Error{Code: "unsupported_state", Table: table, Count: count}
+		return &Error{Code: code, Table: table, Count: count}
 	}
 	return nil
 }
@@ -360,6 +364,10 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 		return err
 	}
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
+		return err
+	}
+	// Platform-vault cards leave only by a custody export; the archive never carries one.
+	if err := refuseRowsAs(ctx, tx, id, "platform_cards", "payment_methods", "custodian='platform' AND status<>'removed'"); err != nil {
 		return err
 	}
 	cardCaptureInvalid, err := gen.New(tx).CountInvalidPaymentMethodCaptureReferences(ctx, id.UUID())

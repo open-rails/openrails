@@ -65,7 +65,10 @@ A migration to a different vault is a separate procedure.
 
 The export preflight refuses unsupported or unsettled state instead of silently
 omitting it. Resolve the named state on the source and export again; do not edit
-the archive or delete financial history to force acceptance.
+the archive or delete financial history to force acceptance. Cards the platform
+vault holds for the merchant (`custodian: platform`) leave only by a custody
+export: until each is exported or removed, the archive is refused with `409
+billing_archive_platform_cards`.
 
 A successful export leaves the source merchant readonly, and an import lands
 the destination readonly: no provider write (charge, renewal, refund, cancel,

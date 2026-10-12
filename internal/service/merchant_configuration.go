@@ -69,6 +69,7 @@ func (s *Service) configurationState(ctx context.Context, mid billing.MerchantID
 	}
 	return &billing.MerchantConfigurationState{
 		Revision: set.Merchant.Revision, DisplayName: set.Merchant.Value.DisplayName, Settings: set.Merchant.Value.Settings,
+		PlatformVault: billing.PlatformVaultState{Available: s.rt.Merchants.PlatformVaultAvailable()},
 	}, nil
 }
 
@@ -122,10 +123,17 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 			next.DisplayName = strings.TrimSpace(*params.DisplayName)
 		}
 		settings, err := merchantconfig.Normalize(next.DisplayName, next.Settings)
+		var refusal *apperr.Error
+		if errors.As(err, &refusal) {
+			return nil, err
+		}
 		if err != nil {
 			return nil, apperr.Invalidf("%s", err.Error()).WithParam("settings")
 		}
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
+			return nil, err
+		}
+		if err := s.rt.Merchants.CheckCardCustody(ctx, mid, next.Settings, set.PSPs); err != nil {
 			return nil, err
 		}
 		set, err = cache.PutMerchant(ctx, mid, next, cas)
@@ -139,6 +147,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 			return nil, err
 		}
 		s.rt.MerchantChanged(mid)
+		if why, refused := set.Rejected[merchantdocs.MerchantDoc]; refused {
+			return nil, apperr.Conflictf("the configuration was written but is not served: %s", why)
+		}
 		return s.configurationState(ctx, mid, set)
 	}
 }
@@ -193,6 +204,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	}
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
+	}
+	if patch.CardCustody != "" {
+		current.CardCustody = patch.CardCustody
 	}
 	if patch.AlertEmail != nil {
 		current.AlertEmail = patch.AlertEmail

@@ -137,6 +137,9 @@ type Config struct {
 	ProviderSandbox *ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 	// HyperSwitch is the host's trusted HyperSwitch deployment.
 	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
+	// PlatformVault is the operator's card vault; nil refuses
+	// settings.card_custody platform.
+	PlatformVault *PlatformVaultConfig `yaml:"platform_vault" json:"platform_vault"`
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
@@ -1078,6 +1081,9 @@ func Validate(cfg *Config) error {
 		return err
 	}
 	if err := validateVault(cfg.Vault); err != nil {
+		return err
+	}
+	if err := validatePlatformVault(cfg); err != nil {
 		return err
 	}
 	for _, slug := range slices.Sorted(maps.Keys(cfg.Merchants)) {

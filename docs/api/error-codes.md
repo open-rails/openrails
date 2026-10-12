@@ -18,6 +18,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `billing_archive_invalid_artifact` | 400 | `invalid_request_error` | The billing archive is invalid, incomplete or unsupported. |
 | `billing_archive_merchant_mismatch` | 409 | `invalid_request_error` | The archive's merchant is not the destination's. |
 | `billing_archive_not_empty` | 409 | `invalid_request_error` | The destination's billing state must be empty. |
+| `billing_archive_platform_cards` | 409 | `invalid_request_error` | The merchant holds cards in the platform vault; export or remove them first. |
 | `billing_archive_unavailable` | 500 | `api_error` | The billing archive operation failed. |
 | `billing_archive_unsupported_state` | 409 | `invalid_request_error` | The merchant has state that cannot safely be moved. |
 | `billing_policy_not_found` | 404 | `invalid_request_error` | The billing policy does not exist. |
@@ -25,6 +26,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `captcha_invalid` | 403 | `invalid_request_error` | The captcha token was rejected. |
 | `captcha_required` | 403 | `invalid_request_error` | The caller must solve a captcha and resend with its token. |
 | `card_attempts_blocked` | 429 | `rate_limit_error` | Too many declined card attempts; try again later. |
+| `card_custody_reserved` | 400 | `invalid_request_error` | settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant. |
 | `card_declined` | 402 | `card_error` | The provider declined the card; metadata.decline_reason says why. |
 | `card_not_saved` | 409 | `api_error` | The card was not saved; enter it again. |
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
@@ -120,6 +122,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
+| `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant. |
+| `platform_vault_unreachable` | 409 | `invalid_request_error` | A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant. |
 | `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
 | `price_change_target_archived` | 422 | `invalid_request_error` | The target price is archived. |
 | `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |

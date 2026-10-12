@@ -1156,6 +1156,7 @@ export type MerchantConfigurationState = {
   revision: number
   display_name: string
   settings: MerchantSettings
+  platform_vault: PlatformVaultState
 }
 
 export type MerchantProfile = {
@@ -1180,6 +1181,7 @@ export type MerchantSettings = {
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
+  card_custody?: "hosted" | "merchant" | "platform"
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
@@ -1727,6 +1729,10 @@ export type PerUnitPrice = {
   round?: "down" | "half_up" | "up"
   maximum_amount?: string
   matrix?: Matrix
+}
+
+export type PlatformVaultState = {
+  available: boolean
 }
 
 export type PreviewMyOrderParams = {

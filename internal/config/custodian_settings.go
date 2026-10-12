@@ -91,6 +91,9 @@ func ValidateCustodianEntry(e CustodianEntry) error {
 	if key == "" {
 		return fmt.Errorf("custodian: key is required")
 	}
+	if strings.EqualFold(key, PlatformCustodianKey) {
+		return fmt.Errorf("custodian %q: the key is reserved for the platform vault's identity", key)
+	}
 	d, err := custodians.Require(e.Kind)
 	if err != nil {
 		return fmt.Errorf("custodian %q: %w", key, err)

@@ -585,6 +585,15 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.Settings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
+	environment := ManifestProviderEnvironment(cfg)
+	declared := merchantdocs.Declared(billing.MerchantID{}, mt, environment, nil, time.Time{})
+	var vault *config.PlatformVaultConfig
+	if cfg != nil {
+		vault = cfg.PlatformVault
+	}
+	if err := merchants.CardCustodyRefusal(vault, environment, mt.Settings, declared.PSPs); err != nil {
+		return err
+	}
 	for key, account := range mt.PSPs {
 		rail := NormalizeManifestRail(string(account.Rail))
 		// A CCBill account with inline credentials must sign its FlexForm links.

@@ -46,7 +46,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	}
 	cache := merchantdocs.NewCache(source)
 	r.MerchantConfig = cache
-	svc, err := merchants.NewService(r.DB.DataPool(), cache, config.ExpectedProviderEnvironment(config.IsTestMode(r.Config)))
+	svc, err := merchants.NewService(r.DB.DataPool(), cache, r.Config)
 	if err != nil {
 		return err
 	}

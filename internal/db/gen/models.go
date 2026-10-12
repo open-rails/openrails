@@ -219,16 +219,16 @@ type BillingCheckoutAttempt struct {
 	OrderID *uuid.UUID
 }
 
-// Merchant custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds; its configuration (settings, credentials, archived) is the custodian document in a file or Vault. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
+// Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// The custodian's manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.
 	Key string
-	// The custodian VENDOR: basis_theory or hyperswitch. Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
+	// The custodian: basis_theory or hyperswitch (a merchant's vendor account), or platform (the deployment's platform vault). Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
 	Kind        string
 	Environment string
-	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami.
+	// The custodian-native identity: the vendor's tenant id, operator-declared (there is no runtime whoami); for platform, <tenant id>/<merchant id>.
 	AccountID string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -1056,7 +1056,7 @@ type BillingPaymentMethod struct {
 	Rail string
 	// The PSP that holds the instrument when custodian = psp. NULL for a card a third-party custodian holds: routing picks the PSP for each charge.
 	PspID *uuid.UUID
-	// Who holds the instrument: psp (the processor itself), basis_theory or hyperswitch (a third-party vault proxied to the processor at charge time).
+	// Who holds the instrument: psp (the processor itself), basis_theory or hyperswitch (the merchant's third-party vault), or platform (the deployment's platform vault, in the merchant's partition); a vault proxies the card to the processor at charge time.
 	Custodian   string
 	CustodianID *uuid.UUID
 	// Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in psp_customers (Stripe).
@@ -1101,6 +1101,8 @@ type BillingPaymentMethod struct {
 	SetupRef *string
 	// Private accepted custodian card-save binding, encrypted SDK authorization until completion, then token hash and canonical method identity. Never payment authority.
 	Capture []byte
+	// The wallet card this merchant copy was made from (lineage); NULL for a card given to the merchant.
+	WalletCardID *uuid.UUID
 }
 
 // Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.

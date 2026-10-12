@@ -112,6 +112,7 @@ type fileConfig struct {
 
 	ProviderSandbox     *billing.ProviderSandboxConfig `koanf:"provider_sandbox"`
 	HyperSwitch         *billing.HyperSwitchConfig     `koanf:"hyperswitch"`
+	PlatformVault       *billing.PlatformVaultConfig   `koanf:"platform_vault"`
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
 
 	// Auth is AuthKit's configuration, decoded by AuthKit's own keys
@@ -258,6 +259,7 @@ func (f *fileConfig) config() (*Config, error) {
 			CCBillWebhookIPAllowlist:      f.CCBillWebhookIPAllowlist,
 			ProviderSandbox:               f.ProviderSandbox,
 			HyperSwitch:                   f.HyperSwitch,
+			PlatformVault:                 f.PlatformVault,
 			EngineAdmissionHold:           f.EngineAdmissionHold,
 		},
 		Auth:                     auth,

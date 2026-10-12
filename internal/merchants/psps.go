@@ -233,6 +233,9 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 		}
 		return s.pspByKey(ctx, id, key)
 	}
+	if err := s.refusePSPForCardCustody(set.Merchant.Value.Settings, key, doc); err != nil {
+		return billing.PSP{}, err
+	}
 	// An identity this merchant declared under the same key (imported
 	// history) is armed by its document; any other owner refuses.
 	if owner, found, err := s.ResolvePSPByIdentity(ctx, rail, s.providerEnvironment, accountID); err != nil {

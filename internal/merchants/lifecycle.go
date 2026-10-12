@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -112,6 +113,9 @@ type Service struct {
 	// fingerprints keys the stored fingerprint of each PSP's account
 	// credential; nil compares declared credentials in memory instead.
 	fingerprints *CredentialFingerprinter
+	// platformVault is the operator's card vault; nil refuses platform
+	// card custody.
+	platformVault *config.PlatformVaultConfig
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -123,26 +127,25 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 	return s
 }
 
-// NewService builds the lifecycle service over the merchants' configuration.
-// providerEnvironment is the deployment's PSP environment: derive it via
-// config.ExpectedProviderEnvironment(config.IsTestMode(cfg)).
-func NewService(pool *db.Pool, configuration *merchantdocs.Cache, providerEnvironment string) (*Service, error) {
+// NewService builds the lifecycle service over the merchants' configuration,
+// in the PSP environment and with the platform vault cfg names.
+func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Config) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
 	if configuration == nil {
 		return nil, errors.New("merchants: merchant configuration is required")
 	}
-	env := normalizeProviderSecretEnvironment(providerEnvironment)
-	if env == "" {
-		return nil, fmt.Errorf("merchants: provider environment must be live or test, got %q", providerEnvironment)
+	if cfg == nil {
+		return nil, errors.New("merchants: the engine configuration is required")
 	}
 	service, err := NewDirectoryService(pool)
 	if err != nil {
 		return nil, err
 	}
 	service.config = configuration
-	service.providerEnvironment = env
+	service.providerEnvironment = config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
+	service.platformVault = cfg.PlatformVault
 	return service, nil
 }
 

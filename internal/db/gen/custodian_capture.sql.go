@@ -23,7 +23,7 @@ UPDATE billing.payment_methods SET
     card_exp_month=$7::smallint,card_exp_year=$8::smallint,
     updated_at=$9::timestamptz
 WHERE merchant_id=$10::uuid AND id=$11::uuid AND status='requires_action'
-RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture
+RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture, wallet_card_id
 ), history AS (
 INSERT INTO billing.payment_method_versions (merchant_id,customer_id,payment_method_id,source,kind,event_ref,custodian_id,
     rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,effective_at)
@@ -144,7 +144,7 @@ func (q *Queries) ExpireCapturedPaymentMethod(ctx context.Context, arg ExpireCap
 }
 
 const getCapturedInstrument = `-- name: GetCapturedInstrument :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture, wallet_card_id FROM billing.payment_methods
 WHERE merchant_id=$1::uuid AND custodian_id=$2::uuid
 AND rail_customer_ref=$3::text AND rail_method_ref=$4::text
 AND custodian='hyperswitch' AND psp_id IS NULL
@@ -195,12 +195,13 @@ func (q *Queries) GetCapturedInstrument(ctx context.Context, arg GetCapturedInst
 		&i.ContactCardholderAt,
 		&i.SetupRef,
 		&i.Capture,
+		&i.WalletCardID,
 	)
 	return i, err
 }
 
 const getCapturedPaymentMethodForUpdate = `-- name: GetCapturedPaymentMethodForUpdate :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture, wallet_card_id FROM billing.payment_methods
 WHERE merchant_id=$1::uuid AND id=$2::uuid AND capture IS NOT NULL
 FOR UPDATE
 `
@@ -243,6 +244,7 @@ func (q *Queries) GetCapturedPaymentMethodForUpdate(ctx context.Context, arg Get
 		&i.ContactCardholderAt,
 		&i.SetupRef,
 		&i.Capture,
+		&i.WalletCardID,
 	)
 	return i, err
 }

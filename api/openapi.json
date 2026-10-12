@@ -8392,6 +8392,7 @@
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
+          "platform_vault_unreachable",
           "psp_claim_requires_proof",
           "psp_credentials_rejected",
           "psp_exists",
@@ -8809,7 +8810,11 @@
         },
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
+          "card_custody_reserved",
           "invalid_param",
+          "platform_vault_unavailable",
+          "platform_vault_unreachable",
+          "resource_conflict",
           "revision_mismatch",
           "service_unavailable"
         ],
@@ -9124,6 +9129,7 @@
           "root": "root:config:manage"
         },
         "x-openrails-errors": [
+          "billing_archive_platform_cards",
           "billing_archive_unavailable",
           "billing_archive_unsupported_state"
         ],
@@ -9185,6 +9191,7 @@
           "billing_archive_invalid_artifact",
           "billing_archive_merchant_mismatch",
           "billing_archive_not_empty",
+          "billing_archive_platform_cards",
           "billing_archive_unavailable",
           "billing_archive_unsupported_state",
           "request_body_too_large"
@@ -17144,12 +17151,16 @@
           },
           "settings": {
             "$ref": "#/components/schemas/MerchantSettings"
+          },
+          "platform_vault": {
+            "$ref": "#/components/schemas/PlatformVaultState"
           }
         },
         "required": [
           "revision",
           "display_name",
-          "settings"
+          "settings",
+          "platform_vault"
         ]
       },
       "MerchantProfile": {
@@ -17219,6 +17230,14 @@
           },
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
+          },
+          "card_custody": {
+            "type": "string",
+            "enum": [
+              "hosted",
+              "merchant",
+              "platform"
+            ]
           },
           "billing_policies": {
             "type": "array",
@@ -20037,6 +20056,17 @@
             "$ref": "#/components/schemas/Matrix"
           }
         }
+      },
+      "PlatformVaultState": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available"
+        ]
       },
       "PreviewMyOrderParams": {
         "type": "object",
@@ -23284,6 +23314,11 @@
       "type": "invalid_request_error",
       "meaning": "The destination's billing state must be empty."
     },
+    "billing_archive_platform_cards": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The merchant holds cards in the platform vault; export or remove them first."
+    },
     "billing_archive_unavailable": {
       "status": 500,
       "type": "api_error",
@@ -23318,6 +23353,11 @@
       "status": 429,
       "type": "rate_limit_error",
       "meaning": "Too many declined card attempts; try again later."
+    },
+    "card_custody_reserved": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant."
     },
     "card_declined": {
       "status": 402,
@@ -23793,6 +23833,16 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "The credential lacks the permission the route requires."
+    },
+    "platform_vault_unavailable": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant."
+    },
+    "platform_vault_unreachable": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant."
     },
     "price_change_currency_mismatch": {
       "status": 422,

@@ -53,6 +53,14 @@ type MerchantConfigurationState struct {
 	Revision    int64            `json:"revision"`
 	DisplayName string           `json:"display_name"`
 	Settings    MerchantSettings `json:"settings"`
+	// PlatformVault is whether settings.card_custody platform can be chosen.
+	PlatformVault PlatformVaultState `json:"platform_vault"`
+}
+
+// PlatformVaultState is the deployment's platform vault as a merchant sees
+// it: Available when one is configured for the deployment's posture.
+type PlatformVaultState struct {
+	Available bool `json:"available"`
 }
 
 // Capabilities is what this deployment serves: each optional route group

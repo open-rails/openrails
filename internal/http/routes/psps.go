@@ -16,7 +16,7 @@ var pspsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/psps", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPs",
 		Query: params(queryOf(handlers.PSPListQuery{}), idsParam, integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
 	{Method: POST, Path: "/v1/merchant/psps", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreatePSP", When: FeatureMerchantConfigManages,
-		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
+		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("platform_vault_unreachable", "psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
 	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "GetPSP",
 		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
 	// Settings change, credentials rotate and the PSP archives here. Archiving

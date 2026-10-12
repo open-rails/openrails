@@ -82,6 +82,7 @@ sql:
       - "internal/migrate/postgres/0083_payment_order_identity.up.sql"
       - "internal/migrate/postgres/0084_destructive_staff_counts.up.sql"
       - "internal/migrate/postgres/0085_customer_orders.up.sql"
+      - "internal/migrate/postgres/0086_platform_custody.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

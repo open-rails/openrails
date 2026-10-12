@@ -343,6 +343,9 @@ var errorCodes = []ErrorCode{
 	{"psp_claim_requires_proof", 403, authz, "Claiming a provider account needs credentials that prove control of it."},
 	{"invalid_psp_reference", 400, invalid, "The PSP reference is invalid."},
 	{"merchant_config_read_only", 409, invalid, "The merchant's configuration is read from a file; change the file."},
+	{"card_custody_reserved", 400, invalid, "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant."},
+	{"platform_vault_unavailable", 409, invalid, "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant."},
+	{"platform_vault_unreachable", 409, invalid, "A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant."},
 	{"webhook_invalid", 400, invalid, "The outbound webhook is invalid."},
 	{"webhook_account_mismatch", 400, invalid, "The webhook's account does not match its payload."},
 	{"metrics_query_invalid", 400, invalid, "The metrics query is invalid; metadata.errors lists why."},
@@ -355,6 +358,7 @@ var errorCodes = []ErrorCode{
 	{"billing_archive_merchant_mismatch", 409, invalid, "The archive's merchant is not the destination's."},
 	{"billing_archive_not_empty", 409, invalid, "The destination's billing state must be empty."},
 	{"billing_archive_unsupported_state", 409, invalid, "The merchant has state that cannot safely be moved."},
+	{"billing_archive_platform_cards", 409, invalid, "The merchant holds cards in the platform vault; export or remove them first."},
 	{"billing_archive_integrity", 422, invalid, "The billing archive failed integrity validation."},
 
 	// Customer links (openrails.dev).

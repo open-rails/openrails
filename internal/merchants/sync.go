@@ -57,6 +57,9 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.CustodianDoc(key), why)
 			}
 		}
+		if err := s.syncCardCustody(ctx, q, id, previous, set, reject); err != nil {
+			return err
+		}
 		rows, err := q.ListPSPsForMerchant(ctx, id.UUID())
 		if err != nil {
 			return err
@@ -64,6 +67,9 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		var declared []DeclaredCredential
 		for _, key := range set.PSPKeys() {
 			p := set.PSPs[key].Value
+			if _, refused := set.Rejected[merchantdocs.PSPDoc(key)]; refused {
+				continue
+			}
 			if slices.ContainsFunc(rows, func(row gen.BillingPsp) bool {
 				return row.SupersededAt == nil && strings.EqualFold(row.Key, key) && !pspDocNames(p, row)
 			}) {

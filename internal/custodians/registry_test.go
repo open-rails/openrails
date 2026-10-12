@@ -8,14 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The registry must name exactly the instrument column's custodians (minus psp),
+// The registry must name exactly the instrument column's custodians (minus psp
+// and the engine-owned platform),
 // and every kind must be drivable: a charge rail, a required credential, and a
 // public value when a browser tokenizes against it — never one that is also a
 // credential name (the public projection reads by name).
 func TestRegistryIsClosedAndComplete(t *testing.T) {
 	var want []string
 	for _, c := range models.Custodians() {
-		if c != models.CustodianPSP {
+		if c != models.CustodianPSP && c != models.CustodianPlatform {
 			want = append(want, c)
 		}
 	}

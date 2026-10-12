@@ -14,7 +14,7 @@ var merchantRoutes = []Route{
 	// Merchant configuration changes only where Vault holds it: a file is
 	// read-only.
 	{Method: PATCH, Path: "/v1/merchant/configuration", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", When: FeatureMerchantConfigManages, NoConn: true,
-		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("invalid_param", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
+		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_custody_reserved", "invalid_param", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
 
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListAlertWebhooks",
@@ -30,10 +30,10 @@ var merchantRoutes = []Route{
 	// transaction and its merchant pin; no outer merchant connection is held
 	// while transferring the artifact.
 	{Method: GET, Path: "/v1/merchant/billing-archive", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ExportBillingArchive", NoConn: true,
-		Responses: []Reply{{200, Stream{"application/x-ndjson"}}}, Errors: codes("billing_archive_unavailable", "billing_archive_unsupported_state"), Handler: h(handlers.ExportBillingArchive)},
+		Responses: []Reply{{200, Stream{"application/x-ndjson"}}}, Errors: codes("billing_archive_platform_cards", "billing_archive_unavailable", "billing_archive_unsupported_state"), Handler: h(handlers.ExportBillingArchive)},
 	{Method: POST, Path: "/v1/merchant/billing-archive", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ImportBillingArchive", NoConn: true,
 		Request: Stream{"application/x-ndjson"}, Responses: []Reply{{200, billing.BillingArchiveImport{}}},
-		Errors: codes("billing_archive_integrity", "billing_archive_invalid_artifact", "billing_archive_merchant_mismatch", "billing_archive_not_empty", "billing_archive_unavailable", "billing_archive_unsupported_state", "request_body_too_large"), Handler: h(handlers.ImportBillingArchive)},
+		Errors: codes("billing_archive_integrity", "billing_archive_invalid_artifact", "billing_archive_merchant_mismatch", "billing_archive_not_empty", "billing_archive_platform_cards", "billing_archive_unavailable", "billing_archive_unsupported_state", "request_body_too_large"), Handler: h(handlers.ImportBillingArchive)},
 	// #737: the DeclaredBilling import door. A bulk book import rewrites
 	// subscriptions, payments and payment methods wholesale, so it is the
 	// merchant's configuration; the import pins its own merchant connection.

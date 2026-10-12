@@ -317,6 +317,7 @@ pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig `yaml:"
 pkg openrails, type Config struct, LLM *config.LLMConfig `yaml:"llm" json:"llm"`
 pkg openrails, type Config struct, Logger *config.LoggerConfig `yaml:"logger" json:"logger"`
 pkg openrails, type Config struct, Merchants map[string]config.MerchantDeclaration `yaml:"merchants" json:"merchants"`
+pkg openrails, type Config struct, PlatformVault *config.PlatformVaultConfig `yaml:"platform_vault" json:"platform_vault"`
 pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 pkg openrails, type Config struct, ProviderWriteMode string `yaml:"provider_write_mode" json:"provider_write_mode"`
 pkg openrails, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url" json:"public_billing_base_url"`
@@ -442,6 +443,10 @@ pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
 pkg openrails, type PSPSignerConfig struct
 pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty"`
 pkg openrails, type PSPSignerConfig struct, Mode string `yaml:"mode,omitempty"`
+pkg openrails, type PlatformVaultConfig = config.PlatformVaultConfig
+pkg openrails, type PlatformVaultConfig struct
+pkg openrails, type PlatformVaultConfig struct, Kind string `yaml:"kind" json:"kind"`
+pkg openrails, type PlatformVaultConfig struct, TenantID string `yaml:"tenant_id" json:"tenant_id"`
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
@@ -590,6 +595,9 @@ pkg openrails/billing, const BalanceTransactionRevoke BalanceTransactionType = "
 pkg openrails/billing, const BalanceTransactionSpend BalanceTransactionType = "spend"
 pkg openrails/billing, const BillingModeArrears BillingMode = "arrears"
 pkg openrails/billing, const BillingModePrepaid BillingMode = "prepaid"
+pkg openrails/billing, const CardCustodyHosted CardCustody = "hosted"
+pkg openrails/billing, const CardCustodyMerchant CardCustody = "merchant"
+pkg openrails/billing, const CardCustodyPlatform CardCustody = "platform"
 pkg openrails/billing, const CardExpiryExpired CardExpiryStatus = "expired"
 pkg openrails/billing, const CardExpiryExpiringSoon CardExpiryStatus = "expiring_soon"
 pkg openrails/billing, const CardExpiryValid CardExpiryStatus = "valid"
@@ -1470,6 +1478,7 @@ pkg openrails/billing, type CaptureUsage struct, Source string `json:"source,omi
 pkg openrails/billing, type CaptureUsage struct, SourceID string `json:"source_id,omitempty"`
 pkg openrails/billing, type Card = cardguard.Card
 pkg openrails/billing, type Card struct
+pkg openrails/billing, type CardCustody string
 pkg openrails/billing, type CardDetails struct
 pkg openrails/billing, type CardDetails struct, Brand *string `json:"brand"`
 pkg openrails/billing, type CardDetails struct, ExpMonth *int `json:"exp_month"`
@@ -2182,6 +2191,7 @@ pkg openrails/billing, type MerchantCheckoutSettings struct
 pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
+pkg openrails/billing, type MerchantConfigurationState struct, PlatformVault PlatformVaultState `json:"platform_vault"`
 pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, Settings MerchantSettings `json:"settings"`
 pkg openrails/billing, type MerchantID [16]byte
@@ -2232,6 +2242,7 @@ pkg openrails/billing, type MerchantSettings struct, BalanceNotices *BalanceNoti
 pkg openrails/billing, type MerchantSettings struct, BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, CardCustody CardCustody `json:"card_custody,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CheckoutRouting *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CollectionThreshold *int64 `json:"collection_threshold,omitempty,string"`
@@ -2782,6 +2793,8 @@ pkg openrails/billing, type PendingAction struct, Hint string `json:"hint"`
 pkg openrails/billing, type PendingAction struct, PSP string `json:"psp"`
 pkg openrails/billing, type PendingAction struct, PatchRequired map[string]map[string]map[string]string `json:"patch_required"`
 pkg openrails/billing, type Permission string
+pkg openrails/billing, type PlatformVaultState struct
+pkg openrails/billing, type PlatformVaultState struct, Available bool `json:"available"`
 pkg openrails/billing, type PreviewMyOrderParams struct
 pkg openrails/billing, type PreviewMyOrderParams struct, Cart bool `json:"cart,omitempty"`
 pkg openrails/billing, type PreviewMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`

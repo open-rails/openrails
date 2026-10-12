@@ -13,6 +13,7 @@ export type OpenRailsErrorCode =
   | "billing_archive_invalid_artifact"
   | "billing_archive_merchant_mismatch"
   | "billing_archive_not_empty"
+  | "billing_archive_platform_cards"
   | "billing_archive_unavailable"
   | "billing_archive_unsupported_state"
   | "billing_policy_not_found"
@@ -20,6 +21,7 @@ export type OpenRailsErrorCode =
   | "captcha_invalid"
   | "captcha_required"
   | "card_attempts_blocked"
+  | "card_custody_reserved"
   | "card_declined"
   | "card_not_saved"
   | "card_requires_https"
@@ -115,6 +117,8 @@ export type OpenRailsErrorCode =
   | "payment_option_unavailable"
   | "payment_provider_rejected"
   | "permission_required"
+  | "platform_vault_unavailable"
+  | "platform_vault_unreachable"
   | "price_change_currency_mismatch"
   | "price_change_target_archived"
   | "price_increase_notice_too_short"
@@ -206,6 +210,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   billing_archive_invalid_artifact: { status: 400, type: "invalid_request_error", meaning: "The billing archive is invalid, incomplete or unsupported." },
   billing_archive_merchant_mismatch: { status: 409, type: "invalid_request_error", meaning: "The archive's merchant is not the destination's." },
   billing_archive_not_empty: { status: 409, type: "invalid_request_error", meaning: "The destination's billing state must be empty." },
+  billing_archive_platform_cards: { status: 409, type: "invalid_request_error", meaning: "The merchant holds cards in the platform vault; export or remove them first." },
   billing_archive_unavailable: { status: 500, type: "api_error", meaning: "The billing archive operation failed." },
   billing_archive_unsupported_state: { status: 409, type: "invalid_request_error", meaning: "The merchant has state that cannot safely be moved." },
   billing_policy_not_found: { status: 404, type: "invalid_request_error", meaning: "The billing policy does not exist." },
@@ -213,6 +218,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   captcha_invalid: { status: 403, type: "invalid_request_error", meaning: "The captcha token was rejected." },
   captcha_required: { status: 403, type: "invalid_request_error", meaning: "The caller must solve a captcha and resend with its token." },
   card_attempts_blocked: { status: 429, type: "rate_limit_error", meaning: "Too many declined card attempts; try again later." },
+  card_custody_reserved: { status: 400, type: "invalid_request_error", meaning: "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant." },
   card_declined: { status: 402, type: "card_error", meaning: "The provider declined the card; metadata.decline_reason says why." },
   card_not_saved: { status: 409, type: "api_error", meaning: "The card was not saved; enter it again." },
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
@@ -308,6 +314,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
+  platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant." },
+  platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant." },
   price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
   price_change_target_archived: { status: 422, type: "invalid_request_error", meaning: "The target price is archived." },
   price_increase_notice_too_short: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },

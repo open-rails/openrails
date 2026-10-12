@@ -255,10 +255,15 @@ const (
 	// proxied to the processor at charge time.
 	CustodianBasisTheory = "basis_theory"
 	CustodianHyperSwitch = "hyperswitch"
+	// CustodianPlatform: the deployment's platform vault holds the card in the
+	// merchant's partition; never a merchant declaration.
+	CustodianPlatform = "platform"
 )
 
 // Custodians lists the declared custody values in stable order.
-func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch} }
+func Custodians() []string {
+	return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch, CustodianPlatform}
+}
 
 // PaymentMethodCharge is a payment method's last-charge health, derived from
 // payments at query time, never stored.

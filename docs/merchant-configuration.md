@@ -9,8 +9,9 @@ and custodians, credentials included. It lives in one of two places:
 - **Vault**, when a KV mount is named ([vault.md](vault.md)): staff edit it over
   HTTP or in the console, and automation may write the documents directly.
 
-`GetMerchantConfiguration` returns the display name, the settings and a
-`revision`; credentials are never returned. `UpdateMerchantConfiguration`
+`GetMerchantConfiguration` returns the display name, the settings, a
+`revision` and `platform_vault.available` (whether `settings.card_custody`
+may be `platform`); credentials are never returned. `UpdateMerchantConfiguration`
 merges the fields it names: omitted fields keep their values and an explicit
 empty list clears one. Name the `expected_revision` you read and an edit made
 since is refused with `409 revision_mismatch`; without one, the edit merges
@@ -39,6 +40,9 @@ settings:
     support_url: https://shop.example/support
     billing_url: https://shop.example/account/billing
 ```
+
+`card_custody` is where new cards are held: `merchant` (absent) or `platform`
+([payment-method custody](payment-method-custody.md)).
 
 `billing_url` is where customers manage and cancel their subscriptions and
 [charge agreements](agreements.md); receipts and confirmations link to it,

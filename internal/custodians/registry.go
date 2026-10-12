@@ -170,7 +170,8 @@ func Require(kind string) (Descriptor, error) {
 
 // Kinds lists the declared third-party custodian kinds in stable order.
 // models.CustodianPSP is NOT one of them: "the PSP holds its own instruments"
-// is the absence of a custodian, and needs no credentials of its own.
+// is the absence of a custodian, and needs no credentials of its own. Nor is
+// models.CustodianPlatform: the operator configures that vault, not a merchant.
 func Kinds() []string {
 	out := make([]string, 0, len(registry))
 	for kind := range registry {
