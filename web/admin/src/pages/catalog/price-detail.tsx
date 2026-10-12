@@ -1,7 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -30,12 +30,23 @@ import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
 import { useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
+// A price ID can contain its own percent-encoded key bytes. Router params
+// decode an inner %2F again; decode the original URL segment exactly once.
+function priceIDFromPath(pathname: string): string {
+  const segment = pathname.replace(/\/+$/, "").split("/").at(-1) ?? ""
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return ""
+  }
+}
+
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
 // log, with dates) and any pending scheduled migration (progress + cancel)
 // for one price key — the wizard's Step 1 entry point ("Change price") also
 // lives here alongside the catalog list row.
 export function PriceDetailPage() {
-  const { id = "" } = useParams()
+  const id = priceIDFromPath(useLocation().pathname)
   const writesAllowed = useCatalogWrites()
   const navigate = useNavigate()
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
@@ -53,6 +64,13 @@ export function PriceDetailPage() {
     adminQueries.priceMigrations(product?.key, price?.key)
   )
   const latestBatch = migrations?.data?.[0]
+
+  if (!id)
+    return (
+      <p role="alert" className="text-sm text-muted-foreground">
+        Invalid price URL.
+      </p>
+    )
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
