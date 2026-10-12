@@ -35,12 +35,12 @@ func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListPar
 	return &out, nil
 }
 
-// CreatePayment records money the merchant received outside OpenRails for
+// RecordExternalPayment records money the merchant received outside OpenRails for
 // one order: part or all of what a usage order owes, or another order's
 // total. Recording the same TransactionID again with the
 // same terms answers the first payment; with other terms it is
 // billing.ErrIdempotencyKeyReused.
-func (c *Client) CreatePayment(ctx context.Context, params billing.CreatePaymentParams, requestOptions ...RequestOption) (*billing.Payment, error) {
+func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams, requestOptions ...RequestOption) (*billing.Payment, error) {
 	var out billing.Payment
 	if err := c.do(ctx, http.MethodPost, "/v1/admin/payments", params, &out, requestOptions...); err != nil {
 		return nil, err

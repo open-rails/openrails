@@ -186,14 +186,6 @@ func (s *MoneyService) ChargeMonthlyOutstanding(ctx context.Context, runner *int
 	return count, nil
 }
 
-// RetryUsageCollection is the merchant charging an open (or uncollectible)
-// usage order to one of its customer's saved cards now. The key binds the
-// card: reusing it answers that collection without another provider charge;
-// a different card under it is a conflict.
-func (s *MoneyService) RetryUsageCollection(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request UsageCollectionRequest) (*UsageCollection, error) {
-	return s.collectUsage(ctx, runner, payer, request, charge.InitiatorMerchant)
-}
-
 // PayUsageNow is the customer paying their usage order with a saved card,
 // in person. It is called only by the verified-customer command; its
 // customer-present posture is frozen in the accepted operation.
@@ -206,10 +198,10 @@ func (s *MoneyService) PayUsageNow(ctx context.Context, runner *intents.Runner, 
 	if err != nil || payer.IsZero() || billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid {
 		return nil, ErrCustomerSessionRequired
 	}
-	return s.collectUsage(ctx, runner, payer, request, charge.InitiatorCustomer)
+	return s.collectUsage(ctx, runner, payer, request)
 }
 
-func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request UsageCollectionRequest, initiator charge.Initiator) (*UsageCollection, error) {
+func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request UsageCollectionRequest) (*UsageCollection, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -226,15 +218,10 @@ func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner,
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 255 {
 		return nil, fmt.Errorf("idempotency_key must be between 1 and 255 bytes")
 	}
-	key := intents.OrderCollectionRetryKey(request.OrderID, request.IdempotencyKey)
-	origin, reason := intents.OriginAdmin, "merchant usage collection"
-	if initiator == charge.InitiatorCustomer {
-		key = charge.CustomerPaymentKey(TypeOrderCollection, payer.UUID(), request.IdempotencyKey)
-		origin, reason = intents.OriginUser, "verified customer usage payment"
-	}
+	key := charge.CustomerPaymentKey(TypeOrderCollection, payer.UUID(), request.IdempotencyKey)
 	pm := request.PaymentMethodID
 	intentID, replayed, err := s.enqueueUsageCollection(ctx, payer, request.OrderID, usageCollectionEnqueue{
-		manual: true, paymentMethodID: &pm, operationKey: key, origin: origin, originReason: reason, initiator: initiator,
+		manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginUser, originReason: "verified customer usage payment", initiator: charge.InitiatorCustomer,
 	})
 	if err != nil {
 		return nil, err
@@ -251,15 +238,6 @@ func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner,
 
 func scheduledUsageCollectionKey(orderID uuid.UUID, ordinal int64) string {
 	return fmt.Sprintf("%s:%s:attempt:%d", TypeOrderCollection, orderID, ordinal)
-}
-
-// usageRetryable gates the merchant's retry: an uncollectible order, or an
-// open one that failed at least once or is past its due date. A never
-// attempted order not yet due is not retryable.
-func usageRetryable(order gen.BillingOrder, now time.Time) bool {
-	return order.CollectionMethod != nil && *order.CollectionMethod == CollectionChargeAutomatically && usage.Due(order) > 0 &&
-		(order.Status == string(billing.OrderUncollectible) ||
-			(order.Status == string(billing.OrderOpen) && (derefInt32(order.CollectionFailureCount) > 0 || (order.DueAt != nil && order.DueAt.Before(now)))))
 }
 
 func scheduledUsageCollectionEligible(order gen.BillingOrder, minThreshold int64, now time.Time) bool {
@@ -343,10 +321,8 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		}
 		eligible := scheduledUsageCollectionEligible(order, opts.minThreshold, now)
 		if opts.manual {
-			eligible = usageRetryable(order, now)
-			if opts.initiator == charge.InitiatorCustomer {
-				eligible = usage.Due(order) > 0 && (order.Status == string(billing.OrderOpen) || order.Status == string(billing.OrderUncollectible))
-			}
+			eligible = opts.initiator == charge.InitiatorCustomer && usage.Due(order) > 0 &&
+				(order.Status == string(billing.OrderOpen) || order.Status == string(billing.OrderUncollectible))
 		}
 		if !eligible {
 			return nil

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +28,6 @@ import (
 
 var (
 	errUsageSavedCard      = apperr.Invalidf("a usage order is paid with a saved card: payment.payment_method_id").WithParam("payment")
-	errUsageCardRequired   = apperr.Invalidf("payment_method_id required").WithParam("payment_method_id")
 	errUsageActionRefused  = apperr.New(http.StatusConflict, billing.CodeOrderActionNotAllowed, "The order's origin or status does not allow this action.")
 	errUsageNotCollectible = apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "The usage order takes no collection now.")
 	errBillingPaused       = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
@@ -141,60 +139,6 @@ func (s *Service) usageAction(ctx context.Context, id billing.OrderID, act func(
 		return nil, err
 	}
 	return s.usageOrderView(ctx, id)
-}
-
-// RetryOrderCollection charges what a usage order still owes to one of its
-// customer's cards: an uncollectible order, or an open one past due or
-// declined before. One key is one collection; a decline answers 402.
-func (s *Service) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams) (OrderAnswer, error) {
-	if params.PaymentMethodID.IsZero() {
-		return OrderAnswer{}, errUsageCardRequired
-	}
-	key := strings.TrimSpace(params.IdempotencyKey)
-	if key == "" {
-		return OrderAnswer{}, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
-	}
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return OrderAnswer{}, err
-	}
-	defer release()
-	rt, err := s.runtime()
-	if err != nil {
-		return OrderAnswer{}, err
-	}
-	if rt.MoneyCharger == nil {
-		return OrderAnswer{}, fmt.Errorf("usage collection charger not configured")
-	}
-	ort, err := s.orderRuntime()
-	if err != nil {
-		return OrderAnswer{}, err
-	}
-	order, err := ort.Orders.Get(ctx, id.UUID())
-	if err != nil {
-		return OrderAnswer{}, err
-	}
-	if order.Origin != string(billing.OrderOriginUsage) {
-		return OrderAnswer{}, errUsageActionRefused
-	}
-	result, err := s.moneyService().RetryUsageCollection(ctx, rt.IntentRunner(), identity.CustomerID(order.CustomerID), money.UsageCollectionRequest{
-		OrderID: order.ID, IdempotencyKey: key, PaymentMethodID: params.PaymentMethodID.UUID(),
-	})
-	if err != nil {
-		return OrderAnswer{}, usageRefusal(err)
-	}
-	view, err := s.usageOrderView(ctx, id)
-	if err != nil {
-		return OrderAnswer{}, err
-	}
-	out := OrderAnswer{Order: view, Status: http.StatusOK, Replayed: result.Replayed}
-	if charged := collectionCharge(result.Operation); charged.Failed {
-		out.Status, out.Code = http.StatusPaymentRequired, billing.CodePaymentFailed
-		if charged.Declined {
-			out.Code = billing.CodeCardDeclined
-		}
-	}
-	return out, nil
 }
 
 // FinalizeUsage bills one customer's owed usage of [from, to) in currency

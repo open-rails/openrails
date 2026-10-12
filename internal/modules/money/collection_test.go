@@ -84,20 +84,19 @@ func TestUsageCollectionEligibility(t *testing.T) {
 		name      string
 		order     gen.BillingOrder
 		threshold int64
-		retry     bool // the merchant's retry
 		scheduled bool // automatic collection
 	}{
-		{name: "new order past due", order: order(func(*gen.BillingOrder) {}), retry: true, scheduled: true},
+		{name: "new order past due", order: order(func(*gen.BillingOrder) {}), scheduled: true},
 		{name: "not yet due", order: order(func(o *gen.BillingOrder) { o.DueAt = &future })},
 		{name: "after a failure", order: order(func(o *gen.BillingOrder) {
 			o.CollectionFailureCount, o.NextCollectionAttemptAt, o.DueAt = failed(1), &past, &future
-		}), retry: true},
-		{name: "retry due", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &now }), retry: true, scheduled: true},
-		{name: "retry in future", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &future }), retry: true},
-		{name: "failed without a scheduled retry", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount = failed(1) }), retry: true},
-		{name: "uncollectible", order: order(func(o *gen.BillingOrder) { o.Status = "uncollectible" }), retry: true},
-		{name: "below minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 101, retry: true},
-		{name: "at minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 100, retry: true, scheduled: true},
+		})},
+		{name: "retry due", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &now }), scheduled: true},
+		{name: "retry in future", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount, o.NextCollectionAttemptAt = failed(1), &future })},
+		{name: "failed without a scheduled retry", order: order(func(o *gen.BillingOrder) { o.CollectionFailureCount = failed(1) })},
+		{name: "uncollectible", order: order(func(o *gen.BillingOrder) { o.Status = "uncollectible" })},
+		{name: "below minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 101},
+		{name: "at minimum threshold", order: order(func(*gen.BillingOrder) {}), threshold: 100, scheduled: true},
 		{name: "collection live", order: order(func(o *gen.BillingOrder) { o.Status = "processing" })},
 		{name: "manual remittance", order: order(func(o *gen.BillingOrder) {
 			m := CollectionSendInvoice
@@ -106,7 +105,6 @@ func TestUsageCollectionEligibility(t *testing.T) {
 		{name: "paid", order: order(func(o *gen.BillingOrder) { o.Status, o.AmountPaid = "complete", &o.Total })},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.retry, usageRetryable(tt.order, now), "merchant retry")
 			require.Equal(t, tt.scheduled, scheduledUsageCollectionEligible(tt.order, tt.threshold, now), "scheduled")
 		})
 	}

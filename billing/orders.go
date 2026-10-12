@@ -148,14 +148,6 @@ type PayOrderParams struct {
 	Reusable      *bool              `json:"reusable,omitempty"`
 }
 
-// RetryOrderCollectionParams charges what a usage order still owes to one
-// of its customer's saved cards. IdempotencyKey is required: a retry with it
-// answers the same collection.
-type RetryOrderCollectionParams struct {
-	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
-	IdempotencyKey  string          `json:"-"`
-}
-
 // Order is one purchase: frozen lines and total. It is read and paid by its
 // own customer; its id is not a credential.
 type Order struct {

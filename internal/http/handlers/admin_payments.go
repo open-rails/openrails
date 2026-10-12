@@ -539,12 +539,12 @@ func GetPayment(r *httprequest.Request) {
 	r.SuccessJSON(PaymentToAPI(payment, refunds))
 }
 
-// CreatePayment (POST /admin/payments) records money received outside
+// RecordExternalPayment (POST /admin/payments) records money received outside
 // OpenRails for one order: 201 with the payment, 200 when the
 // same transaction_id was already recorded with the same terms, and 422
 // idempotency_key_reused when it was recorded with other terms.
-func CreatePayment(r *httprequest.Request) {
-	var req billing.CreatePaymentParams
+func RecordExternalPayment(r *httprequest.Request) {
+	var req billing.RecordExternalPaymentParams
 	if !r.BindJSON(&req) {
 		return
 	}
