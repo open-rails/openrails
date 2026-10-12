@@ -67,7 +67,7 @@ func writeMoneyError(r *httprequest.Request, err error, internalMessage string) 
 		r.APIError(out)
 		return
 	}
-	r.InternalError(internalMessage, err)
+	writeRefusal(r, err, internalMessage)
 }
 
 // moneyRefusal is the answer to a money refusal, nil for an unclassified

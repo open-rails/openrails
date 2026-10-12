@@ -282,6 +282,11 @@ func TestGatesAskTheVerified(t *testing.T) {
 				}
 			case AuthMerchant:
 				want = append([]string{"Authenticate"}, asks(r.Needs())...)
+				// Clearing an incident also needs root authority, asked only
+				// of an interactive human.
+				if r.Name == "ClearDestructiveHold" && billingauth.Interactive(who) {
+					want = append(want, "Can:"+string(billing.RootAdminRateLimitsUnlock))
+				}
 			}
 			req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
 			req.Header.Set("Authorization", "Bearer any")

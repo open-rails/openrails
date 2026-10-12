@@ -270,6 +270,10 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 		if err := q.RevokeMoneyCollection(ctx, gen.RevokeMoneyCollectionParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, Now: now}); err != nil {
 			return err
 		}
+		// It now spends only its balance, which is watched as a prepaid one.
+		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, Now: now}); err != nil {
+			return err
+		}
 		open, err := q.ListOpenUsageOrdersOfCurrency(ctx, gen.ListOpenUsageOrdersOfCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, RowLimit: openUsageOrderLimit})
 		if err != nil {
 			return err

@@ -5521,6 +5521,61 @@
         ]
       }
     },
+    "/v1/me/low-balance-lines/{currency}": {
+      "put": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLowBalanceLineParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveLowBalanceLine"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
     "/v1/me/balance/transactions": {
       "get": {
         "tags": [
@@ -9273,6 +9328,174 @@
         ]
       }
     },
+    "/v1/merchant/destructive-holds": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DestructiveHold"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/destructive-holds/{id}/clear": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearDestructiveHoldParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestructiveHold"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "permission_required",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/app/notification-consumers/{name}": {
       "post": {
         "tags": [
@@ -12760,13 +12983,39 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "usage_rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "low_balance_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "as_of": {
             "type": "string",
             "format": "date-time"
           },
           "depletes_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12775,9 +13024,42 @@
           "available_amount",
           "owed_amount",
           "accrual_rate_per_hour",
+          "usage_rate_per_hour",
+          "low_balance_amount",
           "as_of",
-          "depletes_at"
+          "depletes_at",
+          "runway_ends_at"
         ]
+      },
+      "BalanceNoticeAmount": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "amount"
+        ]
+      },
+      "BalanceNoticeSettings": {
+        "type": "object",
+        "properties": {
+          "runway_hours": {
+            "type": "integer"
+          },
+          "low_amounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BalanceNoticeAmount"
+            }
+          }
+        }
       },
       "BalanceTransaction": {
         "type": "object",
@@ -13992,6 +14274,14 @@
           "prefer"
         ]
       },
+      "ClearDestructiveHoldParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "ConfirmOrderParams": {
         "type": "object",
         "properties": {
@@ -14773,12 +15063,19 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
+          },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectiveLowBalanceLine"
+            }
           }
         },
         "required": [
           "id",
           "balances",
-          "default_payment_methods"
+          "default_payment_methods",
+          "low_balance_lines"
         ]
       },
       "CustomerAmount": {
@@ -15101,6 +15398,12 @@
               "$ref": "#/components/schemas/TrustLevel"
             }
           },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceLine"
+            }
+          },
           "billing_policy": {
             "oneOf": [
               {
@@ -15125,6 +15428,7 @@
         "required": [
           "credit_limits",
           "trust_levels",
+          "low_balance_lines",
           "billing_policy",
           "invoice_profile"
         ]
@@ -15614,6 +15918,77 @@
           "amount_floor"
         ]
       },
+      "DestructiveHold": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "integer"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "ceiling": {
+            "type": "integer"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cleared_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchant_id",
+          "scope",
+          "action",
+          "window",
+          "observed",
+          "requested",
+          "ceiling",
+          "opened_at",
+          "cleared_at"
+        ]
+      },
+      "DestructiveHoldEvent": {
+        "type": "object",
+        "properties": {
+          "hold_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id",
+          "scope"
+        ]
+      },
       "DriftField": {
         "type": "object",
         "properties": {
@@ -15691,6 +16066,35 @@
             }
           }
         }
+      },
+      "EffectiveLowBalanceLine": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "runway_hours": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "default",
+              "merchant"
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "amount",
+          "runway_hours",
+          "source"
+        ]
       },
       "EntitlementChange": {
         "type": "object",
@@ -16270,6 +16674,16 @@
       "HostEvent": {
         "type": "object",
         "properties": {
+          "destructive_hold": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DestructiveHoldEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -16286,6 +16700,8 @@
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
+              "destructive.hold_cleared",
+              "destructive.hold_opened",
               "mandate.revoked",
               "order.canceled",
               "order.completed",
@@ -16384,6 +16800,7 @@
           }
         },
         "required": [
+          "destructive_hold",
           "id",
           "merchant_id",
           "type",
@@ -16485,6 +16902,40 @@
           "tax",
           "billing_contacts",
           "memo"
+        ]
+      },
+      "LowBalanceLine": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "amount",
+          "runway_hours"
         ]
       },
       "Mandate": {
@@ -16833,6 +17284,9 @@
           },
           "checkout": {
             "$ref": "#/components/schemas/MerchantCheckoutSettings"
+          },
+          "balance_notices": {
+            "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
           "billing_policies": {
             "type": "array",
@@ -21073,10 +21527,6 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "low_balance_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "resource": {
             "oneOf": [
               {
@@ -21109,7 +21559,6 @@
           "posted_amount",
           "as_of",
           "overdraft_amount",
-          "low_balance_amount",
           "resource",
           "created_at",
           "updated_at"
@@ -21200,6 +21649,32 @@
         "properties": {
           "payment_method_id": {
             "type": "string"
+          }
+        }
+      },
+      "SetLowBalanceLineParams": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runway_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -21384,10 +21859,6 @@
             "description": "A number as a decimal string."
           },
           "overdraft_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "low_balance_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
@@ -22039,6 +22510,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TrustLevel"
+            }
+          },
+          "low_balance_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LowBalanceLine"
             }
           },
           "billing_policy": {

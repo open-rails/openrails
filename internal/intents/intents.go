@@ -33,6 +33,8 @@ const (
 	OriginUser   Origin = "user"
 	OriginAdmin  Origin = "admin"
 	OriginSystem Origin = "system"
+	// OriginProvider is a verified incoming provider fact and its required consequence.
+	OriginProvider Origin = "provider"
 )
 
 // OutcomeClass classifies one execution (or verification) attempt.

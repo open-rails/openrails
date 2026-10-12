@@ -42,7 +42,8 @@ settings:
 
 `billing_url` is where customers manage and cancel their subscriptions and
 [charge agreements](agreements.md); receipts and confirmations link to it,
-else to `support_url`.
+else to `support_url`. `balance_notices` sets the customers' default
+low-balance lines ([balance notices](balance-notices.md)).
 
 YAML and JSON use the same typed contract. Documents are limited to 1 MiB.
 Unknown or duplicate fields, multiple documents, YAML aliases, anchors, merge

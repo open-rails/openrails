@@ -338,7 +338,8 @@ var jsonRules = map[string]jsonRule{
 		// An order's transition: its statuses, number, payment and decline reason.
 		"status": textValue, "payment_status": textValue, "number": textValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
-		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": textValue}),
+		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
+		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),
 	"provider_intents.payload":            nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":    nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":          object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),

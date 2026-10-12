@@ -159,6 +159,10 @@ func AdminResolveFinding(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeFindingRequiresMerchantConfig, "a pull.* finding is a proposal: approve or dismiss it as one")
 		return
 	}
+	if string(finding.Type) == "life.destructive.hold" {
+		r.ErrorCode(billing.CodePermissionRequired, "destructive incidents require explicit operator clearance")
+		return
+	}
 	if !findingIsOpen(finding) {
 		r.ErrorCode(billing.CodeResourceConflict, "finding already resolved (status="+string(finding.Status)+", resolution="+finding.Resolution+")")
 		return

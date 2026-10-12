@@ -9,6 +9,11 @@
   (and one recurring line's cadence) in one extra read per page; `usePayments`
   returns those orders as `orders`.
 
+## Low-balance lines
+
+- `getAccount()` answers `low_balance_lines`: the line each balance is judged
+  at, with its `source`. `setLowBalanceLine()` sets the customer's own.
+
 ## Embeddable billing administration
 
 - `@openrails/billing-ui/admin` exports `BillingAdmin`, `BillingCustomerSummary`,

@@ -23,7 +23,7 @@ func TestCustomerSettingsDocument(t *testing.T) {
 	a, b := w.newCustomer(), w.newCustomer()
 	net30 := billing.InvoiceProfile{NetTermsDays: 30, CollectionMethod: billing.CollectSendInvoice, PONumber: "PO-7",
 		BillingContacts: []billing.InvoiceContact{{Name: "AP", Email: "ap@example.test"}}, Tax: map[string]any{}}
-	defaults := billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}
+	defaults := billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}, LowBalanceLines: []billing.LowBalanceLine{}}
 	for _, tp := range []topology{embedded, remote} {
 		client := w.client[tp]
 		fresh, err := client.GetCustomer(t.Context(), a.cid())

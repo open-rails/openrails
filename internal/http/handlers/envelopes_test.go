@@ -72,6 +72,9 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
 		"tier":     writeChangeTierError,
+		"admission": func(r *httprequest.Request, err error) {
+			r.APIError(admissionLookupRefusal(r, "req-1", err))
+		},
 	}
 	type want struct {
 		status      int
@@ -115,6 +118,8 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"metering", billingservice.ErrMeterRateCardConflict, want{409, "meter_rate_card_conflict", ""}},
 		{"metering", apperr.New(409, billing.CodeRevisionMismatch, "meter moved"), want{409, "revision_mismatch", ""}},
 		{"catalog", apperr.New(409, billing.CodeRevisionMismatch, "product moved"), want{409, "revision_mismatch", ""}},
+		// A lookup that found no pool connection is a retry, not a failure.
+		{"admission", fmt.Errorf("db: acquire pgx merchant connection: %w: %v", db.ErrPoolExhausted, context.DeadlineExceeded), want{503, "database_busy", ""}},
 	}
 	reworded := func(err error) error {
 		var refusal *apperr.Error

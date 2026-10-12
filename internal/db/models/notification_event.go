@@ -47,6 +47,12 @@ const (
 	// receipt (data.order_id, amount, currency, payment_id).
 	NotificationUsageCharged NotificationEventType = "usage_charged"
 
+	// A watched balance went under its low line, or its capacity reached
+	// zero: once per crossing (data.currency, available_amount, owed_amount,
+	// low_balance_amount, runway_ends_at).
+	NotificationBalanceLow      NotificationEventType = "balance_low"
+	NotificationBalanceDepleted NotificationEventType = "balance_depleted"
+
 	// A usage order with an amount due, and one past its due date.
 	NotificationOrderDue     NotificationEventType = "order_due"
 	NotificationOrderOverdue NotificationEventType = "order_overdue"

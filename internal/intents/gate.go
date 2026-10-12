@@ -23,6 +23,7 @@ type ModeView interface {
 //	            full      limited   readonly
 //	user        execute   execute   park
 //	admin       execute   execute   park
+//	provider    execute   execute   park
 //	system      execute   park      park
 //
 // user/admin intents are reactive completions of a human request (a cancel's
@@ -36,7 +37,7 @@ func GateExecution(ctx context.Context, mode ModeView, merchantID uuid.UUID, ori
 		return true, "operating mode is unknown (no mode view wired); refusing to attempt a provider write"
 	}
 	switch origin {
-	case OriginUser, OriginAdmin, OriginSystem:
+	case OriginUser, OriginAdmin, OriginSystem, OriginProvider:
 	default:
 		// An unknown origin cannot be gated correctly; park rather than guess.
 		return true, fmt.Sprintf("unknown intent origin %q", origin)

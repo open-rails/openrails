@@ -43,12 +43,13 @@ type CustomerContact struct {
 }
 
 // CustomerAccount is the signed-in customer's own summary (GET /v1/me): per
-// currency its balance and its default card, and how many of its notices are
-// unread.
+// currency its balance, its default card and the low-balance line it is told
+// at.
 type CustomerAccount struct {
-	ID                    CustomerID             `json:"id"`
-	Balances              []Balance              `json:"balances"`
-	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
+	ID                    CustomerID                `json:"id"`
+	Balances              []Balance                 `json:"balances"`
+	DefaultPaymentMethods []DefaultPaymentMethod    `json:"default_payment_methods"`
+	LowBalanceLines       []EffectiveLowBalanceLine `json:"low_balance_lines"`
 }
 
 // CustomerListParams lists customers, newest first. Search instead lists the

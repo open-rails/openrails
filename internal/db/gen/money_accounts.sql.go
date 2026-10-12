@@ -137,7 +137,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 	return i, err
 }
 
-const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :exec
+const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :execrows
 INSERT INTO billing.money_settings (
     merchant_id, customer_id, currency, billing_mode, created_at, updated_at
 ) VALUES ($1, $2, $4, $3, $5, $5)
@@ -153,15 +153,18 @@ type InsertMoneyAccountSettingsIfAbsentParams struct {
 }
 
 // Default settings row in the given billing mode; no-op when the row exists.
-func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg InsertMoneyAccountSettingsIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertMoneyAccountSettingsIfAbsent,
+func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg InsertMoneyAccountSettingsIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertMoneyAccountSettingsIfAbsent,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.BillingMode,
 		arg.Currency,
 		arg.Now,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listCustomerBalanceCurrencies = `-- name: ListCustomerBalanceCurrencies :many
@@ -519,7 +522,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 	return i, err
 }
 
-const restoreMoneyCollection = `-- name: RestoreMoneyCollection :exec
+const restoreMoneyCollection = `-- name: RestoreMoneyCollection :execrows
 UPDATE billing.money_settings
 SET collection_revoked_at = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
@@ -535,14 +538,17 @@ type RestoreMoneyCollectionParams struct {
 
 // A new collection agreement in the currency: the merchant's billing mode
 // applies again.
-func (q *Queries) RestoreMoneyCollection(ctx context.Context, arg RestoreMoneyCollectionParams) error {
-	_, err := q.db.Exec(ctx, restoreMoneyCollection,
+func (q *Queries) RestoreMoneyCollection(ctx context.Context, arg RestoreMoneyCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreMoneyCollection,
 		arg.Now,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeMoneyCollection = `-- name: RevokeMoneyCollection :exec

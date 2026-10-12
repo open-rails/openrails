@@ -40,17 +40,19 @@ var handleMethods = map[string]string{
 // it hands its host, and its merchants' handles. No merchant's operation is
 // on it.
 var engineMethods = map[string]string{
-	"HostedCheckout":     "configures the isolated hosted-order surface before startup",
-	"NotificationEvents": "a trusted global consumer across every merchant",
-	"Start":              "starts the workers",
-	"Close":              "stops the engine",
-	"Ready":              "the readiness probe",
-	"Probes":             "the optional dependencies, for the host's supervisor",
-	"Routes":             "the HTTP surface the host mounts",
-	"RiverJobs":          "the jobs a host-owned River fleet runs",
-	"Merchant":           "a merchant's handle",
-	"LocalMerchant":      "an embedded extension of a merchant's handle",
-	"MerchantBySlug":     "the handle of a merchant Config declares",
+	"HostedCheckout":           "configures the isolated hosted-order surface before startup",
+	"NotificationEvents":       "a trusted global consumer across every merchant",
+	"Start":                    "starts the workers",
+	"Close":                    "stops the engine",
+	"Ready":                    "the readiness probe",
+	"Probes":                   "the optional dependencies, for the host's supervisor",
+	"Routes":                   "the HTTP surface the host mounts",
+	"RiverJobs":                "the jobs a host-owned River fleet runs",
+	"Merchant":                 "a merchant's handle",
+	"LocalMerchant":            "an embedded extension of a merchant's handle",
+	"MerchantBySlug":           "the handle of a merchant Config declares",
+	"ListOpenDestructiveHolds": "deployment-wide incidents for the trusted host operator",
+	"ClearDestructiveHold":     "a trusted operator clears an incident that can span merchants",
 }
 
 // remoteMethods are everything a Remote has: nothing spans its merchants.

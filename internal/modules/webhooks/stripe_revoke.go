@@ -35,7 +35,7 @@ func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscripti
 		if err != nil {
 			return err
 		}
-		if err := intents.NewProviderCancelScheduler(d, nil, intents.OriginAdmin, reason).ScheduleProviderCancel(ctx, sub, timeutil.FirstClock(lc.Clock()).Now()); err != nil {
+		if err := intents.NewProviderCancelScheduler(d, nil, intents.OriginProvider, reason).ScheduleProviderCancel(ctx, sub, timeutil.FirstClock(lc.Clock()).Now()); err != nil {
 			return fmt.Errorf("queue stripe cancel for %s: %w", subID, err)
 		}
 		if after != nil {

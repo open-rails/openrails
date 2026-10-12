@@ -5,7 +5,7 @@ go 1.26.9
 ignore ./web/console/node_modules
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.245.1
+require github.com/open-rails/openrails v0.247.0
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
@@ -86,7 +86,7 @@ require (
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/migratekit v1.11.0 // indirect
+	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect

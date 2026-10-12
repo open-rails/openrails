@@ -83,7 +83,24 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	balance := events.Items[0].Balance
 	fmt.Printf("archive balance at %s: available=%d owed=%d\n", balance.AsOf.UTC().Format(time.RFC3339), balance.AvailableAmount, balance.OwedAmount)
 	require.EqualValues(t, -3_600_000, balance.AvailableAmount-balance.OwedAmount)
-	_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{events.Items[0].ID})
+	// The built-in 24-hour runway has told the host of the low balances too.
+	low, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventBalanceLow})
+	require.NoError(t, err)
+	acks := []billing.HostEventID{events.Items[0].ID}
+	for _, e := range low.Items {
+		acks = append(acks, e.ID)
+	}
+	_, err = c.AcknowledgeHostEvents(t.Context(), acks)
+	require.NoError(t, err)
+	// A customer's own low-balance line travels with the merchant.
+	lineAmount := int64(3_000_000)
+	_, err = c.UpdateCustomer(t.Context(), payer.cid(), billing.UpdateCustomerParams{LowBalanceLines: []billing.LowBalanceLine{{Currency: "USD", Amount: &lineAmount}}})
+	require.NoError(t, err)
+	// A prepaid balance with no running charge is watched as well.
+	saver := w.newCustomer()
+	_, err = c.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
+		{CustomerID: saver.cid(), Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: "saver"},
+	})
 	require.NoError(t, err)
 
 	merchantID := c.MerchantID()
@@ -116,11 +133,13 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	original := pgx.Identifier{w.schema}.Sanitize()
 	require.JSONEq(t, rows(original, "running_charges", "id"), rows(quoted, "running_charges", "id"), "every charge, exactly as it stood")
 	require.JSONEq(t, rows(original, "host_outbox", "id"), rows(quoted, "host_outbox", "id"), "the acknowledged balance event")
+	require.JSONEq(t, rows(original, "customer_low_balance_lines", "customer_id"), rows(quoted, "customer_low_balance_lines", "customer_id"), "the customer's line")
+	require.Contains(t, rows(quoted, "customer_low_balance_lines", "customer_id"), `"amount": 3000000`)
 	var watched, due int
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE next_check_at <= now()) FROM "+quoted+".balance_watches WHERE merchant_id=$1",
 		merchantID.UUID()).Scan(&watched, &due))
-	require.Equal(t, 2, watched, "each customer with a running charge is watched again")
-	require.Equal(t, 2, due, "and due at once")
+	require.Equal(t, 3, watched, "each prepaid balance and running charge is watched again")
+	require.Equal(t, 2, due, "a running charge's due at once")
 
 	// The same artifact again is a replay, not a second set of charges.
 	replay, err := merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(artifact.Bytes()))

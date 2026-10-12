@@ -41,7 +41,8 @@ type AcknowledgeNotificationEventsParams struct {
 func CustomerNotificationActionRequested(kind string) bool {
 	switch kind {
 	case "payment_method_failed", "payment_method_update_required", "payment_authentication_required",
-		"order_due", "order_overdue", "order_collection_stopped", "account_delinquent":
+		"order_due", "order_overdue", "order_collection_stopped", "account_delinquent",
+		"balance_low", "balance_depleted":
 		return true
 	default:
 		return false
@@ -115,6 +116,15 @@ type NotificationData struct {
 	FailureReason    string                  `json:"failure_reason,omitempty"`
 	DeclineOutcome   string                  `json:"decline_outcome,omitempty"`
 	NextAttemptAt    *time.Time              `json:"next_attempt_at,omitempty"`
+
+	// A watched balance went low or ran out (balance_low, balance_depleted):
+	// what was available and owed in Currency as the crossing was seen, the
+	// effective low line, and when capacity reaches zero at the customer's
+	// burn rate (absent at rate zero).
+	AvailableAmount  *int64     `json:"available_amount,omitempty,string"`
+	OwedAmount       *int64     `json:"owed_amount,omitempty,string"`
+	LowBalanceAmount *int64     `json:"low_balance_amount,omitempty,string"`
+	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
 
 	// Rail context on payment_method_failed.
 	Rail               string `json:"rail,omitempty"`

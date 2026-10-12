@@ -240,6 +240,22 @@ type MerchantCheckoutSettings struct {
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
 }
 
+// BalanceNoticeSettings are a merchant's default low-balance lines: a
+// customer's own line (LowBalanceLine) overrides each part. RunwayHours is
+// hours of spend at the customer's burn rate, 24 when nil; LowAmounts are
+// amount lines per currency, none for a currency not listed. 0 turns a line
+// off. balance.depleted cannot be turned off.
+type BalanceNoticeSettings struct {
+	RunwayHours *int                  `json:"runway_hours,omitempty"`
+	LowAmounts  []BalanceNoticeAmount `json:"low_amounts,omitempty"`
+}
+
+// BalanceNoticeAmount is an amount line in one currency.
+type BalanceNoticeAmount struct {
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount,string"`
+}
+
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
@@ -262,6 +278,9 @@ type MerchantSettings struct {
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
 	// Checkout is the hosted checkout's settings; a patch replaces it whole.
 	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
+	// BalanceNotices are the default low-balance lines of the merchant's
+	// customers; a patch replaces it whole.
+	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".

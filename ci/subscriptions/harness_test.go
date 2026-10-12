@@ -279,6 +279,8 @@ type world struct {
 	// pull's Stripe reads, the rebill watch's NMI probes). Tests run the
 	// passes they exercise; a scheduled fleet keeps the whole schedule.
 	periodics []string
+	// riverWorkers optionally bounds targeted fixture concurrency.
+	riverWorkers int
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]openrails.PSPConfig)
 	// catalog is the merchant's declared catalog, read and applied on every
@@ -449,8 +451,12 @@ func (w *world) start() {
 	t.Helper()
 	pool, dbURL := w.pool, w.dsn
 	stripe, nmi := http.RoundTripper(w.stripe), http.RoundTripper(w.nmi)
+	workers := w.riverWorkers
+	if workers == 0 {
+		workers = 4
+	}
 	riverConfig := &river.Config{
-		Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}},
+		Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: workers}},
 		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 	}
 	if w.replica != nil {

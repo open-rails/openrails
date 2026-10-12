@@ -71,6 +71,9 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/solana/support.go:CalculateTokenQuote":             "carries the token price + FX RATE; both amount branches go through big.Rat/big.Int",
 		"internal/modules/solana/support.go:FiatMicrosToStablecoinBaseUnits": "passes the identity FX RATE 1.0 into the exact-rational converter",
 
+		// --- Balance watch: the usage rate's decay -----------------------
+		"internal/modules/money/balance_watch.go:decayRate": "decays a usage RATE per hour, an estimate rounded back to an integer rate",
+
 		// --- Checkout: the persisted quote's rates ------------------------
 		"internal/modules/checkout/attempt_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
 

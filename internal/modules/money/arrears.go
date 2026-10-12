@@ -111,10 +111,15 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 		return err
 	}
-	return q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
+	inserted, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency),
 		BillingMode: mode, Now: now,
 	})
+	if err != nil || inserted == 0 || mode != BillingModeArrears {
+		return err
+	}
+	// No row was prepaid: an arrears customer's balance is not watched.
+	return q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), Now: now})
 }
 
 // GetOutstandingOwed returns the payer's arrears exposure in currency, read

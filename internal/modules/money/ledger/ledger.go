@@ -69,6 +69,10 @@ const (
 // AllTransferTypes must equal the DB CHECK exactly (TestLedgerVocabularyMatchesSchema).
 var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment}
 
+// fundingTransfers re-arm a customer's balance notices: money added to its
+// balance, and debt it paid.
+var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
+
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_grant_id_transfer_type_key.
 var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
@@ -159,15 +163,24 @@ func New(q *gen.Queries, merchant uuid.UUID) *Ledger {
 // EnsureSystemAccount get-or-creates the merchant's system account of the given
 // type + currency (customer_id NULL).
 func (l *Ledger) EnsureSystemAccount(ctx context.Context, t AccountType, currency string) (uuid.UUID, error) {
-	return l.ensureAccount(ctx, t, currency, nil, false, false)
+	id, _, err := l.ensureAccount(ctx, t, currency, nil, false, false)
+	return id, err
 }
 
 // EnsureCustomerBalance get-or-creates a customer's balance account, flagged
 // debits_must_not_exceed_credits so it cannot be overdrawn beyond an
-// applier-supplied arrears floor.
+// applier-supplied arrears floor. A new account of a customer not billed in
+// arrears is watched.
 func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	return l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
+	id, created, err := l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
+	if err != nil || !created {
+		return id, err
+	}
+	if err := l.q.InsertPrepaidBalanceWatch(ctx, gen.InsertPrepaidBalanceWatchParams{MerchantID: l.merchant, CustomerID: customer, Currency: currency}); err != nil {
+		return uuid.Nil, fmt.Errorf("ledger: watch the balance: %w", err)
+	}
+	return id, nil
 }
 
 // EnsureCustomerArrears get-or-creates the customer's own arrears-liability
@@ -175,7 +188,8 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 // Not debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	return l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
+	id, _, err := l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
+	return id, err
 }
 
 // CustomerArrearsAccountID returns the customer's arrears account id, and false
@@ -230,27 +244,28 @@ func (l *Ledger) CustomerBalanceAccountID(ctx context.Context, customer uuid.UUI
 	return acc.ID, true, nil
 }
 
-func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency string, customer *uuid.UUID, dmnec, cmned bool) (uuid.UUID, error) {
+// ensureAccount get-or-creates an account; created reports this call made it.
+func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency string, customer *uuid.UUID, dmnec, cmned bool) (id uuid.UUID, created bool, err error) {
 	get := gen.GetLedgerAccountParams{MerchantID: l.merchant, AccountType: string(t), Currency: currency, CustomerID: customer}
 	acc, err := l.q.GetLedgerAccount(ctx, get)
 	if err == nil {
-		return acc.ID, nil
+		return acc.ID, false, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, fmt.Errorf("ledger: get %s account: %w", t, err)
+		return uuid.Nil, false, fmt.Errorf("ledger: get %s account: %w", t, err)
 	}
-	created, err := l.q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
+	row, err := l.q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
 		MerchantID: l.merchant, CustomerID: customer, AccountType: string(t), Currency: currency,
 		DebitsMustNotExceedCredits: dmnec, CreditsMustNotExceedDebits: cmned,
 	})
 	if err != nil {
 		// Lost a create race (unique index): re-read.
 		if acc2, gerr := l.q.GetLedgerAccount(ctx, get); gerr == nil {
-			return acc2.ID, nil
+			return acc2.ID, false, nil
 		}
-		return uuid.Nil, fmt.Errorf("ledger: create %s account: %w", t, err)
+		return uuid.Nil, false, fmt.Errorf("ledger: create %s account: %w", t, err)
 	}
-	return created.ID, nil
+	return row.ID, true, nil
 }
 
 // Transfer is one double-entry movement to append.
@@ -311,10 +326,13 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		OrderID:                t.Order,
 	})
 	if err == nil {
-		// A transfer that names a customer changes what its running charges
-		// may draw: its balance watch, if it has one, is due.
+		// A transfer that names a customer changes what it may spend: its
+		// balance watch, if it has one, is due, and a funding re-arms its
+		// notices.
 		if t.Customer != nil {
-			if err := l.q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: l.merchant, CustomerID: *t.Customer, Currency: t.Currency}); err != nil {
+			if err := l.q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{
+				MerchantID: l.merchant, CustomerID: *t.Customer, Currency: t.Currency, Funded: fundingTransfers[t.Type],
+			}); err != nil {
 				return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: mark the balance watch due: %w", err)
 			}
 		}

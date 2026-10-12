@@ -148,7 +148,7 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	}
 	switch p.Origin {
 	case OriginUser, OriginAdmin:
-	case OriginSystem:
+	case OriginSystem, OriginProvider:
 		return c.checkSystem(ctx, p, now)
 	default:
 		return fmt.Errorf("rate ceiling: destructive op has unknown origin %q", p.Origin) // fail closed
@@ -228,7 +228,7 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 	count, err := c.db.GenDirectory().CountDestructiveIntentsForMerchantSince(ctx,
 		gen.CountDestructiveIntentsForMerchantSinceParams{
 			MerchantID:  p.MerchantID,
-			Origins:     []string{string(OriginSystem)},
+			Origins:     []string{string(OriginSystem), string(OriginProvider)},
 			IntentTypes: DestructiveIntentTypes(),
 			Since:       now.Add(-RateCeilingWindow).UTC(),
 		})

@@ -354,6 +354,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
+	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
+	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
+	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
+	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
+	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtimeRef = runtime
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)

@@ -203,8 +203,8 @@ same public origin to `public_billing_base_url`, `auth.token.issuer` and
 - **Client IP.** Set `config.trusted_proxies` to the CIDR the controller
   connects from (the pod CIDR, or the node CIDR for a host-network controller).
   Without it the server ignores `X-Forwarded-For`, and rate limits, abuse
-  tracking and webhook source addresses all see the controller. Behind
-  Cloudflare, list its ranges in `cloudflare_proxies` as well.
+  tracking, request logs and webhook source addresses all see the controller.
+  Behind Cloudflare, list its ranges in `cloudflare_proxies` as well.
 - **Body size.** Requests are capped at 1 MiB, but a billing archive import
   (`POST /v1/merchant/billing-archive`) streams up to 1 GiB: raise the controller's
   limit if you import over HTTP.

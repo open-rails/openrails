@@ -235,10 +235,12 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/orders/{id}/cancel":                {"/orders/" + aOrder + "/cancel", nil},
 		"POST /v1/me/agreements/{id}/revoke":            {"/agreements/" + aAgreement + "/revoke", nil},
 	}
+	// A customer's own low-balance line names a currency, not an object.
+	ownOnly := map[string]bool{"PUT /v1/me/low-balance-lines/{currency}": true}
 	probed := 0
 	for _, route := range routes.Catalog() {
 		// A catalog price is the merchant's, never another customer's object.
-		if route.Group != routes.Customer || !strings.Contains(strings.ReplaceAll(route.Path, "{price_id}", ""), "{") {
+		if route.Group != routes.Customer || ownOnly[route.Key()] || !strings.Contains(strings.ReplaceAll(route.Path, "{price_id}", ""), "{") {
 			continue
 		}
 		probe, ok := probes[route.Key()]

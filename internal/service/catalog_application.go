@@ -26,7 +26,14 @@ import (
 // before local mutation. An object whose named field an edit set differently
 // is skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil)
+	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil, "")
+}
+
+// ApplyOperatorCatalog applies a catalog file for trusted operator tooling,
+// which carries no verified identity. Like the declared catalog on start, its
+// substantive changes are admitted on the merchant's autonomous budget.
+func (s *Service) ApplyOperatorCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
+	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil, "operator_catalog")
 }
 
 // ErrCatalogProviderUnconfirmed: a provider reference could not be confirmed
@@ -59,13 +66,13 @@ func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire
 	for _, key := range declaredPSPs {
 		declared[strings.ToLower(strings.TrimSpace(key))] = true
 	}
-	return s.applyCatalog(ctx, document, false, verify, declared)
+	return s.applyCatalog(ctx, document, false, verify, declared, "startup_catalog")
 }
 
 // applyCatalog applies params. A reference to a PSP in declaredPSPs with no
 // account yet is ErrCatalogProviderUnconfirmed, unless the document is
 // refused for another reason.
-func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier, declaredPSPs map[string]bool) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier, declaredPSPs map[string]bool, origin string) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -93,7 +100,9 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		if prepared.replay != nil {
 			return prepared.replay, nil
 		}
-		receipt, err := s.commitCatalogApplication(ctx, params, digest, prepared, force)
+		receipt, err := catalogCommandOnce(ctx, s, "catalog/application", params, origin, false, applicationAdmissionPlan(params, prepared, force), func(ctx context.Context, s *Service) (*billing.CatalogApplicationReceipt, error) {
+			return s.commitCatalogApplication(ctx, params, digest, prepared, force)
+		})
 		if !errors.Is(err, errCatalogSnapshotMoved) {
 			return receipt, err
 		}

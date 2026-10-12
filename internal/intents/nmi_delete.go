@@ -110,30 +110,30 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Billin
 
 func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	if _, err := acceptedNMIDeleteTarget(intent); err != nil {
-		return Parked(err.Error())
+		return parkedBeforeEffect(err.Error())
 	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil {
-		return Parked("nmi rail not armable (fail closed): " + err.Error())
+		return parkedBeforeEffect("nmi rail not armable (fail closed): " + err.Error())
 	}
 	if !ok || client == nil {
-		return Parked(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
+		return parkedBeforeEffect(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
-		return Parked("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
 	}
 
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if errors.Is(err, errNMIDeleteTargetChanged) {
-			return Parked(err.Error())
+			return parkedBeforeEffect(err.Error())
 		}
 		// Relevance passed moments ago; treat a read failure here as a clean
 		// (no provider write attempted) retryable failure.
 		return Retryable("load subscription: " + err.Error())
 	}
 	if sub.Status != models.StatusCanceled || sub.DeletionScheduledAt == nil {
-		return Parked("subscription is no longer awaiting this deletion")
+		return parkedBeforeEffect("subscription is no longer awaiting this deletion")
 	}
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	// Verify-then-execute: absent = success.
@@ -152,14 +152,18 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	// Revalidate before the destructive request, still using the captured target.
 	current, err := h.loadSubscription(ctx, intent)
 	if err != nil {
-		return Parked(err.Error())
+		return parkedBeforeEffect(err.Error())
 	}
 	if current.Status != models.StatusCanceled || current.DeletionScheduledAt == nil {
-		return Parked("subscription is no longer awaiting this deletion")
+		return parkedBeforeEffect("subscription is no longer awaiting this deletion")
+	}
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
+	if err != nil {
+		return parkedBeforeEffect(err.Error())
 	}
 	if err := client.DeleteRecurringSubscription(ctx, psid); err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return Parked("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
 		}
 		// The delete request may or may not have reached NMI — never assume;
 		// the verifier resolves by reading.

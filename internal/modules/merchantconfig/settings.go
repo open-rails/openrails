@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Billing period boundaries a merchant's settings may name.
@@ -99,6 +100,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		if _, err := NormalizeEmbedOrigins(in.Checkout.EmbedOrigins); err != nil {
 			return Settings{}, err
 		}
+	}
+	if in.BalanceNotices != nil {
+		notices, err := NormalizeBalanceNotices(*in.BalanceNotices)
+		if err != nil {
+			return Settings{}, err
+		}
+		cfg.BalanceNotices = notices
 	}
 	if in.CheckoutRouting != nil {
 		routing, err := NormalizeCheckoutRouting(*in.CheckoutRouting)
@@ -215,4 +223,33 @@ func nonEmpty(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+// NormalizeBalanceNotices validates a merchant's default low-balance lines.
+func NormalizeBalanceNotices(in billing.BalanceNoticeSettings) (models.BalanceNoticeConfiguration, error) {
+	var out models.BalanceNoticeConfiguration
+	if h := in.RunwayHours; h != nil {
+		if *h < 0 || *h > billing.MaxLowBalanceRunwayHours {
+			return out, fmt.Errorf("balance_notices.runway_hours must be 0 to %d", billing.MaxLowBalanceRunwayHours)
+		}
+		hours := *h
+		out.RunwayHours = &hours
+	}
+	for i, line := range in.LowAmounts {
+		currency := moneyutil.NormalizeCurrency(line.Currency)
+		if err := moneyutil.ValidateCurrency(currency); err != nil {
+			return out, fmt.Errorf("balance_notices.low_amounts[%d].currency: %w", i, err)
+		}
+		if _, dup := out.LowAmounts[currency]; dup {
+			return out, fmt.Errorf("balance_notices.low_amounts names %s twice", currency)
+		}
+		if line.Amount < 0 {
+			return out, fmt.Errorf("balance_notices.low_amounts[%d].amount must be >= 0", i)
+		}
+		if out.LowAmounts == nil {
+			out.LowAmounts = map[string]int64{}
+		}
+		out.LowAmounts[currency] = line.Amount
+	}
+	return out, nil
 }

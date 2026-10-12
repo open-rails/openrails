@@ -50,7 +50,7 @@ func refundIntent(t *testing.T, typ string, mutate func(*RefundPayload)) gen.Bil
 	}
 	raw, err := json.Marshal(p)
 	require.NoError(t, err)
-	return gen.BillingProviderIntent{ID: uuid.New(), IntentType: typ, Rail: "nmi", Payload: raw, IdempotencyKey: "the-intent-key", Origin: string(OriginAdmin), Attempts: 1, Status: StatusInFlight}
+	return gen.BillingProviderIntent{ID: uuid.New(), IntentType: typ, Rail: "nmi", Payload: raw, IdempotencyKey: "the-intent-key", Origin: string(OriginSystem), Attempts: 1, Status: StatusInFlight}
 }
 
 func TestNMIHandlersParkBeforeProviderTraffic(t *testing.T) {

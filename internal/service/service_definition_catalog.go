@@ -25,6 +25,12 @@ import (
 )
 
 func (s *Service) CreateProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
+	return catalogCommand(ctx, s, "product/"+req.Key, req, "", false, createProductPlan(req), func(ctx context.Context, s *Service) (*billing.Product, error) {
+		return s.createProductCommand(ctx, req)
+	})
+}
+
+func (s *Service) createProductCommand(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.createProduct(ctx, req)
 	})
@@ -170,8 +176,10 @@ func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, param
 }
 
 func (s *Service) patchProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*billing.Product, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
-		return scoped.updateProduct(ctx, id, req)
+	return catalogCommand(ctx, s, "product/"+id.String(), req, "", false, productEditPlan(id, req), func(ctx context.Context, s *Service) (*billing.Product, error) {
+		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
+			return scoped.updateProduct(ctx, id, req)
+		})
 	})
 }
 
@@ -406,6 +414,10 @@ func priceRequestCycleDays(req billing.CreatePriceParams) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
+	return catalogCommand(ctx, s, "price/create", req, "", len(req.PSPs) > 0 || len(req.PSPLinks) > 0, createPricePlan(req), func(ctx context.Context, s *Service) (*billing.Price, error) { return s.createPriceCommand(ctx, req) })
+}
+
+func (s *Service) createPriceCommand(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	selectors := 0
 	if !req.ProductID.IsZero() {
 		selectors++
@@ -598,6 +610,18 @@ func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 
 // UpdatePrice applies a merge patch to a price.
 func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams) (*billing.Price, error) {
+	return catalogCommand(ctx, s, "price/"+id.String(), params, "", len(params.PSPLinks) > 0, func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
+		req, err := pricePatch(params)
+		if err != nil {
+			return nil, err
+		}
+		return priceEditPlan(id, req)(ctx, s, state)
+	}, func(ctx context.Context, s *Service) (*billing.Price, error) {
+		return s.updatePriceCommand(ctx, id, params)
+	})
+}
+
+func (s *Service) updatePriceCommand(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams) (*billing.Price, error) {
 	req, err := pricePatch(params)
 	if err != nil {
 		return nil, err

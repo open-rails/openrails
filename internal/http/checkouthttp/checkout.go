@@ -46,7 +46,7 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 	mux.Handle("GET /assets/{file...}", page)
 	mux.Handle("GET "+hostedcheckout.ApplePayDomainAssociationPath, hostedcheckout.ApplePayDomainAssociation())
 	handler := middleware.ChainHTTP(mux.Handler(),
-		middleware.RecoverHTTP(), middleware.RequestLogHTTP(),
+		middleware.RecoverHTTP(), middleware.RequestLogHTTP(rt.TrustedProxies),
 		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha, issuers...), store.Framing(settings)),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes), billingauth.ExplicitCredentials,
 		hostedcheckout.ResolveHTTP(store, rt.Clock.Now), limiter,

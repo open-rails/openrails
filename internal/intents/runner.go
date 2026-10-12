@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -73,6 +74,8 @@ func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFun
 // Runner applies financial claims and provider evidence. Production River
 // dispatch calls ExecuteByID/VerifyByID for one accepted operation.
 type Runner struct {
+	// Admissions rechecks the original staff command before its first effect.
+	Admissions *destructive.Admissions
 	// OnSuccessorCommitted is an internal worker handoff, not handler context.
 	// Only a top-level transition+wakeup commit can acknowledge this operation.
 	OnSuccessorCommitted successorCommitHook
@@ -190,6 +193,12 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// And its PSP: every mirror row the handler creates (charge, subscription,
 	// vaulted method) inherits the account the intent is addressed to.
 	ctx = pinIntentAddress(ctx, intent)
+	var actionErr error
+	ctx, actionErr = r.bindIntentAction(ctx, intent)
+	if actionErr != nil {
+		r.park(ctx, logEntry, stats, intent.ID, now, actionErr.Error())
+		return
+	}
 
 	handler := r.Registry.Lookup(intent.IntentType)
 	if handler == nil {
@@ -234,7 +243,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// rolling execution budget or an operator finding is open. Fails closed:
 	// a breaker error parks rather than executing unexamined.
 	attemptLogged := false
-	if r.Breaker != nil && IsDestructiveIntentType(intent.IntentType) {
+	if r.Breaker != nil && intent.DestructiveActionID == nil && IsDestructiveIntentType(intent.IntentType) {
 		held, reason, err := r.Breaker.Check(ctx, intent, now, func(ctx context.Context, d *db.DB) error {
 			attemptLogged = true
 			return NewStore(d).LogExternalMutation(ctx, r.mutationLogParams(intent, MutationLogPhaseAttempting, "", nil))
@@ -365,6 +374,11 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 			"intent_type": intent.IntentType,
 			"provider":    intent.Rail,
 		})
+		ctx, err = r.bindIntentAction(ctx, intent)
+		if err != nil {
+			r.apply(ctx, logEntry, &stats, nil, intent, Parked(err.Error()), true)
+			continue
+		}
 		handler := r.Registry.Lookup(intent.IntentType)
 		if handler == nil {
 			// Leave it unknown; push the next look out (a verifier's park).
@@ -514,6 +528,16 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
 			applied = OutcomeAmbiguous
 		} else {
+			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
+				if store, ok := r.Store.(*Store); ok {
+					if err := store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
+						logEntry.WithError(err).Error("cannot persist unsent destructive operation")
+					} else {
+						stats.Parked++
+					}
+					return
+				}
+			}
 			r.park(ctx, logEntry, stats, intent.ID, now, outcome.Reason)
 			return
 		}
@@ -708,6 +732,10 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 	}
 	ctx = merchant.WithID(ctx, billing.MerchantID(in.MerchantID))
 	ctx = pinIntentAddress(ctx, in)
+	ctx, err = r.bindIntentAction(ctx, in)
+	if err != nil {
+		return in, err
+	}
 	h := r.Registry.Lookup(in.IntentType)
 	out := Ambiguous("no verifier registered")
 	logger := log.WithContext(ctx).WithField("intent_id", in.ID)

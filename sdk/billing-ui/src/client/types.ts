@@ -534,8 +534,21 @@ export const balanceSchema = z.object({
 export type Balance = z.infer<typeof balanceSchema>
 
 /**
+ * The low-balance line a balance is judged at: the customer is told when what
+ * it may spend is under the larger of `amount` and its burn rate times
+ * `runway_hours`. `source` is `customer`, `merchant` or `default`.
+ */
+export const lowBalanceLineSchema = z.object({
+  currency: z.string(),
+  amount: amount,
+  runway_hours: z.number().int(),
+  source: z.enum(["customer", "merchant", "default"]),
+})
+export type LowBalanceLine = z.infer<typeof lowBalanceLineSchema>
+
+/**
  * The signed-in customer's summary (`GET /me`): money per currency, the
- * default card of each currency, and how many notices are unread.
+ * default card of each currency, and the low-balance line of each balance.
  */
 export const accountSchema = z.object({
   id: z.string(),
@@ -543,6 +556,7 @@ export const accountSchema = z.object({
   default_payment_methods: z.array(
     z.object({ currency: z.string(), payment_method_id: z.string() })
   ),
+  low_balance_lines: z.array(lowBalanceLineSchema),
 })
 export type Account = z.infer<typeof accountSchema>
 

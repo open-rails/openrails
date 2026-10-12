@@ -158,11 +158,18 @@ func (d *deliverer) postWithRetry(ctx context.Context, url string, body []byte) 
 }
 
 func (d *deliverer) postOnce(ctx context.Context, url string, body []byte) (int, error) {
+	return d.postOnceWithKey(ctx, url, body, "")
+}
+
+func (d *deliverer) postOnceWithKey(ctx context.Context, url string, body []byte, key string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	resp, err := d.http.Do(req)
 	if err != nil {
 		return 0, err

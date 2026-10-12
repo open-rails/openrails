@@ -197,8 +197,21 @@ export type BalanceHostEvent = {
   available_amount: string
   owed_amount: string
   accrual_rate_per_hour: string
+  usage_rate_per_hour: string
+  low_balance_amount: string
   as_of: string
-  depletes_at: string
+  depletes_at: string | null
+  runway_ends_at: string | null
+}
+
+export type BalanceNoticeAmount = {
+  currency: string
+  amount: string
+}
+
+export type BalanceNoticeSettings = {
+  runway_hours?: number
+  low_amounts?: BalanceNoticeAmount[]
 }
 
 export type BalanceTransaction = {
@@ -471,6 +484,10 @@ export type CheckoutRoutingRule = {
   prefer: string[]
 }
 
+export type ClearDestructiveHoldParams = {
+  reason?: string
+}
+
 export type ConfirmOrderParams = {
   signature?: string
 }
@@ -678,6 +695,7 @@ export type CustomerAccount = {
   id: string
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
+  low_balance_lines: EffectiveLowBalanceLine[]
 }
 
 export type CustomerAmount = {
@@ -743,6 +761,7 @@ export type CustomerNetworkHostEvent = {
 export type CustomerSettings = {
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
+  low_balance_lines: LowBalanceLine[]
   billing_policy: string | null
   invoice_profile: InvoiceProfile | null
 }
@@ -896,6 +915,24 @@ export type DelinquencyHostEvent = {
   amount_floor: string
 }
 
+export type DestructiveHold = {
+  id: string
+  merchant_id: string
+  scope: string
+  action: string
+  window: string
+  observed: number
+  requested: number
+  ceiling: number
+  opened_at: string
+  cleared_at: string | null
+}
+
+export type DestructiveHoldEvent = {
+  hold_id: string
+  scope: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -919,6 +956,13 @@ export type DunningPolicy = {
 export type DunningTier = {
   max_cycle_hours?: number
   retry_after_hours?: number[]
+}
+
+export type EffectiveLowBalanceLine = {
+  currency: string
+  amount: string
+  runway_hours: number
+  source: "customer" | "default" | "merchant"
 }
 
 export type EntitlementChange = {
@@ -1025,9 +1069,10 @@ export type HeldEntitlements = {
 }
 
 export type HostEvent = {
+  destructive_hold: DestructiveHoldEvent | null
   id: string
   merchant_id: string
-  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "destructive.hold_cleared" | "destructive.hold_opened" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
@@ -1055,6 +1100,12 @@ export type InvoiceProfile = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string
+}
+
+export type LowBalanceLine = {
+  currency: string
+  amount: string | null
+  runway_hours: number | null
 }
 
 export type Mandate = {
@@ -1127,6 +1178,7 @@ export type MerchantSettings = {
   checkout_routing?: CheckoutRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
+  balance_notices?: BalanceNoticeSettings
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
@@ -1994,7 +2046,6 @@ export type RunningCharge = {
   posted_amount: string
   as_of: string
   overdraft_amount: string
-  low_balance_amount: string
   resource: string | null
   created_at: string
   updated_at: string
@@ -2022,6 +2073,11 @@ export type SetDashboardParams = {
 
 export type SetDefaultPaymentMethodParams = {
   payment_method_id?: string
+}
+
+export type SetLowBalanceLineParams = {
+  amount?: string | null
+  runway_hours?: number | null
 }
 
 export type SetMeterParams = {
@@ -2076,7 +2132,6 @@ export type StartRunningChargeParams = {
   started_at?: string
   minimum_amount?: string
   overdraft_amount?: string
-  low_balance_amount?: string
   resource?: string
 }
 
@@ -2201,6 +2256,7 @@ export type UpdateAlertWebhookParams = {
 export type UpdateCustomerParams = {
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
+  low_balance_lines?: LowBalanceLine[]
   billing_policy?: string | null
   invoice_profile?: InvoiceProfile | null
 }

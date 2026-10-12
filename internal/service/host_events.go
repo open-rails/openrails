@@ -28,7 +28,7 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged,
 		billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired, billing.HostEventOrderVoided,
 		billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked, billing.HostEventMandateRevoked,
-		billing.HostEventBalanceLow, billing.HostEventBalanceDepleted:
+		billing.HostEventBalanceLow, billing.HostEventBalanceDepleted, billing.HostEventDestructiveHoldOpened, billing.HostEventDestructiveHoldCleared:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
 	}
@@ -94,6 +94,14 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 		event := billing.HostEvent{ID: billing.HostEventID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), Type: billing.HostEventType(row.EventType),
 			OccurredAt: row.OccurredAt, AcknowledgedAt: row.DeliveredAt}
 		switch event.Type {
+		case billing.HostEventDestructiveHoldOpened, billing.HostEventDestructiveHoldCleared:
+			var payload billing.DestructiveHoldEvent
+			if err := json.Unmarshal(row.Data, &payload); err != nil {
+				return nil, fmt.Errorf("decode destructive hold event %s: %w", row.ID, err)
+			}
+			payload.HoldID = billing.DestructiveHoldID(row.SubjectID)
+			event.DestructiveHold = &payload
+
 		case billing.HostEventPaymentSettled:
 			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentOrderID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)

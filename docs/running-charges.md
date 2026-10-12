@@ -48,7 +48,6 @@ use ordinary `StartRunningCharge` and `StopRunningCharge` requests.
 | `started_at` | Your instant, now when absent: at most 60 seconds ahead and 35 days back |
 | `minimum_amount` | Above 0, the start is refused `402 insufficient_credits` unless the customer's capacity covers it, and nothing is written. 0 never refuses: use it when the work is already delivered |
 | `overdraft_amount` | How far below zero a prepaid customer's capacity may reach before it counts as run out |
-| `low_balance_amount` | The balance under which the customer counts as low; 0 is no line |
 | `resource` | Attribution, carried on the ledger entries |
 
 Starting a reference again with the same terms answers its charge, running or
@@ -57,7 +56,8 @@ it. `minimum_amount` is a gate for the call, not a term: a repeat is not gated
 again. A customer never funded gets its balance account.
 
 Among a customer's running charges in one currency the smallest
-`overdraft_amount` and the largest `low_balance_amount` apply.
+`overdraft_amount` applies. The low line is the customer's, not the charge's
+([balance notices](balance-notices.md)).
 
 ## What a charge costs
 
@@ -118,16 +118,14 @@ running charge has one watch: the earliest of the instant its balance goes
 under the low line, the instant its capacity reaches zero, and the next 00:00
 UTC. A deposit, a capture, a spend, a refund, an expiry or a new hold marks the
 watch due; every 30 seconds one job looks at the watches that are due, and at
-nothing else.
+nothing else. Stopping the last charge of a prepaid customer keeps its watch.
 
 It reaches you two ways:
 
-- **Events** ([host events](api/endpoints.md#host-events)), once per crossing
-  and armed again when the balance is back above the line: `balance.low`
-  (what is available less what is owed is under the low line) and
-  `balance.depleted` (capacity is at zero). Each carries `balance`:
-  `customer_id`, `currency`, `available_amount`, `owed_amount`,
-  `accrual_rate_per_hour`, `as_of` and `depletes_at`.
+- **Events** ([balance notices](balance-notices.md)), once per crossing and
+  re-armed by a funding: `balance.low` (what the customer may spend is under
+  its line, by default 24 hours at its burn rate) and `balance.depleted`
+  (capacity is at zero).
 - **State**: `GET /v1/app/running-charges?depleted=true`
   (`billing.RunningChargeListParams` with `Depleted`) lists the running charges
   of customers whose stored run-out instant has passed, whether or not the

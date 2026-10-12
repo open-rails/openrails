@@ -208,6 +208,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				}
 				stageLegacyPrices = true
 			}
+			if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+				return err
+			}
 			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
 			if err != nil {
 				return err

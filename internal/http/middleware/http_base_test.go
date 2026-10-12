@@ -194,7 +194,7 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/me/checkout", nil)
 		req.Header.Set("X-Request-ID", sent)
 		w := httptest.NewRecorder()
-		RequestLogHTTP()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(w, req)
+		RequestLogHTTP(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(w, req)
 		id := w.Header().Get("X-Request-ID")
 		if want == "" {
 			require.NoError(t, uuid.Validate(id), "missing or oversized ids are replaced")
@@ -210,7 +210,7 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 
 	buf.Reset()
 	w := httptest.NewRecorder()
-	RequestLogHTTP("/health/live")(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	RequestLogHTTP(nil, "/health/live")(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	require.NoError(t, uuid.Validate(w.Header().Get("X-Request-ID")))
 	require.Zero(t, buf.Len(), "skipped paths are not logged")
 }

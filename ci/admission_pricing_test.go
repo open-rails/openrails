@@ -408,12 +408,14 @@ func TestConcurrentCapturesOfOneCustomerAreExact(t *testing.T) {
 	for i := range n {
 		wg.Go(func() {
 			// 200 requests waiting on one customer's lock outrun the pool:
-			// database_busy is a retry, and a retry answers the first capture.
+			// database_busy, for the call or its item, is a retry, and a
+			// retry answers the first capture.
 			for attempt := 0; ; attempt++ {
 				out, err := p.client.CaptureAdmissions(p.ctx, []billing.CaptureAdmissionParams{{RequestID: admits[i].RequestID,
 					Usage: billing.CaptureUsage{EventType: "gen", Dimensions: map[string]int64{"units": 1}}}})
 				var busy *billing.StatusError
-				if errors.As(err, &busy) && busy.Code == "database_busy" && attempt < 100 {
+				busyItem := err == nil && out[0].Error != nil && out[0].Error.Code == "database_busy"
+				if (busyItem || errors.As(err, &busy) && busy.Code == "database_busy") && attempt < 100 {
 					time.Sleep(50 * time.Millisecond)
 					continue
 				}

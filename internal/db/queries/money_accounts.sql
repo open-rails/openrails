@@ -72,7 +72,7 @@ SELECT * FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 FOR UPDATE;
 
--- name: InsertMoneyAccountSettingsIfAbsent :exec
+-- name: InsertMoneyAccountSettingsIfAbsent :execrows
 -- Default settings row in the given billing mode; no-op when the row exists.
 INSERT INTO billing.money_settings (
     merchant_id, customer_id, currency, billing_mode, created_at, updated_at
@@ -109,7 +109,7 @@ UPDATE billing.money_settings
 SET collection_revoked_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
 
--- name: RestoreMoneyCollection :exec
+-- name: RestoreMoneyCollection :execrows
 -- A new collection agreement in the currency: the merchant's billing mode
 -- applies again.
 UPDATE billing.money_settings

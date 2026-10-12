@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 
@@ -276,56 +277,79 @@ func lockUsageOrder(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUI
 // VoidUsageOrder voids an unpaid usage order and writes off what it still
 // claimed, so the ledger stops counting it as owed.
 func (s *MoneyService) VoidUsageOrder(ctx context.Context, id uuid.UUID) error {
+	return s.destructiveUsageOrder(ctx, id, destructive.WaiveOrder)
+}
+
+// MarkUsageOrderUncollectible stops collection while retaining the debt. A
+// later reopened order has a new admitted revision, not the old allowance.
+func (s *MoneyService) MarkUsageOrderUncollectible(ctx context.Context, id uuid.UUID) error {
+	return s.destructiveUsageOrder(ctx, id, destructive.MarkUncollectible)
+}
+
+func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, kind destructive.Kind) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+	observed, err := s.db.Gen(ctx).GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: id})
+	if err != nil {
+		return err
+	}
+	if observed.Origin != string(billing.OrderOriginUsage) {
+		return ErrUsageActionNotAllowed
+	}
+	final := string(billing.OrderVoid)
+	if kind == destructive.MarkUncollectible {
+		final = string(billing.OrderUncollectible)
+	}
+	if observed.Status == final {
+		return nil
+	}
+	if observed.Status != string(billing.OrderOpen) && !(kind == destructive.WaiveOrder && observed.Status == string(billing.OrderUncollectible)) {
+		return ErrUsageActionNotAllowed
+	}
+	if kind == destructive.MarkUncollectible && usage.Due(observed) <= 0 {
+		return ErrUsageActionNotAllowed
+	}
+	command, err := usageOrderDestructiveCommand(ctx, kind, observed)
+	if err != nil {
+		return err
+	}
+	return destructive.RunLocal(ctx, s.db, s.destructiveAdmissions, command, func(ctx context.Context, _ pgx.Tx, txDB *db.DB) (bool, error) {
+		q := txDB.Gen(ctx)
 		order, err := lockUsageOrder(ctx, q, mid.UUID(), id)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if order.Status == string(billing.OrderVoid) {
-			return nil
+		if order.Status == final {
+			return false, nil
+		}
+		if order.Total != observed.Total || usage.Due(order) != usage.Due(observed) || order.Status != observed.Status {
+			return false, ErrUsageActionNotAllowed
+		}
+		if (order.AttemptID == nil) != (observed.AttemptID == nil) || order.AttemptID != nil && *order.AttemptID != *observed.AttemptID {
+			return false, ErrUsageActionNotAllowed
+		}
+		if kind == destructive.MarkUncollectible {
+			changed, err := usage.MarkUncollectible(ctx, q, order, s.now())
+			if err == nil && !changed {
+				err = ErrUsageActionNotAllowed
+			}
+			return changed, err
 		}
 		due := usage.Due(order)
-		voided, err := usage.VoidOrder(ctx, q, order, s.now())
+		changed, err := usage.VoidOrder(ctx, q, order, s.now())
 		if err != nil {
-			return err
+			return false, err
 		}
-		if !voided {
-			return ErrUsageActionNotAllowed
+		if !changed {
+			return false, ErrUsageActionNotAllowed
 		}
 		if due > 0 {
 			_, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
 				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id)
 		}
-		return err
-	})
-}
-
-// MarkUsageOrderUncollectible writes an open usage order off; the debt
-// stands, and collecting the order again reopens it.
-func (s *MoneyService) MarkUsageOrderUncollectible(ctx context.Context, id uuid.UUID) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		order, err := lockUsageOrder(ctx, q, mid.UUID(), id)
-		if err != nil {
-			return err
-		}
-		if order.Status == string(billing.OrderUncollectible) {
-			return nil
-		}
-		marked, err := usage.MarkUncollectible(ctx, q, order, s.now())
-		if err == nil && !marked {
-			err = ErrUsageActionNotAllowed
-		}
-		return err
+		return true, err
 	})
 }
 
@@ -419,4 +443,18 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		return nil, false, err
 	}
 	return payment, created, nil
+}
+
+// A collection is the only transition that reopens an uncollectible order.
+// Its immutable attempt ID distinguishes that new episode even with a frozen
+// clock; incidental updates must never stand in for operation identity.
+func usageOrderDestructiveCommand(ctx context.Context, kind destructive.Kind, order gen.BillingOrder) (destructive.Command, error) {
+	revision := "initial"
+	if order.AttemptID != nil {
+		revision = order.AttemptID.String()
+	}
+	return destructive.CommandFromContext(ctx, kind, order.ID.String(), string(kind)+":"+order.ID.String()+":"+revision, struct {
+		Revision, Status string
+		Total, Due       int64
+	}{revision, order.Status, order.Total, usage.Due(order)})
 }

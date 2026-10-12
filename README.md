@@ -1976,7 +1976,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
 - [Admin console](docs/billing-admin.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
-- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md).
+- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md), [balance notices](docs/balance-notices.md).
 
 **Operate the deployment** — for whoever keeps it running:
 
@@ -1998,3 +1998,8 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 ## License
 
 OpenRails is under the Functional Source License, Version 1.1, ALv2 Future License ([LICENSE](LICENSE)). The browser SDK `@openrails/billing-ui` ([`sdk/billing-ui`](sdk/billing-ui)) is MIT ([sdk/billing-ui/LICENSE](sdk/billing-ui/LICENSE)), so you can ship it in your own frontend under any license.
+
+
+For destructive-operation limits, incident review and explicit operator clearance,
+see [destructive-action controls](docs/destructive-actions.md). The incident audit
+is separate from the Redis/process request-abuse state.

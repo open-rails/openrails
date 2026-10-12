@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 
@@ -113,21 +115,21 @@ func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, inte
 func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
-		return Parked(err.Error())
+		return parkedBeforeEffect(err.Error())
 	}
 	pm, err := h.loadPaymentMethod(ctx, intent, p)
 	if err != nil {
 		return Retryable("load payment method: " + err.Error())
 	}
 	if h.Rails == nil {
-		return Parked("rail client resolver not wired")
+		return parkedBeforeEffect("rail client resolver not wired")
 	}
 	client, err := h.Rails.ResolveClientForPaymentMethod(ctx, pm)
 	if err != nil {
-		return Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
+		return parkedBeforeEffect(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
 	if client.ReadOnly {
-		return Parked("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
 	}
 
 	vaultID := strings.TrimSpace(pm.RailCustomerRef)
@@ -140,7 +142,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	if shared && strings.TrimSpace(pm.RailMethodRef) == "" {
 		// Cannot identify which billing entry is this card: refuse rather than
 		// destroy its siblings in the shared vault.
-		return Parked(fmt.Sprintf("vault %s is shared by other stored payment methods and this row carries no billing id to scope the delete", vaultID))
+		return parkedBeforeEffect(fmt.Sprintf("vault %s is shared by other stored payment methods and this row carries no billing id to scope the delete", vaultID))
 	}
 
 	// Verify-then-execute: absent at the provider IS success.
@@ -158,7 +160,11 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	// Local aliases alone cannot authorize erasing provider-only addresses.
 	// NMI's whole-customer DELETE removes every billing/shipping entry.
 	if !shared && (len(customer.Billing) != 1 || pm.RailMethodRef == "" || customer.Billing[0].ID != pm.RailMethodRef) {
-		return Parked("native vault contains unqualified billing entries; whole-vault deletion refused")
+		return parkedBeforeEffect("native vault contains unqualified billing entries; whole-vault deletion refused")
+	}
+	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
+	if err != nil {
+		return parkedBeforeEffect(err.Error())
 	}
 	if shared {
 		err = client.DeleteCustomerBillingEntry(ctx, vaultID, pm.RailMethodRef)
@@ -168,7 +174,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	if err != nil {
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
-			return Parked("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
 		case errors.Is(err, nmi.ErrV5NotFound):
 			// Already gone (raced delete): absent is success.
 			return h.complete(ctx, intent, p, map[string]any{"already_absent": true, "vault_id": vaultID})
@@ -288,6 +294,11 @@ func billingEntryPresent(customer *nmi.V5Customer, billingID string) bool {
 // A failed ledger write rolls back removal, so recovery can still resolve the
 // canonical method and verify its accepted native-vault target.
 func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.BillingProviderIntent, p NMIPaymentMethodDeletePayload, evidence map[string]any) Outcome {
+	var startErr error
+	ctx, startErr = startLocalCompletion(ctx, in)
+	if startErr != nil {
+		return parkedBeforeEffect(startErr.Error())
+	}
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	customer, err := uuid.Parse(p.UserID)
@@ -349,7 +360,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if n != 1 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		return nil
+		return finishIntentActionTx(ctx, tx, in, destructive.OutcomeSucceeded)
 	})
 	if err != nil {
 		return Ambiguous("native deletion confirmed; atomic local completion pending: " + err.Error())
@@ -367,6 +378,14 @@ type PaymentMethodDeleteThrough struct {
 func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (paymentmethods.PaymentMethodDeleteOutcome, error) {
 	if t == nil || t.Runner == nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("vault delete intent runner not wired")
+	}
+	if pm == nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, paymentmethods.ErrPaymentMethodDeleteUnsafe
+	}
+	var err error
+	ctx, err = t.admitStaffDeletion(ctx, pm)
+	if err != nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
 	if pm != nil && pm.Custodian == models.CustodianHyperSwitch {
 		h, ok := t.Runner.Registry.Lookup(TypeHyperSwitchMethodDelete).(*HyperSwitchMethodDeleteHandler)
@@ -422,4 +441,41 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		out.Terminal = true
 	}
 	return out, nil
+}
+
+func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm *models.PaymentMethod) (context.Context, error) {
+	if customer, ok := billingauth.IdentityFromContext(ctx); ok && customer.Subject == pm.CustomerID.String() {
+		return ctx, nil
+	}
+	if _, err := destructive.ActorFromContext(ctx); err != nil {
+		return ctx, err
+	}
+	if t.Runner.Admissions == nil {
+		return ctx, errors.New("staff payment method admission is not wired")
+	}
+	store, ok := t.Runner.Store.(*Store)
+	if !ok {
+		return ctx, errors.New("payment method admission store is unavailable")
+	}
+	key := NMIPaymentMethodDeleteIdempotencyKey(pm.ID)
+	if pm.Custodian == models.CustodianHyperSwitch {
+		key = TypeHyperSwitchMethodDelete + ":" + pm.ID.String()
+	}
+	// The canonical admission below validates the old row's frozen ownership.
+	// Retrying an existing deletion resumes that command without spending again.
+	if _, err := store.GetByIdempotencyKey(ctx, key); err == nil {
+		return ctx, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return ctx, err
+	}
+	command, err := destructive.CommandFromContext(ctx, destructive.DeletePaymentMethod, pm.ID.String(), "method-delete:"+pm.ID.String(), struct {
+		Customer, PSP          uuid.UUID
+		Custodian              *uuid.UUID
+		CustomerRef, MethodRef string
+	}{pm.CustomerID, pm.HoldingPSP(), pm.CustodianID, pm.RailCustomerRef, pm.RailMethodRef})
+	if err != nil {
+		return ctx, err
+	}
+	ctx, _, err = destructive.AdmitCommand(ctx, t.Runner.Admissions, command)
+	return ctx, err
 }

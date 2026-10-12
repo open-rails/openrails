@@ -40,13 +40,22 @@ type chargeWorld struct {
 	db     *db.DB
 }
 
-func newChargeWorld(t *testing.T) *chargeWorld {
+// newChargeWorld boots a merchant with no low-balance line unless notices
+// gives one: a running charge's tests ask for theirs.
+func newChargeWorld(t *testing.T, notices ...billing.BalanceNoticeSettings) *chargeWorld {
 	t.Helper()
 	f := newFixture(t)
 	// Mid-day, so no test crosses 00:00 UTC unless it means to.
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(24 * time.Hour).Add(36 * time.Hour))
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"charges-" + uuid.NewString()[:8]: {DisplayName: "Charges"}}
+	off := 0
+	lines := billing.BalanceNoticeSettings{RunwayHours: &off}
+	if len(notices) > 0 {
+		lines = notices[0]
+	}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"charges-" + uuid.NewString()[:8]: {
+		DisplayName: "Charges", Settings: billing.MerchantSettings{BalanceNotices: &lines},
+	}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock})
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
@@ -55,12 +64,20 @@ func newChargeWorld(t *testing.T) *chargeWorld {
 
 func (w *chargeWorld) now() time.Time { return w.clock.Now().UTC() }
 
-// funded is a new customer holding amount of USD credit that never lapses.
+// lowAmount is a merchant's USD amount line and no runway line.
+func lowAmount(amount int64) billing.BalanceNoticeSettings {
+	off := 0
+	return billing.BalanceNoticeSettings{RunwayHours: &off, LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: amount}}}
+}
+
+// funded is a new customer holding amount of USD credit that never lapses,
+// its watch looked at once: the funding is not left due.
 func (w *chargeWorld) funded(amount int64) billing.CustomerID {
 	w.t.Helper()
 	customer := billing.CustomerID(uuid.New())
 	if amount > 0 {
 		w.fund(customer, amount, nil)
+		w.watch()
 	}
 	return customer
 }
@@ -125,7 +142,8 @@ func (w *chargeWorld) expireCredits() {
 // engine's own worker does.
 func (w *chargeWorld) watch() {
 	w.t.Helper()
-	worker := riverjobs.BalanceWatchWorker{DB: w.db, Money: engine.Graph(w.client).Runtime.MoneyService}
+	rt := engine.Graph(w.client).Runtime
+	worker := riverjobs.BalanceWatchWorker{DB: rt.DB, Money: rt.MoneyService}
 	require.NoError(w.t, worker.Work(w.t.Context(), &river.Job[riverjobs.BalanceWatchArgs]{}))
 }
 
@@ -699,6 +717,8 @@ func TestStartBelowMinimumIsRefused(t *testing.T) {
 		return n
 	}
 
+	before := rows()
+	require.Equal(t, 1, before, "the funded balance is watched")
 	_, err := start("min-over", 1_000_001, 0)
 	require.ErrorIs(t, err, billing.ErrInsufficientCredits)
 	var se *billing.StatusError
@@ -706,13 +726,13 @@ func TestStartBelowMinimumIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusPaymentRequired, se.Status)
 	_, err = start("min-over-overdraft", 3_000_001, 2_000_000)
 	require.ErrorIs(t, err, billing.ErrInsufficientCredits, "the overdraft reaches 2 USD below zero, no further")
-	require.Zero(t, rows(), "a refusal writes nothing")
+	require.Equal(t, before, rows(), "a refusal writes nothing")
 	_, err = w.client.GetRunningCharge(w.ctx, "min-over")
 	require.ErrorIs(t, err, billing.ErrNotFound)
 
 	exact, err := start("min-exact", 1_000_000, 0)
 	require.NoError(t, err)
-	require.Equal(t, 2, rows(), "the charge and its watch")
+	require.Equal(t, before+1, rows(), "the charge")
 	w.clock.Advance(400 * time.Second)
 	_, err = start("min-second", 600_001, 0)
 	require.ErrorIs(t, err, billing.ErrInsufficientCredits, "what the first charge accrued is taken")
@@ -759,7 +779,7 @@ func TestStartBelowMinimumIsRefused(t *testing.T) {
 func TestRunningChargeWritesNothingWhileItRuns(t *testing.T) {
 	w := newChargeWorld(t)
 	customer := w.funded(100_000_000)
-	charge := w.start(customer, 3_600_000, func(p *billing.StartRunningChargeParams) { p.LowBalanceAmount = 1_000_000 })
+	charge := w.start(customer, 3_600_000)
 	other := w.start(w.funded(50_000_000), 1_800_000)
 	before := w.tables()
 
@@ -791,10 +811,10 @@ func TestRunningChargeWritesNothingWhileItRuns(t *testing.T) {
 // A deposit moves the run-out later at once. The watch is marked due, and the
 // next look re-arms the notices without sending one.
 func TestDepositMovesRunOut(t *testing.T) {
-	w := newChargeWorld(t)
+	w := newChargeWorld(t, lowAmount(500_000))
 	customer := w.funded(1_000_000)
 	t0 := w.now()
-	w.start(customer, 3_600_000, func(p *billing.StartRunningChargeParams) { p.LowBalanceAmount = 500_000 })
+	w.start(customer, 3_600_000)
 	require.True(t, w.balance(customer).DepletesAt.Equal(t0.Add(1000*time.Second)))
 	watch := w.watched(customer)
 	require.True(t, watch.DepletesAt.Equal(t0.Add(1000*time.Second)))
@@ -885,7 +905,7 @@ func TestRunOutFiresOnceAndListsBothCharges(t *testing.T) {
 	w.watch()
 	events := w.events(billing.HostEventBalanceDepleted, customer)
 	require.Equal(t, []billing.BalanceHostEvent{{
-		CustomerID: customer, Currency: "USD", AvailableAmount: 0, OwedAmount: 0, AccrualRatePerHour: 7_200_000, AsOf: at, DepletesAt: at,
+		CustomerID: customer, Currency: "USD", AvailableAmount: 0, OwedAmount: 0, AccrualRatePerHour: 7_200_000, AsOf: at, DepletesAt: &at, RunwayEndsAt: &at,
 	}}, events)
 	require.Equal(t, both, w.depleted(customer))
 	require.Zero(t, w.balance(customer).AvailableAmount, "the host confirms with the balance")
@@ -909,12 +929,12 @@ func TestRunOutFiresOnceAndListsBothCharges(t *testing.T) {
 	require.Len(t, w.events(billing.HostEventBalanceDepleted, customer), 2, "the next crossing fires again")
 	require.Equal(t, both, w.depleted(customer))
 
-	// Stopping what the charges paid for ends the watch.
+	// Stopping what the charges paid for keeps a prepaid balance watched.
 	w.stop(first.Reference)
 	require.Equal(t, []string{second.Reference}, w.depleted(customer))
 	w.stop(second.Reference)
 	require.Empty(t, w.depleted(customer))
-	require.Nil(t, w.watched(customer))
+	require.NotNil(t, w.watched(customer).DepletedAt, "until a funding re-arms it")
 	w.watch()
 	require.Len(t, w.events(billing.HostEventBalanceDepleted, customer), 2)
 
@@ -937,15 +957,14 @@ func TestRunOutFiresOnceAndListsBothCharges(t *testing.T) {
 }
 
 // A balance under its low line sends balance.low once per crossing: not
-// before the line, not again while it stays under, and again after it has
-// been back above.
+// before the line, not again while it stays under, and again after a funding
+// has put it back above.
 func TestLowBalanceFiresOncePerCrossing(t *testing.T) {
-	w := newChargeWorld(t)
+	w := newChargeWorld(t, lowAmount(1_000_000))
 	customer := w.funded(2_000_000)
 	t0 := w.now()
-	// Among a customer's charges the largest low line applies.
-	w.start(customer, 1_800_000, func(p *billing.StartRunningChargeParams) { p.LowBalanceAmount = 1_000_000 })
-	w.start(customer, 1_800_000, func(p *billing.StartRunningChargeParams) { p.LowBalanceAmount = 250_000 })
+	w.start(customer, 1_800_000)
+	w.start(customer, 1_800_000)
 	watch := w.watched(customer)
 	require.True(t, watch.DepletesAt.Equal(t0.Add(2000*time.Second)))
 	require.True(t, watch.NextCheckAt.After(t0.Add(1000*time.Second)) && watch.NextCheckAt.Before(t0.Add(1001*time.Second)),
@@ -958,8 +977,10 @@ func TestLowBalanceFiresOncePerCrossing(t *testing.T) {
 	w.clock.Advance(time.Second)
 	at := w.now()
 	w.watch()
+	runsOut := t0.Add(2000 * time.Second)
 	require.Equal(t, []billing.BalanceHostEvent{{
-		CustomerID: customer, Currency: "USD", AvailableAmount: 999_000, OwedAmount: 0, AccrualRatePerHour: 3_600_000, AsOf: at, DepletesAt: t0.Add(2000 * time.Second),
+		CustomerID: customer, Currency: "USD", AvailableAmount: 999_000, OwedAmount: 0, AccrualRatePerHour: 3_600_000,
+		LowBalanceAmount: 1_000_000, AsOf: at, DepletesAt: &runsOut, RunwayEndsAt: &runsOut,
 	}}, w.events(billing.HostEventBalanceLow, customer))
 	w.clock.Advance(100 * time.Second)
 	w.watch()
@@ -1034,7 +1055,9 @@ func TestDailyCheckpointPostsThroughMidnight(t *testing.T) {
 	}
 	require.EqualValues(t, -180_004_861, sum, "the postings sum to the charge")
 	require.EqualValues(t, funded-180_004_861, w.balance(customer).BalanceAmount)
-	require.Nil(t, w.watched(customer))
+	require.False(t, w.watched(customer).NextCheckAt.After(w.now()), "the stop's posting leaves the watch due")
+	w.watch()
+	require.Nil(t, w.watched(customer).NextCheckAt, "a prepaid balance stays watched, with nothing scheduled")
 
 	t.Run("a start in the past is due the day it already crossed", func(t *testing.T) {
 		late := w.funded(funded)

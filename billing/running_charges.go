@@ -60,20 +60,17 @@ const MaxRunningChargeRatePerHour = 1_000_000_000_000
 // gate for this call, not a term of the charge.
 //
 // OverdraftAmount is how far below zero the charge lets a prepaid customer's
-// capacity reach before the customer counts as depleted; LowBalanceAmount is
-// the balance under which it counts as low (0 is no line). Among a customer's
-// running charges the smallest overdraft and the largest low line apply.
-// Resource is attribution only.
+// capacity reach before the customer counts as depleted; among a customer's
+// running charges the smallest applies. Resource is attribution only.
 type StartRunningChargeParams struct {
-	Reference        string     `json:"reference"`
-	CustomerID       CustomerID `json:"customer_id"`
-	Currency         string     `json:"currency"`
-	RatePerHour      int64      `json:"rate_per_hour,string"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	MinimumAmount    int64      `json:"minimum_amount,omitempty,string"`
-	OverdraftAmount  int64      `json:"overdraft_amount,omitempty,string"`
-	LowBalanceAmount int64      `json:"low_balance_amount,omitempty,string"`
-	Resource         string     `json:"resource,omitempty"`
+	Reference       string     `json:"reference"`
+	CustomerID      CustomerID `json:"customer_id"`
+	Currency        string     `json:"currency"`
+	RatePerHour     int64      `json:"rate_per_hour,string"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	MinimumAmount   int64      `json:"minimum_amount,omitempty,string"`
+	OverdraftAmount int64      `json:"overdraft_amount,omitempty,string"`
+	Resource        string     `json:"resource,omitempty"`
 }
 
 // StopRunningChargeParams stops a running charge at StoppedAt, the host's
@@ -90,22 +87,21 @@ type StopRunningChargeParams struct {
 // when it is final. PostedAmount is the part the ledger holds; the rest is
 // held against the customer's balance.
 type RunningCharge struct {
-	ID               RunningChargeID    `json:"id"`
-	Reference        string             `json:"reference"`
-	CustomerID       CustomerID         `json:"customer_id"`
-	Currency         string             `json:"currency"`
-	RatePerHour      int64              `json:"rate_per_hour,string"`
-	State            RunningChargeState `json:"state"`
-	StartedAt        time.Time          `json:"started_at"`
-	StoppedAt        *time.Time         `json:"stopped_at"`
-	ChargedAmount    int64              `json:"charged_amount,string"`
-	PostedAmount     int64              `json:"posted_amount,string"`
-	AsOf             time.Time          `json:"as_of"`
-	OverdraftAmount  int64              `json:"overdraft_amount,string"`
-	LowBalanceAmount int64              `json:"low_balance_amount,string"`
-	Resource         *string            `json:"resource"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
+	ID              RunningChargeID    `json:"id"`
+	Reference       string             `json:"reference"`
+	CustomerID      CustomerID         `json:"customer_id"`
+	Currency        string             `json:"currency"`
+	RatePerHour     int64              `json:"rate_per_hour,string"`
+	State           RunningChargeState `json:"state"`
+	StartedAt       time.Time          `json:"started_at"`
+	StoppedAt       *time.Time         `json:"stopped_at"`
+	ChargedAmount   int64              `json:"charged_amount,string"`
+	PostedAmount    int64              `json:"posted_amount,string"`
+	AsOf            time.Time          `json:"as_of"`
+	OverdraftAmount int64              `json:"overdraft_amount,string"`
+	Resource        *string            `json:"resource"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
 // RunningChargeListParams pages the merchant's running charges, newest first:

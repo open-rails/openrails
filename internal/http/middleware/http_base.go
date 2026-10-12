@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // The net/http base middleware: security headers, body limits, CORS, recovery
@@ -216,9 +217,10 @@ func RecoverHTTP() HTTPMiddleware {
 	}
 }
 
-// RequestLogHTTP logs one line per request (method, path, status, latency);
-// skipPaths (health probes) are not logged.
-func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
+// RequestLogHTTP logs one line per request: method, path, status, latency and
+// ip, the client resolver names as the rate limiter does (nil: the socket
+// peer). skipPaths (health probes) are not logged.
+func RequestLogHTTP(resolver *iputil.TrustedProxies, skipPaths ...string) HTTPMiddleware {
 	skip := make(map[string]bool, len(skipPaths))
 	for _, p := range skipPaths {
 		skip[p] = true
@@ -237,7 +239,7 @@ func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 			log.WithFields(log.Fields{
 				"status":     sw.status(),
 				"latency":    time.Since(start).String(),
-				"ip":         r.RemoteAddr,
+				"ip":         resolver.ClientIP(r),
 				"request_id": requestID,
 			}).Info(r.Method + " " + r.URL.Path)
 		})
