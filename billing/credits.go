@@ -232,10 +232,10 @@ type MerchantProfile struct {
 	BillingURL string `json:"billing_url,omitempty"`
 }
 
-// MerchantCheckoutSettings are the merchant's hosted checkout settings.
-type MerchantCheckoutSettings struct {
+// MerchantPaymentPageSettings are the merchant's payment page settings.
+type MerchantPaymentPageSettings struct {
 	// EmbedOrigins are the origins that may frame the merchant's embedded
-	// checkouts: exact https origins (http on loopback), at most 10, no
+	// pay URLs: exact https origins (http on loopback), at most 10, no
 	// wildcards.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
 }
@@ -284,15 +284,15 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *string                `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int                   `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64                 `json:"arrears_delinquency_floor,omitempty,string"`
-	CheckoutRouting         *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
+	ProviderRefundAccess    *string           `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays        *int              `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64            `json:"arrears_delinquency_floor,omitempty,string"`
+	PSPRouting              *[]PSPRoutingRule `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
-	// Checkout is the hosted checkout's settings; a patch replaces it whole.
-	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
+	// PaymentPage is the payment page's settings; a patch replaces it whole.
+	PaymentPage *MerchantPaymentPageSettings `json:"payment_page,omitempty"`
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`

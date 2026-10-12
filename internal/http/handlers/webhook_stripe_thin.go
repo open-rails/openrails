@@ -196,7 +196,7 @@ func thinStripeResource(event stripeThinEnvelope, eventType string) (string, str
 	case eventType == "invoice_payment.paid":
 		kind, collection, prefix = "invoice_payment", "invoice_payments", "inpay_"
 	case strings.HasPrefix(eventType, "checkout.session."):
-		kind, collection, prefix = "checkout.session", "checkout/sessions", "cs_"
+		kind, collection, prefix = "checkout.session", "purchase/sessions", "cs_"
 	case strings.HasPrefix(eventType, "customer.subscription."):
 		kind, collection, prefix = "subscription", "subscriptions", "sub_"
 	case strings.HasPrefix(eventType, "refund."):

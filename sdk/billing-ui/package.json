@@ -1,7 +1,7 @@
 {
   "name": "@openrails/billing-ui",
   "version": "0.0.0",
-  "description": "Embeddable OpenRails checkout and account-billing UI: client, React hooks and styled components.",
+  "description": "Embeddable OpenRails purchase and account-billing UI: client, React hooks and styled components.",
   "type": "module",
   "license": "MIT",
   "repository": {

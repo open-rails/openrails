@@ -8,7 +8,7 @@
 SELECT q.mid AS merchant_id
 FROM (
     (SELECT DISTINCT cs.merchant_id AS mid
-       FROM billing.checkout_attempts cs
+       FROM billing.order_attempts cs
       WHERE (sqlc.narg(after)::uuid IS NULL OR cs.merchant_id > sqlc.narg(after)::uuid)
         AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
         AND cs.deleted_at IS NULL
@@ -69,14 +69,14 @@ FROM (
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT ca.merchant_id AS mid
-       FROM billing.checkout_attempts ca
+       FROM billing.order_attempts ca
       WHERE (sqlc.narg(after)::uuid IS NULL OR ca.merchant_id > sqlc.narg(after)::uuid)
         AND ca.status = 'expired' AND ca.deleted_at IS NULL
         AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
-        AND ca.expires_at < sqlc.arg(checkout_attempt_cutoff)::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+        AND ca.expires_at < sqlc.arg(order_attempt_cutoff)::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
@@ -203,19 +203,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- reference or receipt names it. Its checkout session, if one still exists,
 -- goes with it. A soft-deleted attempt belongs to a destructive run that can
 -- still be undone, and is left to it.
--- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
-DELETE FROM billing.checkout_attempts
+-- name: DeleteAbandonedOrderAttemptsBefore :execrows
+DELETE FROM billing.order_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL
   AND id IN (
-    SELECT ca.id FROM billing.checkout_attempts ca
+    SELECT ca.id FROM billing.order_attempts ca
     WHERE ca.merchant_id = sqlc.arg(merchant_id)::uuid
       AND ca.status = 'expired' AND ca.deleted_at IS NULL
       AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < sqlc.arg(cutoff)::timestamptz
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
     ORDER BY ca.expires_at
     LIMIT sqlc.arg(row_limit)::int
 );

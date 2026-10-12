@@ -158,7 +158,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             server/web/console/pnpm-lock.yaml
-            web/checkout/pnpm-lock.yaml
+            web/pay/pnpm-lock.yaml
             sdk/billing-ui/pnpm-lock.yaml
       - run: bash scripts/check.sh console
       - run: pnpm --dir server/web/console exec playwright install --with-deps chromium

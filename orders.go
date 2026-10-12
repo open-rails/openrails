@@ -55,7 +55,7 @@ func (c *Client) PreviewOrder(ctx context.Context, params billing.PreviewOrderPa
 
 // CreateOrder creates a merchant order: an unpaid order for one customer,
 // which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's
-// OrderCheckout). It never charges. A retry with the same IdempotencyKey
+// OrderPayURL). It never charges. A retry with the same IdempotencyKey
 // answers the same order.
 func (c *Client) CreateOrder(ctx context.Context, params billing.CreateOrderParams, requestOptions ...RequestOption) (*billing.Order, error) {
 	if params.CustomerID.IsZero() {

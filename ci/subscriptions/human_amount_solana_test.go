@@ -49,7 +49,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 			chain.prices = map[string]string{tc.token: price.ID.String()}
 			chain.rail = w.options(price.ID)["solana"]
 			buyer := w.newCustomer()
-			transfer := chain.checkoutIn(buyer, tc.token)
+			transfer := chain.purchaseIn(buyer, tc.token)
 			require.Equal(t, uint64(tc.native), transfer.amount, "same-token price is already in atomic chain units")
 			require.Equal(t, tc.mint, transfer.mint)
 			signature := chain.pay(transfer, transfer.amount)

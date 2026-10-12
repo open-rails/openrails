@@ -42,7 +42,7 @@ type PruneResult struct {
 	SubscriptionsSkipped   int // excess but entangled with the grant ledger
 	Payments               int
 	PaymentsSkipped        int // excess but with protected dependents
-	CheckoutAttempts       int // dependents soft-deleted with their subscription
+	OrderAttempts          int // dependents soft-deleted with their subscription
 	ProductAccess          int
 	SubscriptionIDs        []uuid.UUID
 	SkippedSubscriptionIDs []uuid.UUID
@@ -97,7 +97,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //   - A subscription that fed the grant ledger is skipped (removing it would
 //     orphan an append-only grant; convergence revokes instead), as is a
 //     payment with protected dependents (grant, refund, entitlement grant,
-//     checkout attempt).
+//     order attempt).
 //
 // Dry-run writes nothing. Must run merchant-scoped.
 func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, provider Provider, binding PSPBinding, params PruneParams) (PruneResult, error) {
@@ -269,7 +269,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 		// all stamped with the run so the rollback restores them together.
 		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			tq := gen.New(tx)
-			cs, e := tq.PruneSoftDeleteCheckoutAttemptsBySubscription(ctx, gen.PruneSoftDeleteCheckoutAttemptsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
+			cs, e := tq.PruneSoftDeleteOrderAttemptsBySubscription(ctx, gen.PruneSoftDeleteOrderAttemptsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
 			if e != nil {
 				return e
 			}
@@ -280,7 +280,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 			if _, e := tq.PruneSoftDeleteSubscriptionByID(ctx, gen.PruneSoftDeleteSubscriptionByIDParams{MerchantID: mid, ID: subID, Now: now, RunID: runID}); e != nil {
 				return e
 			}
-			res.CheckoutAttempts += int(cs)
+			res.OrderAttempts += int(cs)
 			res.ProductAccess += int(ent)
 			return nil
 		}); err != nil {
@@ -303,10 +303,10 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 
 func affectedJSON(res PruneResult) []byte {
 	b, _ := json.Marshal(map[string]int{
-		"subscriptions":     res.Subscriptions,
-		"payments":          res.Payments,
-		"checkout_attempts": res.CheckoutAttempts,
-		"product_access":    res.ProductAccess,
+		"subscriptions":  res.Subscriptions,
+		"payments":       res.Payments,
+		"order_attempts": res.OrderAttempts,
+		"product_access": res.ProductAccess,
 	})
 	return b
 }
@@ -325,11 +325,11 @@ func finishRunFailed(ctx context.Context, q *gen.Queries, merchantID, runID uuid
 
 // RollbackResult tallies one reversal.
 type RollbackResult struct {
-	RunID            uuid.UUID
-	Subscriptions    int64
-	Payments         int64
-	CheckoutAttempts int64
-	ProductAccess    int64
+	RunID         uuid.UUID
+	Subscriptions int64
+	Payments      int64
+	OrderAttempts int64
+	ProductAccess int64
 }
 
 // RollbackDestructiveRun reverses one prune run by id: every row that run
@@ -380,8 +380,8 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 		if res.Payments, e = tq.RestorePaymentsByDestructiveRun(ctx, gen.RestorePaymentsByDestructiveRunParams{MerchantID: mid, RunID: runID}); e != nil {
 			return fmt.Errorf("restore payments: %w", e)
 		}
-		if res.CheckoutAttempts, e = tq.RestoreCheckoutAttemptsByDestructiveRun(ctx, gen.RestoreCheckoutAttemptsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
-			return fmt.Errorf("restore checkout attempts: %w", e)
+		if res.OrderAttempts, e = tq.RestoreOrderAttemptsByDestructiveRun(ctx, gen.RestoreOrderAttemptsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
+			return fmt.Errorf("restore order attempts: %w", e)
 		}
 		if res.ProductAccess, e = tq.RestoreAccessByDestructiveRun(ctx, gen.RestoreAccessByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
 			return fmt.Errorf("restore entitlements: %w", e)

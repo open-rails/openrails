@@ -116,7 +116,7 @@ type CreatePaymentMethodRequest struct {
 	Address2   string
 	Metadata   map[string]any
 	// AttemptTarget and AttemptOwner place the card's verification in its
-	// checkout (#1110): the price being bought, or attempts.CardSave.
+	// purchase (#1110): the price being bought, or attempts.CardSave.
 	AttemptTarget string
 	AttemptOwner  attempts.Owner
 
@@ -224,7 +224,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	// NMI sandbox accounts refuse any customer email that is not the account
 	// owner's own address (403 E_ACCESS_DENIED), which fails vault creation
 	// outright. The email is not needed to vault a card, so omit it in test
-	// mode rather than block every sandbox checkout.
+	// mode rather than block every sandbox purchase.
 	vaultEmail := req.Email
 	if s != nil && s.Config != nil && config.IsTestMode(s.Config) {
 		vaultEmail = ""
@@ -676,7 +676,7 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 }
 
 // CleanupPaymentMethodBestEffort is the DIRECT delete for reactive decline-cleanup
-// (checkout removing a vault it just created for a now-declined attempt).
+// (purchase removing a vault it just created for a now-declined attempt).
 // Deliberately NOT intent-routed (#674 tail): the vault is referenced nowhere,
 // a lost delete leaves only an inert orphan entry at NMI (no billing state can
 // act on it), and card-testing decline floods must not spam the intent ledger

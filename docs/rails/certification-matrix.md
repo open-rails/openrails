@@ -7,7 +7,7 @@ real PSP qualification.
 | Evidence | Scope | Required gate |
 |---|---|---|
 | E2E NMI | Provider-owned import and engine/provider subscription lifecycle | Required PR contract |
-| E2E Stripe | Hosted checkout, signed webhooks, and engine/provider subscription lifecycle | Required PR contract |
+| E2E Stripe | Payment page, signed webhooks, and engine/provider subscription lifecycle | Required PR contract |
 | Live NMI/Stripe/CCBill/Solana | Real provider or chain behavior | Explicit operator qualification outside merge CI |
 
 A sandbox or live provider result qualifies only the exact operation exercised.
@@ -41,7 +41,7 @@ declare something the rail will quietly drop. Those cells are called out below.
 
 ## What each rail does
 
-The rail registry declares these; checkout, catalog application and the workers
+The rail registry declares these; purchase, catalog application and the workers
 read them, and a request a rail cannot serve is refused, never dropped.
 
 | | NMI | Stripe | CCBill | Solana |

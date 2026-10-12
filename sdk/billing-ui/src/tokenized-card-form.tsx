@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   appearanceStyle,
   appearanceTheme,
-  type CheckoutAppearance,
+  type BillingAppearance,
 } from "./appearance"
 import { CardBillingFields } from "./components/billing-fields"
 import { CardFields } from "./components/card-fields"
@@ -39,12 +39,12 @@ export interface TokenizedCardFormProps {
   disabled?: boolean
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 
 // The host supplies consent and performs its authorized save-card operation.
-// This component neither creates a checkout nor implies payment success.
+// This component neither creates a purchase nor implies payment success.
 export function TokenizedCardForm({
   tokenizationKey,
   tokenizationURL,

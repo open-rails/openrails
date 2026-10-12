@@ -131,7 +131,7 @@ func TestThinStripeEventHydratesToSnapshot(t *testing.T) {
 		{"refund.created", "refund", "re_test", "refunds"},
 		{"charge.dispute.created", "dispute", "dp_test", "disputes"},
 		{"customer.subscription.updated", "subscription", "sub_test", "subscriptions"},
-		{"checkout.session.completed", "checkout.session", "cs_test", "checkout/sessions"},
+		{"checkout.session.completed", "checkout.session", "cs_test", "purchase/sessions"},
 		{"payment_method.detached", "payment_method", "pm_test", "payment_methods"},
 	} {
 		t.Run(tc.eventType, func(t *testing.T) {

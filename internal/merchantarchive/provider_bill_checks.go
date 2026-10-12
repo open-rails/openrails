@@ -9,7 +9,7 @@ import (
 
 // Provider identity is financial history. Schema foreign keys retain the rows;
 // these checks also bind their frozen JSON and payer to the same merchant book.
-// An accepted provider alias can describe its line differently from checkout;
+// An accepted provider alias can describe its line differently from purchase;
 // match the financial fields admission compares, while preserving both texts
 // and the provider's separately accepted service-period evidence.
 var providerBillReferenceChecks = []rowCheck{

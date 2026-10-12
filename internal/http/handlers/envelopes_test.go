@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -205,7 +205,7 @@ func TestDecodeErrorIsCodedAndNamesTheField(t *testing.T) {
 	}
 }
 
-// Card and checkout refusals render one envelope on every payment surface:
+// Card and purchase refusals render one envelope on every payment surface:
 // a customer-safe message, a stable decline_reason and never processor text.
 func TestPaymentRefusalEnvelope(t *testing.T) {
 	const raw = "raw processor detail that must stay server-side"
@@ -224,7 +224,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		{&paymentmethods.PaymentMethodError{LocalizationID: "fraudulent_card", Message: raw}, 402, "card_error", "card_declined", declined, "fraudulent", "fraudulent_card"},
 		{&paymentmethods.PaymentMethodError{LocalizationID: "unmapped_gateway_response", Message: raw}, 402, "card_error", "card_declined", declined, "unknown", "unmapped_gateway_response"},
 		{&paymentmethods.PaymentMethodError{LocalizationID: "300", Message: raw}, 502, "api_error", "payment_provider_rejected", "The payment processor could not complete this payment. Please try again later.", "gateway_rejected", "300"},
-		{fmt.Errorf("%w: %s", checkout.ErrPaymentMethodStale, raw), 402, "card_error", "payment_method_stale", "This saved payment method can no longer be used. Add the card again.", nil, nil},
+		{fmt.Errorf("%w: %s", payment.ErrPaymentMethodStale, raw), 402, "card_error", "payment_method_stale", "This saved payment method can no longer be used. Add the card again.", nil, nil},
 	} {
 		for name, write := range surfaces {
 			got := render(t, func(r *httprequest.Request) { write(r, tc.err) })
@@ -235,12 +235,12 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 	}
 
 	tierStatus := map[error]int{
-		fmt.Errorf("upgrade: %w", checkout.ErrCheckoutProcessing): 409,
-		checkout.ErrTierChangePending:                             409,
-		checkout.ErrTierChangeSameProduct:                         409,
-		checkout.ErrTierChangeNoSubscription:                      404,
-		checkout.ErrTierChangeDifferentGroup:                      400,
-		subscriptions.ErrPriceCurrencyMismatch:                    400,
+		fmt.Errorf("upgrade: %w", payment.ErrPurchaseProcessing): 409,
+		payment.ErrTierChangePending:                             409,
+		payment.ErrTierChangeSameProduct:                         409,
+		payment.ErrTierChangeNoSubscription:                      404,
+		payment.ErrTierChangeDifferentGroup:                      400,
+		subscriptions.ErrPriceCurrencyMismatch:                   400,
 	}
 	for err, status := range tierStatus {
 		require.Equal(t, status, render(t, func(r *httprequest.Request) { writeChangeTierError(r, err) }).Status, "%v", err)
@@ -249,14 +249,14 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 
 func TestTierChangeOutcomeEnvelope(t *testing.T) {
 	got := render(t, func(r *httprequest.Request) {
-		writeChangeTierError(r, &checkout.TierChangeInFlightError{})
+		writeChangeTierError(r, &payment.TierChangeInFlightError{})
 	})
 	require.Equal(t, []any{409, billing.CodeSubscriptionChangeInFlight}, []any{got.Status, got.Code})
-	got = render(t, func(r *httprequest.Request) { writeChangeTierError(r, checkout.ErrNoChangeToConfirm) })
+	got = render(t, func(r *httprequest.Request) { writeChangeTierError(r, payment.ErrNoChangeToConfirm) })
 	require.Equal(t, []any{409, billing.CodeResourceConflict}, []any{got.Status, got.Code})
 
 	got = render(t, func(r *httprequest.Request) {
-		writeChangeTierError(r, &checkout.TierChangeDeclinedError{Rail: "stripe", FailureCode: "insufficient_funds", Message: "raw provider text"})
+		writeChangeTierError(r, &payment.TierChangeDeclinedError{Rail: "stripe", FailureCode: "insufficient_funds", Message: "raw provider text"})
 	})
 	require.Equal(t, []any{402, billing.CodeCardDeclined, "card_error", "insufficient_funds"}, []any{got.Status, got.Code, got.Type, got.Metadata["decline_reason"]})
 	require.NotContains(t, got.Raw, "raw provider text")
@@ -270,16 +270,16 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 		billing.CodeCustomerActionRequired:              403,
 	} {
 		got = render(t, func(r *httprequest.Request) {
-			writeChangeTierError(r, &checkout.TierChangeError{Code: code, Message: "x"})
+			writeChangeTierError(r, &payment.TierChangeError{Code: code, Message: "x"})
 		})
 		require.Equal(t, []any{status, code}, []any{got.Status, got.Code})
 	}
 
 	for status, want := range map[string]int{"processing": http.StatusAccepted, "succeeded": http.StatusOK} {
 		r, rec := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{})
-		writeTierChangeResponse(r, &checkout.TierChangeResponse{Status: status})
+		writeTierChangeResponse(r, &payment.TierChangeResponse{Status: status})
 		require.Equal(t, want, rec.Code)
-		var body checkout.TierChangeResponse
+		var body payment.TierChangeResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		require.Equal(t, status, body.Status)
 	}

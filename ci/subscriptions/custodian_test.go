@@ -190,8 +190,8 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
 	// The merchant sells cards through its custodian's PSP.
-	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"nmi-bt"}}}
-	w.settings = billing.MerchantSettings{CheckoutRouting: &routing}
+	routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi-bt"}}}
+	w.settings = billing.MerchantSettings{PSPRouting: &routing}
 	w.start()
 	// The gateway takes the card number through the proxy; the mock files
 	// those sales under one keyed-card record.
@@ -201,14 +201,14 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 			InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id")}).TransactionID
 	}
 	rt := engine.Graph(w.rt).Runtime
-	rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
+	rt.PurchaseService.CustodianSaleService.BTBaseURLOverride = btURL
 
 	// The page's Basis Theory Elements collect the card; its token intent
 	// pays the order on the custodian's PSP. The order names the card it
 	// kept and the proxy presented.
 	buy := func(c *customer, price billing.PriceID, number string) (card, token string) {
 		t.Helper()
-		paid := c.mustCheckout(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
+		paid := c.mustPurchase(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
 		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT COALESCE(pm.rail_method_ref, ''), COALESCE(p.token_type, '') FROM billing.orders o
 			JOIN billing.payments p ON p.merchant_id = o.merchant_id AND p.id = o.payment_id
 			LEFT JOIN billing.payment_methods pm ON pm.merchant_id = o.merchant_id AND pm.id = o.payment_method_id WHERE o.id = $1`), paid.Order.ID.UUID()).Scan(&card, &token))

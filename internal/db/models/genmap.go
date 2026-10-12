@@ -304,13 +304,13 @@ func PaymentMethodsFromGen(rows []gen.BillingPaymentMethod) ([]*PaymentMethod, e
 	return out, nil
 }
 
-func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, error) {
-	m := &CheckoutAttempt{
+func OrderAttemptFromGen(c gen.BillingOrderAttempt) (*OrderAttempt, error) {
+	m := &OrderAttempt{
 		ID:             c.ID,
 		CustomerID:     c.CustomerID,
 		OrderID:        c.OrderID,
 		Rail:           Rail(c.Rail),
-		Status:         CheckoutAttemptStatus(c.Status),
+		Status:         OrderAttemptStatus(c.Status),
 		Amount:         c.Amount,
 		Currency:       c.Currency,
 		ExpiresAt:      c.ExpiresAt,
@@ -322,21 +322,21 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
-	if err := FromJSONB(c.Metadata, &m.Metadata, "checkout_attempts.metadata"); err != nil {
+	if err := FromJSONB(c.Metadata, &m.Metadata, "order_attempts.metadata"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(c.RailFields, &m.RailFields, "checkout_attempts.rail_fields"); err != nil {
+	if err := FromJSONB(c.RailFields, &m.RailFields, "order_attempts.rail_fields"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(c.RailState, &m.RailState, "checkout_attempts.rail_state"); err != nil {
+	if err := FromJSONB(c.RailState, &m.RailState, "order_attempts.rail_state"); err != nil {
 		return nil, err
 	}
 	if err := m.ValidateTerms(); err != nil {
 		return nil, err
 	}
 	if len(c.RoutingReason) > 0 {
-		var reason CheckoutRoutingReason
-		if err := FromJSONB(c.RoutingReason, &reason, "checkout_attempts.routing_reason"); err != nil {
+		var reason PSPRoutingReason
+		if err := FromJSONB(c.RoutingReason, &reason, "order_attempts.routing_reason"); err != nil {
 			return nil, err
 		}
 		m.RoutingReason = &reason

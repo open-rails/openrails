@@ -88,7 +88,7 @@ const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 const CodeRevisionMismatch = "revision_mismatch"
 
 // CodeProductInUse: a record refers to the product or one of its prices (a
-// purchase, subscription, grant, access, checkout, migration, provider write,
+// purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
 const CodeProductInUse = "product_in_use"
 
@@ -229,14 +229,14 @@ var errorCodes = []ErrorCode{
 	{"payment_not_refundable", 400, invalid, "The payment is not a completed rail charge, or the amount exceeds what remains refundable."},
 	{"refund_failed", 502, fault, "The provider refused the refund."},
 
-	// Checkout.
-	{"checkout_not_found", 404, invalid, "The checkout URL is unknown or no longer valid."},
-	{"checkout_expired", 410, invalid, "The checkout URL expired; the merchant creates a new order."},
-	{"hosted_checkout_unavailable", 400, invalid, "This deployment serves no hosted checkout, or the order cannot take one."},
-	{"checkout_attempts_exhausted", 409, invalid, "The checkout took its most card attempts; the merchant creates a new order."},
-	{"checkout_embed_origins_required", 400, invalid, "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
-	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
-	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},
+	// Pay URLs.
+	{"pay_url_not_found", 404, invalid, "The pay URL is unknown or no longer valid."},
+	{"pay_url_expired", 410, invalid, "The pay URL expired; the merchant creates a new order."},
+	{"pay_url_unavailable", 400, invalid, "This deployment serves no payment origin, or the order cannot take a pay URL."},
+	{"pay_url_attempts_exhausted", 409, invalid, "The pay URL took its most card attempts; the merchant creates a new order."},
+	{"embed_origins_required", 400, invalid, "An embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins."},
+	{"order_attempt_closed", 409, invalid, "The order attempt already completed or was canceled."},
+	{"order_attempt_expired", 410, invalid, "The order attempt expired before it was paid."},
 
 	// Orders.
 	{CodeAlreadyOwned, 409, invalid, "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."},
@@ -347,7 +347,7 @@ var errorCodes = []ErrorCode{
 	{"merchant_config_read_only", 409, invalid, "The merchant's configuration is read from a file; change the file."},
 	{"card_custody_reserved", 400, invalid, "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant."},
 	{"platform_vault_unavailable", 409, invalid, "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant."},
-	{"platform_vault_unreachable", 409, invalid, "A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant."},
+	{"platform_vault_unreachable", 409, invalid, "A card PSP routing offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant."},
 	{"webhook_invalid", 400, invalid, "The outbound webhook is invalid."},
 	{"webhook_account_mismatch", 400, invalid, "The webhook's account does not match its payload."},
 	{"metrics_query_invalid", 400, invalid, "The metrics query is invalid; metadata.errors lists why."},

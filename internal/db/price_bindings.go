@@ -26,7 +26,7 @@ func (d *DB) PriceFromGen(ctx context.Context, row gen.BillingPrice) (*models.Pr
 
 // LoadPricePSPBindings loads each price's PSP bindings and its key's revision.
 // Bindings include archived accounts: their references still own historical
-// money and subscriptions. New checkout admission applies separately.
+// money and subscriptions. New purchase admission applies separately.
 func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, pspID *uuid.UUID) error {
 	if len(prices) == 0 {
 		return nil

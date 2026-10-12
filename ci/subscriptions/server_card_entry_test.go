@@ -64,7 +64,7 @@ func (w *world) relayPay(c *customer, price billing.PriceID, card map[string]any
 	if status != http.StatusCreated {
 		return status, saved, nil
 	}
-	paid, err := c.checkout(embedded, order{price: price, rail: "nmi", method: unwrap(saved)["id"].(string)})
+	paid, err := c.buyOrder(embedded, order{price: price, rail: "nmi", method: unwrap(saved)["id"].(string)})
 	require.NoError(w.t, err)
 	return status, saved, paid
 }

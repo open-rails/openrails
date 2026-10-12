@@ -1,0 +1,498 @@
+package payment
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/railresolve"
+	log "github.com/sirupsen/logrus"
+)
+
+// SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
+// purchase money paths. Provider-bound purchase requires scoped PSP resolution;
+// missing identity or credentials fail closed instead of crossing accounts.
+func (s *PurchaseService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
+	if s == nil {
+		return
+	}
+	s.MerchantSecrets = store
+	if s.NMISaleService != nil {
+		s.NMISaleService.ResolveNMIClient = s.resolveNMIClient
+	}
+}
+
+func (s *PurchaseService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
+	if s == nil {
+		return
+	}
+	s.ProviderSecrets = resolver
+}
+
+func (s *PurchaseService) merchantSecret(ctx context.Context, name string) (string, bool, error) {
+	return s.merchantSecretRef(ctx, merchants.SecretRef{Name: name})
+}
+
+// merchantSecretRef is the single credential read for purchase money paths. It
+// carries the rotation version floor, so a credential rotated on another node
+// is used on the next charge, never a retired key until a cache TTL lapses.
+func (s *PurchaseService) merchantSecretRef(ctx context.Context, ref merchants.SecretRef) (string, bool, error) {
+	if s == nil || s.MerchantSecrets == nil {
+		return "", false, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	sec, err := merchants.ReadSecretRef(ctx, s.MerchantSecrets, tid, ref)
+	if err != nil {
+		if errors.Is(err, merchants.ErrSecretNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	value := strings.TrimSpace(sec.Value)
+	if value == "" {
+		return "", false, nil
+	}
+	return value, true, nil
+}
+
+func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, environment, key string) (string, bool, error) {
+	if s == nil || s.MerchantSecrets == nil || s.ProviderSecrets == nil {
+		return "", false, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err := s.capturedPSPScope(ctx, pspID)
+		if err != nil {
+			return "", false, err
+		}
+		if scope.Rail != rail || scope.Environment != environment {
+			return "", false, errors.New("captured PSP does not match requested rail/environment")
+		}
+		ref, err := scope.SecretRef(key)
+		if err != nil {
+			return "", false, err
+		}
+		return s.merchantSecretRef(ctx, ref)
+	}
+	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
+		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, environment, key)
+		if err != nil || !found {
+			return "", found, err
+		}
+		return s.merchantSecretRef(ctx, ref)
+	}
+	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, environment, key)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return s.merchantSecret(ctx, name)
+}
+
+func (s *PurchaseService) scopedProviderSecretsEnabled() bool {
+	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
+}
+
+// pspEnvironment is the environment PSP rows carry in this deployment: test
+// under test_mode, live otherwise.
+func (s *PurchaseService) pspEnvironment() string {
+	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && config.IsTestMode(s.Config))
+}
+
+// railTarget is a resolved purchase destination: the payment PROVIDER (the
+// merchant's account key, e.g. "mobius") plus the rail it runs on. Purchase
+// requests name the provider; a bare rail name resolves through arming to THE
+// active provider on that rail, so the provider is always picked.
+type railTarget struct {
+	PSP   string // PSP key: catalog psp_links key, plan lookup key
+	Rail  string // gateway rail: dispatch, row vocabulary (subscriptions.rail)
+	Scope *merchants.PSPScope
+}
+
+// knownRails are the gateway rails purchase can dispatch to.
+var knownRails = map[string]struct{}{
+	string(models.RailNMI):    {},
+	string(models.RailCCBill): {},
+	string(models.RailStripe): {},
+	string(models.RailSolana): {},
+}
+
+// AmbiguousRailError reports a bare rail-kind selector that matched more than
+// one armed PSP: the wire must name the PSP key.
+type AmbiguousRailError struct {
+	Rail string
+	Keys []string
+}
+
+func (e *AmbiguousRailError) Error() string {
+	return fmt.Sprintf("ambiguous rail %q: multiple armed PSPs (%s); pass the PSP key", e.Rail, strings.Join(e.Keys, ", "))
+}
+
+// UnknownRailError reports a wire selector that is neither a declared PSP key
+// nor a rail kind.
+type UnknownRailError struct{ Selector string }
+
+func (e *UnknownRailError) Error() string {
+	return fmt.Sprintf("unknown payment provider %q: not a declared PSP key or a rail (nmi, ccbill, stripe, solana)", e.Selector)
+}
+
+// UnarmedRailError reports a known rail with no armed PSP in the current
+// merchant and environment. It is distinct from a resolver failure so routing
+// can explain configuration absence without treating infrastructure errors as
+// an empty catalog.
+type UnarmedRailError struct{ Rail string }
+
+func (e *UnarmedRailError) Error() string {
+	return fmt.Sprintf("payment rail %q has no armed PSP", e.Rail)
+}
+
+// resolveRailTarget resolves a requested purchase provider name. The name is
+// either a declared PSP key ("mobius"), or a rail kind — reserved gateways
+// (stripe/ccbill/solana) are their own PSP names, and a bare rail kind resolves
+// to its armed PSP only when that is unambiguous (exactly one armed account).
+// Unknown names and ambiguous rail kinds fail loudly.
+func (s *PurchaseService) resolveRailTarget(ctx context.Context, requested string) (railTarget, error) {
+	name := strings.ToLower(strings.TrimSpace(requested))
+	if name == "" {
+		return railTarget{}, errors.New("rail is required")
+	}
+	_, isRail := knownRails[name]
+	if s == nil || s.ProviderSecrets == nil {
+		return railTarget{}, errors.New("payment provider resolution is not configured")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
+	}
+
+	// Declared PSP key wins (a rail-named account resolves identically).
+	keys, ok := s.ProviderSecrets.(merchants.PSPKeyResolver)
+	if !ok {
+		return railTarget{}, errors.New("payment provider key resolution is not configured")
+	}
+	scope, found, err := keys.PSPScopeByKey(ctx, tid, name, s.pspEnvironment())
+	if err != nil {
+		return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
+	}
+	if found {
+		return resolvedRailTarget(name, scope)
+	}
+
+	if !isRail {
+		return railTarget{}, &UnknownRailError{Selector: name}
+	}
+
+	// Bare rail kind: arming picks the PSP, and only an unambiguous match may.
+	// The armed account's key becomes the PSP so plan links resolve.
+	lister, ok := s.ProviderSecrets.(merchants.PSPRailScopesResolver)
+	if !ok {
+		return railTarget{}, errors.New("payment provider rail resolution is not configured")
+	}
+	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
+	if err != nil {
+		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", name, err)
+	}
+	switch len(scopes) {
+	case 0:
+		return railTarget{}, &UnarmedRailError{Rail: name}
+	case 1:
+		return resolvedRailTarget(name, scopes[0])
+	default:
+		keys := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			key := strings.ToLower(strings.TrimSpace(scope.Key))
+			if key == "" {
+				key = scope.AccountID
+			}
+			keys = append(keys, key)
+		}
+		return railTarget{}, &AmbiguousRailError{Rail: name, Keys: keys}
+	}
+}
+
+func resolvedRailTarget(requested string, scope merchants.PSPScope) (railTarget, error) {
+	if scope.ID == uuid.Nil {
+		return railTarget{}, errors.New("payment provider identity is unavailable")
+	}
+	rail := strings.ToLower(strings.TrimSpace(scope.Rail))
+	if _, ok := knownRails[rail]; !ok {
+		return railTarget{}, fmt.Errorf("payment provider %q uses unsupported rail %q", requested, rail)
+	}
+	psp := strings.ToLower(strings.TrimSpace(scope.Key))
+	if psp == "" {
+		psp = strings.ToLower(strings.TrimSpace(requested))
+	}
+	return railTarget{PSP: psp, Rail: rail, Scope: &scope}, nil
+}
+
+// resolveRailTargetForPSP resolves the exact account already owning a
+// provider-bound resource. It never reselects a sibling account from the same
+// rail, which is required for saved methods and existing subscriptions.
+func (s *PurchaseService) resolveRailTargetForPSP(ctx context.Context, rail string, pspID uuid.UUID) (railTarget, error) {
+	rail = strings.ToLower(strings.TrimSpace(rail))
+	if pspID == uuid.Nil {
+		return railTarget{}, errors.New("payment provider identity is unavailable")
+	}
+	if _, ok := knownRails[rail]; !ok {
+		return railTarget{}, fmt.Errorf("unsupported rail %q", rail)
+	}
+	if s == nil || s.ProviderSecrets == nil {
+		return railTarget{}, errors.New("payment provider resolution is not configured")
+	}
+	lister, ok := s.ProviderSecrets.(merchants.PSPRailScopesResolver)
+	if !ok {
+		return railTarget{}, errors.New("payment provider rail resolution is not configured")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return railTarget{}, fmt.Errorf("resolve payment provider account: %w", err)
+	}
+	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, rail, s.pspEnvironment())
+	if err != nil {
+		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", rail, err)
+	}
+	for _, scope := range scopes {
+		if scope.ID == pspID {
+			return resolvedRailTarget(rail, scope)
+		}
+	}
+	return railTarget{}, fmt.Errorf("payment provider account %s is not armed on rail %q", pspID, rail)
+}
+
+// RailUsable reports whether a wire payment.rail selector (a PSP key,
+// or an unambiguous rail kind) lands on an armed PSP for the ctx merchant.
+// nil means usable; the error carries the reject reason. Fail closed.
+func (s *PurchaseService) RailUsable(ctx context.Context, selector string) error {
+	if s == nil {
+		return errors.New("unsupported rail")
+	}
+	target, err := s.resolveRailTarget(ctx, selector)
+	if err != nil {
+		return err
+	}
+	if target.Scope == nil {
+		return errors.New("unsupported rail")
+	}
+	return nil
+}
+
+// ResolvePSPID resolves the PSP for new work on the given provider/rail name,
+// for provenance stamping. uuid.Nil when no resolver is wired or nothing is
+// armed: provenance is never invented. The caller decides what an unresolved
+// PSP means; every provider-bound write refuses one.
+func (s *PurchaseService) ResolvePSPID(ctx context.Context, name string) uuid.UUID {
+	if s == nil || s.ProviderSecrets == nil {
+		return uuid.Nil
+	}
+	target, err := s.resolveRailTarget(ctx, name)
+	if err != nil || target.Scope == nil {
+		return uuid.Nil
+	}
+	return target.Scope.ID
+}
+
+// railSource exposes the merchant rail plane for routing (orderRailTargets).
+func (s *PurchaseService) railSource() railresolve.Source {
+	if s == nil {
+		return nil
+	}
+	return s.Rails
+}
+
+// stampPSP pins the resolved account into ctx so the payment, subscription and
+// payment-method writes downstream of this checkout stamp psp_id.
+func (s *PurchaseService) stampPSP(ctx context.Context, name string) context.Context {
+	return db.WithPSPID(ctx, s.ResolvePSPID(ctx, name))
+}
+
+// resolveNMIClient arms the ctx merchant's NMI client for the given provider
+// name (account key or bare rail): the resolved account's security_key. Fail
+// closed — a missing scope/secret errors; there is no boot-config fallback.
+func (s *PurchaseService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
+	if s.ResolveNMIClientOverride != nil {
+		return s.ResolveNMIClientOverride(ctx, provider)
+	}
+	if !s.scopedProviderSecretsEnabled() {
+		return nil, fmt.Errorf("merchant rail resolution is not configured")
+	}
+	target, err := s.operationRailTarget(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		return nil, fmt.Errorf("missing client")
+	}
+	if target.Scope == nil {
+		return nil, errors.New("payment provider identity is unavailable")
+	}
+	// Pinned to the resolved account's own versioned secret and declared
+	// endpoint deployment.
+	owner, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.nmiFactory().Client(ctx, s.MerchantSecrets, owner, *target.Scope)
+}
+
+func (s *PurchaseService) nmiFactory() *railresolve.NMIFactory {
+	if s.NMIClients != nil {
+		return s.NMIClients
+	}
+	return &railresolve.NMIFactory{Config: s.Config}
+}
+
+func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {
+	cfg, err := s.resolveCCBillConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ccbill.NewClient(cfg, s.Config != nil && config.IsTestMode(s.Config))
+}
+
+func (s *PurchaseService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {
+	if !s.scopedProviderSecretsEnabled() {
+		return nil, errors.New("merchant rail resolution is not configured")
+	}
+	return s.resolveScopedCCBillConfig(ctx, &config.CCBillConfig{})
+}
+
+func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
+	scopeResolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver)
+	if !ok {
+		return nil, errors.New("missing scoped merchant CCBill PSP resolver")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Environment follows test_mode: sandbox deployments declare
+	// environment=test rows (ValidateRailSet enforces it).
+	env := s.pspEnvironment()
+	var scope merchants.PSPScope
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err = s.capturedPSPScope(ctx, pspID)
+		ok = err == nil
+	} else {
+		scope, ok, err = scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill), env)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok || scope.Rail != string(models.RailCCBill) || scope.Environment != env {
+		return nil, errors.New("missing scoped merchant CCBill PSP")
+	}
+	cfg := &config.CCBillConfig{}
+	if base != nil {
+		*cfg = *base
+	}
+	// CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
+	// 999999-0000). Both parts are numeric, so the first dash is the separator.
+	acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
+	if !ok || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
+		return nil, errors.New("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000")
+	}
+	cfg.ClientAccNum = strings.TrimSpace(acc)
+	cfg.ClientSubAcc = strings.TrimSpace(sub)
+
+	for _, item := range []struct {
+		key string
+		dst *string
+	}{
+		{key: "salt", dst: &cfg.Salt},
+		{key: "datalink_username", dst: &cfg.DataLinkUsername},
+		{key: "datalink_password", dst: &cfg.DataLinkPassword},
+	} {
+		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), env, item.key)
+		if err != nil {
+			return nil, fmt.Errorf("load merchant CCBill %s: %w", item.key, err)
+		}
+		if ok {
+			*item.dst = value
+		}
+	}
+	if (strings.TrimSpace(cfg.DataLinkUsername) == "") != (strings.TrimSpace(cfg.DataLinkPassword) == "") {
+		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
+	}
+	if strings.TrimSpace(cfg.Salt) == "" {
+		return nil, ccbill.ErrMissingSalt
+	}
+	return cfg, nil
+}
+
+// custodianHeld reports whether the resolved PSP's instruments are held by a
+// third-party custodian: the axis that picks a purchase's charge transport,
+// orthogonal to the rail that charges.
+func custodianHeld(target railTarget) bool {
+	return target.Scope != nil && target.Scope.CustodianID != nil
+}
+
+// pspKeyArchived reports whether selector names a declared-but-archived PSP.
+// Best-effort: it only refines a skip class in the routing trace, never a
+// routing outcome, so a resolver that cannot answer leaves the class as-is.
+func (s *PurchaseService) pspKeyArchived(ctx context.Context, selector string) bool {
+	resolver, ok := s.ProviderSecrets.(merchants.ArchivedPSPKeyResolver)
+	if !ok {
+		return false
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false
+	}
+	archived, err := resolver.PSPKeyArchived(ctx, tid, selector, s.pspEnvironment())
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Debug("PSP routing: archived-PSP lookup failed")
+		return false
+	}
+	return archived
+}
+
+func (s *PurchaseService) capturedPSPScope(ctx context.Context, pspID uuid.UUID) (merchants.PSPScope, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return merchants.PSPScope{}, err
+	}
+	resolver, ok := s.ProviderSecrets.(merchants.PSPIdentityScopeResolver)
+	if !ok {
+		return merchants.PSPScope{}, errors.New("immutable PSP resolver is required")
+	}
+	scope, ok, err := resolver.PSPScopeByID(ctx, mid, pspID)
+	if err != nil {
+		return scope, err
+	}
+	if !ok {
+		return scope, errors.New("captured PSP no longer exists")
+	}
+	return scope, nil
+}
+
+func (s *PurchaseService) operationRailTarget(ctx context.Context, selector string) (railTarget, error) {
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err := s.capturedPSPScope(ctx, pspID)
+		if err != nil {
+			return railTarget{}, err
+		}
+		if scope.Environment != s.pspEnvironment() {
+			return railTarget{}, errors.New("captured PSP environment mismatch")
+		}
+		if _, known := knownRails[selector]; known && selector != scope.Rail {
+			return railTarget{}, errors.New("captured PSP rail mismatch")
+		}
+		return railTarget{PSP: scope.Key, Rail: scope.Rail, Scope: &scope}, nil
+	}
+	return s.resolveRailTarget(ctx, selector)
+}

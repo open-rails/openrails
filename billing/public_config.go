@@ -14,8 +14,8 @@ type PublicConfig struct {
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
-	// Network is how the checkout page signs a shopper in to the customer
-	// network; null without the network or a hosted checkout.
+	// Network is how the payment page signs a shopper in to the customer
+	// network; null without the network or a payment page.
 	Network *PublicNetwork `json:"network"`
 }
 
@@ -29,9 +29,9 @@ type CustomerConfig struct {
 	Merchant PublicMerchant `json:"merchant"`
 }
 
-// PublicNetwork is the checkout page's sign-in to the customer network: an
+// PublicNetwork is the payment page's sign-in to the customer network: an
 // OpenID Connect authorization (code and PKCE) at Issuer for ClientID,
-// returning to the checkout host's /c/sign-in.
+// returning to the payment origin's /pay/sign-in.
 type PublicNetwork struct {
 	Issuer   string `json:"issuer"`
 	ClientID string `json:"client_id"`
@@ -43,7 +43,7 @@ type PublicMerchant struct {
 	DisplayName string  `json:"display_name"`
 	LogoURL     *string `json:"logo_url"`
 	SupportURL  *string `json:"support_url"`
-	// EmbedOrigins are the origins that may frame its embedded checkouts.
+	// EmbedOrigins are the origins that may frame its embedded payment pages.
 	EmbedOrigins []string `json:"embed_origins"`
 }
 
@@ -90,7 +90,7 @@ type SolanaPaymentToken struct {
 type PSPPaymentConfig struct {
 	// PSPID is the public stable account selector used by saved-method setup.
 	PSPID PSPID `json:"psp_id"`
-	// Key is the PSP's key, the checkout payment.psp selector.
+	// Key is the PSP's key, the purchase payment.psp selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
 	Rail string `json:"rail"`
@@ -99,13 +99,13 @@ type PSPPaymentConfig struct {
 	DisplayName string `json:"display_name"`
 	// Flow is how a browser drives this PSP: tokenize, card, elements, redirect
 	// or wallet. card: the page posts the card to OpenRails, which vaults it.
-	// elements: the page saves the card with the PSP's own fields and checkout
+	// elements: the page saves the card with the PSP's own fields and purchase
 	// charges the saved card, with authentication in the page.
 	Flow string `json:"flow"`
-	// Checkout is true when new purchases and newly entered cards use this PSP
-	// under the merchant's checkout routing. Other armed PSPs stay listed so
+	// Routed is true when new purchases and newly entered cards use this PSP
+	// under the merchant's PSP routing. Other armed PSPs stay listed so
 	// their existing cards and agreements keep working.
-	Checkout bool `json:"checkout"`
+	Routed bool `json:"routed"`
 	// Config holds whitelisted public values, such as a tokenization key.
 	Config map[string]string `json:"config,omitempty"`
 	// Status is PSPTemporarilyUnavailable when the PSP's credentials could not

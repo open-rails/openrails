@@ -91,10 +91,10 @@ SELECT
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS payments,
-    (SELECT count(*) FROM billing.checkout_attempts
+    (SELECT count(*) FROM billing.order_attempts
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
-        AND deleted_at IS NOT NULL)::bigint AS checkout_attempts,
+        AND deleted_at IS NOT NULL)::bigint AS order_attempts,
     (SELECT count(*) FROM billing.product_access
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
@@ -107,10 +107,10 @@ type CountPruneRestorableForRunParams struct {
 }
 
 type CountPruneRestorableForRunRow struct {
-	Subscriptions    int64
-	Payments         int64
-	CheckoutAttempts int64
-	ProductAccess    int64
+	Subscriptions int64
+	Payments      int64
+	OrderAttempts int64
+	ProductAccess int64
 }
 
 // The read side of `openrails undo-run`: the dry-run plan, counted with the same
@@ -123,7 +123,7 @@ func (q *Queries) CountPruneRestorableForRun(ctx context.Context, arg CountPrune
 	err := row.Scan(
 		&i.Subscriptions,
 		&i.Payments,
-		&i.CheckoutAttempts,
+		&i.OrderAttempts,
 		&i.ProductAccess,
 	)
 	return i, err
@@ -136,8 +136,8 @@ SELECT
     (SELECT count(*) FROM billing.payments
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL
         AND channel = 'rail')::bigint AS payments,
-    (SELECT count(*) FROM billing.checkout_attempts
-      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_attempts,
+    (SELECT count(*) FROM billing.order_attempts
+      WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS order_attempts,
     -- payment_methods carries no soft-delete column; every row is live. A
     -- card a third-party custodian holds names no PSP: no PSP-scoped
     -- operation reaches it.
@@ -152,11 +152,11 @@ SELECT
 `
 
 type CountUnattributedProviderRowsRow struct {
-	Subscriptions    int64
-	Payments         int64
-	CheckoutAttempts int64
-	PaymentMethods   int64
-	UnfiredIntents   int64
+	Subscriptions  int64
+	Payments       int64
+	OrderAttempts  int64
+	PaymentMethods int64
+	UnfiredIntents int64
 }
 
 // Provider rows lacking PSP provenance. Structurally zero (NOT NULL or CHECK): a
@@ -168,7 +168,7 @@ func (q *Queries) CountUnattributedProviderRows(ctx context.Context, merchantID 
 	err := row.Scan(
 		&i.Subscriptions,
 		&i.Payments,
-		&i.CheckoutAttempts,
+		&i.OrderAttempts,
 		&i.PaymentMethods,
 		&i.UnfiredIntents,
 	)

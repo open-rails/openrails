@@ -75,7 +75,7 @@ type PrepareTierChangeInput struct {
 	Currency          string
 
 	// Reference, when set, tags the tx with a Solana Pay reference
-	// (referenceTagInstruction) so a checkout attempt can drive the tier change.
+	// (referenceTagInstruction) so a order attempt can drive the tier change.
 	Reference string
 }
 

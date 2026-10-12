@@ -5,7 +5,7 @@
 @source "./";
 
 /* @openrails/billing-ui — scoped token set (shadcn base-vega, zinc).
-   The build scopes every rule under `.orck` (tooling/checkout-css), so
+   The build scopes every rule under `.orck` (tooling/scoped-css), so
    utilities resolve against these tokens, not the host page's.
    `data-orck-theme` picks the palette; `auto` follows the OS; `inherit`
    defines no palette, so the host's shadcn tokens and `.dark` class apply.
@@ -96,7 +96,7 @@
   container-name: orck;
 }
 
-/* Host palette: derive the checkout-only tokens from the host's. */
+/* Host palette: derive the purchase-only tokens from the host's. */
 .orck[data-orck-theme="inherit"] {
   --orck-faint: var(--muted-foreground);
   --orck-hairline: color-mix(in oklch, var(--foreground) 6%, transparent);

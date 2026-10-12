@@ -179,7 +179,7 @@ func int32Value(n int) (int32, error) {
 	return int32(n), nil
 }
 
-// Flat-price checkout omits quantity, while providers report one unit. These
+// Flat-price purchase omits quantity, while providers report one unit. These
 // represent the same accepted line; money and product identity still match above.
 func sameQuantity(a *int32, b *int) bool {
 	left, right := int64(1), int64(1)

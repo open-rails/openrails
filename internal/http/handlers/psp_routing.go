@@ -9,7 +9,7 @@ import (
 )
 
 // PreviewPSPRouting handles POST /v1/merchant/psps/routing-preview: which PSP a
-// checkout for this price would use, and why every other PSP was passed over,
+// purchase for this price would use, and why every other PSP was passed over,
 // without creating a session.
 func PreviewPSPRouting(r *httprequest.Request) {
 	var req billing.PreviewPSPRoutingParams

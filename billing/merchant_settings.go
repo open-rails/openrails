@@ -1,20 +1,20 @@
 package billing
 
-// CheckoutRoutingRule is one processor-preference rule. Rules are evaluated in
+// PSPRoutingRule is one processor-preference rule. Rules are evaluated in
 // declaration order and the first whose Match accepts the routing inputs wins.
 // Prefer is that rule's ranked candidate list and its whitelist: a PSP the
 // winning rule does not name is not eligible, so a rule can constrain a
 // product to one rail.
-type CheckoutRoutingRule struct {
-	Match CheckoutRoutingMatch `json:"match,omitempty"`
-	// Prefer are checkout selectors in preference order: PSP keys ("mobius"),
+type PSPRoutingRule struct {
+	Match PSPRoutingMatch `json:"match,omitempty"`
+	// Prefer are purchase selectors in preference order: PSP keys ("mobius"),
 	// or a rail kind, which resolves to that rail's one armed PSP.
 	Prefer []string `json:"prefer"`
 }
 
-// CheckoutRoutingMatch is a rule's condition. Every SET field must match the
+// PSPRoutingMatch is a rule's condition. Every SET field must match the
 // routing inputs; an all-empty match accepts everything (the catch-all rule).
-type CheckoutRoutingMatch struct {
+type PSPRoutingMatch struct {
 	Currency string `json:"currency,omitempty"` // Registered currency code, uppercase (matched case-insensitively)
 	Product  string `json:"product,omitempty"`  // product key
 	Price    string `json:"price,omitempty"`    // price key
@@ -24,7 +24,7 @@ type CheckoutRoutingMatch struct {
 
 // IsCatchAll reports a match with no conditions — it accepts every input, so
 // no later rule can ever be reached.
-func (m CheckoutRoutingMatch) IsCatchAll() bool {
+func (m PSPRoutingMatch) IsCatchAll() bool {
 	return m.Currency == "" && m.Product == "" && m.Price == "" && m.Mode == "" && m.Country == ""
 }
 

@@ -72,7 +72,7 @@ chain qualification, which is a separate operator activity
 ## Business time and money
 
 Business time covers billing periods, entitlement validity, cancellation,
-renewal, dunning retries, checkout expiry, and credit and hold expiry. It uses
+renewal, dunning retries, purchase expiry, and credit and hold expiry. It uses
 the engine's `clockwork.Clock`: supply `Deps.Clock` before constructing a test
 engine and advance the fake clock rather than sleeping. This seam is refused
 with live provider credentials. Infrastructure time (cache TTLs, rate limits,

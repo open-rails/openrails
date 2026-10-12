@@ -1,8 +1,8 @@
 -- name: RegisterSolanaPayReference :one
-INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, created_at, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reference)::text, sqlc.arg(checkout_attempt_id)::uuid, sqlc.arg(kind)::text, 'pending',
+INSERT INTO billing.solana_pay_references (merchant_id, reference, order_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, created_at, updated_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reference)::text, sqlc.arg(order_attempt_id)::uuid, sqlc.arg(kind)::text, 'pending',
         sqlc.arg(expires_at)::timestamptz, sqlc.arg(watch_ends_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
-ON CONFLICT (merchant_id, checkout_attempt_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
+ON CONFLICT (merchant_id, order_attempt_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
 RETURNING *;
 
 -- name: GetSolanaPayReference :one
@@ -76,8 +76,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reference = sqlc.arg(referen
 -- Conflicts on the reference's own row or on a transfer to the same recipient
 -- in the same mint already credited or reviewed on any reference; either way
 -- nothing is written.
-INSERT INTO billing.solana_pay_receipts (merchant_id, reference, signature, checkout_attempt_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, created_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reference)::text, sqlc.arg(signature)::text, sqlc.arg(checkout_attempt_id)::uuid, sqlc.arg(disposition)::text,
+INSERT INTO billing.solana_pay_receipts (merchant_id, reference, signature, order_attempt_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, created_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reference)::text, sqlc.arg(signature)::text, sqlc.arg(order_attempt_id)::uuid, sqlc.arg(disposition)::text,
         sqlc.narg(review_reason)::text, sqlc.arg(recipient)::text, sqlc.arg(token_mint)::text, sqlc.arg(expected_amount)::bigint, sqlc.arg(received_amount)::bigint,
         sqlc.narg(payer)::text, sqlc.narg(landed_at)::timestamptz, sqlc.narg(payment_id)::uuid, sqlc.arg(now)::timestamptz)
 ON CONFLICT DO NOTHING;

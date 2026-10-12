@@ -13,7 +13,7 @@ import (
 
 // hostOnly are the engine settings a host builds in code; no file key sets
 // them. The server's own engine handles keep the default read cache.
-var hostOnly = map[string]bool{"Merchants": true, "Checkout": true, "ReadCache": true}
+var hostOnly = map[string]bool{"Merchants": true, "Purchase": true, "ReadCache": true}
 
 // Every file key reaches the server's configuration, and every engine setting
 // is either a file key or deliberately host-only.
@@ -55,7 +55,7 @@ func TestFileReachesConfig(t *testing.T) {
 	f.EmailSMTP.Host = "smtp.example"
 	f.Redis.Addr = "redis:6379"
 	f.AdminConsole.Issuers = map[string]ConsoleIssuer{"merchant": {URL: "https://issuer.example", ClientID: "console"}}
-	f.HostedCheckout.URL = "https://checkout.example"
+	f.PaymentPage.URL = "https://purchase.example"
 	cfg, err := f.config()
 	require.NoError(t, err)
 	for _, v := range []reflect.Value{reflect.ValueOf(cfg).Elem(), reflect.ValueOf(cfg.Config).Elem()} {

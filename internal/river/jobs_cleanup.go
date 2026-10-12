@@ -132,7 +132,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
 	NotificationEvents      int64
-	CheckoutAttemptsExpired int64
+	OrderAttemptsExpired    int64
 	Carts                   int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
@@ -143,7 +143,7 @@ type CleanupResult struct {
 	RebillCycles            int64
 	NMIHistoryMonths        int64
 	SubscriptionTransitions int64
-	CheckoutAttempts        int64
+	OrderAttempts           int64
 	ReconciliationFindings  int64
 	ReconciliationRuns      int64
 	ProviderIntents         int64
@@ -266,7 +266,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			LifecycleCutoff:        now.Add(-config.HostLifecycleEventAckedRetention),
 			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
 			TransitionCutoff:       now.Add(-retention.SubscriptionTransitions),
-			CheckoutAttemptCutoff:  now.Add(-retention.ExpiredCheckoutAttempts),
+			OrderAttemptCutoff:     now.Add(-retention.ExpiredOrderAttempts),
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
@@ -322,32 +322,32 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	saveSweepCursor(ctx, directory, KindCleanupExpiredData, cursorRow, nextCursor, logger)
 
 	opsmetric.Emit(ctx, opsmetric.MetricRetentionSweep, log.Fields{
-		"worker":                    KindCleanupExpiredData,
-		"merchants_with_work":       len(merchantIDs),
-		"merchants_budget_capped":   result.MerchantsBudgetCapped,
-		"resumed_from_cursor":       cursor != nil,
-		"more_work_queued":          nextCursor != nil,
-		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
-		"checkout_attempts_expired": result.CheckoutAttemptsExpired,
-		"carts":                     result.Carts,
-		"notification_events":       result.NotificationEvents,
-		"notifications_seen":        result.NotificationsSeen,
-		"notifications_unseen":      result.NotificationsAll,
-		"webhook_events":            result.WebhookEvents,
-		"payment_settlements":       result.PaymentSettlements,
-		"lifecycle_events":          result.HostLifecycleEvents,
-		"payment_attempts":          result.PaymentAttempts,
-		"rebill_cycles":             result.RebillCycles,
-		"nmi_history_months":        result.NMIHistoryMonths,
-		"subscription_transitions":  result.SubscriptionTransitions,
-		"checkout_attempts":         result.CheckoutAttempts,
-		"reconciliation_findings":   result.ReconciliationFindings,
-		"reconciliation_runs":       result.ReconciliationRuns,
-		"provider_intents":          result.ProviderIntents,
-		"provider_mutation_logs":    result.ProviderMutationLogs,
-		"customer_links":            result.CustomerLinks,
-		"partitions_created":        result.PartitionsCreated,
-		"partitions_dropped":        result.PartitionsDropped,
+		"worker":                   KindCleanupExpiredData,
+		"merchants_with_work":      len(merchantIDs),
+		"merchants_budget_capped":  result.MerchantsBudgetCapped,
+		"resumed_from_cursor":      cursor != nil,
+		"more_work_queued":         nextCursor != nil,
+		"duration_ms":              clock.Now().Sub(started).Milliseconds(),
+		"order_attempts_expired":   result.OrderAttemptsExpired,
+		"carts":                    result.Carts,
+		"notification_events":      result.NotificationEvents,
+		"notifications_seen":       result.NotificationsSeen,
+		"notifications_unseen":     result.NotificationsAll,
+		"webhook_events":           result.WebhookEvents,
+		"payment_settlements":      result.PaymentSettlements,
+		"lifecycle_events":         result.HostLifecycleEvents,
+		"payment_attempts":         result.PaymentAttempts,
+		"rebill_cycles":            result.RebillCycles,
+		"nmi_history_months":       result.NMIHistoryMonths,
+		"subscription_transitions": result.SubscriptionTransitions,
+		"order_attempts":           result.OrderAttempts,
+		"reconciliation_findings":  result.ReconciliationFindings,
+		"reconciliation_runs":      result.ReconciliationRuns,
+		"provider_intents":         result.ProviderIntents,
+		"provider_mutation_logs":   result.ProviderMutationLogs,
+		"customer_links":           result.CustomerLinks,
+		"partitions_created":       result.PartitionsCreated,
+		"partitions_dropped":       result.PartitionsDropped,
 	})
 
 	if cleanupErr != nil {
@@ -404,9 +404,9 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		capped = true
 	}
 
-	// 1. Expire checkout attempts that have passed their TTL
-	sweep("expire checkout attempts", &result.CheckoutAttemptsExpired, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.ExpireCheckoutAttempts(ctx, gen.ExpireCheckoutAttemptsParams{MerchantID: mid, Now: now, RowLimit: limit})
+	// 1. Expire order attempts that have passed their TTL
+	sweep("expire order attempts", &result.OrderAttemptsExpired, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.ExpireOrderAttempts(ctx, gen.ExpireOrderAttemptsParams{MerchantID: mid, Now: now, RowLimit: limit})
 	})
 
 	// 2. Old notifications — seen ones first, with the shorter retention
@@ -479,10 +479,10 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			})
 		}))
 
-	// 9. Checkout attempts that expired without reaching a provider.
-	sweep("delete abandoned checkout attempts", &result.CheckoutAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteAbandonedCheckoutAttemptsBefore(ctx, gen.DeleteAbandonedCheckoutAttemptsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-retention.ExpiredCheckoutAttempts), RowLimit: limit,
+	// 9. Order attempts that expired without reaching a provider.
+	sweep("delete abandoned order attempts", &result.OrderAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteAbandonedOrderAttemptsBefore(ctx, gen.DeleteAbandonedOrderAttemptsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ExpiredOrderAttempts), RowLimit: limit,
 		})
 	})
 

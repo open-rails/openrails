@@ -62,12 +62,12 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.Zero(t, merchants(), "a refused declaration creates no merchant")
 
 	grace, floor, threshold := 7, int64(5_000_000), int64(50_000_000)
-	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"mobius"}}}
+	routing := []billing.PSPRoutingRule{{Prefer: []string{"mobius"}}}
 	declared := billing.MerchantSettings{
 		Profile:             &billing.MerchantProfile{FromEmail: "billing@declared.example"},
 		CollectionThreshold: &threshold, BillingPeriodBoundary: "calendar_month",
 		ArrearsGraceDays: &grace, ArrearsDelinquencyFloor: &floor,
-		CheckoutRouting:                   &routing,
+		PSPRouting:                        &routing,
 		BillingPolicies:                   []billing.BillingPolicy{{Name: "line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
 		BillingPolicyBindings:             []billing.BillingPolicyBinding{{PolicyName: "line"}},
 		DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000, Currency: "USD"}},
@@ -86,7 +86,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.Equal(t, "calendar_month", s.BillingPeriodBoundary)
 	require.Equal(t, grace, *s.ArrearsGraceDays)
 	require.Equal(t, floor, *s.ArrearsDelinquencyFloor)
-	require.Equal(t, routing, *s.CheckoutRouting)
+	require.Equal(t, routing, *s.PSPRouting)
 	require.Len(t, s.BillingPolicies, 1)
 	require.Equal(t, int64(200_000_000), s.BillingPolicies[0].OutstandingCapAmount)
 	require.Equal(t, []billing.BillingPolicyBinding{{PolicyName: "line"}}, s.BillingPolicyBindings)

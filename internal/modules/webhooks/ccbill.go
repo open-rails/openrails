@@ -52,7 +52,7 @@ type CCBillWebhookService struct {
 	ProfileRepo                  identitydir.UsernameResolver
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	CheckoutAttemptService       webhookCheckoutAttemptStore
+	OrderAttemptService          webhookOrderAttemptStore
 	MoneyService                 *money.MoneyService
 }
 

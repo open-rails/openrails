@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -204,7 +204,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		PaymentService:               r.PaymentService,
 		MoneyService:                 r.MoneyService,
 		RailCustomerService:          r.RailCustomerService,
-		CheckoutAttemptService:       r.CheckoutAttemptService,
+		OrderAttemptService:          r.OrderAttemptService,
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
@@ -338,16 +338,16 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	)
 	// Write-through kinds live with their domain services and register only
 	// when those are wired (worker-only runtimes may lack them).
-	if r.CheckoutService != nil {
-		if r.CheckoutService.NMISaleService != nil {
-			registry.Register(checkout.NewNMISaleIntentHandler(r.CheckoutService.NMISaleService))
+	if r.PurchaseService != nil {
+		if r.PurchaseService.NMISaleService != nil {
+			registry.Register(payment.NewNMISaleIntentHandler(r.PurchaseService.NMISaleService))
 		}
-		if r.CheckoutService.CustodianSaleService != nil {
-			registry.Register(checkout.NewCustodianSaleIntentHandler(r.CheckoutService.CustodianSaleService))
+		if r.PurchaseService.CustodianSaleService != nil {
+			registry.Register(payment.NewCustodianSaleIntentHandler(r.PurchaseService.CustodianSaleService))
 		}
-		registry.Register(checkout.NewInitialMembershipIntentHandler(r.CheckoutService, r.CollectionResolver))
-		registry.Register(checkout.NewNMIUpgradeIntentHandler(r.CheckoutService))
-		registry.Register(checkout.NewStripeTierChangeIntentHandler(r.CheckoutService))
+		registry.Register(payment.NewInitialMembershipIntentHandler(r.PurchaseService, r.CollectionResolver))
+		registry.Register(payment.NewNMIUpgradeIntentHandler(r.PurchaseService))
+		registry.Register(payment.NewStripeTierChangeIntentHandler(r.PurchaseService))
 	}
 	// Durable user-initiated vault writes; a handler with no rail client parks
 	// rather than fails.
@@ -809,7 +809,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 15 minutes: converge sweep, remediating internal drift (stalled
-	// dunning, elapsed grace, abandoned checkouts, unmaterialized grant effects).
+	// dunning, elapsed grace, abandoned purchases, unmaterialized grant effects).
 	// Runs on start: drift is largest after downtime, and a clean sweep is cheap.
 	jobs = append(jobs, r.healthPeriodic(
 		15*time.Minute,

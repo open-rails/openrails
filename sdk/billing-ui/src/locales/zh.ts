@@ -138,7 +138,7 @@ export const zh: BillingUiMessageBundle = {
     removePending: "正在处理移除。",
     inUse: "这张卡正在为有效订阅付款。请先将该订阅切换到其他银行卡。",
   },
-  checkout: {
+  purchase: {
     renews: "{period}续订",
   },
   history: {

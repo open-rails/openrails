@@ -42,7 +42,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Errors.** `{"error": {"type", "code", "message", "param", "metadata"}}`
   ([errors](errors.md)). The `code` is stable; the `message` is not contract.
 - **Idempotency.** Send `Idempotency-Key` only on the routes that read it
-  (marked in [routes.md](routes.md)): checkout, orders, refunds, tier changes,
+  (marked in [routes.md](routes.md)): purchase, orders, refunds, tier changes,
   usage order collection. Each such operation keeps its own durable receipt: the same key
   with the same terms recovers the operation, and with other terms
   `422 idempotency_key_reused`. Admissions instead use `request_id`, usage
@@ -109,7 +109,7 @@ credential binding, a mismatch returns `412 merchant_mismatch` before the
 operation runs. It never selects or grants access to a merchant. The Go
 client sends it whenever its handle knows its merchant.
 
-Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
+Browser-facing routes (the public catalog, purchase, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route
 sends no CORS headers.
 
@@ -131,10 +131,10 @@ with catalog routes and the opt-in `catalog_copilot` capability. The
 explicitly outside the merchant Go `Client` surface; see
 [console assistance](../billing-admin.md).
 
-## Checkout
+## Purchase
 
 A browser buys through an order its customer pays with their own credential;
-the merchant's backend may create one for them. See [checkout](commerce.md).
+the merchant's backend may create one for them. See [purchase](commerce.md).
 
 ## Public configuration
 
@@ -152,19 +152,19 @@ know about the deployment, and names no merchant:
   token_header}`: load `script_url`, solve with `site_key` and `action`, and
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
-- `network`: the checkout page's sign-in to the customer network, null without
-  the network or a hosted checkout.
+- `network`: the payment page's sign-in to the customer network, null without
+  the network or a payment page.
 
 `GET /v1/me/config` is a merchant's part, answered only to a credential bound
-to that merchant: a customer's token, or a checkout URL's secret on the
-checkout host. `Cache-Control: private`.
+to that merchant: a customer's token, or a pay URL's secret on the
+payment origin. `Cache-Control: private`.
 
 - `merchant`: how the merchant presents itself: `display_name`, its https
   `logo_url` and `support_url`, and the `embed_origins` that may frame its
-  embedded checkouts.
+  embedded pay URLs.
 - `payment`: the merchant's browser payment setup. `psps` lists the armed PSPs
-  as `{psp_id, key, rail, custodian, display_name, flow, checkout, config}`:
-  `flow` is `tokenize`, `card`, `elements`, `redirect` or `wallet`, `checkout`
+  as `{psp_id, key, rail, custodian, display_name, flow, routed, config}`:
+  `flow` is `tokenize`, `card`, `elements`, `redirect` or `wallet`, `routed`
   marks the PSPs that take new purchases, and `config` holds only values that
   are public by nature (an NMI `tokenization_key`, a Stripe `publishable_key`,
   a Basis Theory `public_api_key`). A PSP whose credentials could not be
@@ -395,7 +395,7 @@ where Vault holds the configuration; with a file, PSPs are read-only.
 
 Archive is not deletion: the row, its id, credentials and history remain, and
 existing subscriptions, operations and inbound webhooks keep resolving to it
-until they drain. New checkout selects only active PSPs. Archiving the last
+until they drain. New purchase selects only active PSPs. Archiving the last
 active PSP on a rail is `409 psp_last_active` unless `allow_last` is `true`.
 
 ## Refunds

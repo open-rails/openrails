@@ -187,18 +187,18 @@ func TestBeginRaceHasOneWinner(t *testing.T) {
 	e := newEnv(t)
 	for round := range 40 {
 		key := fmt.Sprintf("race-%d-%s", round, uuid.NewString())
-		won := owners(t, e.race(16, "checkout", key))
+		won := owners(t, e.race(16, "purchase", key))
 		require.Len(t, won, 1, "round %d", round)
 		require.False(t, won[0].Reclaimed)
 
-		for _, o := range e.race(16, "checkout", key) {
+		for _, o := range e.race(16, "purchase", key) {
 			require.NoError(t, o.err)
 			require.Nil(t, o.claim, "a live claim is never shared")
 			require.Equal(t, idempotency.StatusProcessing, o.rec.Status)
 			require.True(t, o.rec.Leased)
 		}
 		require.NoError(t, won[0].Complete(e.ctx(), json.RawMessage(fmt.Sprintf(`{"round":%d}`, round))))
-		for _, o := range e.race(16, "checkout", key) {
+		for _, o := range e.race(16, "purchase", key) {
 			require.NoError(t, o.err)
 			require.Nil(t, o.claim)
 			require.Equal(t, idempotency.StatusSucceeded, o.rec.Status)
@@ -213,16 +213,16 @@ func TestKeysAreScopedByMerchantAndOperation(t *testing.T) {
 	e := newEnv(t)
 	other := e.newMerchant()
 	s := e.store(0)
-	a, _, err := s.Begin(e.ctx(), "checkout", "k")
+	a, _, err := s.Begin(e.ctx(), "purchase", "k")
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	b, _, err := s.Begin(e.ctx(), "custodian_sale", "k")
 	require.NoError(t, err)
 	require.NotNil(t, b, "another operation is another key")
-	c, _, err := s.Begin(e.ctxFor(other), "checkout", "k")
+	c, _, err := s.Begin(e.ctxFor(other), "purchase", "k")
 	require.NoError(t, err)
 	require.NotNil(t, c, "another merchant is another key")
-	_, _, err = s.Begin(e.t.Context(), "checkout", "k")
+	_, _, err = s.Begin(e.t.Context(), "purchase", "k")
 	require.Error(t, err, "a claim needs a merchant")
 }
 
@@ -231,11 +231,11 @@ func TestKeysAreScopedByMerchantAndOperation(t *testing.T) {
 func TestReplayAfterComplete(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	claim, _, err := e.store(0).Begin(e.ctx(), "checkout", "replay")
+	claim, _, err := e.store(0).Begin(e.ctx(), "purchase", "replay")
 	require.NoError(t, err)
 	require.NoError(t, claim.Complete(e.ctx(), json.RawMessage(`{"session":"cs_1","status":"succeeded"}`)))
 	for i := range 2 {
-		again, rec, err := e.store(i).Begin(e.ctx(), "checkout", "replay")
+		again, rec, err := e.store(i).Begin(e.ctx(), "purchase", "replay")
 		require.NoError(t, err)
 		require.Nil(t, again)
 		require.Equal(t, idempotency.StatusSucceeded, rec.Status)
@@ -277,29 +277,29 @@ func TestFailThenRetry(t *testing.T) {
 func TestStaleProcessing(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	owner, _, err := e.store(0).Begin(e.ctx(), "checkout", "stale")
+	owner, _, err := e.store(0).Begin(e.ctx(), "purchase", "stale")
 	require.NoError(t, err)
 	work, stop := owner.Hold(e.ctx())
 	deadline := time.Now().Add(3 * lease)
 	for time.Now().Before(deadline) {
-		require.Empty(t, owners(t, e.race(4, "checkout", "stale")), "a live owner keeps its claim")
+		require.Empty(t, owners(t, e.race(4, "purchase", "stale")), "a live owner keeps its claim")
 		time.Sleep(lease / 5)
 	}
 	require.NoError(t, work.Err(), "renewals kept the owner working")
 	stop() // the owner dies
 
-	require.Empty(t, owners(t, e.race(16, "checkout", "stale")), "not before the lease lapses")
+	require.Empty(t, owners(t, e.race(16, "purchase", "stale")), "not before the lease lapses")
 	require.Eventually(t, func() bool {
-		rec, err := e.store(1).Get(e.ctx(), "checkout", "stale")
+		rec, err := e.store(1).Get(e.ctx(), "purchase", "stale")
 		return err == nil && !rec.Leased
 	}, 2*lease, 20*time.Millisecond)
-	won := owners(t, e.race(16, "checkout", "stale"))
+	won := owners(t, e.race(16, "purchase", "stale"))
 	require.Len(t, won, 1, "exactly one reclaims a lapsed claim")
 	require.True(t, won[0].Reclaimed)
 	require.ErrorIs(t, owner.Renew(e.ctx()), idempotency.ErrClaimLost)
 	require.ErrorIs(t, owner.Complete(e.ctx(), json.RawMessage(`{"stale":true}`)), idempotency.ErrClaimLost)
 	require.NoError(t, won[0].Complete(e.ctx(), json.RawMessage(`{"fresh":true}`)))
-	rec, err := e.store(0).Get(e.ctx(), "checkout", "stale")
+	rec, err := e.store(0).Get(e.ctx(), "purchase", "stale")
 	require.NoError(t, err)
 	require.JSONEq(t, `{"fresh":true}`, string(rec.Result))
 }
@@ -309,7 +309,7 @@ func TestStaleProcessing(t *testing.T) {
 func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	owner, _, err := e.store(0).Begin(e.ctx(), "checkout", "starved")
+	owner, _, err := e.store(0).Begin(e.ctx(), "purchase", "starved")
 	require.NoError(t, err)
 	// Starve renewals: a transaction holds the claim row.
 	tx, err := e.admin.Begin(t.Context())
@@ -326,15 +326,15 @@ func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
 		t.Fatal("the owner kept working without a confirmed lease")
 	}
 	require.ErrorIs(t, context.Cause(work), idempotency.ErrClaimLost)
-	rec, err := e.store(1).Watch(e.ctx(), "checkout", "starved")
+	rec, err := e.store(1).Watch(e.ctx(), "purchase", "starved")
 	require.NoError(t, err)
 	require.True(t, rec.Leased, "the owner stopped while its lease still held")
 
 	// A reclaim after the lapse passes the key on; the stopped owner's
 	// transactions refuse to commit.
 	require.NoError(t, tx.Rollback(t.Context()))
-	e.lapse("checkout", "starved")
-	won := owners(t, e.race(8, "checkout", "starved"))
+	e.lapse("purchase", "starved")
+	won := owners(t, e.race(8, "purchase", "starved"))
 	require.Len(t, won, 1)
 	guarded := db.WithCommitGuard(e.ctx(), owner.InTx)
 	err = e.replicas[0].db.MerchantTx(guarded, func(ctx context.Context, tx pgx.Tx) error { return nil })
@@ -347,13 +347,13 @@ func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
 func TestTokenSurvivesCollection(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	old, _, err := e.store(0).Begin(e.ctx(), "checkout", "gc")
+	old, _, err := e.store(0).Begin(e.ctx(), "purchase", "gc")
 	require.NoError(t, err)
 	e.exec(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '2 seconds', expires_at = now() - interval '1 second' WHERE idempotency_key = 'gc'`)
 	deleted, err := riverjobs.IdempotencyGCWorker{DB: e.replicas[1].db}.Sweep(t.Context())
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted)
-	fresh, _, err := e.store(1).Begin(e.ctx(), "checkout", "gc")
+	fresh, _, err := e.store(1).Begin(e.ctx(), "purchase", "gc")
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
 	require.False(t, fresh.Reclaimed, "the key started over")
@@ -367,10 +367,10 @@ func TestExpiryAndGC(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	s := e.store(0)
-	done, _, err := s.Begin(e.ctx(), "checkout", "done")
+	done, _, err := s.Begin(e.ctx(), "purchase", "done")
 	require.NoError(t, err)
 	require.NoError(t, done.Complete(e.ctx(), json.RawMessage(`{"n":1}`)))
-	_, _, err = s.Begin(e.ctx(), "checkout", "abandoned")
+	_, _, err = s.Begin(e.ctx(), "purchase", "abandoned")
 	require.NoError(t, err)
 	// A backlog larger than several batches, across two merchants.
 	other := e.newMerchant()
@@ -386,7 +386,7 @@ func TestExpiryAndGC(t *testing.T) {
 	require.Equal(t, 2602, e.rows(), "nothing has expired")
 
 	e.exec(`UPDATE billing.idempotency_keys SET lease_expires_at = LEAST(lease_expires_at, now() - interval '2 seconds'), expires_at = now() - interval '1 second'`)
-	again, _, err := s.Begin(e.ctx(), "checkout", "done")
+	again, _, err := s.Begin(e.ctx(), "purchase", "done")
 	require.NoError(t, err)
 	require.NotNil(t, again, "an expired result is not replayed; the key is claimable afresh")
 	deleted, err := gc.Sweep(t.Context())

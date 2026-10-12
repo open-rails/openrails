@@ -6,7 +6,7 @@ search is not proof that it failed. NMI order references correlate an operation;
 they do not themselves establish provider-enforced idempotency or definitive
 negative/read-after-write semantics.
 
-Checkout sales, recurring enrollment, custodian-proxied sales, manual rebills
+Purchase sales, recurring enrollment, custodian-proxied sales, manual rebills
 and usage order collection therefore retain unknown state until a positive receipt
 can be reconciled. Resumed intent handlers verify rather than submit another
 mutation. A captured provider receipt survives local finalization failure in

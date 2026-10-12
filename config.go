@@ -128,7 +128,7 @@ const (
 	ProviderWritesFull = config.ProviderWriteModeFull
 	// ProviderWritesLimited makes no system-initiated provider writes:
 	// dunning, invoice collection and the other proactive operations wait,
-	// while checkout and customer or staff actions run.
+	// while purchase and customer or staff actions run.
 	ProviderWritesLimited = config.ProviderWriteModeLimited
 	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
 	ProviderWritesReadOnly = config.ProviderWriteModeReadOnly

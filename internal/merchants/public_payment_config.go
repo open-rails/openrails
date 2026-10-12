@@ -16,11 +16,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Browser checkout flows — how a frontend has to drive a rail. A frontend
+// Browser purchase flows — how a frontend has to drive a rail. A frontend
 // switches on this, not on a hardcoded list of rails.
 const (
 	// FlowTokenize: the browser tokenizes the card itself against the rail's
-	// own public key, then posts the resulting token to /checkout.
+	// own public key, then posts the resulting token to /purchase.
 	FlowTokenize = "tokenize"
 	// FlowRedirect: OpenRails mints a hosted payment URL; the browser sends the
 	// buyer there. No card ever touches the frontend, so no public key is needed.
@@ -29,7 +29,7 @@ const (
 	// /solana/config + /solana/tokens.
 	FlowWallet = "wallet"
 	// FlowElements: the browser saves the card in the PSP's own embedded
-	// fields, then checkout charges that saved card; any authentication runs
+	// fields, then purchase charges that saved card; any authentication runs
 	// in the page. No card data reaches the host.
 	FlowElements = "elements"
 	// FlowCard: the page posts the card to OpenRails, which vaults it at the
@@ -119,7 +119,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 	rail := strings.ToLower(strings.TrimSpace(scope.Rail))
 	profile, known := publicRailProfiles[rail]
 	if !known {
-		return PublicPSPConfig{}, "rail has no browser checkout profile", false
+		return PublicPSPConfig{}, "rail has no browser purchase profile", false
 	}
 	// A PSP that still carries an inline custody block is misconfigured, not
 	// custodial: refuse it rather than advertise a tokenizer key the browser
@@ -167,7 +167,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 			return PublicPSPConfig{}, err.Error(), false
 		}
 		if d.BrowserFlow == "" {
-			return PublicPSPConfig{}, "custodian " + d.Kind + " has no browser checkout profile", false
+			return PublicPSPConfig{}, "custodian " + d.Kind + " has no browser purchase profile", false
 		}
 		public, reason, ok := d.PublicSettings(custodian.Settings)
 		if !ok {
@@ -220,10 +220,10 @@ func publicSettingValue(settings map[string]any, key string) string {
 }
 
 // PublicPSPs lists the merchant's ARMED PSPs for environment with each
-// one's public browser config. Armed means exactly what checkout means by it:
+// one's public browser config. Armed means exactly what purchase means by it:
 // a non-archived billing.psps row for this merchant, rail and environment
 // whose full credential shape resolves — armed reports that, with the same
-// resolver checkout routes through. A PSP declared without credentials (an
+// resolver purchase routes through. A PSP declared without credentials (an
 // import attribution) is an identity, never advertised as available.
 func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
 	scopes, err := s.LivePSPScopes(ctx, id, environment)
@@ -293,27 +293,27 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environ
 		}
 		out = append(out, cfg)
 	}
-	selectors, err := s.checkoutSelectors(ctx, id)
+	selectors, err := s.pspSelectors(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	for i := range out {
-		out[i].Checkout = selectors == nil || selectors[out[i].Key] || selectors[out[i].Rail]
+		out[i].Routed = selectors == nil || selectors[out[i].Key] || selectors[out[i].Rail]
 	}
 	return out, nil
 }
 
-// checkoutSelectors is every PSP key or rail the merchant's checkout routing
-// can pick; nil means no policy, so every armed PSP takes new checkouts.
-func (s *Service) checkoutSelectors(ctx context.Context, id billing.MerchantID) (map[string]bool, error) {
+// pspSelectors is every PSP key or rail the merchant's PSP routing
+// can pick; nil means no policy, so every armed PSP takes new purchases.
+func (s *Service) pspSelectors(ctx context.Context, id billing.MerchantID) (map[string]bool, error) {
 	if s.config == nil {
 		return nil, nil
 	}
 	set, err := s.config.Get(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("load checkout routing policy: %w", err)
+		return nil, fmt.Errorf("load PSP routing policy: %w", err)
 	}
-	routing := set.Merchant.Value.Settings.CheckoutRouting
+	routing := set.Merchant.Value.Settings.PSPRouting
 	if routing == nil || len(*routing) == 0 {
 		return nil, nil
 	}
@@ -326,7 +326,7 @@ func (s *Service) checkoutSelectors(ctx context.Context, id billing.MerchantID) 
 	return selectors, nil
 }
 
-// Browser checkout drivers: how @openrails/billing-ui executes one option.
+// Browser purchase drivers: how @openrails/billing-ui executes one option.
 const (
 	DriverCollectJS      = "collect_js"
 	DriverCard           = "card"

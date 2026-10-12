@@ -40,7 +40,7 @@ const (
 // Content-Length gets 413 before any counting or body read. Unlisted buckets
 // (e.g. "webhook", capped per rail in the handler) are not checked here.
 var BucketMaxContentLength = map[string]int64{
-	"checkout":        64 << 10, // 64 KiB
+	"purchase":        64 << 10, // 64 KiB
 	"subscriptions":   64 << 10, // 64 KiB
 	"payment-methods": 64 << 10, // 64 KiB
 }
@@ -149,7 +149,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 		}
 	}
 
-	// A captcha gates only the browser buckets (checkout, payment methods,
+	// A captcha gates only the browser buckets (purchase, payment methods,
 	// subscriptions). Merchant, console and server-to-server API traffic is
 	// never challenged: an API key cannot solve a captcha.
 	captchaEnforced := captcha.ShouldApply(deps.Captcha, bucket)
@@ -460,8 +460,8 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 		return (*cfg)["webhook"], bucket
 	case "subscriptions":
 		return (*cfg)["subscribe"], bucket
-	case "checkout":
-		return (*cfg)["checkout"], bucket
+	case "purchase":
+		return (*cfg)["purchase"], bucket
 	case "payment-methods":
 		return (*cfg)["payment"], bucket
 	case "catalog-ask":
@@ -492,16 +492,16 @@ func ClassifyBucket(path, method string) string {
 		return "payment-methods"
 	case strings.HasPrefix(path, "/v1/me/subscriptions") && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
 		return "subscriptions"
-	case method == http.MethodPost && isCheckoutPath(path):
-		return "checkout"
+	case method == http.MethodPost && isPurchasePath(path):
+		return "purchase"
 	default:
 		return ""
 	}
 }
 
-// isCheckoutPath is a buyer paying: creating an order, paying or confirming
+// isPurchasePath is a buyer paying: creating an order, paying or confirming
 // one, or a wallet's Solana Pay request for one.
-func isCheckoutPath(path string) bool {
+func isPurchasePath(path string) bool {
 	if path == "/v1/me/orders" {
 		return true
 	}
@@ -565,17 +565,17 @@ func effectiveLimit(limit *config.RateLimit) int {
 	return limit.RequestsPerMinute
 }
 
-// Limits per hosted checkout URL per minute: its secret is the credential, so
+// Limits per pay URL per minute: its secret is the credential, so
 // it is limited whatever address presents it. Polling reads every three
 // seconds; a pay is a buyer's click.
 const (
-	CheckoutURLReadsPerMinute = 120
-	CheckoutURLPaysPerMinute  = 10
+	PayURLReadsPerMinute = 120
+	PayURLPaysPerMinute  = 10
 )
 
-// CheckoutURLRateLimit limits the requests under one hosted checkout URL,
+// PayURLRateLimit limits the requests under one pay URL,
 // keyed by its order (key; "" passes), whatever address presents it.
-func CheckoutURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*request.Request) string) router.Middleware {
+func PayURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*request.Request) string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			order := key(r)

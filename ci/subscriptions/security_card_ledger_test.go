@@ -62,7 +62,7 @@ func (f *fleet) noLedgerTable() {
 
 // Card testing is counted in the abuse state: six refusals in fifteen minutes
 // (or ten in a day) per customer or client address block attempts before the
-// gateway, checkout included, until the window passes. In attack mode any
+// gateway, purchase included, until the window passes. In attack mode any
 // subject with a recent refusal is blocked; clean customers are not. One
 // instance counts in its memory and instances with Redis share the counts,
 // whichever instance served each attempt.
@@ -165,7 +165,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}
 	pay := func(w *world, tp topology, price billing.PriceID, c *customer, ip string, cd card) error {
-		return succeeded(c.checkout(tp, order{price: price, rail: "nmi", token: w.nmi.Tokenize(cd), ip: ip}))
+		return succeeded(c.buyOrder(tp, order{price: price, rail: "nmi", token: w.nmi.Tokenize(cd), ip: ip}))
 	}
 	isDecline := func(t *testing.T, err error) {
 		t.Helper()

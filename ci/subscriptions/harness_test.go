@@ -1031,7 +1031,7 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 
 func (c *customer) enrollOnce(tp topology, rail, priceID, _, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	paid := c.mustCheckout(tp, order{price: pid(priceID), rail: rail, method: method})
+	paid := c.mustPurchase(tp, order{price: pid(priceID), rail: rail, method: method})
 	require.NotNil(c.w.t, paid.SubscriptionID, "the payment names the membership: %+v", paid.Order)
 	return *paid.SubscriptionID
 }

@@ -97,8 +97,8 @@ describe("Cart", () => {
       </BillingProvider>
     )
     expect(await screen.findByText("You already own this.")).toBeInTheDocument()
-    const checkout = screen.getByRole("button", { name: "Check out" })
-    expect(checkout).toBeDisabled()
+    const purchase = screen.getByRole("button", { name: "Check out" })
+    expect(purchase).toBeDisabled()
 
     fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[1])
     await waitFor(() =>

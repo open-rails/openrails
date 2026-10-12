@@ -132,43 +132,43 @@ func TestNormalizeBillingPolicyNameAndBinding(t *testing.T) {
 	require.ErrorContains(t, err, "a customer OR a tier, not both")
 }
 
-func TestNormalizeCheckoutRouting(t *testing.T) {
-	out, err := NormalizeCheckoutRouting(nil)
+func TestNormalizePSPRouting(t *testing.T) {
+	out, err := NormalizePSPRouting(nil)
 	require.NoError(t, err)
 	require.Nil(t, out, "no rules is no policy")
 
-	out, err = NormalizeCheckoutRouting([]models.CheckoutRoutingRule{
-		{Match: models.CheckoutRoutingMatch{Currency: " usd ", Country: "  ", Mode: " Subscription "}, Prefer: []string{" Mobius ", "CCBill"}},
+	out, err = NormalizePSPRouting([]models.PSPRoutingRule{
+		{Match: models.PSPRoutingMatch{Currency: " usd ", Country: "  ", Mode: " Subscription "}, Prefer: []string{" Mobius ", "CCBill"}},
 		{Prefer: []string{"stripe"}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, models.CheckoutRoutingMatch{Currency: "USD", Mode: "subscription"}, out[0].Match)
+	require.Equal(t, models.PSPRoutingMatch{Currency: "USD", Mode: "subscription"}, out[0].Match)
 	require.Equal(t, []string{"mobius", "ccbill"}, out[0].Prefer)
 	require.True(t, out[1].Match.IsCatchAll())
 
-	match := func(m models.CheckoutRoutingMatch) []models.CheckoutRoutingRule {
-		return []models.CheckoutRoutingRule{{Match: m, Prefer: []string{"mobius"}}}
+	match := func(m models.PSPRoutingMatch) []models.PSPRoutingRule {
+		return []models.PSPRoutingRule{{Match: m, Prefer: []string{"mobius"}}}
 	}
-	for want, rules := range map[string][]models.CheckoutRoutingRule{
+	for want, rules := range map[string][]models.PSPRoutingRule{
 		"must name at least one PSP": {{Prefer: nil}},
 		`repeats "mobius"`:           {{Prefer: []string{"mobius", "mobius"}}},
-		"unreachable":                {{Prefer: []string{"mobius"}}, {Match: models.CheckoutRoutingMatch{Currency: "eur"}, Prefer: []string{"ccbill"}}},
-		"unknown currency":           match(models.CheckoutRoutingMatch{Currency: "dollars"}),
-		"one_off or subscription":    match(models.CheckoutRoutingMatch{Mode: "recurring"}),
+		"unreachable":                {{Prefer: []string{"mobius"}}, {Match: models.PSPRoutingMatch{Currency: "eur"}, Prefer: []string{"ccbill"}}},
+		"unknown currency":           match(models.PSPRoutingMatch{Currency: "dollars"}),
+		"one_off or subscription":    match(models.PSPRoutingMatch{Mode: "recurring"}),
 	} {
-		_, err := NormalizeCheckoutRouting(rules)
+		_, err := NormalizePSPRouting(rules)
 		require.ErrorContains(t, err, want)
 	}
 }
 
-func TestCheckoutRoutingRejectsCountry(t *testing.T) {
+func TestPSPRoutingRejectsCountry(t *testing.T) {
 	for _, country := range []string{"US", " us ", "USA"} {
 		t.Run(country, func(t *testing.T) {
-			_, err := NormalizeCheckoutRouting([]models.CheckoutRoutingRule{
-				{Match: models.CheckoutRoutingMatch{Country: country}, Prefer: []string{"nmi"}},
+			_, err := NormalizePSPRouting([]models.PSPRoutingRule{
+				{Match: models.PSPRoutingMatch{Country: country}, Prefer: []string{"nmi"}},
 				{Prefer: []string{"stripe"}},
 			})
-			require.ErrorContains(t, err, "checkout_routing[0].match.country is not supported")
+			require.ErrorContains(t, err, "psp_routing[0].match.country is not supported")
 		})
 	}
 }

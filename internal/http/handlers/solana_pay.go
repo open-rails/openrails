@@ -7,9 +7,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
 type SolanaPayGetResponse struct {
@@ -33,7 +33,7 @@ func solanaOrderID(r *httprequest.Request) (billing.OrderID, bool) {
 		r.ErrorCode(billing.CodeResourceNotFound, "order not found")
 		return billing.OrderID{}, false
 	}
-	if r.State.CheckoutAttemptService == nil {
+	if r.State.OrderAttemptService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "solana pay unavailable")
 		return billing.OrderID{}, false
 	}
@@ -47,7 +47,7 @@ func GetOrderSolanaPay(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	items, err := r.State.CheckoutAttemptService.OrderSolanaLabel(r.Request.Context(), id.UUID())
+	items, err := r.State.OrderAttemptService.OrderSolanaLabel(r.Request.Context(), id.UUID())
 	if err != nil {
 		writeOrderSolanaPayError(r, err)
 		return
@@ -82,7 +82,7 @@ func PostOrderSolanaPay(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "account is required").WithParam("account"))
 		return
 	}
-	resp, err := r.State.CheckoutAttemptService.BuildOrderSolanaTransaction(r.Request.Context(), id.UUID(), req.Account)
+	resp, err := r.State.OrderAttemptService.BuildOrderSolanaTransaction(r.Request.Context(), id.UUID(), req.Account)
 	if err != nil {
 		writeOrderSolanaPayError(r, err)
 		return
@@ -92,13 +92,13 @@ func PostOrderSolanaPay(r *httprequest.Request) {
 
 func writeOrderSolanaPayError(r *httprequest.Request, err error) {
 	switch {
-	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
+	case errors.Is(err, payment.ErrOrderAttemptNotFound):
 		r.ErrorCode(billing.CodeResourceNotFound, "order not found")
-	case errors.Is(err, orders.ErrNotPayable), errors.Is(err, checkout.ErrCheckoutAttemptNotSolana):
+	case errors.Is(err, orders.ErrNotPayable), errors.Is(err, payment.ErrOrderAttemptNotSolana):
 		r.ErrorCode(billing.CodeOrderNotPayable, "the order takes no Solana payment now")
-	case errors.Is(err, checkout.ErrCheckoutAttemptAlreadyCompleted), errors.Is(err, checkout.ErrCheckoutAttemptConflict), errors.Is(err, orders.ErrInProgress):
+	case errors.Is(err, payment.ErrOrderAttemptAlreadyCompleted), errors.Is(err, payment.ErrOrderAttemptConflict), errors.Is(err, orders.ErrInProgress):
 		r.ErrorCode(billing.CodeResourceConflict, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
+	case errors.Is(err, payment.ErrOrderAttemptValidation):
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()))
 	default:
 		writeRefusal(r, err, "solana pay request failed")

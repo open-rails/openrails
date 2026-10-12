@@ -26,10 +26,10 @@ go.work.sum
 .gopath
 
 # Build artifacts (goreleaser, frontend builds). server/web/console/dist and
-# web/checkout/dist keep only their committed placeholders (embed.go).
+# web/pay/dist keep only their committed placeholders (embed.go).
 dist/
 !server/web/console/dist/
-!web/checkout/dist/
+!web/pay/dist/
 build/
 bin/
 /openrails

@@ -1,0 +1,580 @@
+package payment
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	log "github.com/sirupsen/logrus"
+)
+
+const (
+	nmiSaleEvidenceTransactionID = "transaction_id"
+	nmiSaleEvidencePaymentID     = "payment_id"
+	nmiSaleEvidenceDelayedStart  = "delayed_start"
+)
+
+func NMISaleIdempotencyKey(key string) string {
+	return payments.TypeNMISale + ":" + strings.TrimSpace(key)
+}
+func nmiSaleIntentOrderID(id uuid.UUID, run string) string {
+	return payments.NMISaleOrderReference(id, run)
+}
+
+type NMISaleIntentHandler struct {
+	Sale   *NMISaleService
+	Policy intents.BackoffPolicy
+}
+
+func NewNMISaleIntentHandler(sale *NMISaleService) *NMISaleIntentHandler {
+	return &NMISaleIntentHandler{Sale: sale, Policy: intents.DefaultBackoff}
+}
+func (h *NMISaleIntentHandler) Type() string                         { return payments.TypeNMISale }
+func (h *NMISaleIntentHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+func (h *NMISaleIntentHandler) PrunePolicy() (bool, bool)            { return true, true }
+func (h *NMISaleIntentHandler) CommitsTerminalOutcome() bool         { return true }
+func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
+	return intents.StillRelevant(), nil
+}
+func (h *NMISaleIntentHandler) database() *db.DB {
+	if h.Sale == nil || h.Sale.RailPaymentMethodService == nil {
+		return nil
+	}
+	return h.Sale.RailPaymentMethodService.DB
+}
+
+func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
+	if h.database() == nil || h.Sale.Fulfillment == nil {
+		return intents.Parked("purchase sale service not wired")
+	}
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous("cannot load accepted sale: " + err.Error())
+	}
+	var progress map[string]any
+	if len(current.ResultEvidence) > 0 {
+		if err := json.Unmarshal(current.ResultEvidence, &progress); err != nil {
+			return intents.Ambiguous("invalid canonical sale progress")
+		}
+	}
+	if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
+	}
+	if progress["sale_submitted"] == true {
+		if current.Rail == string(models.RailStripe) {
+			return h.recoverStripeSale(ctx, current)
+		}
+		return h.Verify(ctx, current)
+	}
+	in = current
+	p, err := payments.DecodeNMISalePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if in.Rail == string(models.RailStripe) {
+		return h.executeStripeSale(ctx, in, p)
+	}
+	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
+	if err != nil || client == nil {
+		return intents.Parked("accepted NMI account cannot be armed")
+	}
+	owner, account := client.AccountIdentity()
+	if owner != in.MerchantID || account != *in.PspID {
+		return intents.Parked("NMI client does not identify the accepted account")
+	}
+	if client.ReadOnly {
+		return intents.Parked("nmi client is read-only")
+	}
+	// A one-off buy on a saved card is a one-click use of its card-on-file
+	// lineage, or stores it; an order with a recurring line opens a recurring
+	// agreement.
+	credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement()))
+	if err != nil {
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence(err.Error(), map[string]any{"not_executed": true}))
+	}
+	var proxy *hscharge.Charger
+	if p.HyperSwitch != nil {
+		if proxy, err = hyperSwitchProxy(ctx, h.Sale.Config, h.database(), *p.HyperSwitch, p.Instrument, client); err != nil {
+			return intents.Parked(err.Error())
+		}
+	}
+	var held *nmiproxy.Charger
+	if p.Instrument.Custodian == models.CustodianBasisTheory {
+		if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
+			return intents.Parked("Basis Theory sale writes unavailable")
+		}
+		if _, held, _, err = h.Sale.Custody.basisTheory(ctx, *in.PspID); err != nil {
+			return intents.Parked("Basis Theory custody cannot be armed: " + err.Error())
+		}
+	}
+	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
+		return outcome
+	}
+	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if proxy != nil {
+		return h.submitHyperSwitchSale(ctx, in, p, proxy, client, minor)
+	}
+	if held != nil {
+		return h.submitBasisTheorySale(ctx, in, p, held, client, minor)
+	}
+	params := nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: credential}
+	if p.Token != "" {
+		// An order's new card: one sale charges it and, unless it is kept for
+		// this purchase only, saves it in a new vault.
+		params.PaymentToken = p.Token
+		if p.SavesCard() {
+			params.SaveCard = newCardVault(p.Billing)
+		}
+	}
+	response, callErr := client.RunSale(ctx, params)
+	if callErr != nil {
+		duplicate := errors.Is(callErr, nmi.ErrDuplicateTransaction)
+		if !duplicate && nmi.RequiresVerification(callErr) {
+			return intents.Ambiguous("sale outcome requires provider verification")
+		}
+		var refusal *nmi.CustomerVaultError
+		evidence := map[string]any{"request_refused": true}
+		reason := "provider refused the sale request"
+		if duplicate {
+			// NMI's duplicate check refused this unique order unprocessed.
+			evidence["duplicate_refused"] = true
+			evidence["failure_code"] = billing.CodePaymentDuplicateRefused
+			reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
+		} else if errors.As(callErr, &refusal) {
+			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
+			reason = "sale declined"
+			// A declined card is no stored credential: drop a vault the
+			// sale asked for and the gateway made anyway.
+			if params.SaveCard != nil && refusal.CustomerVaultID != "" {
+				if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: refusal.CustomerVaultID}); err != nil {
+					log.WithContext(ctx).WithError(err).WithField("vault_id", refusal.CustomerVaultID).Warn("delete the declined new card's vault")
+				}
+			}
+		}
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+			return intents.Ambiguous("cannot retain sale refusal: " + err.Error())
+		}
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence(reason, evidence))
+	}
+	if response == nil || response.TransactionID == "" {
+		return intents.Ambiguous("sale response has no transaction candidate")
+	}
+	return h.collect(ctx, in, client, response.TransactionID)
+}
+
+// submitHyperSwitchSale charges an order's HyperSwitch-held card through the
+// custodian's NMI proxy: the customer-present storing charge of the
+// subscription the order opens.
+func (h *NMISaleIntentHandler) submitHyperSwitchSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, proxy *hscharge.Charger, client *nmi.NMIClient, minor moneyutil.Cents) intents.Outcome {
+	result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
+		AmountMinor: minor, Currency: p.Currency, Description: p.Description, OrderRef: payments.NMISaleOrderReference(in.ID, p.E2ERunID), Context: p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement())})
+	return h.proxyOutcome(ctx, in, client, result, refusal, err)
+}
+
+// submitBasisTheorySale charges the card a Basis Theory token intent
+// collected through the custodian's proxy, in the customer's presence.
+func (h *NMISaleIntentHandler) submitBasisTheorySale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, proxy *nmiproxy.Charger, client *nmi.NMIClient, minor moneyutil.Cents) intents.Outcome {
+	result, refusal, err := proxy.WithSource(nmiproxy.Source{TokenIntentID: p.Token}).Sale(ctx, charge.Request{Instrument: charge.Instrument{Rail: nmiproxy.Rail},
+		AmountMinor: minor, Currency: p.Currency, Description: p.Description, OrderRef: payments.NMISaleOrderReference(in.ID, p.E2ERunID), Context: p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement())})
+	return h.proxyOutcome(ctx, in, client, result, refusal, err)
+}
+
+// proxyOutcome is a custodian proxy's answer to a sale: refused before it
+// reached the gateway, declined there, or charged.
+func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, result charge.Result, refusal *nmi.CustomerVaultError, err error) intents.Outcome {
+	var evidence map[string]any
+	reason := "sale declined"
+	switch {
+	case errors.Is(err, charge.ErrNotDispatched):
+		evidence, reason = map[string]any{"request_refused": true}, "the custodian refused the sale before sending it"
+	case err != nil:
+		return intents.Ambiguous("sale outcome requires provider verification")
+	case refusal != nil:
+		evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
+	case result.TransactionID == "" || result.Declined:
+		return intents.Ambiguous("sale response has no transaction candidate")
+	default:
+		return h.collect(ctx, in, client, result.TransactionID)
+	}
+	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+		return intents.Ambiguous("cannot retain sale refusal: " + err.Error())
+	}
+	return h.complete(ctx, in, nil, intents.TerminalWithEvidence(reason, evidence))
+}
+
+// fenceSale re-checks the accepted instrument and takes the write-once
+// submission fence. Only the fence winner may send money.
+func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
+	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// A new card is saved by the sale itself: no method exists yet.
+		if p.NewCard && p.OrderID != uuid.Nil {
+			return nil
+		}
+		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if method.CustomerID.String() != p.UserID || !paymentmethods.Chargeable(method) {
+			return errors.New("sale method changed before submission")
+		}
+		if err := p.Instrument.Matches(method); err != nil {
+			return err
+		}
+		return mandates.Recheck(ctx, h.database().NewWithPgxTx(tx).Gen(ctx), in.MerchantID, p.Instrument.Mandate)
+	})
+	if err != nil {
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true})), false
+	}
+	submitted, err := intents.NewStore(h.database()).RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
+	if err != nil {
+		return intents.Ambiguous("cannot retain sale submission fence: " + err.Error()), false
+	}
+	if !submitted {
+		return h.Verify(ctx, in), false
+	}
+	return intents.Outcome{}, true
+}
+
+func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) intents.Outcome {
+	if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
+		return intents.Parked("Stripe sale writes unavailable")
+	}
+	if _, err := h.stripeService(ctx, in); err != nil {
+		return intents.Parked(err.Error())
+	}
+	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
+		return outcome
+	}
+	return h.submitStripeSale(ctx, in)
+}
+
+func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
+	if h.database() == nil || h.Sale.Fulfillment == nil {
+		return intents.Ambiguous("sale recovery service is unavailable")
+	}
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	receipt, found, err := intents.LoadCollectedReceipt(current)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if found {
+		return h.complete(ctx, current, &receipt, intents.Succeeded(nil))
+	}
+	var evidence map[string]any
+	if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &evidence) != nil {
+		return intents.Ambiguous("invalid sale progress")
+	}
+	if evidence["declined"] == true || evidence["not_executed"] == true || evidence["request_refused"] == true {
+		return h.complete(ctx, current, nil, intents.TerminalWithEvidence("sale refused", evidence))
+	}
+	p, err := payments.DecodeNMISalePayload(current)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if evidence["sale_submitted"] != true {
+		// A crashed claim is not a submitted payment. Re-enter the executor
+		// through its write gates; verification itself never sends money.
+		return intents.Retryable("accepted sale has not been submitted")
+	}
+	if current.Rail == string(models.RailStripe) {
+		return h.verifyStripeSale(ctx, current)
+	}
+	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *current.PspID), nmiIntentClientName(p.PSP, current.Rail))
+	if err != nil || client == nil {
+		return intents.Ambiguous("accepted NMI account cannot be read")
+	}
+	return h.collect(ctx, current, client, intents.EvidenceString(current, "transaction_id"))
+}
+
+func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, reference string) intents.Outcome {
+	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, reference)
+	if err != nil || !found {
+		return intents.Ambiguous("sale has no qualified exact payment receipt")
+	}
+	receipt, err = intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt)
+	if err != nil {
+		return intents.Ambiguous("cannot retain sale receipt: " + err.Error())
+	}
+	return h.complete(ctx, in, &receipt, intents.Succeeded(nil))
+}
+
+func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	if h.database() == nil || h.Sale.Fulfillment == nil {
+		return intents.Outcome{}, intents.RejectResolution("sale recovery service is unavailable")
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, intents.RejectResolution("sale has no steps")
+	}
+	p, err := payments.DecodeNMISalePayload(in)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if in.Rail == string(models.RailStripe) {
+		if resolution.NotExecuted {
+			return intents.Outcome{}, intents.RejectResolution("post-submission sale nonexecution is not provable from search absence")
+		}
+		return h.resolveStripeSale(ctx, in, resolution.ProviderReference)
+	}
+	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if resolution.NotExecuted {
+		evidence, err := nmiSaleRefusal(ctx, client, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
+		if err != nil {
+			return intents.Outcome{}, err
+		}
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+			return intents.Outcome{}, err
+		}
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("NMI declined this sale; nothing was charged", evidence)), nil
+	}
+	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
+	if err != nil || !found {
+		return intents.Outcome{}, intents.RejectResolution("exact sale receipt is unavailable or contradicts accepted terms")
+	}
+	receipt, err = intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	return h.complete(ctx, in, &receipt, intents.Succeeded(nil)), nil
+}
+
+func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProviderIntent, receipt *intents.CollectedReceipt, outcome intents.Outcome) intents.Outcome {
+	p, err := payments.DecodeNMISalePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	ctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	ctx = db.WithPSPID(ctx, *in.PspID)
+	var saved *models.PaymentMethod
+	if p.OrderID != uuid.Nil && outcome.Class == intents.OutcomeSucceeded {
+		if saved, err = h.newCardMethod(ctx, in, p, receipt); err != nil {
+			return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
+		}
+	}
+	var declined *models.PaymentMethod
+	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		declined = nil
+		d := h.database().NewWithPgxTx(tx)
+		customer, _ := uuid.Parse(p.UserID)
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: customer}); err != nil {
+			return err
+		}
+		current, err := d.Gen(ctx).LockProviderIntentForSaleCompletion(ctx, gen.LockProviderIntentForSaleCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
+		if err != nil {
+			return err
+		}
+		if current.PspID == nil || *current.PspID != *in.PspID || current.IdempotencyKey != in.IdempotencyKey || !bytes.Equal(current.Payload, in.Payload) {
+			return errors.New("sale completion contradicts accepted operation")
+		}
+		retained, paid, err := intents.LoadCollectedReceipt(current)
+		if err != nil {
+			return err
+		}
+		success := outcome.Class == intents.OutcomeSucceeded
+		if success {
+			if !paid || receipt == nil || receipt.Validate(current) != nil || retained.TransactionID() != receipt.TransactionID() {
+				return errors.New("sale completion has no matching retained receipt")
+			}
+		} else if paid {
+			return errors.New("paid sale cannot be refused")
+		}
+		status := intents.StatusFailedTerminal
+		if success {
+			status = intents.StatusSucceeded
+		}
+		var evidence map[string]any
+		if len(current.ResultEvidence) > 0 {
+			if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
+				return err
+			}
+		}
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		if paid && (evidence["declined"] == true || evidence["not_executed"] == true || evidence["request_refused"] == true) {
+			return errors.New("qualified sale payment contradicts refusal metadata")
+		}
+		if !success && outcome.Evidence["not_executed"] == true && evidence["sale_submitted"] == true {
+			return errors.New("submitted sale cannot become pre-send nonexecution")
+		}
+		if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+			if current.Status != status {
+				return errors.New("sale terminal replay conflicts")
+			}
+			outcome.Evidence = saleResultEvidence(evidence)
+			return nil
+		}
+		purchase := h.Sale.Fulfillment.transactionBound(d)
+		now := purchase.now().UTC()
+		if p.OrderID != uuid.Nil {
+			if err := h.completeOrder(ctx, d, in, p, customer, receipt, success, evidence, outcome, now, saved); err != nil {
+				return err
+			}
+		} else if success {
+			price := &models.Price{ID: p.PriceID, ProductID: p.ProductID, Amount: p.ListAmount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours}
+			product := &models.Product{ID: p.ProductID}
+			eligibility := &EligibilityResult{Status: EligibilityStatus(p.Eligibility), Coverage: &CoverageInfo{}}
+			if p.EntitlementStart.After(p.AcceptedAt) {
+				eligibility.Coverage = &CoverageInfo{HasCoverage: true, EndDate: &p.EntitlementStart}
+			}
+			metadata := map[string]any{"order_id": payments.NMISaleOrderReference(in.ID, p.E2ERunID)}
+			if p.E2ERunID != "" {
+				metadata["e2e_run_id"] = p.E2ERunID
+			}
+			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Description: p.Description, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID, p.CreditGrant)
+			if err != nil {
+				return err
+			}
+			if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
+				return err
+			}
+			if in.Rail != string(models.RailStripe) && p.Instrument.Mandate == nil {
+				if err := mandates.RecordStored(ctx, d.Gen(ctx), mandates.Stored{MerchantID: in.MerchantID, CustomerID: customer, PaymentMethodID: p.PaymentMethodID, PSPID: *in.PspID,
+					Rail: in.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: receipt.TransactionID()}, AcceptedAt: now}); err != nil {
+					return err
+				}
+			}
+			evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), result.PaymentID.String()
+			if result.DelayedStart != nil {
+				evidence["delayed_start"] = result.DelayedStart.UTC().Format(time.RFC3339Nano)
+			}
+		} else {
+			for key, value := range outcome.Evidence {
+				evidence[key] = value
+			}
+			if evidence["declined"] == true {
+				code, _ := evidence["localization_id"].(string)
+				if code == "" {
+					code, _ = evidence["decline_code"].(string)
+				}
+				avs, _ := evidence["avs_response"].(string)
+				cvv, _ := evidence["cvv_response"].(string)
+				transaction, _ := evidence["decline_transaction_id"].(string)
+				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
+					return err
+				}
+			}
+		}
+		if record := intents.OperatorResolutionRecord(ctx); record != nil {
+			evidence["operator_resolution"] = record
+		}
+		if !success && p.NewCard && p.OrderID == uuid.Nil {
+			if declined, err = declinedCard(ctx, d, in.MerchantID, p.PaymentMethodID); err != nil {
+				return err
+			}
+		}
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			return err
+		}
+		reason := outcome.Reason
+		n, err := d.Gen(ctx).CompleteSaleOutcome(ctx, gen.CompleteSaleOutcomeParams{MerchantID: in.MerchantID, ID: in.ID, Status: status, Evidence: raw, Reason: &reason, Now: now})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("sale terminal outcome did not commit")
+		}
+		outcome.Evidence = saleResultEvidence(evidence)
+		return nil
+	})
+	if err != nil {
+		return intents.Ambiguous("sale receipt retained; local completion pending: " + err.Error())
+	}
+	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
+	if saved != nil && saved.Custodian == models.CustodianBasisTheory {
+		h.provisionNetworkToken(ctx, in, p, saved)
+	}
+	return outcome
+}
+
+// newCardVault is a new NMI card's vault details.
+func newCardVault(b *payments.NewCardBilling) *nmi.CreateCustomerVaultData {
+	out := &nmi.CreateCustomerVaultData{}
+	if b != nil {
+		out.FirstName, out.LastName, out.Address1, out.Address2, out.City = b.FirstName, b.LastName, b.Address1, b.Address2, b.City
+		out.State, out.Zip, out.Country, out.Phone, out.Email = b.State, b.Zip, b.Country, b.Phone, b.Email
+	}
+	return out
+}
+
+// nmiSaleRefusal is the only non-execution proof a submitted NMI sale has:
+// NMI's definitive decline as the one transaction under the sale's own order.
+// An empty search is not proof; the Query API has no visibility bound.
+func nmiSaleRefusal(ctx context.Context, client *nmi.NMIClient, orderID string) (map[string]any, error) {
+	attempts, err := client.ReadOrderAttempts(ctx, orderID)
+	if err != nil {
+		return nil, intents.RejectResolution("NMI transaction search is unavailable: %v", err)
+	}
+	if !attempts.Declined {
+		return nil, intents.RejectResolution("NMI shows no definitive decline under order %s (%d transaction(s)); an empty search does not prove nothing was charged, so resolve with the sale's receipt", orderID, attempts.Transactions)
+	}
+	return map[string]any{"declined": true, "response_code": attempts.DeclineCode, "decline_transaction_id": attempts.DeclineTransactionID}, nil
+}
+
+// The persisted row retains custody. Runner diagnostics/pruning receive only
+// the result projection, never a caller-writable copy of reserved receipt keys.
+func saleResultEvidence(evidence map[string]any) map[string]any {
+	out := make(map[string]any, len(evidence))
+	for key, value := range evidence {
+		if key != "qualified_receipt" && key != "qualified_enrollment" && key != "qualified_initial_refusal" && key != "account_requalifications" {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// recordSaleAttempt records the sale's answer in its completion transaction.
+// Its target is the order an order sale pays, else the price; method is the
+// card charged, nil for a new card that was not saved.
+func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, method *uuid.UUID, a attempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
+	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
+	if p.OrderID != uuid.Nil {
+		a.Target, a.OrderID, a.NewCard = p.OrderID.String(), &p.OrderID, p.NewCard
+	}
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, method, &in.ID
+	a.TokenType = saleTokenType(p)
+	a.Sent = p.Instrument.Mandate
+	return attempts.Record(ctx, d.Gen(ctx), a)
+}
+
+// saleTokenType is the credential form a sale presents: the PSP's own stored
+// card, or a custodian-held card through its proxy.
+func saleTokenType(p payments.NMISalePayload) string {
+	if p.Instrument.CustodianHeld() {
+		return payments.DefaultTokenType("nmi", p.Instrument.Custodian)
+	}
+	return charge.TokenTypePSPToken
+}

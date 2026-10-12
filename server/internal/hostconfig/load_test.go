@@ -137,7 +137,7 @@ func TestEnvKeyRouting(t *testing.T) {
 func TestLoadSourcePrecedence(t *testing.T) {
 	secrets := bootEnv(t)
 	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"),
-		"db:\n  password: from-yaml\nrate_limits:\n  checkout:\n    requests_per_minute: 99\n")
+		"db:\n  password: from-yaml\nrate_limits:\n  purchase:\n    requests_per_minute: 99\n")
 	password := func(opts ...LoadOption) string {
 		t.Helper()
 		cfg, err := Load(path, opts...)
@@ -147,7 +147,7 @@ func TestLoadSourcePrecedence(t *testing.T) {
 	cfg, err := Load(path)
 	require.NoError(t, err)
 	require.Equal(t, "from-yaml", cfg.DB.Password)
-	require.Equal(t, 99, (*cfg.RateLimits)["checkout"].RequestsPerMinute)
+	require.Equal(t, 99, (*cfg.RateLimits)["purchase"].RequestsPerMinute)
 	require.Equal(t, 20, (*cfg.RateLimits)["subscribe"].RequestsPerMinute, "a partial map keeps the other defaults")
 
 	writeFile(t, filepath.Join(secrets, "DB_PASSWORD"), "from-file\n")

@@ -1,9 +1,9 @@
-# Checkout
+# Purchase
 
 A browser buys through an **order**: priced lines read and paid by their own
 customer on `/v1/me/orders` ([frontend integration](../frontend-integration.md#orders)).
 The merchant's backend may create an unpaid order for a customer (`CreateOrder`);
-only that customer pays it. A **checkout attempt** (`chk_`) is one charge of an
+only that customer pays it. A **order attempt** (`oat_`) is one charge of an
 order on one PSP; each pay creates one.
 
 ## Merchant client
@@ -19,7 +19,7 @@ order on one PSP; each pay creates one.
 that can take them, in routing order; options report local readiness and never
 probe a gateway. `CreateOrder` freezes the lines into an `open` order; the
 customer pays it with `POST /v1/me/orders/{id}/pay`, signed in, or with
-billing-ui's `<OrderCheckout orderId>`.
+billing-ui's `<OrderPayment orderId>`.
 
 A pay answers the order. `payment.status` is `succeeded`,
 `requires_payment_method` (a decline: `402` with `last_payment_error`),

@@ -114,17 +114,17 @@ func TestClassifyBucket(t *testing.T) {
 	for _, tc := range []struct{ method, path, want string }{
 		{"POST", "/v1/webhooks/stripe", "webhook"},
 		{"POST", "/billing/v1/webhooks/stripe/acct_test", "webhook"},
-		{"POST", "/v1/me/orders", "checkout"},
-		{"POST", "/billing/v1/me/orders/ord_1/pay", "checkout"},
-		{"POST", "/billing/v1/me/orders/{id}/confirm", "checkout"},
+		{"POST", "/v1/me/orders", "purchase"},
+		{"POST", "/billing/v1/me/orders/ord_1/pay", "purchase"},
+		{"POST", "/billing/v1/me/orders/{id}/confirm", "purchase"},
 		{"POST", "/v1/me/orders/preview", ""},
 		{"POST", "/v1/me/orders/ord_1/cancel", ""},
 		{"GET", "/v1/me/orders/ord_1", ""},
-		{"POST", "/v1/orders/ord_1/solana-pay", "checkout"},
+		{"POST", "/v1/orders/ord_1/solana-pay", "purchase"},
 		{"POST", "/v1/config", ""},
 		{"POST", "/v1/app/orders", ""},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
-		{"POST", "/v1/customers/customer_123/checkout", ""},
+		{"POST", "/v1/customers/customer_123/purchase", ""},
 		{"POST", "/v1/me/subscriptions/sub_123/cancel", "subscriptions"},
 		{"delete", "/billing/v1/me/subscriptions/sub_123", "subscriptions"},
 		{"GET", "/v1/me/subscriptions/sub_123", ""},
@@ -154,7 +154,7 @@ func TestRateLimitSubjects(t *testing.T) {
 		{"untrusted forwarded header is ignored", nil, []call{{path: "/v1/me/orders", ip: lb, xff: a, want: 200}, {path: "/v1/me/orders", ip: lb, xff: b, want: 429}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
+			limits := config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}}
 			h := ChainHTTP(okHandler(), RateLimitHTTP(&limits, nil, nil, nil, tc.resolver))
 			for _, c := range tc.calls {
 				c.do(t, h)
@@ -162,7 +162,7 @@ func TestRateLimitSubjects(t *testing.T) {
 		})
 	}
 
-	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
+	limits := config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}}
 	h := RateLimitHTTP(&limits, nil, nil, nil, nil)(okHandler())
 	first := call{path: "/v1/me/orders", ip: a, want: 200}.do(t, h)
 	require.Equal(t, "1", first.Header().Get("X-RateLimit-Limit"))
@@ -176,13 +176,13 @@ func TestRateLimitSubjects(t *testing.T) {
 // Oversized payloads are shed before counting: declared lengths with 413, and
 // chunked bodies by a MaxBytesReader the handler hits on read.
 func TestRateLimitPayloadCaps(t *testing.T) {
-	deps := newDeps(config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}, nil, nil)
+	deps := newDeps(config.RateLimitsConfig{"purchase": {RequestsPerMinute: 10}}, nil, nil)
 	var readErr error
 	h := engine(deps, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, readErr = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
-	limit := BucketMaxContentLength["checkout"]
+	limit := BucketMaxContentLength["purchase"]
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/me/orders", nil)
 	req.ContentLength = limit + 1
@@ -208,7 +208,7 @@ func TestRateLimitPayloadCaps(t *testing.T) {
 // protected buckets; solving it clears the challenge and resets the counters.
 func TestCaptchaEscalation(t *testing.T) {
 	v := &stubVerifier{valid: "good"}
-	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 1}, "webhook": {RequestsPerMinute: 1}}
+	limits := config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 1}, "webhook": {RequestsPerMinute: 1}}
 	h := engine(newDeps(limits, captchaOn, v), okHandler())
 	const ip = "203.0.113.72"
 	for _, c := range []call{
@@ -237,18 +237,18 @@ func TestCaptchaEscalation(t *testing.T) {
 func TestCaptchaChallenges(t *testing.T) {
 	ctx := context.Background()
 	const ip, user = "203.0.113.47", "22222222-2222-2222-2222-222222222222"
-	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}, "payment": {RequestsPerMinute: 60}}
+	limits := config.RateLimitsConfig{"purchase": {RequestsPerMinute: 10}, "payment": {RequestsPerMinute: 60}}
 
 	t.Run("solve clears every subject and resets its counters", func(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
 		for _, key := range []string{"ip:" + ip} {
 			deps.ChallengeStore.MarkChallenged(ctx, key, time.Minute)
-			deps.State.Count(ctx, rateLimitKey("checkout", key), 9, time.Minute)
+			deps.State.Count(ctx, rateLimitKey("purchase", key), 9, time.Minute)
 		}
 		call{path: "/v1/me/orders", ip: ip, user: user, token: "good", want: 200}.do(t, engine(deps, okHandler()))
 		for _, key := range []string{"ip:" + ip} {
 			require.False(t, deps.ChallengeStore.IsChallenged(ctx, key), key)
-			count, _ := deps.State.Count(ctx, rateLimitKey("checkout", key), 0, time.Minute)
+			count, _ := deps.State.Count(ctx, rateLimitKey("purchase", key), 0, time.Minute)
 			require.EqualValues(t, 1, count)
 		}
 	})
@@ -314,25 +314,25 @@ func TestFixedWindowLimit(t *testing.T) {
 	state := stillState(nil)
 	limit := &config.RateLimit{RequestsPerMinute: 10}
 	for i := 1; i <= 11; i++ {
-		res := allow(ctx, state, "ip:a", "checkout", effectiveLimit(limit))
+		res := allow(ctx, state, "ip:a", "purchase", effectiveLimit(limit))
 		require.Equal(t, i <= 10, res.allowed, "request %d", i)
 		require.Equal(t, max(10-i, 0), res.remaining)
 	}
-	require.True(t, allow(ctx, state, "ip:b", "checkout", effectiveLimit(&config.RateLimit{})).allowed, "a zero limit defaults to 60/min")
+	require.True(t, allow(ctx, state, "ip:b", "purchase", effectiveLimit(&config.RateLimit{})).allowed, "a zero limit defaults to 60/min")
 }
 
 // A host-mounted prefix keeps the host URL for auth while policy classifies the
 // canonical route.
 func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 	limits := config.RateLimitsConfig{
-		"checkout": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 2},
+		"purchase": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 2},
 		"webhook": {RequestsPerMinute: 3},
 	}
 	for _, tc := range []struct {
 		canonical, actual, bucket, limit string
 		captcha                          bool
 	}{
-		{"/billing/v1/me/orders/{id}/pay", "/api/pay/v1/me/orders/ord_a%2Fb/pay?x=1", "checkout", "checkout", true},
+		{"/billing/v1/me/orders/{id}/pay", "/api/pay/v1/me/orders/ord_a%2Fb/pay?x=1", "purchase", "purchase", true},
 		{"/billing/v1/me/payment-methods", "/api/pay/v1/me/payment-methods", "payment-methods", "payment", true},
 		{"/billing/v1/webhooks/{provider}/{account_id}", "/api/pay/v1/webhooks/stripe/acct_test", "webhook", "webhook", false},
 	} {

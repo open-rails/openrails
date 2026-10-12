@@ -19,7 +19,7 @@ import (
 var ErrProductInUse = apperr.New(http.StatusConflict, billing.CodeProductInUse, "records refer to the product; archive it instead")
 
 // DeleteProduct deletes a product nothing ever referred to, with its prices.
-// A product a purchase, subscription, grant, access, checkout, migration,
+// A product a purchase, subscription, grant, access, purchase, migration,
 // provider write, PSP link or rate card refers to is refused (ErrProductInUse):
 // archive it instead.
 func (s *Service) DeleteProduct(ctx context.Context, id billing.ProductID) error {

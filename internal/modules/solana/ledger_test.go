@@ -10,7 +10,7 @@ import (
 )
 
 // One transfer's classification, in precedence order: foreign, unreadable,
-// wrong asset, nothing paid, no quote, already paid, late, closed checkout,
+// wrong asset, nothing paid, no quote, already paid, late, closed purchase,
 // short, excess.
 func TestDecide(t *testing.T) {
 	settle := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
@@ -39,7 +39,7 @@ func TestDecide(t *testing.T) {
 		{name: "second transfer", ref: paid, open: true, amount: 100, landed: at(-time.Minute), want: Review, reason: ReasonAlreadyPaid},
 		{name: "late", ref: pending, open: true, amount: 100, landed: at(time.Second), want: Review, reason: ReasonLate},
 		{name: "no block time is judged now", ref: pending, open: true, amount: 100, landed: nil, want: Review, reason: ReasonLate},
-		{name: "closed checkout", ref: pending, open: false, amount: 100, landed: at(-time.Minute), want: Review, reason: ReasonSessionClosed},
+		{name: "closed purchase", ref: pending, open: false, amount: 100, landed: at(-time.Minute), want: Review, reason: ReasonSessionClosed},
 		{name: "short", ref: pending, open: true, amount: 99, landed: at(-time.Minute), want: Review, reason: ReasonUnderpaid},
 	} {
 		obs := ObservedTransfer{Amount: tc.amount, LandedAt: tc.landed}

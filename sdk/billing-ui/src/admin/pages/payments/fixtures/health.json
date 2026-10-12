@@ -83,8 +83,8 @@
         "card_entry": "new",
         "card_last4": "4242",
         "category": "approved",
-        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
-        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "purchase_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "purchase_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
         "currency": "USD",
         "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
         "id": "att_01a0f338-2ed5-7030-88df-aa55c44e0137",
@@ -108,8 +108,8 @@
         "card_entry": "new",
         "card_last4": "4242",
         "category": "approved",
-        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
-        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "purchase_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "purchase_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
         "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
         "id": "att_01a0f338-2e45-7dbc-9179-54282db03fa9",
         "kind": "verify",
@@ -129,8 +129,8 @@
         "attempted_at": "2022-10-01T10:48:59-06:00",
         "card_entry": "new",
         "category": "card_data",
-        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
-        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "purchase_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "purchase_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
         "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
         "cvv_result": "N",
         "id": "att_01a0f338-2e21-7255-9a0c-820a1da69a6a",
@@ -654,11 +654,11 @@
         ]
       }
     },
-    "tileCheckout": {
+    "tilePurchase": {
       "query": {
         "compare": "previous_period",
         "measures": [
-          "checkout_failure_rate"
+          "purchase_failure_rate"
         ],
         "range": {
           "from": "2022-10-01T15:48:59Z",
@@ -669,7 +669,7 @@
         "columns": [
           {
             "kind": "measure",
-            "name": "checkout_failure_rate",
+            "name": "purchase_failure_rate",
             "unit": "ratio"
           }
         ],

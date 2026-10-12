@@ -1,0 +1,571 @@
+package payment
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	log "github.com/sirupsen/logrus"
+)
+
+type purchaseSubscriptionAccess interface {
+	GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
+	GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
+}
+
+type FulfillmentService struct {
+	database            *db.DB
+	transactionDB       *db.DB
+	PriceService        *catalog.PriceService
+	ProductService      *catalog.ProductService
+	PaymentService      *payments.PaymentService
+	EntitlementService  *entitlements.EntitlementService
+	SubscriptionService purchaseSubscriptionAccess
+	clock               clockwork.Clock
+}
+
+func NewFulfillmentService(
+	priceService *catalog.PriceService,
+	productService *catalog.ProductService,
+	paymentService *payments.PaymentService,
+	entitlementService *entitlements.EntitlementService,
+	subscriptionService purchaseSubscriptionAccess,
+	clocks ...clockwork.Clock,
+) *FulfillmentService {
+	var database *db.DB
+	if priceService != nil {
+		database = priceService.Database()
+	}
+	return &FulfillmentService{
+		database:            database,
+		PriceService:        priceService,
+		ProductService:      productService,
+		PaymentService:      paymentService,
+		EntitlementService:  entitlementService,
+		SubscriptionService: subscriptionService,
+		clock:               timeutil.FirstClock(clocks...),
+	}
+}
+
+func (s *FulfillmentService) now() time.Time {
+	if s.clock != nil {
+		return s.clock.Now()
+	}
+	return time.Now()
+}
+
+func (s *FulfillmentService) SetClock(c clockwork.Clock) {
+	s.clock = timeutil.FirstClock(c)
+}
+
+func (s *FulfillmentService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+func (s *FulfillmentService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
+	price, err := s.PriceService.GetByID(ctx, priceID)
+	if err != nil {
+		return nil, fmt.Errorf("price not found: %w", err)
+	}
+	if !price.IsPurchasable() {
+		return &EligibilityResult{Status: EligibilityBlocked, Reason: "price is not available for purchase"}, nil
+	}
+
+	product, err := s.ProductService.GetByID(ctx, price.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("product not found: %w", err)
+	}
+	if !product.IsPurchasable() {
+		return &EligibilityResult{Status: EligibilityBlocked, Reason: "product is not available for purchase"}, nil
+	}
+	if err := s.checkPermanentOwnership(ctx, userID, price, product); err != nil {
+		if errors.Is(err, ErrOrderAttemptConflict) {
+			return &EligibilityResult{Status: EligibilityBlocked, Reason: err.Error()}, nil
+		}
+		return nil, err
+	}
+
+	if product.TierGroup != nil && *product.TierGroup != "" {
+		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
+		if err != nil && !db.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to check tier group: %w", err)
+		}
+
+		if existingSub != nil {
+			existingProduct := existingSub.Price.Product
+			if existingProduct == nil {
+				return nil, errors.New("failed to load existing product for tier comparison")
+			}
+
+			switch {
+			case existingProduct.ID == product.ID:
+			case existingProduct.TierRank < product.TierRank:
+				return &EligibilityResult{Status: EligibilityUpgrade, Reason: fmt.Sprintf("Upgrading from %s to %s", existingProduct.DisplayName, product.DisplayName), ExistingSubscription: existingSub, ExistingProduct: existingProduct}, nil
+			case existingProduct.TierRank > product.TierRank:
+				return &EligibilityResult{Status: EligibilityDowngrade, Reason: fmt.Sprintf("Downgrading from %s to %s", existingProduct.DisplayName, product.DisplayName), ExistingSubscription: existingSub, ExistingProduct: existingProduct}, nil
+			default:
+				return &EligibilityResult{Status: EligibilityBlocked, Reason: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName)}, nil
+			}
+		}
+	}
+
+	coverage, err := s.purchaseCoverage(ctx, userID, price, product)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
+	}
+	if coverage.HasCoverage && coverage.IsIndefinite {
+		return &EligibilityResult{Status: EligibilityBlocked, Reason: "You already have active access to this product", Coverage: coverage}, nil
+	}
+
+	return &EligibilityResult{Status: EligibilityAllowed, Reason: "Purchase allowed", Coverage: coverage}, nil
+}
+
+func (s *FulfillmentService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
+	now := s.now()
+	coverage := &CoverageInfo{HasCoverage: false}
+
+	if s.SubscriptionService != nil {
+		sub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, userID, product.ID)
+		if err != nil && !db.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to check subscription: %w", err)
+		}
+		if sub != nil {
+			if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
+				coverage.HasCoverage = true
+				coverage.SourceType = "subscription"
+				coverage.SourceID = &sub.ID
+				coverage.IsIndefinite = true
+				return coverage, nil
+			}
+			if !sub.CurrentPeriodEndsAt.After(now) {
+				log.WithFields(log.Fields{
+					"subscription_id": sub.ID,
+					"user_id":         userID,
+					"product_id":      product.ID,
+					"period_end":      sub.CurrentPeriodEndsAt,
+				}).Warn("ignoring stale subscription coverage that has already ended")
+			} else {
+				coverage.HasCoverage = true
+				coverage.SourceType = "subscription"
+				coverage.SourceID = &sub.ID
+				coverage.EndDate = sub.CurrentPeriodEndsAt
+			}
+		}
+	}
+
+	// A new rental of the product starts after the customer's live windows
+	// of the same product.
+	if s.EntitlementService != nil {
+		indefinite, latestEnd, err := s.EntitlementService.ProductCoverage(ctx, userID, []uuid.UUID{product.ID}, now)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check product coverage: %w", err)
+		}
+		if indefinite {
+			coverage.HasCoverage = true
+			coverage.IsIndefinite = true
+			coverage.SourceType = "product"
+			return coverage, nil
+		}
+		if latestEnd != nil {
+			coverage.HasCoverage = true
+			coverage.SourceType = "product"
+			if coverage.EndDate == nil || latestEnd.After(*coverage.EndDate) {
+				coverage.EndDate = latestEnd
+			}
+		}
+	}
+
+	return coverage, nil
+}
+
+// ErrPaymentTransactionTaken: the provider transaction id is already recorded
+// for a different purchase, so it cannot settle this one.
+var ErrPaymentTransactionTaken = errors.New("payment transaction belongs to another purchase")
+
+type paymentTransactionTaken string
+
+func (e paymentTransactionTaken) Error() string        { return string(e) }
+func (e paymentTransactionTaken) Is(target error) bool { return target == ErrPaymentTransactionTaken }
+
+func (s *FulfillmentService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
+	if req == nil {
+		return nil, errors.New("purchase is required")
+	}
+	if s.database != nil && s.transactionDB == nil {
+		var result *payments.RegisterPurchaseResponse
+		err := s.database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			result, err = s.transactionBound(s.database.NewWithPgxTx(tx)).RegisterPurchase(ctx, req)
+			return err
+		})
+		return result, err
+	}
+	if req.UserID == "" {
+		return nil, errors.New("user_id is required")
+	}
+	if req.TransactionID == "" {
+		return nil, errors.New("transaction_id is required")
+	}
+	if req.Rail == "" && req.Channel != models.ChannelManual {
+		return nil, errors.New("rail is required")
+	}
+
+	price, err := s.PriceService.GetByID(ctx, req.PriceID)
+	if err != nil {
+		return nil, fmt.Errorf("price not found: %w", err)
+	}
+	if req.Channel == models.ChannelManual && price.CustomerAmount != nil {
+		var chosen *int64
+		if req.AmountProvided {
+			chosen = &req.Amount
+		}
+		price, err = PurchasePriceForAmount(price, chosen)
+		if err != nil {
+			return nil, err
+		}
+	}
+	product, err := s.ProductService.GetByID(ctx, price.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("product not found: %w", err)
+	}
+
+	eligibility, err := s.CheckPurchaseEligibility(ctx, req.UserID, req.PriceID)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"user_id": req.UserID, "price_id": req.PriceID}).Warn("failed to check eligibility during RegisterPurchase")
+		eligibility = &EligibilityResult{Status: EligibilityAllowed}
+	}
+
+	acceptedAt := s.now().UTC().Truncate(time.Microsecond)
+	if req.PurchasedAt != nil {
+		acceptedAt = req.PurchasedAt.UTC().Truncate(time.Microsecond)
+	}
+	benefitPrice := *price
+	if req.AmountProvided {
+		benefitPrice.Amount = req.Amount
+	}
+	var credit *models.CreditGrantSnapshot
+	// Native provider purchases require durable accepted terms. Historical
+	// observations without them must never inherit a newly added benefit.
+	if req.Channel == models.ChannelManual {
+		credit, err = acceptedCreditGrant(product, &benefitPrice)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.applyPurchase(ctx, req, price, product, eligibility, acceptedAt, uuid.Nil, credit)
+}
+
+// applyPurchase is the shared financial/access writer. Observed purchases
+// prepare current facts above; durable sales supply their accepted snapshots.
+// Every service on s must share the caller's transaction for durable completion.
+func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest, price *models.Price, product *models.Product, eligibility *EligibilityResult, acceptedAt time.Time, acceptedPaymentID uuid.UUID, credit *models.CreditGrantSnapshot) (*payments.RegisterPurchaseResponse, error) {
+	coverage := eligibility.Coverage
+	if coverage == nil {
+		coverage = &CoverageInfo{}
+	}
+	amount := req.Amount
+	if !req.AmountProvided && amount == 0 {
+		amount = price.Amount
+	}
+	currency := req.Currency
+	if currency == "" {
+		currency = price.Currency
+	}
+
+	now := s.now()
+	purchasedAt := now
+	if req.PurchasedAt != nil {
+		purchasedAt = req.PurchasedAt.UTC()
+	}
+
+	customerID, err := customerIDFromUser(req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	paymentID := acceptedPaymentID
+	if paymentID == uuid.Nil {
+		paymentID = uuidutil.NewV7()
+	}
+	settledCredit := models.CloneCreditGrantSnapshot(credit)
+	if settledCredit != nil {
+		settledCredit.StartsAt = now.UTC().Truncate(time.Microsecond)
+		expires := settledCredit.StartsAt.AddDate(0, 0, settledCredit.ExpiresAfterDays)
+		settledCredit.ExpiresAt = &expires
+	}
+	payment := &models.Payment{
+		ID:                  paymentID,
+		CustomerID:          customerID,
+		SubscriptionID:      req.SubscriptionID,
+		Channel:             req.Channel,
+		Rail:                models.Rail(req.Rail),
+		TransactionID:       req.TransactionID,
+		Amount:              amount,
+		ListAmount:          price.Amount,
+		Currency:            currency,
+		Status:              payments.PaymentStatusSucceededValue,
+		PurchasedAt:         purchasedAt,
+		CreatedAt:           now,
+		DiscountCode:        req.DiscountCode,
+		DiscountReason:      req.DiscountReason,
+		DiscountMetadata:    req.DiscountMetadata,
+		Metadata:            req.Metadata,
+		CreditGrantSnapshot: settledCredit,
+		// RegisterPurchase records a charge the rail already approved, keyed on
+		// the rail's own transaction id.
+		MoneyMovement: models.MoneyMovementRail,
+	}
+	if req.AttemptKind != "" {
+		k := req.AttemptKind
+		payment.AttemptKind = &k
+	}
+	if req.TokenType != "" {
+		tt := req.TokenType
+		payment.TokenType = &tt
+	}
+
+	if s.transactionDB == nil {
+		return nil, errors.New("recording a purchase requires its transaction")
+	}
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	payment.PspID = &psp
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		// The fallback names immutable accepted identity, not a mutable display name.
+		description = "Purchase " + price.ID.String()
+	}
+	bill, err := observed.Record(ctx, s.transactionDB, observed.Bill{
+		PSPID: psp, CustomerID: customerID, SubscriptionID: req.SubscriptionID, ExistingOrderID: req.OrderID,
+		Owner: observed.OwnerEngine, Kind: "purchase", SourceKind: "purchase", SourceKey: req.TransactionID,
+		Currency: currency, Total: amount, Payment: payment, Settled: true, SettlementSource: "cash",
+		ProviderReference: req.TransactionID,
+		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &product.ID, Description: description,
+			UnitAmount: amount, Amount: amount, AccessDurationHours: price.AccessDurationHours}},
+	}, now)
+	if err != nil {
+		return nil, fmt.Errorf("record purchase order: %w", err)
+	}
+	payment = bill.Payment
+	paymentID = payment.ID
+	if !bill.PaymentCreated {
+		lookup := func() (*models.Payment, error) {
+			if req.Channel == models.ChannelManual {
+				return s.PaymentService.GetManualByTransactionID(ctx, req.TransactionID)
+			}
+			return s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		}
+		existingPayment, err := lookup()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
+		}
+		if existingPayment.CustomerID.String() != req.UserID {
+			return nil, paymentTransactionTaken("payment transaction belongs to a different user")
+		}
+		if (existingPayment.SubscriptionID == nil) != (req.SubscriptionID == nil) {
+			return nil, paymentTransactionTaken("payment transaction subscription linkage mismatch")
+		}
+		if existingPayment.SubscriptionID != nil && *existingPayment.SubscriptionID != *req.SubscriptionID {
+			return nil, paymentTransactionTaken("payment transaction belongs to a different subscription")
+		}
+		if !payments.PaymentStatusSucceeded(existingPayment.Status) {
+			return nil, paymentTransactionTaken("payment transaction is not completed")
+		}
+		if amount > 0 && existingPayment.Amount != amount {
+			return nil, paymentTransactionTaken("payment transaction amount mismatch")
+		}
+		if currency != "" && !strings.EqualFold(strings.TrimSpace(existingPayment.Currency), currency) {
+			return nil, paymentTransactionTaken("payment transaction currency mismatch")
+		}
+
+		if acceptedPaymentID != uuid.Nil && (!models.SameCreditGrantPromise(existingPayment.CreditGrantSnapshot, credit) || existingPayment.ListAmount != price.Amount) {
+			return nil, errors.New("existing payment contradicts accepted purchase terms")
+		}
+		sourceID := existingPayment.ID
+		if existingPayment.SubscriptionID != nil {
+			sourceID = *existingPayment.SubscriptionID
+		}
+		// A credit pack is bought for its credit lot, not held as a product.
+		switch {
+		case existingPayment.CreditGrantSnapshot != nil:
+		case acceptedPaymentID != uuid.Nil:
+			if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, price.AccessDurationHours, acceptedAt, coverage); err != nil {
+				return nil, err
+			}
+		default:
+			if err := s.grantPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, sourceID, coverage, existingPayment.SubscriptionID != nil, price.AccessDurationHours, acceptedAt); err != nil {
+				return nil, fmt.Errorf("failed to repair access for existing payment: %w", err)
+			}
+		}
+		if err := s.grantPurchasedCredits(ctx, existingPayment, product.ID); err != nil {
+			return nil, err
+		}
+		log.WithFields(log.Fields{
+			"payment_id": existingPayment.ID, "user_id": req.UserID, "price_id": req.PriceID,
+			"rail": req.Rail, "transaction_id": req.TransactionID,
+		}).Info("purchase already registered; repaired access if needed")
+		return &payments.RegisterPurchaseResponse{PaymentID: existingPayment.ID, Entitlements: nonNilKeys(product.Entitlements), Eligibility: string(eligibility.Status)}, nil
+	}
+
+	sourceID := paymentID
+	if req.SubscriptionID != nil {
+		log.WithFields(log.Fields{"payment_id": paymentID, "user_id": req.UserID, "price_id": req.PriceID, "subscription_id": req.SubscriptionID}).Info("registered subscription payment")
+		sourceID = *req.SubscriptionID
+	}
+
+	switch {
+	case credit != nil:
+	case acceptedPaymentID != uuid.Nil:
+		if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, paymentID, price.AccessDurationHours, acceptedAt, coverage); err != nil {
+			return nil, err
+		}
+	default:
+		if err := s.grantPurchaseAccess(ctx, req.UserID, product.ID, paymentID, sourceID, coverage, req.SubscriptionID != nil, price.AccessDurationHours, acceptedAt); err != nil {
+			log.WithError(err).WithField("payment_id", sourceID).Error("failed to grant access after payment")
+			return nil, fmt.Errorf("failed to grant access after payment: %w", err)
+		}
+	}
+	if err := s.grantPurchasedCredits(ctx, payment, product.ID); err != nil {
+		return nil, err
+	}
+	if req.SubscriptionID == nil {
+		if err := s.queueReceipt(ctx, payment, product); err != nil {
+			return nil, err
+		}
+	}
+	var delayedStart *time.Time
+	if coverage.HasCoverage && coverage.EndDate != nil {
+		delayedStart = coverage.EndDate
+	}
+
+	log.WithFields(log.Fields{
+		"payment_id": paymentID, "user_id": req.UserID, "price_id": req.PriceID, "product_id": product.ID,
+		"rail": req.Rail, "transaction_id": req.TransactionID,
+		"delayed_start": delayedStart, "eligibility": eligibility.Status,
+	}).Info("registered purchase")
+
+	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: nonNilKeys(product.Entitlements), DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
+}
+
+// grantPurchaseAccess grants the purchased product for the window the price
+// bought: from acceptedAt, or after the customer's live windows of the product
+// it stacks on, for the price's access duration (none: indefinitely). A
+// subscription payment grants through its subscription. Idempotent per source.
+func (s *FulfillmentService) grantPurchaseAccess(ctx context.Context, userID string, productID, paymentID, sourceID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationHours *int, acceptedAt time.Time) error {
+	if s.EntitlementService == nil {
+		return nil
+	}
+	start := acceptedAt
+	if coverage.HasCoverage && coverage.EndDate != nil {
+		start = *coverage.EndDate
+	}
+	sourceType := models.AccessSourcePurchase
+	if subscription {
+		sourceType = models.AccessSourceSubscription
+	}
+	exists, err := s.EntitlementService.AccessExistsBySource(ctx, sourceType, sourceID.String(), productID)
+	if err != nil {
+		return fmt.Errorf("check existing access source: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	params := entitlements.PushAccessParams{UserID: userID, ProductID: productID, NotBefore: &start, SourceType: sourceType, SourceID: sourceID.String()}
+	if !subscription {
+		params.PaymentID = &paymentID
+	}
+	if accessDurationHours != nil && *accessDurationHours > 0 {
+		end := start.Add(time.Duration(*accessDurationHours) * time.Hour).UTC()
+		params.EndsAt = &end
+	} else {
+		params.Indefinite = true
+	}
+	if _, err := s.EntitlementService.PushAccess(ctx, params); err != nil {
+		log.WithError(err).WithFields(log.Fields{"user_id": userID, "product_id": productID, "payment_id": paymentID}).Error("failed to grant purchase access")
+		return err
+	}
+	return nil
+}
+
+func nonNilKeys(keys []string) []string {
+	if keys == nil {
+		return []string{}
+	}
+	return keys
+}
+
+// grantPurchasedCredits fulfills the payment snapshot using the existing credit
+// ledger in the same transaction as the receipt. Replays retain an expired or
+// revoked lot; they never mint replacement credit.
+func (s *FulfillmentService) grantPurchasedCredits(ctx context.Context, payment *models.Payment, productID uuid.UUID) error {
+	credit := payment.CreditGrantSnapshot
+	if credit == nil {
+		return nil
+	}
+	if err := credit.Validate(); err != nil {
+		return err
+	}
+	if s.transactionDB == nil {
+		return errors.New("purchased credit requires the payment transaction")
+	}
+	if payment.OrderID == nil {
+		return errors.New("purchased credit requires its order")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	lines, err := s.transactionDB.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{*payment.OrderID}})
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 || lines[0].ProductID == nil || *lines[0].ProductID != productID || lines[0].Amount != payment.Amount {
+		return errors.New("purchased credit must name its accepted order line")
+	}
+	_, err = purchasedcredits.New(s.transactionDB, s.clock).Fund(ctx, purchasedcredits.Params{
+		CustomerID: identity.CustomerID(payment.CustomerID), PaymentID: payment.ID, ProductID: productID, OrderLineID: lines[0].ID,
+		Amount: credit.Amount, PaidAmount: payment.Amount, Currency: credit.Currency,
+		StartsAt: credit.StartsAt, ExpiresAt: credit.ExpiresAt,
+	})
+	return err
+}
+
+// queueReceipt queues the receipt of the one-off payment applyPurchase
+// created, in its transaction.
+func (s *FulfillmentService) queueReceipt(ctx context.Context, payment *models.Payment, product *models.Product) error {
+	if s.transactionDB == nil {
+		return errors.New("a purchase receipt requires the payment transaction")
+	}
+	if strings.TrimSpace(product.DisplayName) == "" && product.Key == "" {
+		stored, err := s.ProductService.GetByID(ctx, product.ID)
+		if err != nil {
+			return err
+		}
+		product = stored
+	}
+	name := strings.TrimSpace(product.DisplayName)
+	if name == "" {
+		name = product.Key
+	}
+	return subscriptions.QueuePurchaseReceipt(ctx, s.transactionDB, subscriptions.PurchaseReceipt{PaymentID: payment.ID, CustomerID: payment.CustomerID,
+		Items: name, Amount: payment.Amount, Currency: payment.Currency, Rail: string(payment.Rail), PaidAt: payment.PurchasedAt})
+}

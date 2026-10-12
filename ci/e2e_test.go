@@ -272,10 +272,10 @@ products:
 	require.EqualValues(t, 20, meter.RateCard.Price.PerUnit.UnitAmount)
 }
 
-func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
+func TestPurchaseReplayAndEntitlementAccess(t *testing.T) {
 	f := newFixture(t)
 	provider := &stripeCheckoutFake{t: t}
-	bill, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
+	bill, client := f.runtimeWithStripe(t, "purchase-"+uuid.NewString()[:8], provider)
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:          "premium-post-" + uuid.NewString()[:8],
@@ -307,11 +307,11 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first, replay)
 	require.Equal(t, attempt, session.attempt(f), "a repeated pay resumes the same attempt")
-	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "the provider sees one request across an identical replay")
+	require.EqualValues(t, 1, provider.purchaseCalls.Load(), "the provider sees one request across an identical replay")
 
 	_, err = session.pay("pay-1", redirect("https://e2e.test/changed"))
 	requireCode(t, err, billing.CodeIdempotencyKeyReused)
-	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "a changed pay must not contact Stripe")
+	require.EqualValues(t, 1, provider.purchaseCalls.Load(), "a changed pay must not contact Stripe")
 
 	read := session.read()
 	require.Equal(t, billing.OrderPaymentRequiresAction, read.Payment.Status)

@@ -13,7 +13,7 @@
 # was FIXED, not excluded:
 #   govet         suspicious constructs (0 findings)
 #   ineffassign   values assigned and never read — 3 fixed, incl. a webhook
-#                 terminate flag and a checkout `claimed` flag
+#                 terminate flag and a purchase `claimed` flag
 #   bodyclose     leaked HTTP response bodies (0 findings)
 #   noctx         requests built without a context — the or#866 bug class; the
 #                 NMI choke point is now clean and this keeps it that way

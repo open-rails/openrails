@@ -17,8 +17,8 @@ import {
   type FakeBilling,
 } from "./test/billing-server"
 
-// Paying is OrderCheckout's (order-checkout.test.tsx) and the checkout host's
-// (EmbeddedCheckout); here the dialogs record what BuyButton hands them.
+// Paying is OrderPayment's (order-payment.test.tsx) and the payment origin's
+// (EmbeddedPayment); here the dialogs record what BuyButton hands them.
 const modals = vi.hoisted(() => [] as OrderModalProps[])
 const frames = vi.hoisted(() => [] as EmbeddedModalProps[])
 vi.mock("./modal", () => ({
@@ -279,7 +279,7 @@ describe("BuyButton", () => {
     ).toHaveLength(1)
   })
 
-  it("frames the checkout host on a site the merchant registered to frame it", async () => {
+  it("frames the payment origin on a site the merchant registered to frame it", async () => {
     frames.length = 0
     const server = fakeBilling({ embedOrigins: [window.location.origin] })
     const onPaid = vi.fn()
@@ -309,10 +309,10 @@ describe("BuyButton", () => {
     )!
     expect(JSON.parse(String(create[1]!.body))).toEqual({
       lines: [{ price_id: "price_rent" }],
-      checkout: { ui_mode: "embedded" },
+      pay_url: { embedded: true },
     })
     const frame = frames.at(-1)!
-    expect(frame.url).toMatch(/^https:\/\/pay.test\/c\/ord_price_rent#cks_/)
+    expect(frame.url).toMatch(/^https:\/\/pay.test\/pay\/ord_price_rent#pus_/)
 
     // The frame's word is a hint: the order says whether it is paid.
     frame.onComplete!({ orderId: "ord_price_rent", successUrl: "" })
@@ -347,7 +347,7 @@ describe("BuyButton", () => {
     const create = server.fetch.mock.calls.find(
       ([, init]) => init?.method === "POST"
     )!
-    expect(JSON.parse(String(create[1]!.body))).not.toHaveProperty("checkout")
+    expect(JSON.parse(String(create[1]!.body))).not.toHaveProperty("purchase")
   })
 })
 

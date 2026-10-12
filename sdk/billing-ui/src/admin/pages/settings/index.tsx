@@ -592,7 +592,7 @@ function PSPRow({
       !(await confirm({
         title: `Archive ${psp.key}?`,
         description:
-          "New checkout stops routing to it. Existing subscriptions, refunds and webhooks keep using it.",
+          "New purchase stops routing to it. Existing subscriptions, refunds and webhooks keep using it.",
         confirmLabel: "Archive PSP",
       }))
     )
@@ -696,7 +696,7 @@ function PSPRow({
                 onOpenChange={setConfirmLastOpen}
                 title={`Archive the last active ${railName} PSP?`}
                 description={adminText(
-                  "New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one."
+                  "New purchase on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one."
                 )}
                 confirmationWord="ARCHIVE"
                 actionLabel="Archive PSP"
@@ -1065,7 +1065,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                 <Field
                   label={adminText("Key")}
                   id={"pv-key"}
-                  hint="Your name for this PSP, such as mobius. Prices and checkout name it by this key."
+                  hint="Your name for this PSP, such as mobius. Prices and purchase name it by this key."
                 >
                   <Input
                     id={adminId("pv-key")}

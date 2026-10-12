@@ -57,7 +57,7 @@ func TestUnresolvedEnrollmentHoldsMembershipSlot(t *testing.T) {
 	member := w.membership("slot:enrollment-first", 9_990_000)
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	enrolling, err := c.checkout(embedded, order{price: member.ID, rail: "stripe", method: challenged})
+	enrolling, err := c.buyOrder(embedded, order{price: member.ID, rail: "stripe", method: challenged})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", enrolling.Status, "%+v", enrolling.Order)
 

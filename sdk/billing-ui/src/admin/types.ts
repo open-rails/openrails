@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react"
 import type { QueryClient } from "@tanstack/react-query"
-import type { CheckoutAppearance } from "../appearance"
+import type { BillingAppearance } from "../appearance"
 import type { Customer } from "../client/generated/wire"
 
 /** The host's authenticated transport. Tokens remain with the host. */
@@ -54,7 +54,7 @@ export interface BillingAdminProps {
   userHref?: (id: string) => string
   newMerchantHref?: string
   emptyState?: ReactNode
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
   style?: CSSProperties
   queryClient?: QueryClient

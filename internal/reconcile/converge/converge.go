@@ -95,7 +95,7 @@ type ConvergeFinding struct {
 	// Ungated opts a ShapeExcess repair out of the confirmed-absence gate. Only
 	// legitimate when a local terminal fact, not an absence in provider data,
 	// justifies the retraction (an already-terminated grant's effect, an
-	// abandoned checkout attempt). Every use must say why in a comment.
+	// abandoned order attempt). Every use must say why in a comment.
 	Ungated bool
 	// Retracts marks a repair of another shape that closes access, so the
 	// Retractions gate holds it as it holds every EXCESS repair.

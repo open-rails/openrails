@@ -339,7 +339,7 @@ func ImportDeclaredSubscriptions(
 			if schedule.IntervalHours > 0 {
 				intervalHours = &schedule.IntervalHours
 			}
-			// The line names what was bought, as an accepted checkout line does.
+			// The line names what was bought, as an accepted purchase line does.
 			description := "Subscription"
 			if product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: merchantID, ID: price.ProductID}); err == nil && strings.TrimSpace(product.DisplayName) != "" {
 				description = product.DisplayName

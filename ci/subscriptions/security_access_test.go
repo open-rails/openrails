@@ -61,7 +61,7 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 // buyWith pays a session for price with a card saved on rail.
 func (c *customer) buyWith(rail, method string, price *billing.Price) {
 	c.w.t.Helper()
-	c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method})
+	c.mustPurchase(embedded, order{price: price.ID, rail: rail, method: method})
 }
 
 func (c *customer) entitledAt(entitlement string, at time.Time) bool {

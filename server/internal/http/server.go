@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -42,10 +43,10 @@ type Dependencies struct {
 	RouteGroups config.RouteGroups
 	// AdminConsole declares app sign-in methods; the console is always on.
 	AdminConsole *hostconfig.ConsoleConfig
-	// CheckoutOrigin serves the hosted checkout there (by Host), from
-	// CheckoutAssets; empty serves none.
-	CheckoutOrigin string
-	CheckoutAssets fs.FS
+	// PaymentOrigin serves the payment page there (by Host), from
+	// PaymentPageAssets; empty serves none.
+	PaymentOrigin     string
+	PaymentPageAssets fs.FS
 }
 
 type Server struct {
@@ -91,10 +92,11 @@ type Server struct {
 	nativeRoutes    *router.Table
 	nativeBrowser   map[string]bool
 	sharedRateLimit middleware.HTTPMiddleware
-	// checkoutHost and checkoutHandler are the hosted checkout's host and
-	// surface; the public handler sends that host's requests there.
-	checkoutHost    string
-	checkoutHandler http.Handler
+	// paymentOrigin, paymentHost and paymentHandler are the payment origin,
+	// its Host and its surface; the public handler sends its requests there.
+	paymentOrigin  string
+	paymentHost    paymentpage.Host
+	paymentHandler http.Handler
 }
 
 // recordRoute appends a registered pattern to the server's route table.
@@ -103,7 +105,7 @@ func (s *Server) recordRoute(pattern string) {
 }
 
 // recordBrowserRoute is recordRoute plus browser-tier CORS registration
-// (#765): used ONLY by the checkout + self-service
+// (#765): used ONLY by the purchase + self-service
 // registration call sites, so PermissiveCORSHTTP grants the static `*` policy
 // on exactly those routes and nothing else. Lazily initializes
 // browserTierRoutes so hand-built *Server{} unit tests that skip New() still
@@ -151,11 +153,11 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.PaymentService == nil {
 		return nil, fmt.Errorf("server runtime payment service is required")
 	}
-	if deps.Runtime.CheckoutService == nil {
-		return nil, fmt.Errorf("server runtime checkout service is required")
+	if deps.Runtime.PurchaseService == nil {
+		return nil, fmt.Errorf("server runtime purchase service is required")
 	}
-	if deps.Runtime.CheckoutAttemptService == nil {
-		return nil, fmt.Errorf("server runtime checkout attempt service is required")
+	if deps.Runtime.OrderAttemptService == nil {
+		return nil, fmt.Errorf("server runtime order attempt service is required")
 	}
 	if deps.Runtime.SubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime subscription service is required")
@@ -257,10 +259,10 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
-	if err := s.buildCheckout(deps.CheckoutOrigin, deps.CheckoutAssets); err != nil {
+	if err := s.buildPaymentPage(deps.PaymentOrigin, deps.PaymentPageAssets); err != nil {
 		return nil, err
 	}
-	s.publicHandler = s.dispatchCheckout(s.wrapPublicHandler(mux.Handler()))
+	s.publicHandler = s.dispatchPaymentPage(s.wrapPublicHandler(mux.Handler()))
 	s.nativeRoutes = &router.Table{}
 	for _, entry := range mux.Entries {
 		switch entry.Path {

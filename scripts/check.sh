@@ -63,13 +63,13 @@ console() {
     exit 1
   }
   (cd server && go build -o /dev/null ./cmd/openrails)
-  bash scripts/build-checkout-page.sh
-  test -f web/checkout/dist/index.html || {
-    echo "checkout: web/checkout/dist/index.html missing" >&2
+  bash scripts/build-payment-page.sh
+  test -f web/pay/dist/index.html || {
+    echo "purchase: web/pay/dist/index.html missing" >&2
     exit 1
   }
-  git diff --quiet -- web/checkout/dist || {
-    echo "checkout: the build removed web/checkout/dist/.gitkeep; go build without a page build would fail" >&2
+  git diff --quiet -- web/pay/dist || {
+    echo "purchase: the build removed web/pay/dist/.gitkeep; go build without a page build would fail" >&2
     exit 1
   }
 }

@@ -44,7 +44,7 @@ type CardToken struct {
 }
 
 // CardData is raw card input for SERVER-SIDE token-intent creation. Production
-// checkout never sends a PAN through OpenRails (browser -> BT Elements, SAQ A);
+// purchase never sends a PAN through OpenRails (browser -> BT Elements, SAQ A);
 // this exists for the integration-test leg only (BT test tenants accept
 // arbitrary PANs).
 type CardData struct {

@@ -30,7 +30,7 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 	e.method = e.c.saveCard(rail, visa)
 	// The merchant creates the order through tp's Client; its customer pays
 	// it signed in with the saved card.
-	paid, err := e.c.checkout(tp, order{price: price.ID, rail: rail, method: e.method})
+	paid, err := e.c.buyOrder(tp, order{price: price.ID, rail: rail, method: e.method})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", paid.Status, "%+v", paid.Order)
 	require.NotNil(t, paid.SubscriptionID)

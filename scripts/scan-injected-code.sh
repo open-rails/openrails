@@ -320,9 +320,9 @@ if [ "$mode" = self-test ]; then
 		"$self" --all >&2 || true
 		failed=1
 	fi
-	# Shallow CI checkouts have no HEAD~1; skip rather than fail.
+	# Shallow CI purchases have no HEAD~1; skip rather than fail.
 	if ! git rev-parse --verify -q HEAD~1 >/dev/null; then
-		echo "skip --range (no HEAD~1 in a shallow checkout)"
+		echo "skip --range (no HEAD~1 in a shallow purchase)"
 	elif "$self" --range HEAD~1...HEAD >/dev/null 2>&1; then
 		echo "ok   --range (last commit clean)"
 	else

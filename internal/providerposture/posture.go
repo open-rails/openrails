@@ -129,7 +129,7 @@ type entry struct {
 }
 
 // DefaultTimeout bounds one posture check, whatever the provider client's own
-// timeout: a checkout waiting on it must not hang.
+// timeout: a purchase waiting on it must not hang.
 const DefaultTimeout = 5 * time.Second
 
 // Registry is a concurrency-safe verdict cache. One check runs per key at a

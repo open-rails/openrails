@@ -93,7 +93,7 @@ Price fields worth knowing:
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
 Trial terms are supported only on rails with native trial settlement; current
-engine-managed checkout refuses trials before charging.
+engine-managed purchase refuses trials before charging.
 
 **A one-time purchase** — null `billing_interval` with a finite duration gives timed
 access; null `access_duration` gives indefinite access:
@@ -321,7 +321,7 @@ decision (`Client.RefundPayment`).
 product nothing ever referred to, with its prices, and answers 204. Reads and
 catalog listings leave it out. Creating its key again revives it with the new
 definition, since a product's id is its key's. A product an order line,
-payment, subscription, grant, product access, checkout, price migration,
+payment, subscription, grant, product access, purchase, price migration,
 scheduled change, provider write, PSP link or meter rate card refers to is
 never deleted: the request answers `409 product_in_use`, and you archive it
 instead. A purchase therefore always names a product that exists. OpenRails
@@ -358,7 +358,7 @@ route group's permission (`GET /v1/admin/access`).
   - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)
     with `card_entry=new`. It can also be grouped by `reason`, `category`, `response_code`,
     `card_bin`, `card_brand` and AVS/CVV.
-  - `checkout_failure_rate`: the same per buyer rather than per attempt.
+  - `purchase_failure_rate`: the same per buyer rather than per attempt.
   - `rebill_first_failure_rate` and `rebill_missed_rate`: rebills that failed on the first
     attempt, and rebills that never happened.
   - `dunning_recovered` by `recovery_attempt` or `days_to_recover`: the recovery curve.

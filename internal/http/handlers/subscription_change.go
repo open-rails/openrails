@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -34,7 +34,7 @@ type CustomerChangeSubscriptionParams struct {
 }
 
 // changeRequest validates a change body and the subscription it names.
-func changeRequest(r *httprequest.Request, priceID *billing.PriceID, quantity *int) (*checkout.SubscriptionChangeRequest, bool) {
+func changeRequest(r *httprequest.Request, priceID *billing.PriceID, quantity *int) (*payment.SubscriptionChangeRequest, bool) {
 	if priceID == nil && quantity == nil {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "a change names a price_id, a quantity or both"))
 		return nil, false
@@ -52,11 +52,11 @@ func changeRequest(r *httprequest.Request, priceID *billing.PriceID, quantity *i
 		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
 		return nil, false
 	}
-	if r.State.CheckoutService == nil {
-		r.ErrorCode(billing.CodeInternalError, "checkout service unavailable")
+	if r.State.PurchaseService == nil {
+		r.ErrorCode(billing.CodeInternalError, "purchase service unavailable")
 		return nil, false
 	}
-	req := &checkout.SubscriptionChangeRequest{SubscriptionID: id.UUID(), Quantity: quantity}
+	req := &payment.SubscriptionChangeRequest{SubscriptionID: id.UUID(), Quantity: quantity}
 	if priceID != nil {
 		req.PriceID = priceID.String()
 	}
@@ -100,10 +100,10 @@ func ChangeSubscription(r *httprequest.Request) {
 		return
 	}
 	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
-	payer := checkoutVerifiedPrincipal(r)
+	payer := verifiedPrincipal(r)
 	req.Payer = &payer
 	r.SetHeader("Cache-Control", "no-store") // next_action may carry a client secret
-	resp, err := r.State.CheckoutService.ChangeSubscription(r.Request.Context(), req, user)
+	resp, err := r.State.PurchaseService.ChangeSubscription(r.Request.Context(), req, user)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -124,12 +124,12 @@ func ConfirmSubscriptionChange(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
 		return
 	}
-	if r.State.CheckoutService == nil {
-		r.ErrorCode(billing.CodeInternalError, "checkout service unavailable")
+	if r.State.PurchaseService == nil {
+		r.ErrorCode(billing.CodeInternalError, "purchase service unavailable")
 		return
 	}
 	r.SetHeader("Cache-Control", "no-store")
-	resp, err := r.State.CheckoutService.ConfirmSubscriptionChange(r.Request.Context(), id.UUID(), user, checkoutVerifiedPrincipal(r))
+	resp, err := r.State.PurchaseService.ConfirmSubscriptionChange(r.Request.Context(), id.UUID(), user, verifiedPrincipal(r))
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -140,7 +140,7 @@ func ConfirmSubscriptionChange(r *httprequest.Request) {
 // writeTierChangeResponse answers a durable change: 202 while the provider
 // outcome is unresolved (the same Idempotency-Key replays the result), 200
 // otherwise.
-func writeTierChangeResponse(r *httprequest.Request, resp *checkout.TierChangeResponse) {
+func writeTierChangeResponse(r *httprequest.Request, resp *payment.TierChangeResponse) {
 	if resp.Status == "processing" {
 		r.JSON(http.StatusAccepted, resp)
 		return
@@ -164,7 +164,7 @@ func PreviewSubscriptionChange(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	resp, err := r.State.CheckoutService.PreviewSubscriptionChange(r.Request.Context(), req, user)
+	resp, err := r.State.PurchaseService.PreviewSubscriptionChange(r.Request.Context(), req, user)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -178,17 +178,17 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		r.APIError(refusal)
 		return
 	}
-	var inFlight *checkout.TierChangeInFlightError
+	var inFlight *payment.TierChangeInFlightError
 	if errors.As(err, &inFlight) {
 		r.ErrorCode(billing.CodeSubscriptionChangeInFlight, inFlight.Error())
 		return
 	}
-	var tierErr *checkout.TierChangeError
+	var tierErr *payment.TierChangeError
 	if errors.As(err, &tierErr) {
 		r.ErrorCode(tierErr.Code, tierErr.Message)
 		return
 	}
-	var declined *checkout.TierChangeDeclinedError
+	var declined *payment.TierChangeDeclinedError
 	if errors.As(err, &declined) {
 		r.APIError(railPaymentRefusalError(declined.Rail, declined.FailureCode, declined.Reason))
 		return
@@ -199,19 +199,19 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		writePaymentMethodError(r, pmErr)
 		return
 	}
-	if errors.Is(err, checkout.ErrPaymentMethodStale) {
+	if errors.Is(err, payment.ErrPaymentMethodStale) {
 		writePaymentMethodStale(r)
 		return
 	}
 
 	switch {
-	case errors.Is(err, checkout.ErrTierChangeNoSubscription):
+	case errors.Is(err, payment.ErrTierChangeNoSubscription):
 		r.ErrorCode(billing.CodeResourceNotFound, "no active subscription found")
-	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing), errors.Is(err, checkout.ErrNoChangeToConfirm):
+	case errors.Is(err, payment.ErrTierChangePending), errors.Is(err, payment.ErrPurchaseProcessing), errors.Is(err, payment.ErrNoChangeToConfirm):
 		r.ErrorCode(billing.CodeResourceConflict, err.Error())
-	case errors.Is(err, checkout.ErrTierChangeSameProduct):
+	case errors.Is(err, payment.ErrTierChangeSameProduct):
 		r.ErrorCode(billing.CodeResourceConflict, "already on this plan")
-	case errors.Is(err, checkout.ErrTierChangeDifferentGroup):
+	case errors.Is(err, payment.ErrTierChangeDifferentGroup):
 		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a different tier group")
 	case errors.Is(err, subscriptions.ErrPriceCurrencyMismatch):
 		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a plan in a different currency")

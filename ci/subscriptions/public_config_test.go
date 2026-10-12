@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// One PSP whose credentials cannot be checked never takes checkout down: the
+// One PSP whose credentials cannot be checked never takes purchase down: the
 // customer's configuration still lists every other PSP with its public
 // values, and that one as temporarily unavailable, without them.
 func TestPublicConfigDegradesOnePSP(t *testing.T) {

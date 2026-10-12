@@ -42,21 +42,21 @@ export {
   SavePaymentMethod,
   type SavePaymentMethodProps,
 } from "./save-payment-method"
-export { OrderCheckout, type OrderCheckoutProps } from "./order-checkout"
+export { OrderPayment, type OrderPaymentProps } from "./order-payment"
 export {
-  CHECKOUT_COMPLETE_MESSAGE,
-  CHECKOUT_RESIZE_MESSAGE,
-  EmbeddedCheckout,
-  type EmbeddedCheckoutCompletion,
-  type EmbeddedCheckoutProps,
-} from "./embedded-checkout"
+  PAYMENT_COMPLETE_MESSAGE,
+  PAYMENT_RESIZE_MESSAGE,
+  EmbeddedPayment,
+  type EmbeddedPaymentCompletion,
+  type EmbeddedPaymentProps,
+} from "./embedded-payment"
 export { Cart, type CartProps } from "./cart"
 export { authenticateChange } from "./authenticate"
 export {
   canAuthenticatePayment,
   canSavePaymentMethod,
   cardSetupDriver,
-  checkoutPsps,
+  routedPsps,
   pspConfigSchema,
   type CardSetupDriver,
   type PspConfig,
@@ -100,10 +100,9 @@ export {
   type Amount,
 } from "./lib/money"
 export {
-  type CheckoutAppearance,
-  type CheckoutAppearance as BillingAppearance,
-  type CheckoutTheme,
-  type CheckoutVariables,
+  type BillingAppearance,
+  type BillingTheme,
+  type BillingVariables,
 } from "./appearance"
 export type { SavedPaymentMethod } from "./types"
 export {

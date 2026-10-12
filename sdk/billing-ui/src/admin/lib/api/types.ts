@@ -114,7 +114,7 @@ export type UsageAggregation =
 export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 // PSPRoutingSkip mirrors the routing skip vocabulary
-// (internal/db/models/checkout_attempt.go). null = the PSP is eligible.
+// (internal/db/models/order_attempt.go). null = the PSP is eligible.
 export type PSPRoutingSkip =
   | "unknown_selector"
   | "ambiguous_selector"
@@ -133,7 +133,7 @@ export interface PSPRoutingCandidate {
 }
 
 // PSPRoutingPreview is POST /merchant/psps/routing-preview (or#288): which
-// PSP a checkout for this price would use, and why every other PSP was passed
+// PSP a purchase for this price would use, and why every other PSP was passed
 // over. Read-only — it creates nothing.
 export interface PSPRoutingPreview {
   policy: string

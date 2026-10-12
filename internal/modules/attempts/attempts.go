@@ -60,11 +60,11 @@ func OwnerOf(policy models.CollectionPolicy) Owner {
 	return OwnerNone
 }
 
-// CardSave is the checkout target of a card saved without a purchase.
+// CardSave is the purchase target of a card saved without a purchase.
 const CardSave = "card_save"
 
-// checkoutGap ends a checkout that went quiet.
-const checkoutGap = time.Hour
+// purchaseGap ends a purchase that went quiet.
+const purchaseGap = time.Hour
 
 // Attempt is one answered authorization.
 type Attempt struct {
@@ -74,7 +74,7 @@ type Attempt struct {
 	// Owner defaults to none.
 	Owner Owner
 	// NewCard: the card was entered in this checkout or card add. A charge in
-	// the checkout that verified its card is new without saying so.
+	// the purchase that verified its card is new without saying so.
 	NewCard bool
 	// ProviderSchedule: the PSP charged on its own schedule.
 	ProviderSchedule bool
@@ -90,7 +90,7 @@ type Attempt struct {
 	Amount   int64
 	Currency string
 	At       time.Time
-	// Target groups a buyer's new-card attempts into one checkout: a price id,
+	// Target groups a buyer's new-card attempts into one purchase: a price id,
 	// or CardSave. Empty for rebills.
 	Target                                                       string
 	SubscriptionID, PaymentMethodID, PaymentID, ProviderIntentID *uuid.UUID
@@ -237,14 +237,14 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		}
 	}
 	if a.Target != "" {
-		checkout, err := checkoutFor(ctx, q, a)
+		purchase, err := purchaseFor(ctx, q, a)
 		if err != nil {
 			return err
 		}
-		row.CheckoutID, row.CheckoutTarget = &checkout, &a.Target
+		row.PurchaseID, row.PurchaseTarget = &purchase, &a.Target
 		if !a.NewCard && a.Kind != Verify && a.PaymentMethodID != nil {
-			verified, err := q.CheckoutVerifiedPaymentMethod(ctx, gen.CheckoutVerifiedPaymentMethodParams{
-				MerchantID: a.MerchantID, CustomerID: a.CustomerID, CheckoutTarget: a.Target, CheckoutID: checkout, PaymentMethodID: *a.PaymentMethodID,
+			verified, err := q.PurchaseVerifiedPaymentMethod(ctx, gen.PurchaseVerifiedPaymentMethodParams{
+				MerchantID: a.MerchantID, CustomerID: a.CustomerID, PurchaseTarget: a.Target, PurchaseID: purchase, PaymentMethodID: *a.PaymentMethodID,
 			})
 			if err != nil {
 				return err
@@ -310,11 +310,11 @@ func cardFromMethod(ctx context.Context, q *gen.Queries, a Attempt, row *gen.Ins
 	return nil
 }
 
-// checkoutFor continues the buyer's open checkout on this target, or opens a
-// new one. A checkout ends when its target is approved or it goes quiet.
-func checkoutFor(ctx context.Context, q *gen.Queries, a Attempt) (uuid.UUID, error) {
-	last, err := q.LatestPaymentCheckoutAttempt(ctx, gen.LatestPaymentCheckoutAttemptParams{
-		MerchantID: a.MerchantID, CustomerID: a.CustomerID, CheckoutTarget: a.Target, Since: a.At.Add(-checkoutGap),
+// purchaseFor continues the buyer's open purchase on this target, or opens a
+// new one. A purchase ends when its target is approved or it goes quiet.
+func purchaseFor(ctx context.Context, q *gen.Queries, a Attempt) (uuid.UUID, error) {
+	last, err := q.LatestPaymentOrderAttempt(ctx, gen.LatestPaymentOrderAttemptParams{
+		MerchantID: a.MerchantID, CustomerID: a.CustomerID, PurchaseTarget: a.Target, Since: a.At.Add(-purchaseGap),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuidutil.NewV7(), nil
@@ -325,7 +325,7 @@ func checkoutFor(ctx context.Context, q *gen.Queries, a Attempt) (uuid.UUID, err
 	if last.Category == string(decline.Approved) && closes(Kind(last.Kind), a.Target) {
 		return uuidutil.NewV7(), nil
 	}
-	return last.CheckoutID, nil
+	return last.PurchaseID, nil
 }
 
 // closes reports whether an approval of kind completes the target.

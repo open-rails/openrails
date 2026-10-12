@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react"
 
-import type { CheckoutAppearance } from "./appearance"
+import type { BillingAppearance } from "./appearance"
 import { cn } from "cn"
 import { useScopeProps } from "./scope-context"
 
@@ -10,7 +10,7 @@ export function BillingUiRoot({
   className,
   style,
   ...props
-}: ComponentProps<"div"> & { appearance?: CheckoutAppearance }) {
+}: ComponentProps<"div"> & { appearance?: BillingAppearance }) {
   const scope = useScopeProps(appearance)
   return (
     <div

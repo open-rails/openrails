@@ -15,9 +15,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -35,41 +35,41 @@ var (
 
 // payUsage pays what the open usage order still owes. replayed: key's
 // collection already existed.
-func (s *Service) payUsage(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, bool, error) {
+func (s *Service) payUsage(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (payment.OrderCharge, bool, error) {
 	if pay.method == uuid.Nil {
-		return checkout.OrderCharge{}, false, errUsageSavedCard
+		return payment.OrderCharge{}, false, errUsageSavedCard
 	}
 	// The collection decides: a key's earlier collection answers again
 	// whatever the order's state is now.
 	rt, err := s.runtime()
 	if err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	if rt.MoneyCharger == nil {
-		return checkout.OrderCharge{}, false, fmt.Errorf("usage collection charger not configured")
+		return payment.OrderCharge{}, false, fmt.Errorf("usage collection charger not configured")
 	}
 	collectKey := orderPayKey(order.ID, key)
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, collectKey); err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	result, err := s.moneyService().PayUsageNow(ctx, rt.IntentRunner(), actor.Principal, money.UsageCollectionRequest{OrderID: order.ID, IdempotencyKey: collectKey, PaymentMethodID: pay.method})
 	if err != nil {
-		return checkout.OrderCharge{}, false, usageRefusal(err)
+		return payment.OrderCharge{}, false, usageRefusal(err)
 	}
 	return collectionCharge(result.Operation), result.Replayed, nil
 }
 
 // collectionCharge is how an order collection ended: failed, and whether
 // the card was declined.
-func collectionCharge(op gen.BillingProviderIntent) checkout.OrderCharge {
+func collectionCharge(op gen.BillingProviderIntent) payment.OrderCharge {
 	if op.Status != intents.StatusFailedTerminal {
-		return checkout.OrderCharge{}
+		return payment.OrderCharge{}
 	}
 	var evidence struct {
 		Declined bool `json:"declined"`
 	}
 	_ = json.Unmarshal(op.ResultEvidence, &evidence)
-	return checkout.OrderCharge{Failed: true, Declined: evidence.Declined}
+	return payment.OrderCharge{Failed: true, Declined: evidence.Declined}
 }
 
 // usageRefusal answers a collection the usage order refused.

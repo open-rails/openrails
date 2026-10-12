@@ -33,7 +33,7 @@ func WebhookSecretOverlapDuration(cfg *Config) (time.Duration, error) {
 	return d, nil
 }
 
-// AllowedReturnOrigins are the exact origins checkout success/cancel and
+// AllowedReturnOrigins are the exact origins purchase success/cancel and
 // billing-portal return URLs may name (SEC-33): ReturnOrigins, else the origin
 // of PublicBillingBaseURL. Empty refuses every return URL.
 func AllowedReturnOrigins(cfg *Config) []string {

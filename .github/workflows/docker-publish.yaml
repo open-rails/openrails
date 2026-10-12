@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: false
 
 # FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 runs the JavaScript-based actions
-# (checkout, docker/setup-buildx-action) on Node.js 24.
+# (purchase, docker/setup-buildx-action) on Node.js 24.
 # Those actions still declare the Node 20 runtime, which GitHub deprecates on
 # 2026-06-16; this opts into the new runtime ahead of the cutover.
 env:

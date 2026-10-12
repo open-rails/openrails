@@ -32,7 +32,7 @@ var (
 	// ErrPlatformVaultUnreachable refuses platform card custody beside a card
 	// PSP that cannot charge the platform vault's cards.
 	ErrPlatformVaultUnreachable = apperr.New(http.StatusConflict, "platform_vault_unreachable",
-		"a card PSP checkout offers cannot charge cards from the platform vault")
+		"a card PSP purchase offers cannot charge cards from the platform vault")
 )
 
 // PlatformVaultAvailable reports whether platform card custody can be chosen.

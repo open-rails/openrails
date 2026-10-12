@@ -7,14 +7,14 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/customernetwork"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/paymentpage"
 )
 
 // networkProof is the merchant side the customer's request proves: the
-// customer at its merchant, by its own token or, on the checkout host, by
-// its order's checkout URL.
+// customer at its merchant, by its own token or, on the payment origin, by
+// its order's pay URL.
 func networkProof(r *httprequest.Request) (customernetwork.Network, customernetwork.Proof, bool) {
 	scope, ok := r.CustomerScope()
 	if !ok {
@@ -26,8 +26,8 @@ func networkProof(r *httprequest.Request) (customernetwork.Network, customernetw
 		return nil, customernetwork.Proof{}, false
 	}
 	proof := customernetwork.Proof{Merchant: scope.Merchant(), Customer: scope.Customer(), Credential: customernetwork.CustomerToken}
-	if c, ok := hostedcheckout.FromContext(r.Request.Context()); ok {
-		proof.Credential, proof.Order = customernetwork.CheckoutURL, c.OrderID
+	if c, ok := paymentpage.FromContext(r.Request.Context()); ok {
+		proof.Credential, proof.Order = customernetwork.PayURL, c.OrderID
 	}
 	return r.State.Network, proof, true
 }

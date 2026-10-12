@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A custodian save is an owned pending payment method, not a checkout or a
+// A custodian save is an owned pending payment method, not a purchase or a
 // payment. Only the later order charges the verified permanent instrument.
 func TestCustodianCaptureUsesThePaymentMethodResource(t *testing.T) {
 	hs, hsURL := newHSFake(t, "hs-capture-e2e")
@@ -40,8 +40,8 @@ func TestCustodianCaptureUsesThePaymentMethodResource(t *testing.T) {
 	require.Equal(t, "requires_action", created["status"])
 	require.Nil(t, created["psp_id"], "the custodian holds the card; the PSP only routes later charges")
 	var attempts int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.checkout_attempts WHERE customer_id=$1`), c.cid().UUID()).Scan(&attempts))
-	require.Zero(t, attempts, "card capture creates no checkout or payable")
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.order_attempts WHERE customer_id=$1`), c.cid().UUID()).Scan(&attempts))
+	require.Zero(t, attempts, "card capture creates no purchase or payable")
 	action := created["next_action"].(map[string]any)
 	require.Equal(t, "capture", action["type"])
 	payload := action["payload"].(map[string]any)
@@ -80,7 +80,7 @@ func TestCustodianCaptureUsesThePaymentMethodResource(t *testing.T) {
 	require.Equal(t, id, duplicate["id"])
 	require.Equal(t, "replaced", w.methodRow(secondID, "status"))
 	price := w.membershipEvery("capture:member", 9_990_000, monthHours)
-	c.mustCheckout(embedded, order{price: price.ID, rail: "nmi", method: id})
+	c.mustPurchase(embedded, order{price: price.ID, rail: "nmi", method: id})
 	require.Equal(t, 1, hs.sales(), "only the order charges")
 	expiring := c.must(http.MethodPost, "/payment-methods", "capture-expiry", request)
 	w.clock.Advance(16 * time.Minute)

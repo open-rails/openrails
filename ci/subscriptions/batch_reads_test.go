@@ -131,7 +131,7 @@ func (w *world) permanent(entitlement string) *billing.Price {
 	return price
 }
 
-// buy completes a permanent purchase through checkout, as enrollment does.
+// buy completes a permanent purchase through purchase, as enrollment does.
 func (c *customer) buy(priceID, entitlement, method string) {
 	c.w.t.Helper()
 	c.purchase(priceID, method)
@@ -141,7 +141,7 @@ func (c *customer) buy(priceID, entitlement, method string) {
 // purchase pays a session for the price with a saved Stripe card.
 func (c *customer) purchase(priceID, method string) {
 	c.w.t.Helper()
-	c.mustCheckout(embedded, order{price: pid(priceID), rail: "stripe", method: method})
+	c.mustPurchase(embedded, order{price: pid(priceID), rail: "stripe", method: method})
 }
 
 func uuidShort() string { return uuid.NewString()[:8] }
@@ -172,7 +172,7 @@ func requireEnriched(t *testing.T, prices []*billing.Price, subs []billing.Subsc
 	}
 }
 
-func TestCheckoutCoverageIsOneQuery(t *testing.T) {
+func TestPurchaseCoverageIsOneQuery(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
 	hours := 48

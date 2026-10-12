@@ -2,7 +2,7 @@ import * as React from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import type { BillingError } from "#orck/client/errors"
 import type { PaymentMethod } from "#orck/client/types"
 import { CardBrandPlate } from "#orck/components/card-brands"
@@ -29,7 +29,7 @@ import type { Translator } from "#orck/i18n/messages"
 import { useCustomerConfig } from "#orck/react/config"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
-import { canSavePaymentMethod, cardRetryAfter, checkoutPsps } from "#orck/psp"
+import { canSavePaymentMethod, cardRetryAfter, routedPsps } from "#orck/psp"
 import { SavePaymentMethod } from "#orck/save-payment-method"
 import { cardText, RESET } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
@@ -44,7 +44,7 @@ export interface PaymentMethodsPanelProps {
   defaultCurrency?: string
   /** Billing country to preselect when adding a card. */
   defaultCountry?: string
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 
@@ -80,7 +80,7 @@ export function PaymentMethodsPanel({
   } | null>(null)
   const [adding, setAdding] = React.useState(false)
   const config = useCustomerConfig()
-  const psps = checkoutPsps(config.config?.payment.psps ?? [])
+  const psps = routedPsps(config.config?.payment.psps ?? [])
   const savable = psps.filter(canSavePaymentMethod)
   const retryAfter = savable.length > 0 ? null : cardRetryAfter(psps)
   const { refetch: refetchConfig } = config

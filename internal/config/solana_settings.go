@@ -20,7 +20,7 @@ const (
 	SolanaSettingRPCProvider = "rpc_provider"
 	SolanaSettingRPCAPIKey   = "rpc_api_key"
 	SolanaSettingTokens      = "tokens"
-	// SolanaSettingRecipientWallet is consumed by the checkout money path (not
+	// SolanaSettingRecipientWallet is consumed by the purchase money path (not
 	// parsed here); listed so strict manifest validation accepts it.
 	SolanaSettingRecipientWallet = "recipient_wallet"
 )

@@ -29,13 +29,13 @@ type NMIInitialScheduleTerms struct {
 
 // InitialMembershipPayload is one accepted operation with mutually exclusive
 // native-schedule and engine-custody legs. Terms and Instrument own payment and
-// access authority; CheckoutAttemptID binds only the terminal session projection.
+// access authority; OrderAttemptID binds only the terminal session projection.
 type InitialMembershipPayload struct {
-	CheckoutAttemptID      *uuid.UUID                 `json:"checkout_attempt_id,omitempty"`
+	OrderAttemptID         *uuid.UUID                 `json:"order_attempt_id,omitempty"`
 	Terms                  InitialMembershipTerms     `json:"terms"`
 	Instrument             charge.FrozenInstrument    `json:"instrument"`
 	RequestFingerprint     string                     `json:"request_fingerprint"`
-	CheckoutIdempotencyKey string                     `json:"checkout_idempotency_key"`
+	PurchaseIdempotencyKey string                     `json:"purchase_idempotency_key"`
 	NativeSchedule         *NMIInitialScheduleTerms   `json:"native_schedule,omitempty"`
 	HyperSwitch            *charge.HyperSwitchBinding `json:"hyperswitch,omitempty"`
 	PSP                    string                     `json:"psp"`
@@ -75,7 +75,7 @@ func (p InitialMembershipPayload) Initiator() charge.Initiator {
 	return charge.InitiatorCustomer
 }
 
-// TierChangeKeyPrefix scopes an upgrade's client key beside checkout keys.
+// TierChangeKeyPrefix scopes an upgrade's client key beside purchase keys.
 const TierChangeKeyPrefix = "tier_change:"
 
 // Upgrade reports whether this operation is an engine tier upgrade.
@@ -104,11 +104,11 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 		return p, errors.New("initial membership payload has trailing data")
 	}
 
-	if p.CheckoutAttemptID != nil && (*p.CheckoutAttemptID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
+	if p.OrderAttemptID != nil && (*p.OrderAttemptID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
 		return p, errors.New("initial membership has invalid quoted-session binding")
 	}
 	changed, change := p.Terms.Changed()
-	if (p.Upgrade() && p.RequestedPrice == "") || (!change && p.RequestedPrice != "") || (change && (p.CheckoutAttemptID != nil || !strings.HasPrefix(p.CheckoutIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != changed)) {
+	if (p.Upgrade() && p.RequestedPrice == "") || (!change && p.RequestedPrice != "") || (change && (p.OrderAttemptID != nil || !strings.HasPrefix(p.PurchaseIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != changed)) {
 		return p, errors.New("engine change has no exact subscription-change binding")
 	}
 	if err := p.Terms.Validate(); err != nil {
@@ -117,7 +117,7 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeInitialMembership || in.PspID == nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || strings.TrimSpace(p.PSP) == "" || p.CheckoutIdempotencyKey == "" || in.IdempotencyKey != TypeInitialMembership+":"+strings.TrimSpace(p.CheckoutIdempotencyKey) {
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeInitialMembership || in.PspID == nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || strings.TrimSpace(p.PSP) == "" || p.PurchaseIdempotencyKey == "" || in.IdempotencyKey != TypeInitialMembership+":"+strings.TrimSpace(p.PurchaseIdempotencyKey) {
 		return p, errors.New("initial membership contradicts its canonical accepted scope")
 	}
 	if len(p.RequestFingerprint) != 64 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {

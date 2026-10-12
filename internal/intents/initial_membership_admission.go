@@ -58,7 +58,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 				return err
 			}
 			if accepted.Terms.CustomerID.String() != terms.Terms.CustomerID.String() || accepted.Terms.PriceID != terms.Terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
-				return apperr.Conflictf("checkout key belongs to another accepted enrollment")
+				return apperr.Conflictf("purchase key belongs to another accepted enrollment")
 			}
 			row = previous
 			return nil
@@ -120,7 +120,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 			return err
 		}
 		if accepted.Terms.CustomerID.String() != terms.Terms.CustomerID.String() || accepted.Terms.PriceID != terms.Terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
-			return apperr.Conflictf("checkout key belongs to another accepted enrollment")
+			return apperr.Conflictf("purchase key belongs to another accepted enrollment")
 		}
 		return nil
 	})

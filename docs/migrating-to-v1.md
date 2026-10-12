@@ -140,9 +140,9 @@ to match after the mapped price ID is supplied.
 
 | Before | After |
 |---|---|
-| `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `checkout`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
+| `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `purchase`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
 | `GET /`, `/healthz`, `/readyz`, `/health/ready?verbose=1`, 503 `not_ready` | `/health/live` and `/health/ready`; a failed readiness check is 503 `service_unavailable` and the failing dependency is logged, not answered |
-| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/config`'s `capabilities` list the groups `checkout`, `customer`, `merchant`, `merchant_config`, `webhooks` |
+| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | `/v1/config`'s `capabilities` list the groups `payment`, `customer`, `merchant`, `merchant_config`, `webhooks` |
 | Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are behind `billing.MerchantConfigManage` or `billing.RootConfigManage` |
 | CLI flag `--provider-account` | `--psp` |
 
@@ -215,7 +215,7 @@ The Client is flat: no sub-clients (`client.Products`, `client.Prices`,
 `billing.ListPage` and take a `billing.PageRequest` (`Cursor`, `Limit`); there is
 no offset and no total; every list's params embed `billing.PageRequest`
 (`PaymentListParams.Page` and its siblings are gone). Ids are typed: `billing.CustomerID`, `billing.ProductID`,
-`billing.PriceID`, `billing.PSPID`, `billing.CheckoutAttemptID`.
+`billing.PriceID`, `billing.PSPID`, `billing.OrderAttemptID`.
 
 Every merchant route has exactly one Client method, named for it, and a
 request type is `…Params` named for its method: `CreateCheckoutSessionRequest`
@@ -499,8 +499,8 @@ fields (`400 unknown_field`), and every error code is in
   `customers_at_depletion_risk`.
 - **Error codes.** Every refusal carries a registered code, and a code always
   answers the same status; a client that matched on a status-derived code reads
-  [error-codes.md](api/error-codes.md). An expired checkout attempt is 410
-  `checkout_attempt_expired`. A refund refusal is 404 `payment_not_found`,
+  [error-codes.md](api/error-codes.md). An expired order attempt is 410
+  `order_attempt_expired`. A refund refusal is 404 `payment_not_found`,
   400 `payment_not_refundable` or 502 `refund_failed`; approving a finding
   without a recommendation is 422 `finding_not_actionable`, and a failed run
   502 `finding_action_failed`. A tier change answers 404 `price_not_found`,
@@ -560,12 +560,12 @@ calendar ([data retention](operations.md#data-retention)):
 
 | Before | After |
 |---|---|
-| `createHttpSource`, `CheckoutSourceError`, `<Checkout>`, `<CheckoutModal>` | `<OrderCheckout orderId>` pays an order; `<BuyButton>` creates and pays one |
+| `createHttpSource`, `CheckoutSourceError`, `<Checkout>`, `<CheckoutModal>` | `<OrderPayment orderId>` pays an order; `<BuyButton>` creates and pays one |
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
 | `getSolanaConfig()` | `getCustomerConfig()`; the network is `payment.solana.network` |
 | `getConfig()` and `useConfig()` with `payment` and `merchant` | `getConfig()` and `useConfig()` are the deployment's part; `getCustomerConfig()` and `useCustomerConfig()` read the merchant's `payment` and `merchant` (`GET /v1/me/config`) |
 | `listProducts`, `useProducts`, `<BuyButton merchant product price>`, `<ProductList merchant keys>` | The browser never reads the catalog: your server puts the products in its page, `<ProductList products>` and `<BuyButton price>` sell them |
-| A host route creating an order with an embedded checkout for the signed-in customer | `<BuyButton>` creates the order with its checkout in one call (`POST /v1/me/orders` with `checkout`) on a registered embed origin |
+| A host route creating an order with an embedded checkout for the signed-in customer | `<BuyButton>` creates the order with its pay URL in one call (`POST /v1/me/orders` with `pay_url`) on a registered embed origin |
 | A `getToken` you refresh yourself | `tokenSource({ fetchToken })` keeps the token in memory and replaces it before it expires; `redeemAssertion` redeems a backend's customer assertion |
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/me/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
@@ -577,7 +577,7 @@ calendar ([data retention](operations.md#data-retention)):
 | `cancelSubscription`, `resumeSubscription`, `setSubscriptionPaymentMethod` resolved to nothing | Each resolves to the `Subscription` |
 | Generated list fields typed `T[] \| null` | `T[]`: the server always writes `[]` |
 
-A page that posted to `/v1/checkout` now renders `<OrderCheckout orderId>`
+A page that posted to `/v1/checkout` now renders `<OrderPayment orderId>`
 for an unpaid order, or uses `<BuyButton>` to create and pay a customer order.
 
 ## 6. Reading the database
@@ -592,7 +592,7 @@ up there.
 | `rail_intents`, `rail_mutation_logs` | `billing.provider_intents`, `billing.provider_mutation_logs` |
 | `rail_customer_accounts`, `rail_refresh_watermarks` | `billing.psp_customers`, `billing.psp_refresh_watermarks` |
 | `provider_billing_qualifications`, `provider_billing_observations` | Removed with provider operations: a host charges by the hour with a [running charge](running-charges.md) |
-| `checkout_sessions` (engine), `hosted_checkout_sessions` | `billing.checkout_attempts`, `billing.orders` |
+| `checkout_sessions` (engine), `hosted_checkout_sessions` | `billing.order_attempts`, `billing.orders` |
 | `psps.evidence` (jsonb), `psps.replaced_at` | Columns on `billing.psps`: `settings`, `signer`, `credential_refs`, `revision`, `archived_at`; `key` is NOT NULL |
 | `subscriptions.user_email`; `cancelled_at`; status `cancelled` | The directory (`Deps.UserInfo`) or `customer_contacts.email`; `canceled_at`; `canceled` |
 | `customers.email`, `customers.username`, `customers.blocked` | `billing.customer_contacts` (`email`, `user_name`, `display_name`, `active`), the copy SCIM and token claims keep when OpenRails is not embedded beside the directory; none with `Deps.UserInfo` |

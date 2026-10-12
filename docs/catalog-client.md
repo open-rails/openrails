@@ -28,7 +28,7 @@ identical requests return the same product and price. A price key with
 different financial terms is a conflict; invalid
 initial prices leave no orphan product. A price's terms never change: a new
 amount is a new price, and the same key with new terms archives its
-predecessor, so past checkouts stay valid.
+predecessor, so past purchases stay valid.
 
 Inline creation takes local terms only; PSP links on an existing product go
 through `CreatePrice` with `ProductID` and `UpdatePrice`. Provider writes never
@@ -107,7 +107,7 @@ openrails.ReadCache{
 }
 ```
 
-## Access and checkout
+## Access and purchase
 
 Check only the products already selected for a host page: `ListProductAccess`
 with those `ProductIDs` and `LiveOnly` lists the live windows of that bounded

@@ -10,7 +10,7 @@ import (
 )
 
 // SPL Memo self-recognition stamp "openrails:1:<local-id>": local-id is the
-// UUID of our record for the money movement (checkout attempt for one-offs,
+// UUID of our record for the money movement (order attempt for one-offs,
 // pull intent for recurring); merchant, kind and amount are derivable from the
 // chain. Invariants: the memo is a discovery hint, never money truth (that is
 // the transfer: mint, base units, destination, signature); no MAC (a forged

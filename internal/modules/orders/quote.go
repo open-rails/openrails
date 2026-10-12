@@ -399,7 +399,7 @@ func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, c
 
 // pendingPurchase reports another purchase of the product or its tier group
 // whose payment is unresolved: a membership enrollment or Solana subscribe,
-// or a one-time checkout or sale.
+// or a one-time purchase or sale.
 func pendingPurchase(ctx context.Context, q *gen.Queries, merchantID, customerID, productID uuid.UUID, at time.Time) (bool, error) {
 	reason, err := intents.MembershipSlot{MerchantID: merchantID, CustomerID: customerID, ProductID: productID, At: at}.Pending(ctx, q)
 	if err != nil || reason != "" {

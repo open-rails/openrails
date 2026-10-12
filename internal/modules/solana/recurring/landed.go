@@ -243,13 +243,13 @@ func (l *landedTx) cancels(subscriber, plan, sub solanago.PublicKey) error {
 	return fmt.Errorf("%w: no cancel of %s by %s", ErrPaymentUnverified, sub, subscriber)
 }
 
-// references proves the transaction carries a checkout's Solana Pay reference.
+// references proves the transaction carries a purchase's Solana Pay reference.
 // The merchant co-signs the whole message, so a reference inside a co-signed
-// transaction was put there by the checkout that prepared it.
+// transaction was put there by the purchase that prepared it.
 func (l *landedTx) references(reference string) error {
 	key, err := solanago.PublicKeyFromBase58(strings.TrimSpace(reference))
 	if err != nil {
-		return fmt.Errorf("%w: checkout has no valid reference", ErrPaymentUnverified)
+		return fmt.Errorf("%w: purchase has no valid reference", ErrPaymentUnverified)
 	}
 	if !l.carries(key) {
 		return fmt.Errorf("%w: transaction is not for this checkout", ErrPaymentUnverified)

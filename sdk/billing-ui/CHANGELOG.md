@@ -1,5 +1,22 @@
 # Changelog
 
+## An order and its pay URL
+
+- Breaking: "checkout" is gone. `EmbeddedCheckout` is `EmbeddedPayment`,
+  `OrderCheckout` is `OrderPayment` (with `EmbeddedPaymentProps`,
+  `EmbeddedPaymentCompletion`, `OrderPaymentProps`), and
+  `CHECKOUT_COMPLETE_MESSAGE` / `CHECKOUT_RESIZE_MESSAGE` are
+  `PAYMENT_COMPLETE_MESSAGE` / `PAYMENT_RESIZE_MESSAGE`, whose types are
+  `openrails.payment.complete` and `openrails.payment.resize`.
+- Breaking: `createOrder({ payUrl: { embedded: true } })` replaces
+  `checkout: { ui_mode: "embedded" }`. The order answers `pay_url`,
+  `pay_url_expires_at`, `embedded`, `success_url`, `cancel_url` and
+  `saved_payment_methods` in place of `order.checkout`. The pay URL is
+  `/pay/<order>#<secret>` on the payment origin.
+- Breaking: `CheckoutAppearance`, `CheckoutTheme` and `CheckoutVariables` are
+  `BillingAppearance`, `BillingTheme` and `BillingVariables`; `checkoutPsps`
+  is `routedPsps`, reading a PSP's `routed`.
+
 ## Hosts sell the products their pages carry
 
 - Breaking: the browser never reads the catalog. `listProducts`, `useProducts`,

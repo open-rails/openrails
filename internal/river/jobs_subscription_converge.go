@@ -165,7 +165,7 @@ type SubscriptionConvergeWorker struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	CheckoutAttemptService       webhooks.CheckoutAttemptStore
+	OrderAttemptService          webhooks.OrderAttemptStore
 }
 
 func (SubscriptionConvergeWorker) Kind() string { return KindSubscriptionConverge }
@@ -289,8 +289,8 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			PaymentService:               w.PaymentService,
 			MoneyService:                 w.MoneyService,
 
-			RailCustomerService:    w.RailCustomerService,
-			CheckoutAttemptService: w.CheckoutAttemptService,
+			RailCustomerService: w.RailCustomerService,
+			OrderAttemptService: w.OrderAttemptService,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 

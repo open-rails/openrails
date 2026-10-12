@@ -288,7 +288,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 				return nil, nil, nil, apperr.Invalidf("customer_amount requires Stripe or NMI")
 			}
 			if len(req.PSPLinks[name]) > 0 {
-				return nil, nil, nil, apperr.Invalidf("customer_amount uses checkout amounts, not provider catalog links")
+				return nil, nil, nil, apperr.Invalidf("customer_amount uses purchase amounts, not provider catalog links")
 			}
 		}
 		if req.Quantity != nil && (t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) || len(req.PSPLinks[name]) > 0) {

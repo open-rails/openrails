@@ -619,7 +619,7 @@ export function createEndpoints(client: AdminClient) {
       body,
     })
 
-  // previewPSPRouting (or#288) explains which PSP a checkout for this price
+  // previewPSPRouting (or#288) explains which PSP a purchase for this price
   // would use and why each other PSP was passed over. Read-only: it runs the
   // production decision path without creating a session.
   const previewPSPRouting = (

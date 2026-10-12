@@ -91,7 +91,7 @@ func (in *abuseInstances) call(on http.Handler, method, path, addr string) *http
 	return rec
 }
 
-// pay is a checkout payment on instance i: the checkout bucket, 10 a minute.
+// pay is a purchase payment on instance i: the purchase bucket, 10 a minute.
 func (in *abuseInstances) pay(i int, addr string) *httptest.ResponseRecorder {
 	return in.call(in.public[i%len(in.public)], http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", addr)
 }

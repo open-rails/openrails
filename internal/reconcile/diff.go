@@ -186,7 +186,7 @@ func decodeBreadcrumbs(raw json.RawMessage) txnBreadcrumbs {
 
 // parseRebillOrderID extracts the local subscription uuid from the dunning
 // worker's order_id breadcrumb `rebill-<subscriptionID>-<unixPeriodEnd>`, or
-// from a bare local-subscription-uuid order id (checkout signup shape).
+// from a bare local-subscription-uuid order id (purchase signup shape).
 func parseRebillOrderID(orderID string) (uuid.UUID, bool) {
 	orderID = strings.TrimSpace(orderID)
 	if orderID == "" {
@@ -695,7 +695,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	if discoveredNotLocalRaw(r.Raw) {
 		// Chain-scan discoveries (permissionless `subscribe`) never
 		// auto-create local billing state: operator decision only.
-		blockers = append(blockers, "subscription was discovered on-chain with no local checkout trail (#714); creating billing state from chain data alone is an operator decision")
+		blockers = append(blockers, "subscription was discovered on-chain with no local purchase trail (#714); creating billing state from chain data alone is an operator decision")
 	}
 	if len(blockers) > 0 {
 		if opts.Materialize {
@@ -1423,7 +1423,7 @@ func discoveredNotLocalRaw(raw json.RawMessage) bool {
 //     duplicate local-id) => requires_review, never applied;
 //   - clean but unpriced (asset is not a registry USD stablecoin) => parked
 //     too: the payments mirror is fiat, so the operator prices it manually;
-//   - clean one-off with resolved checkout identity => backfill via the same
+//   - clean one-off with resolved purchase identity => backfill via the same
 //     idempotent payment lane the other rails use, money from the on-chain
 //     transfer only;
 //   - clean pull => ok=false, the generic correlator lane owns it (matches by
@@ -1474,12 +1474,12 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 	}
 
 	f.LocalEvidence = map[string]any{
-		"checkout_attempt_id": checkoutAttemptRef(d.MemoLocalID),
-		"customer_id":         customerID.String(),
-		"price_id":            d.PublicPriceID,
-		"correlated_via":      "purchase_memo",
+		"order_attempt_id": orderAttemptRef(d.MemoLocalID),
+		"customer_id":      customerID.String(),
+		"price_id":         d.PublicPriceID,
+		"correlated_via":   "purchase_memo",
 	}
-	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
+	f.RecommendedAction = "memo-recognized one-off purchase verified against its order attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
 	f.Apply = &ApplyAction{BackfillPayment: &BackfillPaymentAction{
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,
@@ -1489,11 +1489,11 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 		PriceID:       priceID,
 		CustomerID:    customerID,
 		Metadata: map[string]any{
-			"reconcile_backfill":  true,
-			"correlated_via":      "purchase_memo",
-			"discovered_via":      "wallet_scan",
-			"checkout_attempt_id": checkoutAttemptRef(d.MemoLocalID),
-			"provider":            string(provider),
+			"reconcile_backfill": true,
+			"correlated_via":     "purchase_memo",
+			"discovered_via":     "wallet_scan",
+			"order_attempt_id":   orderAttemptRef(d.MemoLocalID),
+			"provider":           string(provider),
 		},
 	}}
 	return f, true
@@ -1714,11 +1714,11 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 	return findings
 }
 
-// checkoutAttemptRef spells a purchase memo's local id, a checkout attempt
+// orderAttemptRef spells a purchase memo's local id, a order attempt
 // UUID, as the attempt's wire id; a memo that is not a UUID stays verbatim.
-func checkoutAttemptRef(memoLocalID string) string {
+func orderAttemptRef(memoLocalID string) string {
 	if u, err := uuid.Parse(memoLocalID); err == nil {
-		return billing.CheckoutAttemptID(u).String()
+		return billing.OrderAttemptID(u).String()
 	}
 	return memoLocalID
 }

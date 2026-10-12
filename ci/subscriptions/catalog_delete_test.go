@@ -33,7 +33,7 @@ func TestDeletingAProductNothingReferences(t *testing.T) {
 	soldPrice, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sold.ID, Key: "buy", UnitAmount: 4_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	buyer := w.newCustomer()
-	buyer.mustCheckout(remote, order{price: soldPrice.ID, rail: "nmi", method: buyer.saveCard("nmi", visa)})
+	buyer.mustPurchase(remote, order{price: soldPrice.ID, rail: "nmi", method: buyer.saveCard("nmi", visa)})
 
 	require.Equal(t, http.StatusNoContent, w.staffCall(http.MethodDelete, "/v1/catalog/products/"+unsold.ID.String(), nil, nil))
 	_, err = c.GetProduct(t.Context(), unsold.ID)
@@ -138,8 +138,8 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 			require.NoError(t, err)
 			buyer := w.newCustomer()
 			method := buyer.saveCard("nmi", visa)
-			buyer.mustCheckout(remote, order{price: soldPrice.ID, rail: "nmi", method: method})
-			buyer.mustCheckout(remote, order{price: bought.ID, rail: "nmi", method: method})
+			buyer.mustPurchase(remote, order{price: soldPrice.ID, rail: "nmi", method: method})
+			buyer.mustPurchase(remote, order{price: bought.ID, rail: "nmi", method: method})
 
 			only := &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 				kept: {DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000)}},

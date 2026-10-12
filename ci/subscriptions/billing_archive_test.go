@@ -58,7 +58,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	for _, update := range []string{
 		`UPDATE billing.payments SET metadata = coalesce(metadata, '{}'::jsonb) || $1::jsonb, discount_metadata = $1::jsonb`,
 		`UPDATE billing.payment_methods SET metadata = coalesce(metadata, '{}'::jsonb) || $1::jsonb`,
-		`UPDATE billing.checkout_attempts SET metadata = coalesce(metadata, '{}'::jsonb) || $1::jsonb`,
+		`UPDATE billing.order_attempts SET metadata = coalesce(metadata, '{}'::jsonb) || $1::jsonb`,
 		`UPDATE billing.subscriptions SET gateway_response = coalesce(gateway_response, '{}'::jsonb) || $1::jsonb`,
 	} {
 		result, err := w.pool.Exec(t.Context(), w.q(update), metadata)
@@ -127,7 +127,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 		{"usage_collection_cadence", "merchant_id", "monthly_period_started_at,completed_at"},
 		{"payments", "id", "metadata,discount_metadata,amount,list_amount,currency,status,subscription_id,transaction_id"},
 		{"payment_methods", "id", "metadata,rail_customer_ref,rail_method_ref,card_last4"},
-		{"checkout_attempts", "id", "metadata,payment_id,subscription_id,status"},
+		{"order_attempts", "id", "metadata,payment_id,subscription_id,status"},
 		{"subscriptions", "id", "gateway_response,status,price_id,current_period_starts_at,current_period_ends_at"},
 		{"owed_items", "id", "metadata,amount,status"},
 		{"usage_events", "id", "metadata,(metadata IS NULL) AS metadata_is_sql_null,amount,currency"},
@@ -204,7 +204,7 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 		return refusal.Error.Metadata.Table, refusal.Error.Metadata.Count
 	}
 	_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.idempotency_keys (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
-		SELECT id, 'checkout_attempt_create', k, s, gen_random_uuid(), CASE WHEN s = 'succeeded' THEN '{}'::jsonb END, now() + interval '1 hour', now() + interval '1 day'
+		SELECT id, 'order_attempt_create', k, s, gen_random_uuid(), CASE WHEN s = 'succeeded' THEN '{}'::jsonb END, now() + interval '1 hour', now() + interval '1 day'
 		FROM billing.merchants, (VALUES ('running', 'processing'), ('done', 'succeeded')) AS v(k, s) WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	table, count := archiveRefusal()

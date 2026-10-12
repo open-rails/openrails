@@ -19,7 +19,7 @@ import (
 func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
-	req := p.checkout(buyer)
+	req := p.purchase(buyer)
 	p.w.clock.Advance(16 * time.Minute)
 	read := buyer.order(http.MethodGet, "/orders/"+req.order.String(), "", nil)
 	require.Equal(t, "requires_action", paymentOf(read)["status"], "the quote expired but its reference still credits")
@@ -38,7 +38,7 @@ func TestSolanaSubscribeHoldsSlotBeforeFirstPull(t *testing.T) {
 	s := openSolanaShop(t)
 	t.Run("card enrollment waits", func(t *testing.T) {
 		b := s.buyer(t, false)
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		charges := len(s.w.nmi.Ledger(""))
 		_, err := b.sell(embedded, order{price: pid(s.price)})
 		requireSlotHeld(t, err)
@@ -50,7 +50,7 @@ func TestSolanaSubscribeHoldsSlotBeforeFirstPull(t *testing.T) {
 	})
 	t.Run("orphaned first pull is queued for refund", func(t *testing.T) {
 		b := s.buyer(t, false)
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		// Another writer (an import, a restored book) gave the customer this
 		// plan meanwhile.
 		_, err := s.w.pool.Exec(t.Context(), s.w.q(`INSERT INTO billing.subscriptions

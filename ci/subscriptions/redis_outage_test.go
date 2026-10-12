@@ -59,7 +59,7 @@ func redisInUse(w *world) (answers, ready bool) {
 	return false, err == nil
 }
 
-// A Redis that stops answering mid-flow leaves card checkout and Solana Pay
+// A Redis that stops answering mid-flow leaves card purchase and Solana Pay
 // running: abuse state moves to process memory, Solana Pay never needed Redis,
 // and the engine stays ready with Redis degraded. Once Redis answers again it
 // is used again, and what memory counted meanwhile still counts: card refusals
@@ -77,7 +77,7 @@ func TestRedisLossAndRecoveryMidFlow(t *testing.T) {
 	// One address testing cards, each through a fresh account.
 	ip := "198.51.100.77"
 	attempt := func(cd card) error {
-		return succeeded(w.newCustomer().checkout(embedded, order{price: price, rail: "nmi", token: w.nmi.Tokenize(cd), ip: ip}))
+		return succeeded(w.newCustomer().buyOrder(embedded, order{price: price, rail: "nmi", token: w.nmi.Tokenize(cd), ip: ip}))
 	}
 	refused := func(err error) {
 		t.Helper()
@@ -98,7 +98,7 @@ func TestRedisLossAndRecoveryMidFlow(t *testing.T) {
 	count := func() int64 { n, _ := state.Count(ctx, window, 1, time.Hour); return n }
 
 	// Before: a Solana Pay order awaits its wallet; one refusal is in Redis.
-	req := p.checkout(w.newCustomer())
+	req := p.purchase(w.newCustomer())
 	refused(attempt(declined))
 	require.EqualValues(t, 1, inRedis())
 	require.EqualValues(t, 1, count())
@@ -113,7 +113,7 @@ func TestRedisLossAndRecoveryMidFlow(t *testing.T) {
 	require.Equal(t, "credited", disposition)
 	require.Equal(t, 1, p.payments(req))
 	require.Eventually(t, func() bool { up, ready := redisInUse(w); return !up && ready }, 20*time.Second, 100*time.Millisecond, "ready, with Redis degraded")
-	require.NoError(t, succeeded(w.newCustomer().checkout(embedded, order{price: price, rail: "nmi", token: w.nmi.Tokenize(visa)})), "a card checkout pays with Redis down")
+	require.NoError(t, succeeded(w.newCustomer().buyOrder(embedded, order{price: price, rail: "nmi", token: w.nmi.Tokenize(visa)})), "a card purchase pays with Redis down")
 	for range 4 {
 		refused(attempt(declined))
 	}
@@ -136,7 +136,7 @@ func TestRedisLossAndRecoveryMidFlow(t *testing.T) {
 	require.Equal(t, "card_attempts_blocked", blocked.Code)
 	require.Len(t, w.nmi.Sales(), sales, "a blocked attempt never reaches the gateway")
 
-	again := p.checkout(w.newCustomer())
+	again := p.purchase(w.newCustomer())
 	p.pay(again, again.amount)
 	p.confirm(again)
 	p.until(func() bool { return p.status(again) == "succeeded" }, "Solana Pay after recovery")

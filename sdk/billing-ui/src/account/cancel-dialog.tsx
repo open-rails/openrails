@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 
 import {
   CANCEL_REASON_MAX,
@@ -38,7 +38,7 @@ export interface CancelSubscriptionDialogProps {
   pending?: SubscriptionAction
   /** Resolves null on success; the dialog then closes. */
   onConfirm: (reason: string) => Promise<BillingError | null>
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
 }
 
 export function CancelSubscriptionDialog({

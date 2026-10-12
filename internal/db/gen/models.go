@@ -188,37 +188,6 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
-// An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
-type BillingCheckoutAttempt struct {
-	ID             uuid.UUID
-	Rail           string
-	Status         string
-	Amount         *int64
-	Currency       *string
-	ExpiresAt      *time.Time
-	Reference      *string
-	TransactionID  *string
-	PaymentID      *uuid.UUID
-	SubscriptionID *uuid.UUID
-	RailFields     []byte
-	RailState      []byte
-	Metadata       []byte
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	// PSP selected for this attempt. Required.
-	PspID uuid.UUID
-	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
-	DeletedAt           *time.Time
-	DestructiveRunID    *uuid.UUID
-	DestructiveRunClass *string
-	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
-	RoutingReason []byte
-	// The order this payment attempt pays.
-	OrderID *uuid.UUID
-}
-
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -358,11 +327,11 @@ type BillingCustomerLink struct {
 	CustomerID uuid.UUID
 	// The openrails.dev account: its AuthKit user id, the public network id (OIDC sub).
 	AccountID uuid.UUID
-	// checkout: at hosted or embedded checkout; connect: the merchant's own customer, from its site; sign_in: the merchant signs its customers in with openrails.dev, so the customer is the account itself.
+	// payment_page: on the payment page, by an order's pay URL; connect: the merchant's own customer, from its site; sign_in: the merchant signs its customers in with openrails.dev, so the customer is the account itself.
 	Method string
-	// The merchant-side proof: the customer's token at the merchant, or the checkout URL secret of order_id. NULL for sign_in.
+	// The merchant-side proof: the customer's token at the merchant, or the pay URL secret of order_id. NULL for sign_in.
 	Credential *string
-	// The order whose checkout made the link; evidence only, kept after the order goes.
+	// The order whose pay URL made the link; evidence only, kept after the order goes.
 	OrderID *uuid.UUID
 	// The network sign-in the link was proven with (OIDC auth_time, amr). NULL for sign_in.
 	AuthTime *time.Time
@@ -820,7 +789,7 @@ type BillingNotificationEventAck struct {
 	AcknowledgedAt time.Time
 }
 
-// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -837,7 +806,7 @@ type BillingOrder struct {
 	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
 	PaymentMethodID *uuid.UUID
 	PspID           *uuid.UUID
-	// The checkout attempt last started for the order.
+	// The order attempt last started for the order.
 	AttemptID        *uuid.UUID
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
@@ -850,22 +819,20 @@ type BillingOrder struct {
 	UpdatedAt   time.Time
 	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
 	PaymentStatus string
-	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once on a merchant order; on a customer's own order, again each time the customer asks for its checkout, which ends the last.
-	CheckoutSecretHash []byte
-	// When the checkout URL stops working; no later than the order's own expiry.
-	CheckoutExpiresAt *time.Time
-	// Where a merchant order's checkout returns once paid. NULL on a customer's own embedded checkout, which returns nowhere: the frame tells its page.
-	CheckoutSuccessUrl          *string
-	CheckoutCancelUrl           *string
-	CheckoutSavedPaymentMethods *bool
-	SubscriptionID              *uuid.UUID
-	PeriodStartsAt              *time.Time
-	PeriodEndsAt                *time.Time
+	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant order; on a customer's own order, again each time the customer asks for its pay URL, which ends the last.
+	PayUrlSecretHash []byte
+	// When the pay URL stops working; no later than the order's own expiry.
+	PayUrlExpiresAt *time.Time
+	// Where a merchant order's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
+	SuccessUrl          *string
+	CancelUrl           *string
+	SavedPaymentMethods *bool
+	SubscriptionID      *uuid.UUID
+	PeriodStartsAt      *time.Time
+	PeriodEndsAt        *time.Time
 	// When a renewal is owed: its period's start. An open order past it is overdue.
 	DueAt    *time.Time
 	VoidedAt *time.Time
-	// Where the checkout page runs: hosted, or embedded in the merchant's registered origins (settings checkout.embed_origins).
-	CheckoutUiMode *string
 	// A usage order's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
 	AmountPaid      *int64
 	UncollectibleAt *time.Time
@@ -886,6 +853,39 @@ type BillingOrder struct {
 	SubscriptionBillKind *string
 	// sha256 of a customer order's lines (prices, quantities, amounts), which POST /v1/me/orders finds its open order by. NULL on a cart's order and every other origin.
 	LinesDigest []byte
+	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
+	Embedded *bool
+}
+
+// An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
+type BillingOrderAttempt struct {
+	ID             uuid.UUID
+	Rail           string
+	Status         string
+	Amount         *int64
+	Currency       *string
+	ExpiresAt      *time.Time
+	Reference      *string
+	TransactionID  *string
+	PaymentID      *uuid.UUID
+	SubscriptionID *uuid.UUID
+	RailFields     []byte
+	RailState      []byte
+	Metadata       []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	// PSP selected for this attempt. Required.
+	PspID uuid.UUID
+	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
+	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
+	RoutingReason []byte
+	// The order this payment attempt pays.
+	OrderID *uuid.UUID
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
@@ -972,7 +972,7 @@ type BillingPayment struct {
 	CustomerID        uuid.UUID
 	// PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).
 	PspID *uuid.UUID
-	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
+	// initial|renewal, stamped at write time by the purchase vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string
 	// Raw rail decline code, recorded verbatim (no fabrication).
 	FailureCode *string
@@ -998,7 +998,7 @@ type BillingPayment struct {
 	Quantity *int32
 }
 
-// One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
+// One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. purchase_id groups one buyer's attempts on one target (purchase_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
 type BillingPaymentAttempt struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1024,8 +1024,8 @@ type BillingPaymentAttempt struct {
 	Amount         int64
 	Currency       *string
 	AttemptedAt    time.Time
-	CheckoutID     *uuid.UUID
-	CheckoutTarget *string
+	PurchaseID     *uuid.UUID
+	PurchaseTarget *string
 	// The subscription the attempt renews or would create. No foreign key: a declined first charge names a subscription that is never written.
 	SubscriptionID   *uuid.UUID
 	PaymentMethodID  *uuid.UUID
@@ -1240,7 +1240,7 @@ type BillingProduct struct {
 	MerchantID uuid.UUID
 	// Advances on every change to the product, its keys or its rate cards; never on a change to its prices.
 	Revision int64
-	// Purchased currency credit policy; accepted checkouts freeze amount and expiry duration.
+	// Purchased currency credit policy; accepted purchases freeze amount and expiry duration.
 	CreditGrant []byte
 	// unique (one live holding per customer, per tier group when set), consumable (units stack, quantity counts them) or extend (a later purchase starts when the current window ends). NULL derives it: consumable for a credit product, extend when every price is one-time with an access duration, unique otherwise.
 	Ownership *string
@@ -1606,44 +1606,44 @@ type BillingScheduledChange struct {
 	Reason  *string
 }
 
-// Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
+// Every signature observed on a Solana Pay reference, recorded once. credited = the order attempt was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
 type BillingSolanaPayReceipt struct {
-	MerchantID        uuid.UUID
-	Reference         string
-	Signature         string
-	CheckoutAttemptID uuid.UUID
-	Disposition       string
-	ReviewReason      *string
-	Recipient         string
-	TokenMint         string
-	ExpectedAmount    int64
-	ReceivedAmount    int64
-	Payer             *string
-	LandedAt          *time.Time
-	PaymentID         *uuid.UUID
-	ResolvedAt        *time.Time
-	Resolution        *string
-	CreatedAt         time.Time
+	MerchantID     uuid.UUID
+	Reference      string
+	Signature      string
+	OrderAttemptID uuid.UUID
+	Disposition    string
+	ReviewReason   *string
+	Recipient      string
+	TokenMint      string
+	ExpectedAmount int64
+	ReceivedAmount int64
+	Payer          *string
+	LandedAt       *time.Time
+	PaymentID      *uuid.UUID
+	ResolvedAt     *time.Time
+	Resolution     *string
+	CreatedAt      time.Time
 }
 
-// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
+// One Solana Pay reference per order attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
 type BillingSolanaPayReference struct {
-	MerchantID        uuid.UUID
-	Reference         string
-	CheckoutAttemptID uuid.UUID
-	Kind              string
-	Status            string
-	ExpiresAt         time.Time
-	WatchEndsAt       time.Time
-	NextPollAt        time.Time
-	Signature         *string
-	SeenUntil         *string
-	ScanStack         []string
-	ScanBelow         *string
-	BuiltTransaction  *string
-	BuiltValidHeight  *int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	MerchantID       uuid.UUID
+	Reference        string
+	OrderAttemptID   uuid.UUID
+	Kind             string
+	Status           string
+	ExpiresAt        time.Time
+	WatchEndsAt      time.Time
+	NextPollAt       time.Time
+	Signature        *string
+	SeenUntil        *string
+	ScanStack        []string
+	ScanBelow        *string
+	BuiltTransaction *string
+	BuiltValidHeight *int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // On-chain mirror of one Solana subscription: its program accounts, mint and next pull.

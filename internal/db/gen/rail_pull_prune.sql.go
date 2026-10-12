@@ -467,7 +467,7 @@ const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :o
 SELECT
   EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM billing.checkout_attempts cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.order_attempts cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
   AS protected
 `
 
@@ -476,7 +476,7 @@ type PaymentHasProtectedDependentsParams struct {
 	PaymentID  uuid.UUID
 }
 
-// A payment that feeds a grant or backs a refund or checkout attempt is
+// A payment that feeds a grant or backs a refund or order attempt is
 // retracted through convergence (grant revoke), never pruned.
 func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg PaymentHasProtectedDependentsParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, paymentHasProtectedDependents, arg.MerchantID, arg.PaymentID)
@@ -516,8 +516,8 @@ func (q *Queries) PruneSoftDeleteAccessBySubscription(ctx context.Context, arg P
 	return result.RowsAffected(), nil
 }
 
-const pruneSoftDeleteCheckoutAttemptsBySubscription = `-- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
-UPDATE billing.checkout_attempts
+const pruneSoftDeleteOrderAttemptsBySubscription = `-- name: PruneSoftDeleteOrderAttemptsBySubscription :execrows
+UPDATE billing.order_attempts
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
@@ -526,15 +526,15 @@ WHERE merchant_id = $3::uuid
   AND deleted_at IS NULL
 `
 
-type PruneSoftDeleteCheckoutAttemptsBySubscriptionParams struct {
+type PruneSoftDeleteOrderAttemptsBySubscriptionParams struct {
 	Now            time.Time
 	RunID          uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
 }
 
-func (q *Queries) PruneSoftDeleteCheckoutAttemptsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutAttemptsBySubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutAttemptsBySubscription,
+func (q *Queries) PruneSoftDeleteOrderAttemptsBySubscription(ctx context.Context, arg PruneSoftDeleteOrderAttemptsBySubscriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteOrderAttemptsBySubscription,
 		arg.Now,
 		arg.RunID,
 		arg.MerchantID,
@@ -627,20 +627,20 @@ func (q *Queries) RestoreAccessByDestructiveRun(ctx context.Context, arg Restore
 	return result.RowsAffected(), nil
 }
 
-const restoreCheckoutAttemptsByDestructiveRun = `-- name: RestoreCheckoutAttemptsByDestructiveRun :execrows
-UPDATE billing.checkout_attempts
+const restoreOrderAttemptsByDestructiveRun = `-- name: RestoreOrderAttemptsByDestructiveRun :execrows
+UPDATE billing.order_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
 `
 
-type RestoreCheckoutAttemptsByDestructiveRunParams struct {
+type RestoreOrderAttemptsByDestructiveRunParams struct {
 	Now        time.Time
 	MerchantID uuid.UUID
 	RunID      uuid.UUID
 }
 
-func (q *Queries) RestoreCheckoutAttemptsByDestructiveRun(ctx context.Context, arg RestoreCheckoutAttemptsByDestructiveRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, restoreCheckoutAttemptsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
+func (q *Queries) RestoreOrderAttemptsByDestructiveRun(ctx context.Context, arg RestoreOrderAttemptsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreOrderAttemptsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return 0, err
 	}

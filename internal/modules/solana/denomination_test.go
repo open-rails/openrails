@@ -57,14 +57,14 @@ func TestFiatTokenQuoteUsesRegisteredNativePrecision(t *testing.T) {
 }
 
 func TestTokenQuoteUsesItsOwningCreationTime(t *testing.T) {
-	created := time.Date(2001, 2, 3, 4, 5, 6, 0, time.FixedZone("checkout", 3600))
+	created := time.Date(2001, 2, 3, 4, 5, 6, 0, time.FixedZone("purchase", 3600))
 	for _, tc := range []struct {
 		currency string
 		amount   moneyutil.Micros
 	}{{"USD", 1_000_000}, {"USDC", 1_000_000}, {"USD", 0}} {
 		quote, err := CalculateTokenQuote(t.Context(), "USDC", usdcMainnetMint, 6, tc.amount, tc.currency, nil, nil, created)
 		require.NoError(t, err)
-		require.Equal(t, created.UTC(), quote.QuotedAt, "fiat, token and zero-amount quotes use the same checkout clock")
+		require.Equal(t, created.UTC(), quote.QuotedAt, "fiat, token and zero-amount quotes use the same purchase clock")
 	}
 	_, err := CalculateTokenQuote(t.Context(), "USDC", usdcMainnetMint, 6, 1_000_000, "USDC", nil, nil, time.Time{})
 	require.ErrorContains(t, err, "creation time")

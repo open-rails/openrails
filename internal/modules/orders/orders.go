@@ -1,7 +1,7 @@
 // Package orders is the purchase: frozen lines and totals bought by one
 // customer, ownership claims that keep two buys of one thing from both
 // succeeding, the merchant's gapless document numbers, and fulfilment when an
-// order is paid. Charging is checkout's: an order's attempts are checkout
+// order is paid. Charging is purchase's: an order's attempts are purchase
 // attempts, and their provider intents settle the order through Paid.
 package orders
 
@@ -198,9 +198,10 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction
 	}
-	if o.CheckoutExpiresAt != nil && o.CheckoutSavedPaymentMethods != nil && o.CheckoutUiMode != nil {
-		out.Checkout = &billing.OrderCheckout{UIMode: billing.CheckoutUIMode(*o.CheckoutUiMode), ExpiresAt: o.CheckoutExpiresAt.UTC(), SuccessURL: o.CheckoutSuccessUrl,
-			CancelURL: o.CheckoutCancelUrl, SavedPaymentMethods: *o.CheckoutSavedPaymentMethods}
+	if o.PayUrlExpiresAt != nil && o.SavedPaymentMethods != nil && o.Embedded != nil {
+		expires := o.PayUrlExpiresAt.UTC()
+		out.PayURLExpiresAt, out.Embedded, out.SavedPaymentMethods = &expires, *o.Embedded, *o.SavedPaymentMethods
+		out.SuccessURL, out.CancelURL = o.SuccessUrl, o.CancelUrl
 	}
 	if o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && options != nil {
 		out.PaymentOptions = options

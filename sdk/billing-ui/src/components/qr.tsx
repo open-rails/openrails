@@ -1,5 +1,5 @@
 // Solana Pay transfer request: the official SDK owns QR rendering while the
-// checkout owns lifecycle copy and the same-device wallet link.
+// purchase owns lifecycle copy and the same-device wallet link.
 import * as React from "react"
 
 import { buttonVariants } from "#orck/components/ui/button"

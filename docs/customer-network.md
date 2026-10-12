@@ -38,7 +38,7 @@ AuthKit (group OAuth clients); the consent screen names the merchant.
   account's stable public id, the `sub` every merchant's client receives.
 - `method` is how it was proven: `connect` (from the merchant's site),
   `sign_in` (the merchant signs its customers in with openrails.dev) or
-  `checkout` (on the checkout page).
+  `payment_page` (on the payment page).
 - Links are openrails.dev's, not the merchant's: `billing.customer_links` is not
   in the merchant archive, and a deleted merchant's links end.
 
@@ -75,15 +75,15 @@ network terms. A token granted only `openrails:link` is no customer: `403
 permission_required`. An account linked to another customer of the merchant
 signing in this way is refused `409 network_account_linked`.
 
-## At checkout
+## On the payment page
 
-On the hosted checkout host, the order's checkout URL is the merchant's side:
+On the payment origin, the order's pay URL is the merchant's side:
 its backend created the order for its customer. The URL's secret asks for the
 challenge and redeems it (the same two routes), and the shopper signs in with
-the checkout page's own client, `openrails-checkout`. The server declares it
-when the network runs with a hosted checkout: its redirect URI is the checkout
-host's `/c/sign-in`, its sign-in asks for the network terms, and the page may
-call the server's AuthKit. Only that client answers a checkout URL, and a
+the payment page's own client, `openrails-payment-page`. The server declares it
+when the network runs with a payment page: its redirect URI is the payment
+origin's `/pay/sign-in`, its sign-in asks for the network terms, and the page may
+call the server's AuthKit. Only that client answers a pay URL, and a
 merchant's client never does; an operator declaring it is refused at boot.
 
 ## Refusals

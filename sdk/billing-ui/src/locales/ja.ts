@@ -145,7 +145,7 @@ export const ja: BillingUiMessageBundle = {
     inUse:
       "このカードは有効なサブスクリプションの支払いに使われています。先に別のカードへ切り替えてください。",
   },
-  checkout: {
+  purchase: {
     renews: "更新：{period}",
   },
   history: {

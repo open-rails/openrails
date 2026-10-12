@@ -58,16 +58,16 @@ SELECT EXISTS(
 ) AS has_grant;
 
 -- name: PaymentHasProtectedDependents :one
--- A payment that feeds a grant or backs a refund or checkout attempt is
+-- A payment that feeds a grant or backs a refund or order attempt is
 -- retracted through convergence (grant revoke), never pruned.
 SELECT
   EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
   OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = sqlc.arg(payment_id)::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM billing.checkout_attempts cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.order_attempts cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
   AS protected;
 
--- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
-UPDATE billing.checkout_attempts
+-- name: PruneSoftDeleteOrderAttemptsBySubscription :execrows
+UPDATE billing.order_attempts
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
@@ -117,8 +117,8 @@ UPDATE billing.payments
 SET deleted_at = NULL, destructive_run_id = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
--- name: RestoreCheckoutAttemptsByDestructiveRun :execrows
-UPDATE billing.checkout_attempts
+-- name: RestoreOrderAttemptsByDestructiveRun :execrows
+UPDATE billing.order_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 

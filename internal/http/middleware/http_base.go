@@ -101,7 +101,7 @@ func RequestLimitsHTTP(maxBytes int64) HTTPMiddleware {
 }
 
 // BrowserTierRoutes is the set of route patterns in the permissive-CORS
-// browser tier; checkout and self-service routes register as they mount.
+// browser tier; purchase and self-service routes register as they mount.
 // Matching is by path, whatever the method: a preflight is OPTIONS, which no
 // route registers, so the serving mux cannot answer it.
 type BrowserTierRoutes struct {

@@ -32,7 +32,7 @@ func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error) {
 // DeclarePSP records a PSP identity of the handle's merchant, without
 // credentials, for imported billing facts attributed to it. Call during
 // setup, before serving or starting workers. It never arms the PSP for
-// checkout.
+// purchase.
 func (c *LocalClient) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error) {
 	e := c.engine
 	if e.App.Runtime == nil || e.App.Runtime.Merchants == nil {

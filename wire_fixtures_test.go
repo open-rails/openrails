@@ -140,7 +140,7 @@ var (
 	subscriptionFixture   = billing.SubscriptionID(uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 	methodFixture         = billing.PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	paymentFixture        = billing.PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
-	sessionFixture        = billing.CheckoutAttemptID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
+	sessionFixture        = billing.OrderAttemptID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
 	orderFixture          = billing.OrderID(uuid.MustParse("99999999-9999-4999-8999-999999999998"))
 	orderLineFixture      = billing.OrderLineID(uuid.MustParse("99999999-9999-4999-8999-999999999997"))
 	mandateFixture        = billing.MandateID(uuid.MustParse("12121212-1212-4121-8121-121212121212"))

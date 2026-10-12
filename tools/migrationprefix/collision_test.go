@@ -146,7 +146,7 @@ func clone(t *testing.T, origin *repo) *repo {
 	}
 	r := &repo{t: t, dir: dir}
 	r.configure()
-	r.git("checkout", "-q", "-b", "lane")
+	r.git("purchase", "-q", "-b", "lane")
 	r.installScript()
 	return r
 }

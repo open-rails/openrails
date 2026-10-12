@@ -52,12 +52,12 @@ type tierChangeMembershipStore interface {
 type ConfirmTierChangeInput struct {
 	Signature string // the wallet's atomic tier-change tx signature
 
-	// CheckoutAttemptID and Reference bind a checkout-driven change: the
-	// transaction must carry the checkout's reference and is claimed for it.
+	// OrderAttemptID and Reference bind a purchase-driven change: the
+	// transaction must carry the purchase's reference and is claimed for it.
 	// Both empty for the subscription route, which binds by the subscription
 	// accounts alone.
-	CheckoutAttemptID uuid.UUID
-	Reference         string
+	OrderAttemptID uuid.UUID
+	Reference      string
 
 	// OldSubscriptionID is the lifecycle subscription being changed FROM (the
 	// caller has already authorized ownership).
@@ -302,8 +302,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		if locked.Status != models.StatusActive {
 			return fmt.Errorf("%w: old subscription is not active for this subscriber", ErrPaymentUnverified)
 		}
-		if in.CheckoutAttemptID != uuid.Nil {
-			if err := settlement.ClaimCheckout(ctx, txDB, in.CheckoutAttemptID, in.Signature); err != nil {
+		if in.OrderAttemptID != uuid.Nil {
+			if err := settlement.ClaimOrder(ctx, txDB, in.OrderAttemptID, in.Signature); err != nil {
 				return err
 			}
 		}
@@ -372,7 +372,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 // returning the upgrade's pulled amount (0 for a downgrade).
 func (s *ConfirmTierChangeService) verifyLanded(payment *landedTx, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
 	var err error
-	if in.CheckoutAttemptID != uuid.Nil {
+	if in.OrderAttemptID != uuid.Nil {
 		if err := payment.references(in.Reference); err != nil {
 			return 0, err
 		}

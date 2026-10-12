@@ -255,7 +255,7 @@ These are OpenRails' routes that you just mounted. In this example, the full rou
 | `DELETE /v1/me/cart` | empty their cart |
 | `PUT /v1/me/cart/lines/{price_id}` | set a line's quantity (0 removes it) |
 | `POST /v1/me/orders/preview` | the total and the ways it can be paid; changes nothing |
-| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next, with its embedded checkout on the checkout host when asked (`checkout`: framed by the merchant's registered origins, as long as the order is open); asked again for the same lines, it answers the customer's open order |
+| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next, with its embedded pay URL on the payment origin when asked (`pay_url`: framed by the merchant's registered origins, as long as the order is open); asked again for the same lines, it answers the customer's open order |
 | `GET /v1/me/orders` | their orders: purchases, subscription renewals and usage periods |
 | `GET /v1/me/orders/{id}` | one order |
 | `POST /v1/me/orders/{id}/pay` | pay an open order (a failed renewal or a usage period included), with a saved or new card |
@@ -671,9 +671,9 @@ lists the courses a page at a time: Watch for those the user owns, a
 `<BuyButton price>` per price the server answered for the rest. A course page plays
 the signed URL or goes to its buy page. A buy page sells the products the gate's
 `402` carried (the course, the bundle, the membership) with `<ProductList products>`;
-once paid, the gate lets the buyer in. The pages never handle a checkout themselves:
+once paid, the gate lets the buyer in. The pages never handle a purchase themselves:
 `<BuyButton>` and `<ProductList>` create the order, take the card (on the page, or in
-the embedded checkout on a site the merchant registered to frame it) and report
+the embedded payment page on a site the merchant registered to frame it) and report
 `onPaid`:
 
 ```tsx
@@ -1288,7 +1288,7 @@ products:
       expires_after_days: 365
     prices:
       deposit:
-        amount: 0 USD # customer_amount requires an explicit checkout amount; this is not free
+        amount: 0 USD # customer_amount requires an explicit purchase amount; this is not free
         customer_amount:
           min_amount: 1000000 # at least $1
           max_amount: 1000000000 # at most $1,000
@@ -1304,12 +1304,12 @@ the funded balance. Each top-up uses the existing currency balance and usage led
 The two packs above give different value per dollar. Each successful purchase
 automatically and idempotently creates a credit lot; another purchase creates
 another lot. Credit-only products do not create permanent ownership that would
-prevent repeat purchases. The amount and expiry policy are frozen at checkout;
+prevent repeat purchases. The amount and expiry policy are frozen at purchase;
 expiry starts when payment succeeds. Omitted expiry means 365 days. Later catalog
-changes affect new checkouts, preserving existing lots.
+changes affect new purchases, preserving existing lots.
 
 The deposit is also a product: it names what is bought, its currency, limits, and
-expiry policy. The amount is selected for each checkout without creating a new
+expiry policy. The amount is selected for each purchase without creating a new
 price revision. For a $100 deposit, the customer's browser orders it with that
 amount on `POST /billing/v1/me/orders`:
 `{"lines": [{"price_id": "<deposit price>", "amount": "100000000"}]}`, paying in
@@ -1326,7 +1326,7 @@ order, err := client.CreateOrder(ctx, billing.CreateOrderParams{
 
 The customer pays it with `POST /billing/v1/me/orders/{id}/pay`. Its amount cannot
 change once ordered, and fixed-price packs reject an amount. Customer-selected deposits
-currently support Stripe and NMI checkout; recurring credit benefits are not yet
+currently support Stripe and NMI purchase; recurring credit benefits are not yet
 supported. These are monetary API balances, consumed by priced usage, rather than
 a separate request-count or token-count wallet. A voluntary refund requires the
 corresponding credits to remain unused and unheld; forced reversals use the source
@@ -1335,7 +1335,7 @@ lot and preserve the existing rules for already-authorized usage.
 #### Updating prepaid prices
 
 Credit benefits evolve through the same partial updates. For example, this changes
-only the expiry offered by new $100-pack checkouts. Existing credit lots keep the
+only the expiry offered by new $100-pack purchases. Existing credit lots keep the
 expiry promised when they were bought:
 
 ```yaml
@@ -1447,7 +1447,7 @@ version: 1
 merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
     display_name: OnlyDemo
-    api_host: localhost # the Host its public routes (the catalog, checkout) answer on
+    api_host: localhost # the Host its public routes (the catalog, purchase) answer on
     settings:
       profile:
         from_email: billing@onlydemo.example # merchant sender identity
@@ -1666,7 +1666,7 @@ merchants:
 - **Merchant console** — an optional admin UI for your team: customers, subscriptions,
   refunds, catalog, API keys, and a metrics dashboard you can customize with your own
   key-metric widgets.
-- **Hosted & embedded checkout** — send a customer to a checkout URL on OpenRails' own
+- **Hosted & embedded payment page** — send a customer to a pay URL on OpenRails' own
   domain, or frame it on your site: cards, 3-D Secure, Apple Pay and Google Pay.
 - **One account across merchants (openrails.dev)** — shoppers link their openrails.dev
   account to each merchant's customer, proven from both sides, and see, cancel and pay
@@ -1688,7 +1688,7 @@ Archetypes — the site you're building, and what OpenRails does for it:
   against its own database, not a provider API.
 - **Building a Gumroad, itch.io, or Teachable** — videos, courses, games, downloads sold
   individually. Purchases can grant permanent ownership or time-limited rental access; your
-  server checks the stored access grant. There is one checkout model whether the buyer pays by card or USDC.
+  server checks the stored access grant. There is one purchase model whether the buyer pays by card or USDC.
 - **Building a Linear, Notion, or Figma** — classic SaaS seat billing: define the tier
   list once, customers self-serve upgrades with proration previews, Stripe rail today
   with an exit ramp built in.
@@ -1823,7 +1823,7 @@ Embedded Mode:
 
 OpenRails does not receive or store your user's credit card details; only your payment-process should. There are two payment flows that achieve this:
 
-- **Redirect flow**: Browser -> payment provider's checkout page (ex. Stripe) -> user enters credit card details -> payment provider redirects back to your frontend. Behind the scenes Stripe webhook -> Your OpenRails server -> updates entitlements in your database.
+- **Redirect flow**: Browser -> payment provider's payment page (ex. Stripe) -> user enters credit card details -> payment provider redirects back to your frontend. Behind the scenes Stripe webhook -> Your OpenRails server -> updates entitlements in your database.
 - **Tokenized-vault flow**: Browser -> sends credit card details directly to your payment provider -> browser receives a token in response -> browser sends the token to OpenRails -> OpenRails sends the charge + token to the payment provider -> payment provider charges the card and returns the result to OpenRails -> OpenRails updates entitlements in your database.
 
 Your webserver + OpenRails only need PCI-compliance SAQ-A, which is a self-assessment + annual questionnaire; if you're handling or storing credit-card information that would make you SAQ-D, which requires a lot of work.
@@ -1873,7 +1873,7 @@ streams, aggregates them into meters in real time, does feature/entitlement chec
 hands the results to Stripe for actual billing. If your problem is *"billions of usage
 events, Stripe is fine as the money layer,"* OpenMeter is the stronger metering engine —
 its ingestion architecture is built for volumes we don't target. But it never touches
-money: no checkout, no dunning, no ledger, no rails. And metering is after-the-fact by
+money: no payments, no dunning, no ledger, no rails. And metering is after-the-fact by
 design — it can tell you what a customer used, not stop them before an expensive request
 exceeds their balance. OpenRails' admission API (hold → capture/release, spend caps,
 per-invoker budgets) exists precisely for that pre-authorization gap, and our
@@ -1925,7 +1925,7 @@ Before writing any code, confirm with me:
 
 Then follow the guide's milestone plan in order, verifying each step before
 the next. All development runs against sandbox rails (test_mode=sandbox);
-prove the full checkout → webhook → entitlement flow end-to-end before ever
+prove the full purchase → webhook → entitlement flow end-to-end before ever
 touching live credentials.
 ```
 
@@ -1940,17 +1940,17 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Embedded integration (Go library)](docs/embedded-integration.md) — run the engine in-process: boot, migrations, declaring your merchant, mounting the billing routes on your server, calling the in-process client.
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, orders, payment methods, tokens, and error handling.
-- [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
+- [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable purchase and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Products and prices through the Client](docs/catalog-client.md).
-- [Hosted checkout](docs/hosted-checkout.md) — a checkout URL on OpenRails' own domain, or embedded on your site.
+- [Payment page](docs/payment-page.md) — a pay URL on OpenRails' own domain, or embedded on your site.
 - [Customer network](docs/customer-network.md) — openrails.dev accounts linked to each merchant's customers, and the portal's API.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 
 **API** — the contract:
 
 - [API guide](docs/api/endpoints.md) — conventions and behavior; [every route](docs/api/routes.md); [every error code](docs/api/error-codes.md); [`api/openapi.json`](api/openapi.json).
-- [Checkout](docs/api/commerce.md), [errors](docs/api/errors.md) and [money, ids and times on the wire](docs/money-wire.md).
+- [Purchase](docs/api/commerce.md), [errors](docs/api/errors.md) and [money, ids and times on the wire](docs/money-wire.md).
 - [Compatibility](docs/compatibility.md) — what v1 freezes and what counts as additive.
 - [Migrating to v1](docs/migrating-to-v1.md) — everything a v0 host changes.
 
@@ -1978,7 +1978,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Merchant provisioning](docs/merchant-provisioning.md) — manifests, credentials, secrets, and API keys; [merchant names](docs/merchant-name-authority.md); [settings](docs/api/merchant-settings.md) and [configuration applications](docs/merchant-configuration.md).
 - [Self-hosting with host-owned credentials](docs/self-hosting-mode1.md), [runtime configuration](docs/runtime-configuration.md) and [Vault](docs/vault.md).
 - [Backup and recovery](docs/backup-and-recovery.md), [moving a merchant](docs/merchant-portability.md) and [provider uncertainty](docs/provider-uncertainty.md).
-- [Rate limiting](docs/rate-limiting.md) — the built-in limits on checkout, card and subscription writes, and captcha escalation.
+- [Rate limiting](docs/rate-limiting.md) — the built-in limits on purchase, card and subscription writes, and captcha escalation.
 
 **Reference**
 

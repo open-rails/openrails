@@ -7,7 +7,7 @@ import { cn } from "cn"
 
 import { RESET } from "#orck/account/format"
 import { EmptyState } from "#orck/account/section"
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import { BuyButton } from "#orck/buy-button"
 import type { Order, Product } from "#orck/client/types"
 import {
@@ -33,7 +33,7 @@ export interface ProductListProps {
    */
   onPaid: (order: Order) => void
   /**
-   * Buying needs a signed-in customer: called instead of the checkout when
+   * Buying needs a signed-in customer: called instead of the purchase when
    * `signedIn` is false or OpenRails answers 401.
    */
   onSignInRequired: () => void
@@ -41,7 +41,7 @@ export interface ProductListProps {
   signedIn?: boolean
   /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
   returnUrl?: string
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 
@@ -57,7 +57,7 @@ export function ProductList({
   const m = useMessages()
   const scope = useScopeProps(appearance)
 
-  // A deposit's amount is chosen before checkout; ProductList sells fixed prices.
+  // A deposit's amount is chosen before purchase; ProductList sells fixed prices.
   const products = given
     .filter((product) => !product.archived)
     .map((product) => ({

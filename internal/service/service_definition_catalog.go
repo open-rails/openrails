@@ -669,7 +669,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	if existing.CustomerAmount != nil {
 		for _, link := range req.PSPLinks {
 			if len(link) > 0 {
-				return nil, apperr.Invalidf("customer_amount uses checkout amounts, not provider catalog links")
+				return nil, apperr.Invalidf("customer_amount uses purchase amounts, not provider catalog links")
 			}
 		}
 	}

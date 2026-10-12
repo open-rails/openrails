@@ -45,7 +45,7 @@ const (
 	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
 	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets (#786)
 	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
-	FamCheckouts      Family = "checkouts"       // flow over checkouts, one per checkout_id (first attempt)
+	FamPurchases      Family = "purchases"       // flow over purchases, one per purchase_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at, #1120)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
@@ -397,9 +397,9 @@ var families = map[Family]familySpec{
 			"token_type":    `COALESCE(a.token_type, 'unknown')`,
 		},
 	},
-	FamCheckouts: {
+	FamPurchases: {
 		Kind:     "flow",
-		From:     checkoutsFrom,
+		From:     purchasesFrom,
 		TimeExpr: `ck.started_at`,
 		DimExprs: map[string]string{
 			"currency":   `ck.currency`,
@@ -486,12 +486,12 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 		ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
 	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL) cy`
 
-// #1116: a checkout is one buyer's attempts on one target (checkout_id). It
+// #1116: a purchase is one buyer's attempts on one target (purchase_id). It
 // is approved when its target is: a verification for a card save, an initial
 // or upgrade charge for a purchase.
-const checkoutsFrom = `(SELECT a.merchant_id, a.checkout_id,
+const purchasesFrom = `(SELECT a.merchant_id, a.purchase_id,
 		MIN(a.attempted_at) AS started_at, MAX(a.attempted_at) AS last_at, COUNT(*) AS attempts,
-		bool_or(a.category = 'approved' AND CASE WHEN a.checkout_target = 'card_save' THEN a.kind = 'verify' ELSE a.kind IN ('initial', 'upgrade') END) AS approved,
+		bool_or(a.category = 'approved' AND CASE WHEN a.purchase_target = 'card_save' THEN a.kind = 'verify' ELSE a.kind IN ('initial', 'upgrade') END) AS approved,
 		bool_or(a.category <> 'approved') AS had_failure,
 		bool_or(a.card_entry = 'new') AS new_card,
 		(array_agg(a.rail ORDER BY a.attempted_at, a.id))[1] AS rail,
@@ -499,11 +499,11 @@ const checkoutsFrom = `(SELECT a.merchant_id, a.checkout_id,
 		(array_agg(a.owner ORDER BY a.attempted_at, a.id))[1] AS owner,
 		COALESCE((array_agg(a.currency ORDER BY a.attempted_at, a.id) FILTER (WHERE a.currency IS NOT NULL))[1], '') AS currency
 	FROM billing.payment_attempts a
-	WHERE a.checkout_id IS NOT NULL
-	GROUP BY a.merchant_id, a.checkout_id) ck`
+	WHERE a.purchase_id IS NOT NULL
+	GROUP BY a.merchant_id, a.purchase_id) ck`
 
-// checkoutSettled: approved, or quiet for an hour before the query's end.
-const checkoutSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
+// purchaseSettled: approved, or quiet for an hour before the query's end.
+const purchaseSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
 
 // #1116: rebill cycles as migration 0033's view derives them. Closed states
 // are as of the query's range end.
@@ -515,7 +515,7 @@ const (
 // #1116 dimension sets.
 var (
 	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
-	checkoutDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
+	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
 	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
 	nmiHistDims  = []string{"psp", "nmi_kind", "category", "reason"}
 )
@@ -657,41 +657,41 @@ var Measures = []Measure{
 		Description: "failed / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
 		Formula:     "failed_attempts / attempts",
 		Dims:        attemptDims},
-	// --- checkouts (#1116): one buyer's attempts on one target -------------------
-	{Name: "checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count",
-		Description: "checkouts (a buyer's attempts on one purchase or card save) started in the bucket",
-		Formula:     "COUNT(checkouts)",
+	// --- purchases (#1116): one buyer's attempts on one target -------------------
+	{Name: "purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count",
+		Description: "purchases (a buyer's attempts on one purchase or card save) started in the bucket",
+		Formula:     "COUNT(purchases)",
 		Expr:        `COUNT(*)`,
-		Dims:        checkoutDims},
-	{Name: "settled_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ` + checkoutSettled + `)`,
-		Dims: checkoutDims},
-	{Name: "failed_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count",
-		Description: "checkouts that never reached an approval of their target and went quiet for an hour",
-		Formula:     "COUNT(checkouts without approval, idle > 1h)",
-		Expr:        `COUNT(*) FILTER (WHERE NOT ck.approved AND ` + checkoutSettled + `)`,
-		Dims:        checkoutDims},
-	{Name: "checkout_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_checkouts", Den: "settled_checkouts",
-		Description: "failed / settled checkouts: the new-card failure rate per buyer rather than per attempt",
-		Formula:     "failed_checkouts / (approved + failed checkouts)",
-		Dims:        checkoutDims},
-	{Name: "checkout_attempts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Dims:        purchaseDims},
+	{Name: "settled_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ` + purchaseSettled + `)`,
+		Dims: purchaseDims},
+	{Name: "failed_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count",
+		Description: "purchases that never reached an approval of their target and went quiet for an hour",
+		Formula:     "COUNT(purchases without approval, idle > 1h)",
+		Expr:        `COUNT(*) FILTER (WHERE NOT ck.approved AND ` + purchaseSettled + `)`,
+		Dims:        purchaseDims},
+	{Name: "purchase_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_purchases", Den: "settled_purchases",
+		Description: "failed / settled purchases: the new-card failure rate per buyer rather than per attempt",
+		Formula:     "failed_purchases / (approved + failed purchases)",
+		Dims:        purchaseDims},
+	{Name: "order_attempts", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(ck.attempts), 0)::bigint`,
-		Dims: checkoutDims},
-	{Name: "attempts_per_checkout", Class: ClassRatio, Unit: "ratio", Num: "checkout_attempts", Den: "checkouts",
-		Description: "average authorizations per checkout",
-		Formula:     "SUM(attempts per checkout) / checkouts",
-		Dims:        checkoutDims},
-	{Name: "troubled_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ` + checkoutSettled + `)`,
-		Dims: checkoutDims},
-	{Name: "recovered_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Dims: purchaseDims},
+	{Name: "attempts_per_purchase", Class: ClassRatio, Unit: "ratio", Num: "order_attempts", Den: "purchases",
+		Description: "average authorizations per purchase",
+		Formula:     "SUM(attempts per purchase) / purchases",
+		Dims:        purchaseDims},
+	{Name: "troubled_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ` + purchaseSettled + `)`,
+		Dims: purchaseDims},
+	{Name: "recovered_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
 		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ck.approved)`,
-		Dims: checkoutDims},
-	{Name: "checkout_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "recovered_checkouts", Den: "troubled_checkouts",
-		Description: "checkouts with a failure that still ended approved / settled checkouts with a failure",
-		Formula:     "recovered checkouts / settled checkouts with a failure",
-		Dims:        checkoutDims},
+		Dims: purchaseDims},
+	{Name: "purchase_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "recovered_purchases", Den: "troubled_purchases",
+		Description: "purchases with a failure that still ended approved / settled purchases with a failure",
+		Formula:     "recovered purchases / settled purchases with a failure",
+		Dims:        purchaseDims},
 	// --- rebill cycles (#1116): cohort by the period that came due ---------------
 	{Name: "rebills_due", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or recorded missed",
@@ -927,7 +927,7 @@ var Caveats = []string{
 	"snapshot measures reconstruct state from interval columns; the 'status' dimension reflects each subscription's CURRENT status, not its status at historical t",
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
 	"token_type exists from #796 instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
-	"attempts, checkouts and rebill cycles begin at their instrumentation (#1110, #1111): earlier history lives in payments and the provider. Checkouts and cycles are dated by their first attempt and due date; a checkout quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
+	"attempts, purchases and rebill cycles begin at their instrumentation (#1110, #1111): earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; a purchase quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
 	"admission_denials are hourly aggregates flushed periodically from Redis; the current hour can lag one flush cycle",
 	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",

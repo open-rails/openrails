@@ -18,12 +18,12 @@ import (
 var ErrInvalidDeclaredInput = apperr.New(http.StatusBadRequest, "invalid_param", "import billing: invalid declared input")
 
 // A declared book is host-authored free text that lands in the same columns
-// checkout writes and the merchant archive later exports: rail_method_ref,
+// purchase writes and the merchant archive later exports: rail_method_ref,
 // initial_transaction_id, last_four, card_type, expiry_date, source_id,
-// customer email and the verbatim legacy `evidence` blob. Checkout scans those
+// customer email and the verbatim legacy `evidence` blob. Purchase scans those
 // names and the archive scans those columns, so this door — the only other way
 // into them — scans them too. A card number in a declared book would be stored
-// under SAQ A exactly as one pasted into checkout would.
+// under SAQ A exactly as one pasted into purchase would.
 //
 // Fail closed on the whole book: a declared import is one transaction, and a
 // PAN in any row means the host's export is leaking cards, not that one row is

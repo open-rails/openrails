@@ -167,7 +167,7 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- Resolves a provider attempt row whose real payment is recorded separately
--- (NMI subscription checkout), so it never reads as stuck pending. It keeps its
+-- (NMI subscription purchase), so it never reads as stuck pending. It keeps its
 -- synthetic transaction_id, is hidden from listings by the
 -- nmi_subscription_order_id metadata key, and keeps money_movement = 'none':
 -- the money moved on the real charge row, so no second settlement publishes.

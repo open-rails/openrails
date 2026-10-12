@@ -1,7 +1,7 @@
 import * as React from "react"
 import { cn } from "cn"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import type { Payment } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
@@ -14,7 +14,7 @@ import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
 import { BillingStatusBadge } from "./status-badge"
 
 export interface PaymentHistoryProps extends PaymentsOptions {
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 

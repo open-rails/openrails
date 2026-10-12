@@ -1,6 +1,6 @@
 import { cn } from "cn"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import type { SendSolanaTransaction } from "#orck/client/client"
 import { BillingUiRoot } from "#orck/scope"
 import { PaymentHistory } from "./payment-history"
@@ -22,7 +22,7 @@ export interface AccountBillingProps {
   plansHref?: string
   renderSubscriptionFooter?: SubscriptionsPanelProps["renderSubscriptionFooter"]
   historyPageSize?: number
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 

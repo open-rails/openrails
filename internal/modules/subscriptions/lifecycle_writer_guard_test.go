@@ -18,7 +18,7 @@ import (
 // (a plan change superseding a membership, a refund revoking access). Adding a
 // writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
-	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":   true,
+	"internal/modules/payment/stripe_tier_change_intent.go:finalizeUpgrade":    true,
 	"internal/intents/refund.go:revokeMembershipAccess":                        true,
 	"internal/modules/subscriptions/transition.go:Transition":                  true,
 	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore": true,

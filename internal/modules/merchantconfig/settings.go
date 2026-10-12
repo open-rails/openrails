@@ -99,8 +99,8 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	if err := validateCardCustody(in.CardCustody); err != nil {
 		return Settings{}, err
 	}
-	if in.Checkout != nil {
-		if _, err := NormalizeEmbedOrigins(in.Checkout.EmbedOrigins); err != nil {
+	if in.PaymentPage != nil {
+		if _, err := NormalizeEmbedOrigins(in.PaymentPage.EmbedOrigins); err != nil {
 			return Settings{}, err
 		}
 	}
@@ -111,12 +111,12 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		}
 		cfg.BalanceNotices = notices
 	}
-	if in.CheckoutRouting != nil {
-		routing, err := NormalizeCheckoutRouting(*in.CheckoutRouting)
+	if in.PSPRouting != nil {
+		routing, err := NormalizePSPRouting(*in.PSPRouting)
 		if err != nil {
 			return Settings{}, err
 		}
-		cfg.CheckoutRouting = routing
+		cfg.PSPRouting = routing
 	}
 	windows, err := NormalizeBudgetWindows("merchant settings", "delegated_invoker_wasted_spend_limits", budgetWindows(in.DelegatedInvokerWastedSpendLimits))
 	if err != nil {

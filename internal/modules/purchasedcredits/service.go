@@ -26,7 +26,7 @@ import (
 )
 
 // Params contains the accepted payment's immutable benefit and
-// cash funding. Expiry is frozen by the checkout, never recomputed on replay.
+// cash funding. Expiry is frozen by the purchase, never recomputed on replay.
 type Params struct {
 	CustomerID identity.CustomerID
 	PaymentID  uuid.UUID

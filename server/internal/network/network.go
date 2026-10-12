@@ -40,10 +40,10 @@ const (
 	// ScopeLink is the consent a merchant's client needs to link the
 	// merchant's own customer to the account (the connect path).
 	ScopeLink = "openrails:link"
-	// CheckoutClientID is the checkout page's first-party client, which the
-	// server declares: its ID tokens prove the network side of a checkout
+	// PaymentPageClientID is the payment page's first-party client, which the
+	// server declares: its ID tokens prove the network side of a purchase
 	// link.
-	CheckoutClientID = "openrails-checkout"
+	PaymentPageClientID = "openrails-payment-page"
 	// ChallengeTTL is how long a link challenge can be redeemed.
 	ChallengeTTL = 5 * time.Minute
 )
@@ -148,9 +148,9 @@ func (s *Service) Link(ctx context.Context, proof customernetwork.Proof, params 
 	}
 	method := billing.CustomerLinkConnect
 	switch proof.Credential {
-	case customernetwork.CheckoutURL:
-		method = billing.CustomerLinkCheckout
-		if tok.ClientID != CheckoutClientID || tok.GroupID != "" {
+	case customernetwork.PayURL:
+		method = billing.CustomerLinkPaymentPage
+		if tok.ClientID != PaymentPageClientID || tok.GroupID != "" {
 			return billing.CustomerLink{}, false, errChallengeInvalid
 		}
 	case customernetwork.CustomerToken:
@@ -185,7 +185,7 @@ func (s *Service) Link(ctx context.Context, proof customernetwork.Proof, params 
 		MerchantID: proof.Merchant.UUID(), CustomerID: proof.Customer.UUID(), AccountID: account.UUID(), Method: string(method),
 		Credential: &credential, AuthTime: &tok.AuthTime, Amr: append([]string{}, tok.AMR...), TermsVersion: version, LinkedAt: s.now().UTC(),
 	}
-	if method == billing.CustomerLinkCheckout {
+	if method == billing.CustomerLinkPaymentPage {
 		order := proof.Order.UUID()
 		insert.OrderID = &order
 	}

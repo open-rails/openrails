@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -55,7 +55,7 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 		}
 	}
 	now := workerNow(w.Clock)
-	before := now.Add(-checkout.SetupAbandonAfter)
+	before := now.Add(-payment.SetupAbandonAfter)
 	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, Now: now, MerchantLimit: orderExpiryBatch})
 	if err != nil {
 		return fmt.Errorf("card save expiry: list merchants: %w", err)

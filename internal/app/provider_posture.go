@@ -172,7 +172,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 
 // followPSPPosture keeps the verified PSPs in step with a merchant's
 // configuration as this replica loads it: a PSP no longer live is forgotten,
-// and one whose document changed is verified again, so checkout on every
+// and one whose document changed is verified again, so purchase on every
 // replica serves the current credentials without a restart.
 func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current merchantdocs.Set) {
 	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {

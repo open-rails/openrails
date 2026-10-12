@@ -235,7 +235,7 @@ products:
 			in.mux.ServeHTTP(rec, req)
 			return rec
 		}
-		limit := (*config.DefaultRateLimits())["checkout"].RequestsPerMinute
+		limit := (*config.DefaultRateLimits())["purchase"].RequestsPerMinute
 		for i := range limit {
 			rec := pay(instances[i%len(instances)])
 			require.NotEqual(t, http.StatusTooManyRequests, rec.Code, "request %d of %d: %s", i+1, limit, rec.Body.String())

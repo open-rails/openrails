@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/customerscope"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
 type retiredKeyError struct{}
@@ -228,7 +228,7 @@ func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, "/checkout", nil)
+			r := httptest.NewRequest(http.MethodPost, "/purchase", nil)
 			if tc.supplied != "" {
 				r.Header.Set("X-Request-ID", tc.supplied)
 			}
@@ -280,7 +280,7 @@ func TestRefusalLogLevel(t *testing.T) {
 func TestGetUserIsTheCustomerScope(t *testing.T) {
 	req, _ := newReq(http.MethodGet, "/x", "")
 	require.Nil(t, req.GetUser())
-	req.Set("user", &checkout.UserIdentity{ID: "u-3"})
+	req.Set("user", &payment.UserIdentity{ID: "u-3"})
 	require.Nil(t, req.GetUser(), "a stray value is no customer")
 
 	customer := billing.CustomerID(uuid.MustParse("22222222-2222-4222-8222-222222222222"))

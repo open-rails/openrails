@@ -27,7 +27,7 @@ import (
 
 // ErrRailNotArmed reports that the ctx merchant has no active armed account on
 // the requested rail (or a required scoped secret is missing). Consumers MUST
-// fail closed on it — reject the webhook/checkout, never default-allow.
+// fail closed on it — reject the webhook/purchase, never default-allow.
 var ErrRailNotArmed = errors.New("rail is not armed for this merchant")
 
 // Source resolves per-merchant armed rail state at decision time. The merchant

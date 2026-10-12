@@ -1,6 +1,6 @@
 # Payment form contract
 
-`OrderCheckout` renders one real `<form autocomplete="on">` and submits through
+`OrderPayment` renders one real `<form autocomplete="on">` and submits through
 its native submit event. Every host-owned billing field has a stable `id`,
 `name`, label, and standards-based autocomplete token.
 
@@ -42,7 +42,7 @@ autofill against the real gateway in each supported browser because a DOM unit
 test cannot inspect or control the cross-origin fields.
 
 A PSP that takes cards on OpenRails itself (`card_entry: server`) takes no
-card on an order: `OrderCheckout` offers it for saved cards only, and the card
+card on an order: `OrderPayment` offers it for saved cards only, and the card
 is saved first (`SavePaymentMethod`).
 
 A new-card payment sends the one-time `token` and its `psp_id` plus
@@ -82,7 +82,7 @@ message, and the next pay is a new attempt under a new key.
 `name_on_card`, `country` and `zip` to its async `onTokenized` callback. The host
 provides explicit save-card consent and uses the callback to invoke its native
 authenticated save-card endpoint. Set `disabled` until consent is given. The
-form never creates a zero-dollar checkout or announces a completed payment.
+form never creates a zero-dollar purchase or announces a completed payment.
 After token submission it locks the form; a failed/unknown save must be checked
 against the host's saved-method state before mounting a new attempt.
 

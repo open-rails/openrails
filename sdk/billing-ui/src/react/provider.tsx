@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react"
 
-import type { CheckoutAppearance } from "../appearance"
+import type { BillingAppearance } from "../appearance"
 import type { BillingClient } from "../client/client"
 import { MessagesContext } from "../i18n/context"
 import {
@@ -23,13 +23,13 @@ import { BillingContext, type BillingChange } from "./context"
 export interface BillingProviderProps {
   /**
    * The customer's client: hooks and the account panels read it, and a
-   * checkout saves a new card to the customer first. Leave it out where no
+   * purchase saves a new card to the customer first. Leave it out where no
    * customer is signed in, such as the shared payment page.
    */
   client?: BillingClient
   /** Fires after each successful mutation: the host's cache-invalidation hook. */
   onChange?: (change: BillingChange) => void
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   /** Locale bundle(s) layered over English; later entries win. */
   messages?: BillingUiMessageBundle | readonly BillingUiMessageBundle[]
   /** Host translation hook, consulted before the bundles. */

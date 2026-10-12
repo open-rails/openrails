@@ -409,13 +409,13 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         enabled,
         meta: { errorAction: "Load drift" },
       }),
-    checkoutRouting: (priceId: string) =>
+    pspRouting: (priceId: string) =>
       queryOptions({
         queryKey: [...queryKeys.catalog(), "prices", priceId, "routing"],
         queryFn: ({ signal }) =>
           previewPSPRouting({ price_id: priceId }, signal),
         enabled: Boolean(priceId),
-        meta: { errorAction: "Check checkout readiness" },
+        meta: { errorAction: "Check purchase readiness" },
       }),
     usageMeters: (limit = 200, cursor?: string) =>
       queryOptions({

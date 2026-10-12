@@ -49,7 +49,7 @@ func TestCheckoutSessionCompletesWithASignedWebhook(t *testing.T) {
 	form := url.Values{"mode": {"payment"}, "success_url": {"https://host.test/done"}, "cancel_url": {"https://host.test/done"},
 		"line_items[0][price_data][currency]": {"usd"}, "line_items[0][price_data][unit_amount]": {"1299"},
 		"line_items[0][price_data][product_data][name]": {"API credit"}, "line_items[0][quantity]": {"1"},
-		"metadata[checkout_attempt_id]": {"chk_test"}, "metadata[user_id]": {"user-1"}}
+		"metadata[order_attempt_id]": {"oat_test"}, "metadata[user_id]": {"user-1"}}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, stripe.URL()+"/v1/checkout/sessions", strings.NewReader(form.Encode()))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -77,7 +77,7 @@ func TestCheckoutSessionCompletesWithASignedWebhook(t *testing.T) {
 	require.Equal(t, "complete", object["status"])
 	require.Equal(t, "paid", object["payment_status"])
 	require.EqualValues(t, 1299, object["amount_total"])
-	require.Equal(t, "chk_test", object["metadata"].(map[string]any)["checkout_attempt_id"])
+	require.Equal(t, "oat_test", object["metadata"].(map[string]any)["order_attempt_id"])
 	paid := stripe.LastCheckoutSession()
 	require.Equal(t, object["payment_intent"], paid.PaymentIntent)
 	ledger := stripe.Ledger("")

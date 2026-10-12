@@ -109,10 +109,10 @@ type Config struct {
 	// AdminConsole declares app sign-in methods. The console is always on at
 	// /admin; LocalSignIn separately enables local accounts.
 	AdminConsole *AdminConsole
-	// HostedCheckoutURL is the origin (https://checkout.example.com) the
-	// server serves its hosted checkout on, by Host; merchant orders then
-	// take a checkout. It must be an origin of its own. Empty serves none.
-	HostedCheckoutURL string
+	// PaymentOrigin is the origin (https://pay.example.com) the server
+	// serves its payment page on, by Host; orders then take a pay URL. It
+	// must be an origin of its own. Empty serves none.
+	PaymentOrigin string
 
 	// Addr is where Run and Serve listen; empty is ":3053".
 	Addr string
@@ -142,10 +142,10 @@ type Deps struct {
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
-	// CheckoutAssets is a host-built hosted checkout page (web/checkout's
+	// PaymentPageAssets is a host-built payment page (web/pay's
 	// Vite build, rooted at index.html). Nil uses the build embedded in this
 	// module, when the binary was built with one.
-	CheckoutAssets fs.FS
+	PaymentPageAssets fs.FS
 	// ConsoleAssets is a built admin console rooted at index.html. Nil uses
 	// the console build embedded in the binary.
 	ConsoleAssets fs.FS
@@ -192,7 +192,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 			return nil, fmt.Errorf("server: Engine.Merchants[%q].Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", slug)
 		}
 	}
-	origin, err := checkoutOrigin(cfg)
+	origin, err := paymentOrigin(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
-		CheckoutOrigin: origin, CheckoutAssets: checkoutAssets(deps.CheckoutAssets), ConsoleAssets: consoleAssets,
+		PaymentOrigin: origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}

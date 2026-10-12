@@ -5,11 +5,11 @@ import type { CSSProperties } from "react"
 
 // `inherit` uses the host page's shadcn tokens (`--background`, ...) and its
 // `.dark` class instead of the bundled zinc palette.
-export type CheckoutTheme = "light" | "dark" | "auto" | "inherit"
+export type BillingTheme = "light" | "dark" | "auto" | "inherit"
 
 // The tokens integrators may override. Values are raw CSS color/length
-// strings; they land as custom properties on the checkout root.
-export interface CheckoutVariables {
+// strings; they land as custom properties on the purchase root.
+export interface BillingVariables {
   background?: string
   foreground?: string
   card?: string
@@ -25,12 +25,12 @@ export interface CheckoutVariables {
   fontFamily?: string
 }
 
-export interface CheckoutAppearance {
-  theme?: CheckoutTheme
-  variables?: CheckoutVariables
+export interface BillingAppearance {
+  theme?: BillingTheme
+  variables?: BillingVariables
 }
 
-const VARIABLE_TO_CSS: Record<keyof CheckoutVariables, string> = {
+const VARIABLE_TO_CSS: Record<keyof BillingVariables, string> = {
   background: "--background",
   foreground: "--foreground",
   card: "--card",
@@ -47,7 +47,7 @@ const VARIABLE_TO_CSS: Record<keyof CheckoutVariables, string> = {
 }
 
 export function appearanceStyle(
-  appearance: CheckoutAppearance | undefined,
+  appearance: BillingAppearance | undefined,
   namespace: "orck" | "orba" = "orck"
 ): CSSProperties | undefined {
   const variables = appearance?.variables
@@ -56,7 +56,7 @@ export function appearanceStyle(
   for (const [key, value] of Object.entries(variables)) {
     if (!value) continue
     style[
-      VARIABLE_TO_CSS[key as keyof CheckoutVariables].replace(
+      VARIABLE_TO_CSS[key as keyof BillingVariables].replace(
         "--orck-",
         `--${namespace}-`
       )
@@ -66,7 +66,7 @@ export function appearanceStyle(
 }
 
 export function appearanceTheme(
-  appearance: CheckoutAppearance | undefined
-): CheckoutTheme {
+  appearance: BillingAppearance | undefined
+): BillingTheme {
   return appearance?.theme ?? "auto"
 }

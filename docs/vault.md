@@ -45,7 +45,7 @@ it):
 ```
 
 `scope_prefix` defaults to `openrails`. A key (the PSP or custodian name
-checkout and the catalog use) matches `^[a-z0-9][a-z0-9_-]{0,62}$`.
+purchase and the catalog use) matches `^[a-z0-9][a-z0-9_-]{0,62}$`.
 `credential_fingerprint_key` is created by OpenRails on first start; it keys
 the fingerprints that catch one gateway account declared twice. Keep it.
 `platform_vault/<tenant_id>` holds the platform vault's keys when the
@@ -132,7 +132,7 @@ on restart. Credentials are written, never read back over the API.
 
 Startup waits for Vault (bounded) when it holds configuration and fails when it
 does not answer. Afterwards a Vault outage is ridden out from the cache:
-checkout, renewals and webhooks keep working for every merchant already loaded.
+purchase, renewals and webhooks keep working for every merchant already loaded.
 A merchant first used during the outage fails until Vault returns.
 
 ## Authenticating

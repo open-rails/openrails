@@ -36,7 +36,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -45,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -291,7 +291,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// SEC-30: the card-testing ledger, in the abuse state.
 	cardFailureLedger := abuse.NewFailureLedger(abuseState, clock, abuse.DefaultCardAbuseConfig())
-	serviceInstances.CheckoutAttemptService.SetCardFailureLedger(cardFailureLedger)
+	serviceInstances.OrderAttemptService.SetCardFailureLedger(cardFailureLedger)
 
 	// #725/#788: collection adapters arm PER MERCHANT from the armed rail
 	// state at charge time — no boot adapter map exists anymore.
@@ -316,7 +316,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		PriceService:             serviceInstances.PriceService,
 		NotificationService:      serviceInstances.NotificationService,
 		PaymentMethodService:     serviceInstances.PaymentMethodService,
-		PaymentService:           serviceInstances.PurchaseService,
+		PaymentService:           serviceInstances.PaymentService,
 		EntitlementService:       serviceInstances.EntitlementService,
 		ProductAccessService:     serviceInstances.ProductAccessService,
 		RailPaymentMethodService: serviceInstances.RailPaymentMethodService,
@@ -335,29 +335,29 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,
 
-		CheckoutService:        serviceInstances.CheckoutService,
-		CheckoutAttemptService: serviceInstances.CheckoutAttemptService,
-		Orders:                 orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
-		Idempotency:            serviceInstances.Idempotency,
-		CardAbuseGuard:         cardAbuseGuard,
-		AbuseState:             abuseState,
-		CaptchaStore:           captchaStore,
-		CardFailureLedger:      cardFailureLedger,
-		MoneyService:           serviceInstances.MoneyService,
-		MetricsService:         serviceInstances.MetricsService,
-		DashboardService:       serviceInstances.DashboardService,
-		CopilotService:         serviceInstances.CopilotService,
-		AlertService:           alertService,
-		WebhookHealth:          &webhookhealth.Recorder{DB: database, Clock: clock},
-		MoneyCharger:           moneyCharger,
-		RailCustomerService:    serviceInstances.RailCustomerService,
+		PurchaseService:     serviceInstances.PurchaseService,
+		OrderAttemptService: serviceInstances.OrderAttemptService,
+		Orders:              orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
+		Idempotency:         serviceInstances.Idempotency,
+		CardAbuseGuard:      cardAbuseGuard,
+		AbuseState:          abuseState,
+		CaptchaStore:        captchaStore,
+		CardFailureLedger:   cardFailureLedger,
+		MoneyService:        serviceInstances.MoneyService,
+		MetricsService:      serviceInstances.MetricsService,
+		DashboardService:    serviceInstances.DashboardService,
+		CopilotService:      serviceInstances.CopilotService,
+		AlertService:        alertService,
+		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock},
+		MoneyCharger:        moneyCharger,
+		RailCustomerService: serviceInstances.RailCustomerService,
 	}
 
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
-	// Redirect PSPs and bank challenges come back to the checkout page itself.
-	serviceInstances.CheckoutAttemptService.SetCheckoutOrigin(runtime.HostedCheckoutOrigin)
+	// Redirect PSPs and bank challenges come back to the payment page itself.
+	serviceInstances.OrderAttemptService.SetPaymentOrigin(runtime.PaymentOrigin)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -369,11 +369,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
 	// NMI client through the shared factory.
 	runtime.NMIClients = nmiClients
-	if serviceInstances.CheckoutService != nil {
-		serviceInstances.CheckoutService.NMIClients = nmiClients
+	if serviceInstances.PurchaseService != nil {
+		serviceInstances.PurchaseService.NMIClients = nmiClients
 	}
-	if serviceInstances.CheckoutAttemptService != nil {
-		serviceInstances.CheckoutAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
+	if serviceInstances.OrderAttemptService != nil {
+		serviceInstances.OrderAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
 	}
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.NMIClients = nmiClients
@@ -382,9 +382,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// #817: decimals come from the SPL mint on-chain, read through the same
 	// per-merchant chain reader and cached (mint decimals are immutable).
 	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
-	if serviceInstances.CheckoutAttemptService != nil {
-		serviceInstances.CheckoutAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
-		serviceInstances.CheckoutAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
+	if serviceInstances.OrderAttemptService != nil {
+		serviceInstances.OrderAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+		serviceInstances.OrderAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
 	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
@@ -451,26 +451,26 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// execute it inline through the SAME registry/runner the scheduled
 	// executor/verifier drains — one primitive, identical semantics.
 	intentRunner := runtime.IntentRunner()
-	if runtime.CheckoutService != nil {
-		runtime.CheckoutService.Intents = intentRunner
-		runtime.CheckoutService.Posture = runtime.Posture()
-		if runtime.CheckoutService.NMISaleService != nil {
-			runtime.CheckoutService.NMISaleService.Intents = intentRunner
-			runtime.CheckoutService.NMISaleService.Config = runtime.Config
-			runtime.CheckoutService.NMISaleService.Posture = runtime.Posture()
+	if runtime.PurchaseService != nil {
+		runtime.PurchaseService.Intents = intentRunner
+		runtime.PurchaseService.Posture = runtime.Posture()
+		if runtime.PurchaseService.NMISaleService != nil {
+			runtime.PurchaseService.NMISaleService.Intents = intentRunner
+			runtime.PurchaseService.NMISaleService.Config = runtime.Config
+			runtime.PurchaseService.NMISaleService.Posture = runtime.Posture()
 			if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-				runtime.CheckoutService.NMISaleService.StripeEngines = engines
+				runtime.PurchaseService.NMISaleService.StripeEngines = engines
 			}
 		}
 		if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-			runtime.CheckoutService.StripeEngines = engines
+			runtime.PurchaseService.StripeEngines = engines
 		}
-		if runtime.CheckoutService.CustodianSaleService != nil {
-			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner
+		if runtime.PurchaseService.CustodianSaleService != nil {
+			runtime.PurchaseService.CustodianSaleService.Intents = intentRunner
 		}
 	}
-	if runtime.CheckoutAttemptService != nil {
-		runtime.CheckoutAttemptService.SetOrders(runtime.Orders)
+	if runtime.OrderAttemptService != nil {
+		runtime.OrderAttemptService.SetOrders(runtime.Orders)
 	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
@@ -527,7 +527,7 @@ type servicesInstances struct {
 	PriceService             *catalog.PriceService
 	NotificationService      *subscriptions.NotificationService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
-	PurchaseService          *payments.PaymentService
+	PaymentService           *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	ProductAccessService     *productaccess.Service
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
@@ -549,13 +549,13 @@ type servicesInstances struct {
 
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
-	CheckoutService        *checkout.CheckoutService
-	CheckoutAttemptService *checkout.CheckoutAttemptService
-	MoneyService           *money.MoneyService
-	MetricsService         *metrics.Service
-	DashboardService       *dashboard.Service
-	CopilotService         *copilot.Service
-	RailCustomerService    *payments.RailCustomerService
+	PurchaseService     *payment.PurchaseService
+	OrderAttemptService *payment.OrderAttemptService
+	MoneyService        *money.MoneyService
+	MetricsService      *metrics.Service
+	DashboardService    *dashboard.Service
+	CopilotService      *copilot.Service
+	RailCustomerService *payments.RailCustomerService
 }
 
 // alertingDashboardBaseURL uses the independently configured admin destination.
@@ -573,7 +573,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	// Domain services publish immutable notification facts; applications consume them.
 	notificationService := subscriptions.NewNotificationService(database)
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
-	purchaseService := payments.NewPaymentService(database, clock)
+	paymentService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
@@ -602,8 +602,8 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	// held in process memory. Never a flat 1.0 rate.
 	fxProvider := fxRates
 
-	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
-	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
+	// Note: solanaPayService and SolanaPayPoller need purchaseService, which is created later
+	// We'll create solanaPayService with nil purchaseService and set it after purchaseService is created
 	solanaPayService := solanamodule.NewSolanaPayService(database, clock)
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, nil, cfg, priceService, fxProvider, clock)
 	solanaTransactionService.SetMerchantRPC(solanaRPCResolver)
@@ -614,7 +614,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		priceService,
 		entitlementService,
 		notificationService,
-		purchaseService, // For creating Payment records on renewal
+		paymentService, // For creating Payment records on renewal
 		clock,
 	)
 	subscriptionLifecycleService.SetConfig(cfg)
@@ -647,7 +647,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService, err := idempotency.NewStore(database, leaseDB, checkout.IdempotencyTTL, checkout.IdempotencyLease)
+	idempotencyService, err := idempotency.NewStore(database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +660,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		subscriptionService,
 		productService,
 		priceService,
-		purchaseService,
+		paymentService,
 		notificationService,
 		entitlementService,
 		collectionResolver,
@@ -673,7 +673,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		priceService,
 		entitlementService,
 		notificationService,
-		purchaseService,
+		paymentService,
 		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}
@@ -692,7 +692,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		ProductService:               productService,
 		NotificationService:          notificationService,
 		SubscriptionService:          subscriptionService,
-		PaymentService:               purchaseService,
+		PaymentService:               paymentService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		ProfileRepo:                  usernameResolver,
 		DeduplicationService:         deduplicationService,
@@ -702,12 +702,12 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		MoneyService:                 moneyService,
 	}
 
-	// Create checkout service for unified checkout endpoint
-	checkoutService := checkout.NewCheckoutService(
+	// Create purchase service for unified purchase endpoint
+	purchaseService := payment.NewPurchaseService(
 		subscriptionService,
 		productService,
 		priceService,
-		purchaseService,
+		paymentService,
 		entitlementService,
 		paymentMethodService,
 		railPMService,
@@ -716,16 +716,16 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		railConfigs,
 		clock,
 	)
-	checkoutService.StripeClients = stripeClients
-	checkoutService.StripeService.StripeClients = stripeClients
-	checkoutService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
-	webhookDispatcher.PurchaseRegistrar = checkoutService
-	checkoutAttemptService := checkout.NewCheckoutAttemptService(
+	purchaseService.StripeClients = stripeClients
+	purchaseService.StripeService.StripeClients = stripeClients
+	purchaseService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
+	webhookDispatcher.PurchaseRegistrar = purchaseService
+	orderAttemptService := payment.NewOrderAttemptService(
 		database,
 		priceService,
 		productService,
 		paymentMethodService,
-		checkoutService,
+		purchaseService,
 		solanaPayService,
 		solanaTransactionService,
 		fxProvider,
@@ -734,11 +734,11 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		railConfigs,
 		clock,
 	)
-	webhookDispatcher.CheckoutAttemptService = checkoutAttemptService
+	webhookDispatcher.OrderAttemptService = orderAttemptService
 
-	// The poller settles through the checkout attempt service, the one
+	// The poller settles through the order attempt service, the one
 	// crediting path for Solana Pay purchases.
-	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, checkoutAttemptService, clock)
+	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, orderAttemptService, clock)
 
 	return &servicesInstances{
 		SubscriptionService:          subscriptionService,
@@ -746,7 +746,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		PriceService:                 priceService,
 		NotificationService:          notificationService,
 		PaymentMethodService:         paymentMethodService,
-		PurchaseService:              purchaseService,
+		PaymentService:               paymentService,
 		EntitlementService:           entitlementService,
 		ProductAccessService:         productAccessService,
 		RailPaymentMethodService:     railPMService,
@@ -762,8 +762,8 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		WebhookDispatcher:            webhookDispatcher,
-		CheckoutService:              checkoutService,
-		CheckoutAttemptService:       checkoutAttemptService,
+		PurchaseService:              purchaseService,
+		OrderAttemptService:          orderAttemptService,
 		Idempotency:                  idempotencyService,
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,

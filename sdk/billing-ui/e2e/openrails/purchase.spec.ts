@@ -2,7 +2,7 @@
 // products with the Go client and answers them, the browser never reads the
 // catalog, a signed-out visitor is sent to sign in, and a signed-in customer
 // creates the order on /v1/me and pays it on the page (the page is not a site
-// the merchant registered to frame its checkout). The loopback NMI gateway
+// the merchant registered to frame its purchase). The loopback NMI gateway
 // charges; Collect.js is a stand-in.
 import { expect, test, type Page } from "@playwright/test"
 
@@ -95,7 +95,7 @@ test("a signed-in customer orders the host's price and pays it on the page", asy
 
   expect(reads).toContain("POST /billing/v1/me/orders")
   expect(reads).toContain("GET /billing/v1/me/config")
-  expect(reads.filter((r) => r.includes("/checkout"))).toEqual([])
+  expect(reads.filter((r) => r.includes("/purchase"))).toEqual([])
   expect(reads.filter((r) => r.includes("/products"))).toEqual([])
 })
 

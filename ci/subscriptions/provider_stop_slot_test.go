@@ -33,17 +33,17 @@ func nmiDeleteFails(w *world, failing *atomic.Bool) {
 	}, http.StatusServiceUnavailable, 1000)
 }
 
-// checkoutAgain buys the legacy membership's own price again: the merchant
+// purchaseAgain buys the legacy membership's own price again: the merchant
 // creates the order and the customer pays it.
-func (l *legacy) checkoutAgain(method string) (*paidOrder, error) {
+func (l *legacy) purchaseAgain(method string) (*paidOrder, error) {
 	l.w.t.Helper()
-	return l.c.checkout(embedded, order{price: l.price.ID, rail: "nmi", method: method})
+	return l.c.buyOrder(embedded, order{price: l.price.ID, rail: "nmi", method: method})
 }
 
-// reenroll is a checkoutAgain that is answered.
+// reenroll is a purchaseAgain that is answered.
 func (l *legacy) reenroll(method string) *paidOrder {
 	l.w.t.Helper()
-	paid, err := l.checkoutAgain(method)
+	paid, err := l.purchaseAgain(method)
 	require.NoError(l.w.t, err)
 	return paid
 }
@@ -82,7 +82,7 @@ func TestPendingProviderStopHoldsSlot(t *testing.T) {
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, l.sub).Status)
 	require.True(t, w.nmi.ScheduleLive(l.railSub), "the provider stop has not succeeded")
 
-	_, err := l.checkoutAgain(method)
+	_, err := l.purchaseAgain(method)
 	require.Equal(t, "resume", requireSlotHeld(t, err).Metadata["hint"])
 	require.Len(t, w.nmi.Ledger(""), before, "the refused enrollment charges nothing")
 
@@ -125,7 +125,7 @@ func TestCanceledInUndoWindowResumesInsteadOfBuyingAgain(t *testing.T) {
 	w.settle()
 	require.NotNil(t, w.subscription(remote, l.sub).DeletionScheduledAt)
 
-	_, err := l.checkoutAgain(method)
+	_, err := l.purchaseAgain(method)
 	requireSlotHeld(t, err)
 	require.Len(t, w.nmi.Ledger(""), before)
 
@@ -138,7 +138,7 @@ func TestCanceledInUndoWindowResumesInsteadOfBuyingAgain(t *testing.T) {
 	require.Len(t, w.nmi.Ledger(""), before)
 }
 
-// The kill switch parks the delete of an account deletion's cancel: checkout
+// The kill switch parks the delete of an account deletion's cancel: purchase
 // stays refused for that product until the operator arms the merchant and the
 // delete runs, and then until the paid period ends.
 func TestDisarmedProviderStopHoldsSlot(t *testing.T) {
@@ -154,14 +154,14 @@ func TestDisarmedProviderStopHoldsSlot(t *testing.T) {
 	w.settle()
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, l.sub).Status)
 
-	_, err = l.checkoutAgain(method)
+	_, err = l.purchaseAgain(method)
 	requireSlotHeld(t, err)
 	require.Len(t, w.nmi.Ledger(""), before)
 
 	w.armDestructive()
 	w.until(func() bool { return !w.nmi.ScheduleLive(l.railSub) }, "the held delete runs once armed")
 	w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the verified stop releases the slot")
-	_, err = l.checkoutAgain(method)
+	_, err = l.purchaseAgain(method)
 	requireSlotHeld(t, err) // until the paid period ends
 	w.advanceHealthyTo(l.periodEnd().Add(time.Minute))
 	require.Equal(t, "succeeded", l.reenroll(method).Status)

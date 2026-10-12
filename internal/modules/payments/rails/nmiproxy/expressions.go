@@ -39,7 +39,7 @@ func (g GatewayConfig) directPostURL() string {
 type Source struct {
 	// TokenID: durable stored card token (MITs, CVC-less CIT reuse).
 	TokenID string
-	// TokenIntentID: checkout CIT charging the 24h intent (CVC present —
+	// TokenIntentID: purchase CIT charging the 24h intent (CVC present —
 	// the CVC lives on the INTENT and never moves to the token).
 	TokenIntentID string
 	// Via routes pan_proxy | network_token ("" = pan_proxy).
@@ -145,7 +145,7 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 		switch {
 		case intentID != "":
 			if req.Context.Initiator != charge.InitiatorCustomer {
-				return nil, errors.New("nmiproxy: token intents are checkout CIT sources; MITs charge the stored token")
+				return nil, errors.New("nmiproxy: token intents are purchase CIT sources; MITs charge the stored token")
 			}
 			values.Set("ccnumber", intentNumberExpr(intentID))
 			values.Set("ccexp", intentExpExpr(intentID))

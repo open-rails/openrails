@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons"
 import { cn } from "cn"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import type { SendSolanaTransaction } from "#orck/client/client"
 import type { Subscription } from "#orck/client/types"
 import { Button, buttonVariants } from "#orck/components/ui/button"
@@ -38,7 +38,7 @@ export interface SubscriptionsPanelProps extends SubscriptionsOptions {
   plansHref?: string
   /** Host content under a row, e.g. a plan-change control. */
   renderSubscriptionFooter?: (subscription: Subscription) => React.ReactNode
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 

@@ -216,7 +216,7 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id billing.MerchantID, key
 }
 
 // PSPScopeByKey resolves a live PSP by its key in environment: how the
-// payment-provider vocabulary of the catalog and checkout resolves to a
+// payment-provider vocabulary of the catalog and purchase resolves to a
 // concrete account.
 func (s *Service) PSPScopeByKey(ctx context.Context, id billing.MerchantID, key, environment string) (PSPScope, bool, error) {
 	key = strings.TrimSpace(key)
@@ -240,7 +240,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id billing.MerchantID, key,
 }
 
 // ActivePSPScopesForRail lists every live PSP on rail/environment, newest
-// first. Checkout accepts a bare rail-kind selector only when it is
+// first. Purchase accepts a bare rail-kind selector only when it is
 // unambiguous (#848).
 func (s *Service) ActivePSPScopesForRail(ctx context.Context, id billing.MerchantID, rail, environment string) ([]PSPScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {

@@ -5,7 +5,7 @@
 
 Connect a Stripe account to OpenRails as a PSP on the `stripe` rail. Stripe is a
 reserved gateway: the PSP name is `stripe` (a sandbox account is conventionally
-`stripe-sandbox`). Checkout uses Stripe-hosted pages — the browser is redirected to
+`stripe-sandbox`). Purchase uses Stripe-hosted pages — the browser is redirected to
 Stripe, enters card details there, and Stripe redirects back to your frontend;
 fulfillment is driven by webhooks.
 
@@ -51,7 +51,7 @@ are verified against the `Stripe-Signature` header using the account's
 OpenRails registers the endpoint on Stripe **automatically** — at merchant bootstrap
 and via an hourly reconcile job — subscribing exactly to the event types it handles
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
-checkout-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
+purchase-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached` and
 `.automatically_updated`, and dispute open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
@@ -142,7 +142,7 @@ and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate
 
 New Stripe products and
 prices stay in OpenRails, including secondary provider accounts. Recurring setup uses saved Customer/PaymentMethod references and
-PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses
+PaymentIntents; it creates no Stripe Subscription. One-time payment page uses
 inline accepted product/price presentation without a maintained remote catalog.
 Existing explicit Stripe links remain available for provider-owned agreements.
 
@@ -166,7 +166,7 @@ OpenRails round-trips it and rejects the link if amount, currency, recurring ter
 or product association don't match the catalog. The pull reconciliation job is
 alert-only — it reports drift and never mutates your Stripe objects.
 
-### Checkout
+### Purchase
 
 With a declared `publishable_key` the page takes a card in Stripe Elements: the
 `pm_` it makes pays an order as `payment: {token, psp_id}`, one PaymentIntent
@@ -176,7 +176,7 @@ subscriptions are sold. `POST /v1/me/payment-methods` saves a card without
 buying (one SetupIntent).
 
 An order of one-time lines can also be paid on a Stripe-hosted Checkout
-session: its Stripe option accepts `redirect`, and `payment: {return_url, psp_id?}` opens a payment-mode Checkout
+session: its Stripe option accepts `redirect`, and `payment: {return_url, psp_id?}` opens a payment-mode Purchase
 Session for the order's total. The order answers `requires_action` with
 `next_action: {type: "redirect_to_url", url}`; the session's completion (its
 webhook, or `POST /v1/me/orders/{id}/confirm` reading it) completes the order,
@@ -184,12 +184,12 @@ and its expiry returns the order to `requires_payment_method`. Canceling or
 expiring the order expires the session. `return_url` must be on an allowed
 origin.
 
-On a server serving the hosted checkout, a declared Stripe PSP gets the
-checkout host registered as a payment-method domain on its account
+On a server serving the payment page, a declared Stripe PSP gets the
+payment origin registered as a payment-method domain on its account
 (through Stripe's payment method domains API, after reading whether the
 account holds it),
 so the page's Express Checkout Element offers Apple Pay and Google Pay; see
-[Hosted checkout](../hosted-checkout.md#apple-pay-and-google-pay).
+[Payment page](../payment-page.md#apple-pay-and-google-pay).
 
 ### Card updates
 

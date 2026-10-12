@@ -18,15 +18,15 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -109,9 +109,9 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 // a Solana wallet.
 type orderPayment struct {
 	method uuid.UUID
-	card   *checkout.OrderCard
-	solana *checkout.OrderSolana
-	hosted *checkout.OrderHosted
+	card   *payment.OrderCard
+	solana *payment.OrderSolana
+	hosted *payment.OrderHosted
 }
 
 func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayment, error) {
@@ -132,19 +132,19 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 	case (wallet || hosted) && (reusable != nil || p.BillingDetails != nil):
 		return orderPayment{}, apperr.Invalidf("billing_details and reusable describe a new card").WithParam("payment")
 	case hosted:
-		pay := &checkout.OrderHosted{ReturnURL: strings.TrimSpace(p.ReturnURL)}
+		pay := &payment.OrderHosted{ReturnURL: strings.TrimSpace(p.ReturnURL)}
 		if p.PSPID != nil {
 			pay.PSPID = p.PSPID.UUID()
 		}
 		return orderPayment{hosted: pay}, nil
 	case wallet:
-		pay := &checkout.OrderSolana{TokenSymbol: strings.TrimSpace(p.TokenSymbol)}
+		pay := &payment.OrderSolana{TokenSymbol: strings.TrimSpace(p.TokenSymbol)}
 		if p.PSPID != nil {
 			pay.PSPID = p.PSPID.UUID()
 		}
 		return orderPayment{solana: pay}, nil
 	}
-	card := &checkout.OrderCard{Token: p.Token, Billing: p.BillingDetails, Reusable: reusable}
+	card := &payment.OrderCard{Token: p.Token, Billing: p.BillingDetails, Reusable: reusable}
 	if p.PSPID != nil {
 		card.PSPID = p.PSPID.UUID()
 	}
@@ -153,7 +153,7 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 
 // CreateOrder answers the customer's open order of the lines, or freezes them
 // into a new one, and, with a payment, pays it in the same call, or, with a
-// checkout, answers a fresh URL where the customer pays it. key, required
+// pay URL, answers a fresh URL where the customer pays it. key, required
 // with a payment, names its attempt: a later request with it answers what
 // the first did.
 func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateMyOrderParams, key string) (OrderAnswer, error) {
@@ -166,19 +166,19 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	if params.Checkout == nil {
+	if params.PayURL == nil {
 		return s.createOrder(ctx, rt, actor, params, key)
 	}
-	origin, err := s.orderCheckout(ctx, params)
+	origin, err := s.payURLOrigin(ctx, params)
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	params.Checkout = nil // the checkout is not part of the order or its key
+	params.PayURL = nil // the pay URL is not part of the order or its key
 	answer, err := s.createOrder(ctx, rt, actor, params, key)
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	return s.attachCheckout(ctx, rt, actor, answer, origin)
+	return s.attachPayURL(ctx, rt, actor, answer, origin)
 }
 
 // createOrder is CreateOrder's order, under its key.
@@ -207,7 +207,7 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 		if found {
 			status = http.StatusOK
 		}
-		return s.orderAnswer(ctx, rt, actor, order.ID, status, checkout.OrderCharge{}, false, nil)
+		return s.orderAnswer(ctx, rt, actor, order.ID, status, payment.OrderCharge{}, false, nil)
 	}
 	// A one-call buy's key names its payment attempt.
 	if strings.TrimSpace(key) == "" {
@@ -247,27 +247,27 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 
 // createClaimed runs a one-call buy under its key's claim: the customer's
 // open order of the lines (or a new one), paid under the key's attempt.
-func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, pay orderPayment, key string) (uuid.UUID, bool, checkout.OrderCharge, error) {
+func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, pay orderPayment, key string) (uuid.UUID, bool, payment.OrderCharge, error) {
 	customer := actor.Customer.UUID()
 	if params.Payment != nil {
 		// A payment that cannot be made refuses the order before it exists.
 		lines, err := orderLinesOf(ctx, rt, actor.Customer, params.Lines, params.Cart)
 		if err != nil {
-			return uuid.Nil, false, checkout.OrderCharge{}, err
+			return uuid.Nil, false, payment.OrderCharge{}, err
 		}
 		quote, err := rt.Orders.Preview(ctx, customer, lines)
 		if err == nil {
 			err = s.orderPaymentUsable(ctx, quote, pay, actor.Customer)
 		}
 		if err != nil {
-			return uuid.Nil, false, checkout.OrderCharge{}, err
+			return uuid.Nil, false, payment.OrderCharge{}, err
 		}
 	}
 	order, found, err := s.placeOrder(ctx, rt, actor, params)
 	if err != nil {
-		return uuid.Nil, false, checkout.OrderCharge{}, err
+		return uuid.Nil, false, payment.OrderCharge{}, err
 	}
-	var charged checkout.OrderCharge
+	var charged payment.OrderCharge
 	if order.Status == string(billing.OrderOpen) {
 		charged, err = s.payOrder(ctx, rt, actor, order, pay, "create:"+key)
 	}
@@ -294,17 +294,17 @@ func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderA
 
 // resumePayment runs a one-call buy's payment again under its key: the same
 // attempt, which never charges twice.
-func (s *Service) resumePayment(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, pay orderPayment, key string) (checkout.OrderCharge, error) {
+func (s *Service) resumePayment(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, pay orderPayment, key string) (payment.OrderCharge, error) {
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id)
 	if err != nil || (pay.method == uuid.Nil && pay.card == nil && pay.solana == nil && pay.hosted == nil) || order.Status != string(billing.OrderOpen) {
-		return checkout.OrderCharge{}, err
+		return payment.OrderCharge{}, err
 	}
 	return s.payOrder(ctx, rt, actor, order, pay, key)
 }
 
 // orderAnswer reads the order a request acted on into its answer: 402 when
 // its payment failed. err passes through.
-func (s *Service) orderAnswer(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, status int, charged checkout.OrderCharge, replayed bool, err error) (OrderAnswer, error) {
+func (s *Service) orderAnswer(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, status int, charged payment.OrderCharge, replayed bool, err error) (OrderAnswer, error) {
 	if err != nil {
 		return OrderAnswer{}, err
 	}
@@ -344,7 +344,7 @@ func (s *Service) replayOrderAnswer(ctx context.Context, rt *orderRuntime, actor
 			return OrderAnswer{}, err
 		}
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-		if result.Order.Payment.NextAction, err = rt.Checkout.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
+		if result.Order.Payment.NextAction, err = rt.Attempts.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
 			return OrderAnswer{}, err
 		}
 	}
@@ -404,12 +404,12 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	}
 	if claim == nil {
 		return s.replayOrderAnswer(ctx, rt, actor, rec, digest, func(id uuid.UUID) (OrderAnswer, error) {
-			return s.orderAnswer(ctx, rt, actor, id, http.StatusOK, checkout.OrderCharge{}, true, nil)
+			return s.orderAnswer(ctx, rt, actor, id, http.StatusOK, payment.OrderCharge{}, true, nil)
 		})
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
-	var charged checkout.OrderCharge
+	var charged payment.OrderCharge
 	var replayed bool
 	switch {
 	case params.ExpectedTotal != order.Total:
@@ -419,7 +419,7 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	case order.Origin == string(billing.OrderOriginUsage):
 		charged, replayed, err = s.payUsage(work, actor, order, pay, key)
 	default:
-		_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: checkout.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
+		_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: payment.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
 		replayed = attemptErr == nil
 		charged, err = s.payOrder(work, rt, actor, order, pay, "pay:"+key)
 	}
@@ -434,19 +434,19 @@ func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.Ord
 
 // payOrder pays a purchase. A saved card awaiting the customer's consent
 // (its brand changed) is verified with them present first.
-func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, error) {
+func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, pay orderPayment, key string) (payment.OrderCharge, error) {
 	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
-		return checkout.OrderCharge{}, orders.ErrNotPayable
+		return payment.OrderCharge{}, orders.ErrNotPayable
 	}
 	quote, err := s.frozenQuote(ctx, order)
 	if err != nil {
-		return checkout.OrderCharge{}, err
+		return payment.OrderCharge{}, err
 	}
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
-		return checkout.OrderCharge{}, err
+		return payment.OrderCharge{}, err
 	}
-	user := &checkout.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	return rt.Checkout.PayOrder(ctx, checkout.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user, Prices: quote.prices, Products: quote.products})
+	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
+	return rt.Attempts.PayOrder(ctx, payment.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user, Prices: quote.prices, Products: quote.products})
 }
 
 // ConfirmOrder reads the provider after the customer completed next_action;
@@ -469,7 +469,7 @@ func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing
 	if params.Signature != nil {
 		signature = strings.TrimSpace(*params.Signature)
 	}
-	charged, err := rt.Checkout.ConfirmOrder(ctx, order, actor.Principal, signature)
+	charged, err := rt.Attempts.ConfirmOrder(ctx, order, actor.Principal, signature)
 	return s.orderAnswer(ctx, rt, actor, order.ID, http.StatusOK, charged, false, err)
 }
 
@@ -613,7 +613,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 	var next *billing.NextAction
 	if order.CollectionOwner == string(billing.OrderCollectionEngine) && order.AwaitsCustomer() {
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-		if next, err = rt.Checkout.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
+		if next, err = rt.Attempts.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
 			return nil, err
 		}
 	}
@@ -670,7 +670,7 @@ func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenL
 }
 
 func (s *Service) orderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
-	options, err := s.rt.CheckoutAttemptService.OrderOptions(ctx, prices, products)
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, prices, products)
 	if err != nil {
 		return nil, err
 	}
@@ -687,31 +687,31 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	if i := quote.Refused(); i >= 0 {
 		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
 	}
-	options, err := s.rt.CheckoutAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
 	if err != nil {
 		return err
 	}
 	if pay.card != nil {
-		_, err := checkout.NewCardOption(options, pay.card.PSPID)
+		_, err := payment.NewCardOption(options, pay.card.PSPID)
 		return err
 	}
 	if pay.solana != nil {
-		_, err := checkout.SolanaOption(options, pay.solana.PSPID)
+		_, err := payment.SolanaOption(options, pay.solana.PSPID)
 		return err
 	}
 	if pay.hosted != nil {
-		if err := s.rt.CheckoutAttemptService.CheckReturnURL(pay.hosted.ReturnURL); err != nil {
+		if err := s.rt.OrderAttemptService.CheckReturnURL(pay.hosted.ReturnURL); err != nil {
 			return err
 		}
-		_, err := checkout.HostedOption(options, pay.hosted.PSPID)
+		_, err := payment.HostedOption(options, pay.hosted.PSPID)
 		return err
 	}
 	pm, err := s.rt.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pay.method, customer.String())
 	if err != nil {
-		return fmt.Errorf("%w: %w", checkout.ErrPaymentMethodStale, err)
+		return fmt.Errorf("%w: %w", payment.ErrPaymentMethodStale, err)
 	}
 	if pm.Status != paymentmethods.StatusActive {
-		return fmt.Errorf("%w: the card is %s", checkout.ErrPaymentMethodStale, pm.Status)
+		return fmt.Errorf("%w: the card is %s", payment.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
 		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
@@ -724,7 +724,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 // orderCustomerAllowed refuses every customer of a merchant whose provider
 // writes are fenced.
 func (s *Service) orderCustomerAllowed(ctx context.Context, _ billing.CustomerID) error {
-	if err := s.rt.CheckoutAttemptService.TakesOrders(ctx); err != nil {
+	if err := s.rt.OrderAttemptService.TakesOrders(ctx); err != nil {
 		return errOrdersFenced
 	}
 	return nil
@@ -732,7 +732,7 @@ func (s *Service) orderCustomerAllowed(ctx context.Context, _ billing.CustomerID
 
 type orderRuntime struct {
 	Orders      *orders.Service
-	Checkout    *checkout.CheckoutAttemptService
+	Attempts    *payment.OrderAttemptService
 	Idempotency *idempotency.Store
 	DB          interface {
 		Gen(context.Context) *gen.Queries
@@ -744,10 +744,10 @@ func (s *Service) orderRuntime() (*orderRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	if rt.Orders == nil || rt.CheckoutAttemptService == nil || rt.Idempotency == nil || rt.DB == nil || rt.PriceService == nil || rt.ProductService == nil || rt.PaymentMethodService == nil {
+	if rt.Orders == nil || rt.OrderAttemptService == nil || rt.Idempotency == nil || rt.DB == nil || rt.PriceService == nil || rt.ProductService == nil || rt.PaymentMethodService == nil {
 		return nil, errors.New("billing service: orders unavailable")
 	}
-	return &orderRuntime{Orders: rt.Orders, Checkout: rt.CheckoutAttemptService, Idempotency: rt.Idempotency, DB: rt.DB}, nil
+	return &orderRuntime{Orders: rt.Orders, Attempts: rt.OrderAttemptService, Idempotency: rt.Idempotency, DB: rt.DB}, nil
 }
 
 func orderDigest(v any) []byte {
@@ -847,13 +847,13 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if err != nil {
 			return nil, true, err
 		}
-		if view.Checkout != nil {
-			recovered, err := hostedcheckout.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.HostedCheckoutOrigin(), existing.BillingOrder, s.now())
+		if view.PayURLExpiresAt != nil {
+			recovered, err := paymentpage.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.PaymentOrigin(), existing.BillingOrder, s.now())
 			if err != nil {
 				return nil, true, err
 			}
 			if recovered != "" {
-				view.Checkout.URL = &recovered
+				view.PayURL = &recovered
 			}
 		}
 		return view, true, nil
@@ -866,23 +866,23 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			return nil, false, errMerchantOrderExpiry
 		}
 	}
-	// A hosted checkout is checked before the order exists; without an
-	// expiry of its own, the order expires with it (Stripe).
+	// A pay URL is checked before the order exists; without an expiry of
+	// its own, the order expires with it (Stripe).
 	var attach func(context.Context, *gen.Queries, uuid.UUID) error
-	var checkoutURL string
-	if params.Checkout != nil {
-		origin := s.rt.HostedCheckoutOrigin()
+	var payURL string
+	if params.PayURL != nil {
+		origin := s.rt.PaymentOrigin()
 		if origin == "" {
-			return nil, false, apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
+			return nil, false, apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no payment origin").WithParam("pay_url")
 		}
-		plan, err := hostedcheckout.Plan(*params.Checkout, billing.OrderID{}, now, params.ExpiresAt)
+		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt)
 		if err != nil {
 			return nil, false, err
 		}
-		if plan.UIMode == billing.CheckoutEmbedded {
+		if plan.Embedded {
 			if _, err := s.embedOrigins(ctx); err != nil {
 				if errors.Is(err, errEmbedOriginsRequired) {
-					err = errEmbedOriginsRequired.WithParam("checkout.ui_mode")
+					err = errEmbedOriginsRequired.WithParam("pay_url.embedded")
 				}
 				return nil, false, err
 			}
@@ -895,11 +895,11 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			if err != nil {
 				return err
 			}
-			c, err := hostedcheckout.Plan(*params.Checkout, billing.OrderID(id), now, params.ExpiresAt)
+			c, err := paymentpage.Plan(*params.PayURL, billing.OrderID(id), now, params.ExpiresAt)
 			if err != nil {
 				return err
 			}
-			checkoutURL, err = hostedcheckout.Attach(ctx, q, origin, mid, c, now)
+			payURL, err = paymentpage.Attach(ctx, q, origin, mid, c, now)
 			return err
 		}
 	}
@@ -911,27 +911,27 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		}
 		return nil, false, err
 	}
-	if params.Checkout != nil {
-		// A Stripe PSP declared before the checkout host was served is
+	if params.PayURL != nil {
+		// A Stripe PSP declared before the payment origin was served is
 		// registered as its payment-method domain now.
 		if mid, err := merchant.Require(ctx); err == nil {
-			s.rt.Go("checkout domain registration", func(ctx context.Context) {
-				if err := s.rt.RegisterCheckoutDomain(ctx, mid); err != nil && ctx.Err() == nil {
-					log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("checkout domain: cannot queue its registration")
+			s.rt.Go("payment domain registration", func(ctx context.Context) {
+				if err := s.rt.RegisterPaymentDomain(ctx, mid); err != nil && ctx.Err() == nil {
+					log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("payment domain: cannot queue its registration")
 				}
 			})
 		}
 	}
 	view, err := s.merchantOrderView(ctx, order)
-	if err == nil && checkoutURL != "" && view.Checkout != nil {
+	if err == nil && payURL != "" && view.PayURLExpiresAt != nil {
 		// Only creation and its authenticated retry return the capability.
-		view.Checkout.URL = &checkoutURL
+		view.PayURL = &payURL
 	}
 	return view, false, err
 }
 
 // embedOrigins are the origins the merchant registered to frame its
-// embedded checkouts: checkout_embed_origins_required without one.
+// embedded pay URLs: embed_origins_required without one.
 func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -951,22 +951,22 @@ func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 	return origins, nil
 }
 
-var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "checkout_embed_origins_required",
-	"an embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins")
+var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "embed_origins_required",
+	"an embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins")
 
-// orderCheckout is the checkout host a customer's order checkout is on,
+// payURLOrigin is the payment origin a customer's order's pay URL is on,
 // checked before the order exists: the merchant registered the origins that
 // frame it. The request names no URL.
-func (s *Service) orderCheckout(ctx context.Context, params billing.CreateMyOrderParams) (string, error) {
+func (s *Service) payURLOrigin(ctx context.Context, params billing.CreateMyOrderParams) (string, error) {
 	switch {
 	case params.Payment != nil:
-		return "", apperr.Invalidf("checkout and payment are exclusive: the checkout takes the payment").WithParam("checkout")
-	case params.Checkout.UIMode != "" && params.Checkout.UIMode != billing.CheckoutEmbedded:
-		return "", apperr.Invalidf("checkout.ui_mode is embedded: a customer's checkout is framed by the merchant's registered origins").WithParam("checkout.ui_mode")
+		return "", apperr.Invalidf("pay_url and payment are exclusive: the pay URL takes the payment").WithParam("pay_url")
+	case !params.PayURL.Embedded:
+		return "", apperr.Invalidf("pay_url.embedded is true: a customer's pay URL is framed by the merchant's registered origins").WithParam("pay_url.embedded")
 	}
-	origin := s.rt.HostedCheckoutOrigin()
+	origin := s.rt.PaymentOrigin()
 	if origin == "" {
-		return "", apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
+		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no payment origin").WithParam("pay_url")
 	}
 	if _, err := s.embedOrigins(ctx); err != nil {
 		return "", err
@@ -974,10 +974,10 @@ func (s *Service) orderCheckout(ctx context.Context, params billing.CreateMyOrde
 	return origin, nil
 }
 
-// attachCheckout gives the answer's order, read as it is now (a retry's
-// answer is the first's), its embedded checkout in place of the one it had:
+// attachPayURL gives the answer's order, read as it is now (a retry's
+// answer is the first's), its embedded pay URL in place of the one it had:
 // a fresh URL on every answer. A paid or closed order takes none.
-func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor OrderActor, answer OrderAnswer, origin string) (OrderAnswer, error) {
+func (s *Service) attachPayURL(ctx context.Context, rt *orderRuntime, actor OrderActor, answer OrderAnswer, origin string) (OrderAnswer, error) {
 	live, err := s.orderView(ctx, rt, actor, answer.Order.ID.UUID())
 	if err != nil {
 		return OrderAnswer{}, err
@@ -991,19 +991,19 @@ func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor Or
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	c, ok, err := hostedcheckout.AttachMine(ctx, rt.DB.Gen(ctx), origin, mid, actor.Customer, order.ID, order.ExpiresAt, s.now())
+	c, url, ok, err := paymentpage.AttachMine(ctx, rt.DB.Gen(ctx), origin, mid, actor.Customer, order.ID, order.ExpiresAt, s.now())
 	switch {
 	case err != nil:
 		return OrderAnswer{}, err
 	case !ok:
 		return answer, nil
 	}
-	s.rt.Go("checkout domain registration", func(ctx context.Context) {
-		if err := s.rt.RegisterCheckoutDomain(ctx, mid); err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("checkout domain: cannot queue its registration")
+	s.rt.Go("payment domain registration", func(ctx context.Context) {
+		if err := s.rt.RegisterPaymentDomain(ctx, mid); err != nil && ctx.Err() == nil {
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("payment domain: cannot queue its registration")
 		}
 	})
-	order.Checkout = &c
+	c.Show(&order, &url)
 	return answer, nil
 }
 

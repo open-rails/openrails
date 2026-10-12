@@ -22,7 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// TypeStripePaymentMethodDomain registers the hosted checkout's host as a
+// TypeStripePaymentMethodDomain registers the payment page's host as a
 // payment-method domain on a Stripe PSP's account, so Stripe's Express
 // Checkout Element offers Apple Pay and Google Pay there.
 const TypeStripePaymentMethodDomain = "stripe_payment_method_domain"

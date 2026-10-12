@@ -47,9 +47,9 @@ type Config struct {
 	RouteGroups billing.RouteGroups
 	// AdminConsole declares app sign-in. The console is always served at /admin.
 	AdminConsole *ConsoleConfig
-	// HostedCheckoutURL is the hosted checkout host's origin
-	// (hosted_checkout.url); empty serves none.
-	HostedCheckoutURL string
+	// PaymentOrigin is where the server serves the payment page
+	// (payment_origin); empty serves none.
+	PaymentOrigin string
 }
 
 type contextKey struct{}
@@ -96,7 +96,7 @@ type fileConfig struct {
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
 	Vault              *billing.VaultConfig      `koanf:"vault"`
 	AdminConsole       *ConsoleConfig            `koanf:"admin_console"`
-	HostedCheckout     *hostedCheckoutFile       `koanf:"hosted_checkout"`
+	PaymentOrigin      string                    `koanf:"payment_origin"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
 	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
 
@@ -208,19 +208,6 @@ func (s *smtpFile) config() (*billing.SMTPConfig, error) {
 	return &billing.SMTPConfig{Host: s.Host, Port: s.Port, Username: s.Username, Password: s.Password, From: from}, nil
 }
 
-// hostedCheckoutFile is the hosted_checkout section: the origin the server
-// serves the checkout page on, apart from its API's.
-type hostedCheckoutFile struct {
-	URL string `koanf:"url"`
-}
-
-func (h *hostedCheckoutFile) url() string {
-	if h == nil {
-		return ""
-	}
-	return strings.TrimSpace(h.URL)
-}
-
 // config is the loaded file as the server's configuration.
 func (f *fileConfig) config() (*Config, error) {
 	posture, err := billing.ParseCredentialPosture(f.TestMode)
@@ -274,7 +261,7 @@ func (f *fileConfig) config() (*Config, error) {
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole,
-		HostedCheckoutURL:        f.HostedCheckout.url(),
+		PaymentOrigin:            strings.TrimSpace(f.PaymentOrigin),
 	}, nil
 }
 

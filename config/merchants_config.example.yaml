@@ -52,7 +52,7 @@ merchants:
       # answer for a merchant with one PSP per rail. A declared list REPLACES
       # the policy whole; a rule with an empty `match` matches everything and
       # must be last. A request that NAMES a PSP always gets that PSP.
-      checkout_routing:
+      psp_routing:
         # EU subscriptions go to CCBill first, NMI second.
         - match: { currency: EUR, mode: subscription }
           prefer: [ccbill, mobius]
@@ -208,7 +208,7 @@ merchants:
         # no runtime whoami (#592).
         account_id: replace-with-bt-tenant-id
         settings:
-          # The PUBLIC application key the checkout page tokenizes with. It
+          # The PUBLIC application key the payment page tokenizes with. It
           # replaces the rail's own tokenization_key: with custody, the
           # browser sends the PAN to the CUSTODIAN, not to the gateway.
           public_api_key: replace-with-bt-public-application-key

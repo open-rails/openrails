@@ -72,7 +72,7 @@ func (w *world) refundGate(rail string) *gate {
 	return w.nmi.hold(newGate(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/refund") }, false))
 }
 
-// Double spend on one checkout. While the first pay's charge is in flight at
+// Double spend on one purchase. While the first pay's charge is in flight at
 // the provider, the same session is paid again on another replica and on the
 // same one. The provider sees one charge and exactly one membership is
 // created.

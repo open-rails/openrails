@@ -23,7 +23,7 @@ import {
   canAuthenticatePayment,
   cardRetryAfter,
   cardSetupDriver,
-  checkoutPsps,
+  routedPsps,
   type PspConfig,
 } from "./psp"
 import { BillingProvider } from "./react/provider"
@@ -83,10 +83,10 @@ describe("PSP flows", () => {
     expect(cardRetryAfter([nmi, { ...ccbill, status: down.status }])).toBeNull()
   })
 
-  it("hides non-checkout PSPs", () => {
+  it("hides non-purchase PSPs", () => {
     const elements = { ...stripe, flow: "elements" }
     expect(
-      checkoutPsps([nmi, { ...elements, checkout: false }]).map((p) => p.key)
+      routedPsps([nmi, { ...elements, routed: false }]).map((p) => p.key)
     ).toEqual(["nmi"])
   })
 

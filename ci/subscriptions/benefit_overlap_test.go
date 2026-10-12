@@ -24,7 +24,7 @@ func TestConcurrentTimedPassesStack(t *testing.T) {
 	buyer := p.w.newCustomer()
 	// One open order of the customer's own and one the merchant made for
 	// them: the customer's own request for the same lines answers its one.
-	first, second := p.checkout(buyer), p.merchantCheckout(buyer)
+	first, second := p.purchase(buyer), p.merchantPaymentPage(buyer)
 	// Both wallets pay and the customer confirms both at once: the two
 	// settlements race, as two pollers would.
 	var settled sync.WaitGroup

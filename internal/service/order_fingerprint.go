@@ -17,7 +17,7 @@ import (
 // price's public spelling. Private UUIDs never changed in the cutover, so this
 // reproduces pre-cutover hashes without rewriting durable receipts. Only the
 // known price_id selectors in creation params change; field order, quantities,
-// amounts, checkout/payment details and all other request bytes stay intact.
+// amounts, purchase/payment details and all other request bytes stay intact.
 func (s *Service) orderCreationDigest(ctx context.Context, params any, lines []billing.OrderLineParams) ([]byte, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {

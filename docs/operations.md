@@ -161,7 +161,7 @@ is a file or Vault, cached per instance. Per-instance caches:
 
 ### What scales
 
-- **HTTP**: any instance serves any request: checkout pages, webhooks, the
+- **HTTP**: any instance serves any request: payment pages, webhooks, the
   admin console and its API.
 - **Webhooks**: one effect per provider event however many instances receive
   it. A copy arriving while the first is applied waits up to 10 seconds, then
@@ -240,7 +240,7 @@ A PSP's secrets are part of the merchant's configuration: the manifest's
 `merchant_manifest_overlays`) without Vault, the PSP's Vault document with it
 ([vault.md](vault.md)). The retired anchors (`accounts`,
 `rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename
-error. Checkout, webhooks, tokenization, provider intents and pulls all arm
+error. Purchase, webhooks, tokenization, provider intents and pulls all arm
 per PSP from it.
 
 ## Private Standalone First Run
@@ -290,8 +290,8 @@ execute; `full` executes everything; an unrecognized origin parks.
 
 Every outbound provider mutation flows through the ledger: deferred NMI
 deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
-cancels, payment-method swaps, vault deletes, checkout NMI sales, Solana
-recurring pulls and the hosted checkout's Stripe payment-method domain
+cancels, payment-method swaps, vault deletes, purchase NMI sales, Solana
+recurring pulls and the payment page's Stripe payment-method domain
 registrations.
 
 Execution is **effectively-once**, never assumed exactly-once. Per class:
@@ -428,7 +428,7 @@ the account identity behind a credential; the declaration is trusted.
 One local check stands: two live PSPs on a rail holding the same account
 credential (NMI `security_key`, Stripe `secret_key`) are one gateway account
 declared twice. The later one stays disarmed — its credentials read as absent,
-so its intents park and checkout never offers it — and a
+so its intents park and purchase never offers it — and a
 `consistency.duplicate_gateway_account` finding names it. With the
 configuration in a file its PSPs are compared at startup; with Vault each
 stores `psps.credential_fingerprint`, an HMAC of the credential under a random
@@ -459,7 +459,7 @@ Rules:
 - **Moving to a DIFFERENT PSP**: never repoint an existing PSP
   row's credentials (OpenRails cannot detect the swap — the declared
   `account_id` would silently lie). Arm a NEW PSP and archive
-  the old one; `archived` is drain-only — no new checkout/pull work selects
+  the old one; `archived` is drain-only — no new purchase/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
   `PATCH /v1/merchant/psps/{id}` with `{archived: true}` makes no provider call, so it
   works when the old provider is terminated or unreachable.
@@ -700,7 +700,7 @@ never an error.
 The continuous internal-repair half of the system (the pull feeds it). One
 idempotent **`Converge(scope)`** — scope-narrowable from a single customer to
 a whole merchant — runs from three places so the system never *holds* an
-inconsistency: **inline** after every source mutation (checkout completes,
+inconsistency: **inline** after every source mutation (purchase completes,
 renewal bills, refund webhook lands, dunning transitions, free product grants);
 **after every mutating `pull-provider` run**; and **on the sweep** — a
 15-minute River job (RunOnStart) over every active merchant, catching drift
@@ -970,7 +970,7 @@ across all references.
   `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
   `unreadable`, `settle_failed`. Nothing is refunded automatically, and
   underpayments are not added together. A transfer that already settled another
-  checkout is recorded as `duplicate`.
+  purchase is recorded as `duplicate`.
 - Unresolved reviews and pending references refuse the billing archive. After
   refunding, close a review with `openrails solana-pay resolve --merchant …
   --signature … --resolution …`.
@@ -1007,7 +1007,7 @@ Row retention:
 | `provider_mutation_logs` | 25 months after `created_at` |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
-| `checkout_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
+| `order_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
 | `checkout_sessions` | at `purge_at`, 24 hours after the session expired |
 | `carts` | 30 days after `last_changed_at` |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
@@ -1024,12 +1024,12 @@ What is kept on purpose:
   sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
   or refused) are what grants, payments and orders are checked against, a
   card erasure is the proof the card is gone, and a Stripe payment-method
-  domain registration (one per PSP and checkout host) is the record that the
+  domain registration (one per PSP and payment origin) is the record that the
   host is registered. Only the instruction-only types
   above age out. The list lives once in the baseline's
   `provider_intents_updated_at_idx` and once in the retention code; a test
   keeps them equal.
-- **A checkout attempt that reached a provider is permanent**, expired or not:
+- **A order attempt that reached a provider is permanent**, expired or not:
   one with a payment, a subscription or a provider transaction, or that a
   provider intent or a Solana Pay reference or receipt names.
 - **A cost observation outlives its operation.** While the operation is open its
@@ -1242,7 +1242,7 @@ in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
-| User checkout / charge | yes | yes | no — refused |
+| User purchase / charge | yes | yes | no — refused |
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
@@ -1448,8 +1448,8 @@ CORS doesn't exist. So a per-merchant origin allowlist would protect nothing.
 The engine answers a **static, non-configurable** policy, by
 route tier:
 
-- **The standalone server's API routes** (catalog, checkout, `/v1/me/*`, the
-  admin API, `/v1/app/*`) and an embedded host's checkout and self-service
+- **The standalone server's API routes** (catalog, purchase, `/v1/me/*`, the
+  admin API, `/v1/app/*`) and an embedded host's purchase and self-service
   routes answer every preflight and response with
   `Access-Control-Allow-Origin: *`, the methods and headers those routes need
   plus the headers the mount's Authenticator advertises, `WWW-Authenticate`

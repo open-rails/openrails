@@ -9,7 +9,7 @@ import (
 // flexFormCurrencyCodes is CCBill's billable set: canonical (upper-case, as the
 // DB currency CHECK accepts) currency -> ISO-4217 numeric `currencyCode`.
 // Values are strings: AUD's leading zero ("036") is part of the wire value.
-// Checkout and the webhook share this table, so a billable currency is always
+// Purchase and the webhook share this table, so a billable currency is always
 // one the webhook can match.
 var flexFormCurrencyCodes = map[string]string{
 	"AUD": "036",

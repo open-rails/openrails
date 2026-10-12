@@ -77,7 +77,7 @@ func (s *StripeService) stripeBaseURL() string {
 
 // CreateCustomer creates a Stripe Customer for the given app user, tagging it
 // with metadata[app_user_id] so it can be re-discovered later. The request is
-// idempotent on the app user id, so retries (or two parallel checkouts) cannot
+// idempotent on the app user id, so retries (or two parallel purchases) cannot
 // mint duplicate customers.
 func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID string) (string, error) {
 	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
@@ -101,7 +101,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	// Idempotency on the app user id prevents duplicate customers across retries
-	// and concurrent checkouts.
+	// and concurrent purchases.
 	req.Header.Set("Idempotency-Key", "customer_create_"+appUserID)
 
 	client := s.StripeClients.Client(s.Config, 0)

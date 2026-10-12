@@ -78,7 +78,7 @@ func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing
 	return &out, nil
 }
 
-// PreviewPSPRouting reports which PSP a checkout for a price would use, and
+// PreviewPSPRouting reports which PSP a purchase for a price would use, and
 // why each other PSP was passed over. Nothing is created.
 func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
 	var out billing.PSPRoutingPreview

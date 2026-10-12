@@ -357,12 +357,12 @@ export const billingAdminMessages = {
   "New batch": "New batch",
   "New cards by AVS result": "New cards by AVS result",
   "New cards by CVV result": "New cards by CVV result",
-  "New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one.":
-    "New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one.",
+  "New purchase on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one.":
+    "New purchase on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one.",
   "New merchant": "New merchant",
   "New plan": "New plan",
   "New price": "New price",
-  "New-card checkout failure rate": "New-card checkout failure rate",
+  "New-card purchase failure rate": "New-card purchase failure rate",
   "New-card decline rate": "New-card decline rate",
   "New-card decline rate by week": "New-card decline rate by week",
   Next: "Next",
@@ -697,8 +697,8 @@ export const billingAdminMessages = {
   "Webhook URL": "Webhook URL",
   Webhooks: "Webhooks",
   "What the customer asked for": "What the customer asked for",
-  "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real checkout asks, without starting one.":
-    "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real checkout asks, without starting one.",
+  "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real purchase asks, without starting one.":
+    "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real purchase asks, without starting one.",
   "Which providers this price has been sent to, and whether their copy still matches yours. Publishing the catalog is what sends it; this page only reports. Verify asks each provider what it currently holds, and changes nothing.":
     "Which providers this price has been sent to, and whether their copy still matches yours. Publishing the catalog is what sends it; this page only reports. Verify asks each provider what it currently holds, and changes nothing.",
   Why: "Why",

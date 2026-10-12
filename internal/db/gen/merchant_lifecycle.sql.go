@@ -25,17 +25,6 @@ func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merch
 	return count, err
 }
 
-const countMerchantRowsCheckoutAttempts = `-- name: CountMerchantRowsCheckoutAttempts :one
-SELECT count(*) FROM billing.checkout_attempts WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsCheckoutAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsCheckoutAttempts, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsEntitlementCache = `-- name: CountMerchantRowsEntitlementCache :one
 SELECT count(*) FROM billing.customer_entitlement_cache WHERE merchant_id = $1
 `
@@ -108,6 +97,17 @@ SELECT count(*) FROM billing.notifications WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsNotificationQueue, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsOrderAttempts = `-- name: CountMerchantRowsOrderAttempts :one
+SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsOrderAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsOrderAttempts, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -243,15 +243,6 @@ func (q *Queries) PurgeMerchantRowsCatalogDriftEvents(ctx context.Context, merch
 	return err
 }
 
-const purgeMerchantRowsCheckoutAttempts = `-- name: PurgeMerchantRowsCheckoutAttempts :exec
-DELETE FROM billing.checkout_attempts WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsCheckoutAttempts(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsCheckoutAttempts, merchantID)
-	return err
-}
-
 const purgeMerchantRowsEntitlementCache = `-- name: PurgeMerchantRowsEntitlementCache :exec
 DELETE FROM billing.customer_entitlement_cache WHERE merchant_id = $1
 `
@@ -312,6 +303,15 @@ DELETE FROM billing.notifications WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsNotificationQueue, merchantID)
+	return err
+}
+
+const purgeMerchantRowsOrderAttempts = `-- name: PurgeMerchantRowsOrderAttempts :exec
+DELETE FROM billing.order_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsOrderAttempts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsOrderAttempts, merchantID)
 	return err
 }
 

@@ -21,7 +21,7 @@ Merchant directory/authority settings are never copied over the destination.
 The fixed profiles in `contract/profiles.go` cover retained billing tables, including mandates, card versions,
 ledger accounts/transfers, orders, grants, product access, admission receipts,
 running charges, rating and provider-refresh watermarks, webhook deduplication, acknowledged host
-events, and completed checkout and provider-intent coordinates. Scalar money is
+events, and completed purchase and provider-intent coordinates. Scalar money is
 encoded as decimal strings; nested money contracts use integer JSON tokens.
 The archive targets the reviewed OpenRails table inventory. Co-located host,
 AuthKit and River tables are outside that ownership boundary and are never
@@ -48,7 +48,7 @@ automatic database reset is performed.
   destructive before-images and account updater batches refuse any rows. Their
   opaque evidence has no v1 portable contract; provider formats belong to #1010.
 - Application-owned JSON metadata is retained verbatim: payments (including
-  discount metadata), payment methods, usage events, invoice items, checkout
+  discount metadata), payment methods, usage events, invoice items, purchase
   attempts, subscription `gateway_response`, and the metadata inside admission
   capture terms. Keys, nesting and string values are not a schema or secret
   detector boundary. JSON syntax, depth and archive framing limits still apply.
@@ -75,15 +75,15 @@ automatic database reset is performed.
   destructive-action switch belong to the destination deployment.
 
 Unresolved payments, invoice attempts, open admissions, provider intents,
-checkouts, unfinished webhook receipts, undelivered host events and running
-maintenance work refuse export. Terminal checkout rows retain IDs, provider
+purchases, unfinished webhook receipts, undelivered host events and running
+maintenance work refuse export. Terminal purchase rows retain IDs, provider
 coordinates, request fingerprints and declared safe rail fields/routing facts;
 unknown structured rail state refuses; application metadata is preserved. The
-currently supported checkout state covers NMI completion/failure and its request fingerprint. Redirect/Solana quote
+currently supported purchase state covers NMI completion/failure and its request fingerprint. Redirect/Solana quote
 or transaction blobs require a separate safe contract. Terminal intent payloads
 and evidence are never filtered: known safe refund/result shapes and typed NMI
 sale/subscription creation receipts are preserved verbatim. Successful NMI
-checkout intents prune their submission payloads in the ordinary runner; any
+purchase intents prune their submission payloads in the ordinary runner; any
 nonempty retained NMI purchase payload still refuses. Other provider workflows
 require their own safe contract.
 
@@ -117,7 +117,7 @@ additional rows or provider work.
 
 Integration tests use the normal application role and isolated PostgreSQL
 18 databases. They cover populated profiles across three schemas, production NMI
-one-off sale and recurring creation through CheckoutSessionService/CheckoutService
+one-off sale and recurring creation through CheckoutSessionService/PurchaseService
 against a loopback provider, new destination authority, atomic tamper refusal,
 unknown tables/columns, receipt tampering and temporary-catalog shadowing,
 concurrent restore receipts, balanced exact-integer ledgers and lost-response

@@ -77,30 +77,30 @@ describe("catalog", () => {
     ).toBe(false)
   })
 
-  it("creates the customer's order with its embedded checkout in one call", async () => {
-    const checkout = {
-      url: "https://pay.test/c/ord_1#cks_secret",
-      ui_mode: "embedded",
-      expires_at: "2026-10-12T20:15:00Z",
+  it("creates the customer's order with its embedded pay URL in one call", async () => {
+    const payUrl = {
+      pay_url: "https://pay.test/pay/ord_1#pus_secret",
+      pay_url_expires_at: "2026-10-12T20:15:00Z",
+      embedded: true,
       success_url: "https://shop.test/",
       cancel_url: null,
       saved_payment_methods: true,
     }
     const { client, request } = served(
-      json(201, order({ id: "ord_1", checkout }))
+      json(201, order({ id: "ord_1", ...payUrl }))
     )
     const { order: made } = await client.createOrder({
       lines: [{ price_id: "price_1" }],
-      checkout: { ui_mode: "embedded" },
+      payUrl: { embedded: true },
       idempotencyKey: "k",
     })
-    expect(made.checkout).toEqual(checkout)
+    expect(made).toMatchObject(payUrl)
     expect(request()).toMatchObject({
       url: "/billing/v1/me/orders",
       method: "POST",
       body: {
         lines: [{ price_id: "price_1" }],
-        checkout: { ui_mode: "embedded" },
+        pay_url: { embedded: true },
       },
     })
     expect(request().headers.get("Idempotency-Key")).toBe("k")

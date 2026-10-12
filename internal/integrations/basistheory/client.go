@@ -39,7 +39,7 @@ var ErrProviderReadOnly = errors.New("basistheory: provider writes are blocked (
 
 // Config builds a Client. APIKey is the PRIVATE application key (permissions:
 // proxy:invoke, token*, token-intent*, network-token*, account-updater:job:*).
-// The public application key is checkout-page config, never used here; the
+// The public application key is payment-page config, never used here; the
 // management key is operator-only and never stored in the engine.
 type Config struct {
 	APIKey        string

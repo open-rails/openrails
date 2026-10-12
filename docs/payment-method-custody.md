@@ -19,7 +19,7 @@ value `psp`, not an absence — a DB CHECK enforces the vocabulary.
 `payment_methods_psp_custody_check`). A card a third-party custodian holds belongs
 to no PSP: each charge routes to the one live PSP of the card's rail that
 reaches the custodian (`charge.RoutePSP`); none, or two, is `ErrNoRoute`. An
-obligation that names its PSP (a subscription, a frozen checkout instrument)
+obligation that names its PSP (a subscription, a frozen purchase instrument)
 charges through that PSP, provided it still reaches the custodian.
 
 ## The matrix
@@ -132,7 +132,7 @@ merchants:
         kind: basis_theory
         account_id: <BT tenant id>     # the custodian-native tenant identity
         settings:
-          public_api_key: <BT public application key>   # checkout-page config
+          public_api_key: <BT public application key>   # payment-page config
           network_tokens: false
           account_updater: false                        # batch account updater add-on
           account_updater_lookahead_days: 14            # optional; default 14
@@ -157,8 +157,8 @@ Consequences, all enforced rather than documented:
   carries a composite foreign key so it cannot reference another merchant's.
 * A custodial PSP must not also declare `tokenization_key` / `tokenization_url`:
   the browser tokenizes against the **custodian**, so the rail's own tokenizer
-  key would be dead config on a checkout path.
-* `GET /checkout/config` reports `custodian` alongside `rail` and serves the
+  key would be dead config on a purchase path.
+* `GET /purchase/config` reports `custodian` alongside `rail` and serves the
   custodian's public key — a frontend drives whoever holds the card.
 * Secrets are scoped by custodian IDENTITY, not by the merchant's nickname for
   it: `custodians/<kind>/<environment>/<account_id>/<key>`, the exact shape
@@ -233,12 +233,12 @@ expiry. The normal cleanup sweep removes expired setups. A captured card has
 no holding PSP (`psp_id: null`); its orders and recurring agreements select the
 processor that can reach its custodian.
 
-Checkout creation no longer accepts a price or a mode. New payments are order
-attempts. Prelaunch checkout history is not migrated or reconstructed.
+Purchase creation no longer accepts a price or a mode. New payments are order
+attempts. Prelaunch purchase history is not migrated or reconstructed.
 
 ## Choosing a card
 
-A checkout or pay-now names its method (`payment_method_id` or a new card);
+A purchase or pay-now names its method (`payment_method_id` or a new card);
 naming neither is `payment_method_required` (400). Renewals and automatic
 usage order collection charge by a two-level default: a subscription's own card,
 else the customer's default card for its currency

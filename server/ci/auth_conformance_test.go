@@ -178,7 +178,7 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 // merchant-config route its group's: the root: name (root:customer:read) in
 // AuthKit's root group or the merchant: name (merchant:customer:read) in the
 // merchant's own. A group that is off is not mounted. Admin writes need
-// no recent sign-in, and the machine checkout-attempt routes are gone.
+// no recent sign-in, and the machine order-attempt routes are gone.
 func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
@@ -222,13 +222,13 @@ func TestRouteGroupPermissions(t *testing.T) {
 		passes(t, mux, stale, http.MethodPost, payment)
 
 		for _, route := range []struct{ method, path string }{
-			{http.MethodPost, "/billing/v1/admin/checkout-attempts"},
-			{http.MethodGet, "/billing/v1/admin/checkout-attempts/" + billing.CheckoutAttemptID(uuid.New()).String()},
-			{http.MethodPost, "/billing/v1/admin/checkout-attempts/" + billing.CheckoutAttemptID(uuid.New()).String() + "/confirm"},
+			{http.MethodPost, "/billing/v1/admin/order-attempts"},
+			{http.MethodGet, "/billing/v1/admin/order-attempts/" + billing.OrderAttemptID(uuid.New()).String()},
+			{http.MethodPost, "/billing/v1/admin/order-attempts/" + billing.OrderAttemptID(uuid.New()).String() + "/confirm"},
 		} {
 			unmounted(t, mux, route.method, route.path)
 		}
-		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/checkout-sessions")
+		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/purchase-sessions")
 	})
 
 	// A merchant's own staff hold the merchant: names in its group: they act

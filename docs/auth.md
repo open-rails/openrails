@@ -36,7 +36,7 @@ Every gated route acts on the merchant the credential is bound to
 `Authenticate`: the merchant whose scope its `BoundScope` is (the
 group id being the merchant's id, in the `RootScope`'s authority), else the
 merchant that declares the identity's issuer (`MerchantDeclaration.Issuer`),
-else, for OpenRails' own credentials (a checkout URL's secret, a provisioning
+else, for OpenRails' own credentials (a pay URL's secret, a provisioning
 token, the in-process handle), the merchant of their row. Nothing in the
 request names it. A credential bound to none, or to a scope that is not a live
 merchant's, is `403 merchant_unresolved`.

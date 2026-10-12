@@ -1284,7 +1284,7 @@ type PricesHoldReferencesParams struct {
 }
 
 // Whether a record refers to any of the prices: a purchase line,
-// a subscription, a checkout, a price migration, a scheduled change, a
+// a subscription, a purchase, a price migration, a scheduled change, a
 // provider write or a PSP link.
 func (q *Queries) PricesHoldReferences(ctx context.Context, arg PricesHoldReferencesParams) (bool, error) {
 	row := q.db.QueryRow(ctx, pricesHoldReferences, arg.MerchantID, arg.PriceIds)

@@ -5,7 +5,7 @@
 > CCBill operations. Automatic refunds are unavailable; see the
 > [CCBill refunds](ccbill-refund-qualification.md).
 
-CCBill is a hosted-checkout payment processor commonly used by high-risk and
+CCBill is a payment-page payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own
 name such as `mobius`). CCBill owns the card vault and the rebill schedule:
@@ -80,7 +80,7 @@ billed amounts against the catalog (2% tolerance) and reject a
 
 ### New sales and upgrades
 
-OpenRails sells nothing new on CCBill: checkout offers no CCBill option for a
+OpenRails sells nothing new on CCBill: purchase offers no CCBill option for a
 one-time price or a new subscription, and catalog application refuses a price
 that only CCBill could sell (`price_not_sellable`). Subscriptions that already
 bill at CCBill keep renewing there and stay mirrored.
@@ -174,4 +174,4 @@ posture alone accepts nothing extra.
   subscription; no reader resolves CCBill attributions yet (DataLink is the
   planned source), so it records no payment until one does.
 - CCBill subscriptions cannot be reassigned to another payment method;
-  payment-method changes go through a new checkout.
+  payment-method changes go through a new purchase.

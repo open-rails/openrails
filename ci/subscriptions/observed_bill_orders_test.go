@@ -240,14 +240,14 @@ func TestObservedLateBillKeepsCancellation(t *testing.T) {
 	require.Equal(t, 1, findings, "the late capture requires refund review")
 }
 
-// Native flat recurring checkout leaves quantity nil; Stripe's accepted invoice
+// Native flat recurring purchase leaves quantity nil; Stripe's accepted invoice
 // reports one unit. The verified invoice must reuse that order without changing
 // its frozen money or creating a second obligation.
-func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
+func TestObservedBillReusesFlatPayURLOrder(t *testing.T) {
 	w := orderWorld(t)
-	w.waive("evidenced", "normalized verified invoice exercises checkout correlation without issuing a gateway charge")
+	w.waive("evidenced", "normalized verified invoice exercises purchase correlation without issuing a gateway charge")
 	c := w.newCustomer()
-	price := w.membership("observed-flat-checkout", 100)
+	price := w.membership("observed-flat-purchase", 100)
 	order, err := w.client[embedded].CreateOrder(t.Context(), billing.CreateOrderParams{
 		CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: uuid.NewString(),
 	})
@@ -255,14 +255,14 @@ func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
 	orderID := order.ID.UUID()
 	var storedQuantity *int32
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT quantity FROM billing.order_lines WHERE order_id=$1`), orderID).Scan(&storedQuantity))
-	require.Nil(t, storedQuantity, "native flat checkout omits quantity")
+	require.Nil(t, storedQuantity, "native flat purchase omits quantity")
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
 	priceID, productID := w.priceStorageID(price.ID), price.ProductID.UUID()
 	bill := observed.Bill{PSPID: w.psp["stripe"].UUID(), CustomerID: uuid.MustParse(c.id), ExistingOrderID: &orderID,
-		Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "invoice", SourceKey: "flat-checkout-invoice", Currency: "USD", Total: 100,
-		Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted flat checkout", Quantity: new(1), UnitAmount: 100, Amount: 100}},
+		Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "invoice", SourceKey: "flat-purchase-invoice", Currency: "USD", Total: 100,
+		Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted flat purchase", Quantity: new(1), UnitAmount: 100, Amount: 100}},
 	}
 	record := func(b observed.Bill) (out observed.Result, err error) {
 		err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -277,7 +277,7 @@ func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
 	require.False(t, first.Created)
 	require.Equal(t, orderID, first.Order.ID)
 	alias := bill
-	alias.SourceKind, alias.SourceKey = "checkout_invoice", "flat-checkout-alias"
+	alias.SourceKind, alias.SourceKey = "purchase_invoice", "flat-purchase-alias"
 	replayed, err := record(alias)
 	require.NoError(t, err)
 	require.False(t, replayed.Created)

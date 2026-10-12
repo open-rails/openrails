@@ -83,7 +83,7 @@ func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
 
 func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
 	// A one-off price needs no Plan: it settles as a direct transfer validated
-	// at payment time. Mark the rail present so checkout offers Solana.
+	// at payment time. Mark the rail present so purchase offers Solana.
 	if in.BillingCycleDays == nil {
 		return map[string]string{"provider": "solana"}, nil
 	}
@@ -245,9 +245,9 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		if in.BillingCycleDays == nil {
 			// A one-off price takes no link keys (it settles as a direct transfer
-			// quoted at checkout). Refuse rather than drop the operator's values
+			// quoted at purchase). Refuse rather than drop the operator's values
 			// and re-flag the same drift forever.
-			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana")
+			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at purchase); remove psp_links.solana")
 		}
 		if symbol == "" {
 			symbol = a.defaultRecurringToken()

@@ -14,10 +14,10 @@ export const pspConfigSchema = z.object({
   flow: z.string(),
   config: z.record(z.string(), z.string()).nullish(),
   /**
-   * New purchases and new cards use this PSP (the operator's checkout PSP).
+   * New purchases and new cards use this PSP under the merchant's routing.
    * Other PSPs stay listed so existing cards and subscriptions keep working.
    */
-  checkout: z.boolean().nullish(),
+  routed: z.boolean().nullish(),
   /**
    * `temporarily_unavailable`: the PSP could not be checked just now and is
    * listed without `config`; ask again after `retry_after` seconds.
@@ -28,8 +28,8 @@ export const pspConfigSchema = z.object({
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
 /** PSPs that take new purchases and new cards. */
-export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
-  psps.filter((psp) => psp.checkout !== false)
+export const routedPsps = (psps: readonly PspConfig[]): PspConfig[] =>
+  psps.filter((psp) => psp.routed !== false)
 
 const cardFlows = new Set(["tokenize", "card", "elements"])
 

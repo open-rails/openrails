@@ -68,7 +68,7 @@ func TestEmbeddedDefaults(t *testing.T) {
 		require.Equal(t, config.CaptchaProviderTurnstile, config.CaptchaProvider(cfg.Captcha))
 	}
 
-	custom := &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
+	custom := &config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}}
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeLimited, RateLimits: custom}
 	_, err := validate(cfg, config.Deps{})
 	require.NoError(t, err)

@@ -53,7 +53,7 @@ func RequireMintInfo(ctx context.Context, chain MintInfoSource, mint string) (*s
 	return chain.MintInfo(ctx, key)
 }
 
-// RegisterReference gives a transaction-request checkout attempt its one
+// RegisterReference gives a transaction-request order attempt its one
 // reference and puts it under the poller's watch. Idempotent per attempt.
 func (s *SolanaPayService) RegisterReference(ctx context.Context, kind ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.BillingSolanaPayReference, error) {
 	return NewPayLedger(s.db).Register(ctx, kind, sessionID, strings.TrimSpace(reference), quoteExpiresAt, s.now())

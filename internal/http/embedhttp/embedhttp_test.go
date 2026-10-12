@@ -83,7 +83,7 @@ func (c catalogued) KnownPermission(p string) bool {
 }
 
 // The combined handler refuses to mount the admin API without its Auth,
-// and only the configuration and checkout routes join the permissive-CORS
+// and only the configuration and purchase routes join the permissive-CORS
 // browser tier. A group that is on mounts its reads and its changes.
 func TestNewRoutes(t *testing.T) {
 	admin := config.RouteGroups{Admin: true}
@@ -96,7 +96,7 @@ func TestNewRoutes(t *testing.T) {
 	for _, e := range table.Entries {
 		key := e.Method + " " + e.Path
 		keys = append(keys, key)
-		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/checkout") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
+		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/purchase") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
 			slices.Contains([]string{"/billing/v1/products", "/billing/v1/config"}, e.Path), e.Browser, key)
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}

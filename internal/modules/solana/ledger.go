@@ -65,7 +65,7 @@ const (
 
 var (
 	// ErrSignatureClaimed: the transfer is already credited or reviewed on
-	// another reference. One on-chain transfer settles at most one checkout.
+	// another reference. One on-chain transfer settles at most one purchase.
 	ErrSignatureClaimed = errors.New("solana: transfer already recorded on another reference")
 	ErrUnknownReference = errors.New("solana: unknown pay reference")
 )
@@ -139,7 +139,7 @@ type PayLedger struct{ db *db.DB }
 
 func NewPayLedger(d *db.DB) *PayLedger { return &PayLedger{db: d} }
 
-// Register gives a checkout attempt its reference. A second call for the same
+// Register gives a order attempt its reference. A second call for the same
 // attempt returns the existing row; a different reference is refused.
 func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt, now time.Time) (gen.BillingSolanaPayReference, error) {
 	mid, err := merchant.Require(ctx)
@@ -154,14 +154,14 @@ func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID 
 		watch = settle.Add(watchWindow)
 	}
 	row, err := l.db.Gen(ctx).RegisterSolanaPayReference(ctx, gen.RegisterSolanaPayReferenceParams{
-		MerchantID: mid.UUID(), Reference: reference, CheckoutAttemptID: sessionID, Kind: string(kind),
+		MerchantID: mid.UUID(), Reference: reference, OrderAttemptID: sessionID, Kind: string(kind),
 		ExpiresAt: settle, WatchEndsAt: watch, Now: now,
 	})
 	if err != nil {
 		return row, err
 	}
 	if row.Reference != reference {
-		return row, fmt.Errorf("checkout attempt %s already has Solana Pay reference %s", sessionID, row.Reference)
+		return row, fmt.Errorf("order attempt %s already has Solana Pay reference %s", sessionID, row.Reference)
 	}
 	return row, nil
 }
@@ -306,7 +306,7 @@ func (l *PayLedger) Record(ctx context.Context, r Receipt, now time.Time) error 
 		return err
 	}
 	n, err := l.db.Gen(ctx).InsertSolanaPayReceipt(ctx, gen.InsertSolanaPayReceiptParams{
-		MerchantID: mid.UUID(), Reference: r.Reference, Signature: r.Signature, CheckoutAttemptID: r.SessionID,
+		MerchantID: mid.UUID(), Reference: r.Reference, Signature: r.Signature, OrderAttemptID: r.SessionID,
 		Disposition: string(r.Disposition), ReviewReason: optional(r.ReviewReason), Recipient: r.Recipient, TokenMint: r.TokenMint,
 		ExpectedAmount: expected, ReceivedAmount: received, Payer: optional(r.Payer), LandedAt: r.LandedAt,
 		PaymentID: r.PaymentID, Now: now,
@@ -327,14 +327,14 @@ func (l *PayLedger) RaiseReview(ctx context.Context, r Receipt, customerID strin
 		return nil
 	}
 	meta := map[string]any{
-		"reference":           r.Reference,
-		"checkout_attempt_id": r.SessionID.String(),
-		"review_reason":       r.ReviewReason,
-		"recipient":           r.Recipient,
-		"token_mint":          r.TokenMint,
-		"expected_amount":     strconv.FormatUint(r.ExpectedAmount, 10),
-		"received_amount":     strconv.FormatUint(r.ReceivedAmount, 10),
-		"payer":               r.Payer,
+		"reference":        r.Reference,
+		"order_attempt_id": r.SessionID.String(),
+		"review_reason":    r.ReviewReason,
+		"recipient":        r.Recipient,
+		"token_mint":       r.TokenMint,
+		"expected_amount":  strconv.FormatUint(r.ExpectedAmount, 10),
+		"received_amount":  strconv.FormatUint(r.ReceivedAmount, 10),
+		"payer":            r.Payer,
 	}
 	if r.LandedAt != nil {
 		meta["landed_at"] = r.LandedAt.UTC().Format(time.RFC3339)
@@ -372,15 +372,15 @@ func RecordLateSettlement(ctx context.Context, database *db.DB, landedAt time.Ti
 		IdempotencyKey: "solana-late:" + signature,
 		Err:            fmt.Errorf("transfer landed %s after its quote expired", landedAt.Sub(late.ExpiresAt).Round(time.Second)),
 		Metadata: map[string]any{
-			"reference":           reference,
-			"checkout_attempt_id": strings.TrimSpace(late.SessionID),
-			"price_id":            late.PriceID,
-			"quote_expired_at":    late.ExpiresAt.UTC().Format(time.RFC3339),
-			"landed_at":           landedAt.UTC().Format(time.RFC3339),
-			"token":               late.Token,
-			"token_amount":        strconv.FormatUint(late.TokenAmount, 10),
-			"fiat_amount":         strconv.FormatInt(late.Amount, 10),
-			"currency":            late.Currency,
+			"reference":        reference,
+			"order_attempt_id": strings.TrimSpace(late.SessionID),
+			"price_id":         late.PriceID,
+			"quote_expired_at": late.ExpiresAt.UTC().Format(time.RFC3339),
+			"landed_at":        landedAt.UTC().Format(time.RFC3339),
+			"token":            late.Token,
+			"token_amount":     strconv.FormatUint(late.TokenAmount, 10),
+			"fiat_amount":      strconv.FormatInt(late.Amount, 10),
+			"currency":         late.Currency,
 		},
 	}); err != nil {
 		return fmt.Errorf("record late Solana settlement alert: %w", err)
@@ -401,7 +401,7 @@ func DeleteSettled(ctx context.Context, d *db.DB, now time.Time, batch int32) (i
 
 func receiptFromRow(r gen.BillingSolanaPayReceipt) *Receipt {
 	out := &Receipt{
-		Reference: r.Reference, Signature: r.Signature, SessionID: r.CheckoutAttemptID,
+		Reference: r.Reference, Signature: r.Signature, SessionID: r.OrderAttemptID,
 		Disposition: Disposition(r.Disposition), Recipient: r.Recipient, TokenMint: r.TokenMint,
 		ExpectedAmount: uint64(max(r.ExpectedAmount, 0)), ReceivedAmount: uint64(max(r.ReceivedAmount, 0)),
 		LandedAt: r.LandedAt, PaymentID: r.PaymentID,
@@ -442,10 +442,10 @@ func RecordOrphanedFirstPull(ctx context.Context, database *db.DB, now time.Time
 		IdempotencyKey: "solana-subscribe-slot-taken:" + signature,
 		Err:            fmt.Errorf("first pull %s landed but the customer already holds this product's subscription; refund it", signature),
 		Metadata: map[string]any{
-			"checkout_attempt_id": strings.TrimSpace(late.SessionID),
-			"price_id":            late.PriceID,
-			"token":               late.Token,
-			"token_amount":        strconv.FormatUint(late.TokenAmount, 10),
+			"order_attempt_id": strings.TrimSpace(late.SessionID),
+			"price_id":         late.PriceID,
+			"token":            late.Token,
+			"token_amount":     strconv.FormatUint(late.TokenAmount, 10),
 		},
 	})
 }

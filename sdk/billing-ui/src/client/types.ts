@@ -88,7 +88,7 @@ export const priceSchema = z.object({
   product_id: z.string(),
   archived: z.boolean(),
   unit_amount: amount,
-  /** Optional bounds for a deposit whose amount is selected before checkout. */
+  /** Optional bounds for a deposit whose amount is selected before purchase. */
   customer_amount: z
     .object({ min_amount: amount, max_amount: amount })
     .nullish(),
@@ -351,19 +351,19 @@ export const orderSchema = z.object({
     )
     .nullish()
     .transform((v) => v ?? []),
-  /** The order's hosted checkout; `url` only on the answer that made it. */
-  checkout: z
-    .object({
-      url: z.string().nullish(),
-      /** `hosted`, or `embedded` in the merchant's registered origins. */
-      ui_mode: z.enum(["hosted", "embedded"]).catch("hosted"),
-      expires_at: time,
-      /** A merchant checkout's return; none on a customer's embedded one. */
-      success_url: z.string().nullish(),
-      cancel_url: z.string().nullish(),
-      saved_payment_methods: z.boolean(),
-    })
-    .nullish(),
+  /** Where the customer pays the order; only on the answer that made it. */
+  pay_url: z.string().nullish(),
+  /** When the pay URL stops working; null without one. */
+  pay_url_expires_at: time.nullish(),
+  /** The merchant's page frames the pay URL. */
+  embedded: z.boolean().nullish().transform((v) => v ?? false),
+  /** A merchant order's return; none on a customer's embedded one. */
+  success_url: z.string().nullish(),
+  cancel_url: z.string().nullish(),
+  saved_payment_methods: z
+    .boolean()
+    .nullish()
+    .transform((v) => v ?? false),
   renewal: z
     .object({
       subscription_id: z.string(),
@@ -723,7 +723,7 @@ export const publicMerchantSchema = z.object({
   display_name: z.string(),
   logo_url: z.string().nullish(),
   support_url: z.string().nullish(),
-  /** The origins that may frame its embedded checkouts. */
+  /** The origins that may frame its embedded payment pages. */
   embed_origins: z
     .array(z.string())
     .nullish()
@@ -747,8 +747,8 @@ export const publicConfigSchema = z.object({
     .transform((v) => v ?? []),
   captcha: captchaConfigSchema.nullish(),
   /**
-   * The checkout page's sign-in to the customer network (OpenID Connect,
-   * code and PKCE); null without the network or a hosted checkout.
+   * The payment page's sign-in to the customer network (OpenID Connect,
+   * code and PKCE); null without the network or a payment page.
    */
   network: z.object({ issuer: z.string(), client_id: z.string() }).nullish(),
 })

@@ -58,7 +58,7 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		tokens,
 	))
 
-	if r.CheckoutAttemptService == nil {
+	if r.OrderAttemptService == nil {
 		return
 	}
 	prepare := recurring.NewPrepareSubscribeService(
@@ -68,5 +68,5 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		network,
 		tokens,
 	)
-	r.CheckoutAttemptService.SetSolanaRecurring(prepare, enroll)
+	r.OrderAttemptService.SetSolanaRecurring(prepare, enroll)
 }

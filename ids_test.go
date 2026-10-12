@@ -24,7 +24,7 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 		{billing.PaymentIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentID(s) }, func(u uuid.UUID) wireID { return billing.PaymentID(u) }},
 		{billing.PaymentMethodIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentMethodID(s) }, func(u uuid.UUID) wireID { return billing.PaymentMethodID(u) }},
 		{billing.MandateIDPrefix, func(s string) (wireID, error) { return billing.ParseMandateID(s) }, func(u uuid.UUID) wireID { return billing.MandateID(u) }},
-		{billing.CheckoutAttemptIDPrefix, func(s string) (wireID, error) { return billing.ParseCheckoutAttemptID(s) }, func(u uuid.UUID) wireID { return billing.CheckoutAttemptID(u) }},
+		{billing.OrderAttemptIDPrefix, func(s string) (wireID, error) { return billing.ParseOrderAttemptID(s) }, func(u uuid.UUID) wireID { return billing.OrderAttemptID(u) }},
 		{billing.PaymentAttemptIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentAttemptID(s) }, func(u uuid.UUID) wireID { return billing.PaymentAttemptID(u) }},
 		{billing.RenewalIDPrefix, func(s string) (wireID, error) { return billing.ParseRenewalID(s) }, func(u uuid.UUID) wireID { return billing.RenewalID(u) }},
 		{billing.PSPIDPrefix, func(s string) (wireID, error) { return billing.ParsePSPID(s) }, func(u uuid.UUID) wireID { return billing.PSPID(u) }},

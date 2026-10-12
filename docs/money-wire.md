@@ -35,7 +35,7 @@ another kind's prefix is `400 invalid_param`.
 | `prod_` | product | | |
 | `sub_` | subscription | `pay_` | payment |
 | `pm_` | payment method | `ord_` | order |
-| `psp_` | PSP | `chk_` | checkout attempt |
+| `psp_` | PSP | `oat_` | order attempt |
 | `att_` | payment attempt | `cyc_` | rebill cycle |
 | `cgr_` | credit grant | `txn_` | balance transaction |
 | `ent_` | entitlement | `pa_` | product access |

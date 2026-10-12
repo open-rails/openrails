@@ -14,7 +14,7 @@ import (
 // Billing-policy shape (or#897). ONE validator serves both declaration paths —
 // the mode-1 manifest and the mode-2 config API — so a policy that boots cannot
 // be a policy the API would have refused, and vice versa. Same contract as
-// NormalizeCheckoutRouting (or#288): it REJECTS rather than repairs, because a
+// NormalizePSPRouting (or#288): it REJECTS rather than repairs, because a
 // silently-dropped limit is a spend cap nobody chose.
 
 // MinAccrualRateWindowSeconds is the shortest accrual-rate lookback a policy may

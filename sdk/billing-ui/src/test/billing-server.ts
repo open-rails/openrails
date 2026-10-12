@@ -441,7 +441,7 @@ export function fakeBilling(
       }
       if (key === "POST /me/orders") {
         // Like OpenRails: the customer's open order of the same lines is
-        // answered, with a fresh checkout URL when it asks for one.
+        // answered, with a fresh pay URL when it asks for one.
         const slot = JSON.stringify(body?.lines ?? "cart")
         const line = (body?.lines as Row[] | undefined)?.[0]
         const base = `ord_${line?.price_id ?? "cart"}`
@@ -455,17 +455,17 @@ export function fakeBilling(
         const found = state.created.has(slot)
         state.created.set(slot, made)
         const id = String(made.id)
-        const checkout = body?.checkout
+        const payUrl = body?.pay_url
           ? {
-              url: `https://pay.test/c/${id}#cks_${crypto.randomUUID()}`,
-              ui_mode: "embedded",
-              expires_at: "2036-09-01T00:15:00Z",
+              pay_url: `https://pay.test/pay/${id}#pus_${crypto.randomUUID()}`,
+              pay_url_expires_at: "2036-09-01T00:15:00Z",
+              embedded: true,
               success_url: `${state.embedOrigins[0] ?? "https://shop.test"}/`,
               cancel_url: null,
               saved_payment_methods: true,
             }
-          : null
-        return json(found ? 200 : 201, order({ id, checkout }))
+          : {}
+        return json(found ? 200 : 201, order({ id, ...payUrl }))
       }
       if ((m = key.match(/^GET \/me\/orders\/([^/]+)$/))) {
         const paid = state.orderStatus === "complete"

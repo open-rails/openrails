@@ -19,7 +19,7 @@ import (
 )
 
 // A refunded purchase stays refunded: a replayed or late completion event for
-// the same checkout (a new event id) does not grant it again.
+// the same purchase (a new event id) does not grant it again.
 func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	f := newFixture(t)
 	fake := &stripeCheckoutFake{t: t}
@@ -46,7 +46,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.NoError(t, err)
 	_, err = session.pay("pay-1", redirect("https://example.test/success"))
 	require.NoError(t, err)
-	providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID := fake.metadata(t)
+	providerSessionID, orderAttemptID, metadataUserID, metadataOrderID := fake.metadata(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: authtest.Deny{}}))
@@ -63,7 +63,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	}
 
 	now := time.Now()
-	deliver(stripeWebhookBody(t, "evt_security_paid", "checkout.session.completed", providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID, now.Unix()))
+	deliver(stripeWebhookBody(t, "evt_security_paid", "checkout.session.completed", providerSessionID, orderAttemptID, metadataUserID, metadataOrderID, now.Unix()))
 	require.True(t, entitled())
 
 	refund, err := json.Marshal(map[string]any{
@@ -82,7 +82,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.False(t, entitled(), "a full provider refund ends the purchase")
 
 	for i, kind := range []string{"checkout.session.completed", "checkout.session.async_payment_succeeded"} {
-		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID, now.Add(time.Duration(i+2)*time.Second).Unix()))
+		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, orderAttemptID, metadataUserID, metadataOrderID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
 	access, err := heldProducts(t.Context(), client, billing.CustomerID(uuid.MustParse(userID)), product.ID)
@@ -97,5 +97,5 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, charged, "replays never record another purchase")
-	require.EqualValues(t, 1, fake.checkoutCalls.Load())
+	require.EqualValues(t, 1, fake.purchaseCalls.Load())
 }

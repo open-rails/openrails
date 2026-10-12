@@ -37,14 +37,14 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	c := w.newCustomer()
 	price := w.membership("archive-provider-goods", 100)
 	priceID, productID := w.priceStorageID(price.ID), price.ProductID.UUID()
-	checkout, err := c.sell(embedded, order{price: price.ID})
+	purchase, err := c.sell(embedded, order{price: price.ID})
 	require.NoError(t, err)
-	require.Nil(t, checkout.order.Lines[0].Quantity, "native flat-price checkout omits quantity")
+	require.Nil(t, purchase.order.Lines[0].Quantity, "native flat-price purchase omits quantity")
 	mid := w.client[embedded].MerchantID()
 	ctx := merchant.WithID(t.Context(), mid)
 	source, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
-	bill := observed.Bill{ExistingOrderID: new(checkout.order.ID.UUID()), PSPID: w.psp["nmi"].UUID(), CustomerID: c.cid().UUID(), Owner: observed.OwnerProvider,
+	bill := observed.Bill{ExistingOrderID: new(purchase.order.ID.UUID()), PSPID: w.psp["nmi"].UUID(), CustomerID: c.cid().UUID(), Owner: observed.OwnerProvider,
 		Kind: "purchase", SourceKind: "verified_invoice", SourceKey: "archive-invoice", ProviderReference: "archive-invoice",
 		Currency: "USD", Total: 100, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted goods", Quantity: new(1), UnitAmount: 100, Amount: 100}},
 		Settled: true, SettlementSource: "cash"}
@@ -60,8 +60,8 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	}
 	original, err := record(source, bill)
 	require.NoError(t, err)
-	require.Equal(t, checkout.order.ID.UUID(), original.Order.ID)
-	require.False(t, original.Created, "provider evidence reuses the checkout order")
+	require.Equal(t, purchase.order.ID.UUID(), original.Order.ID)
+	require.False(t, original.Created, "provider evidence reuses the purchase order")
 	require.True(t, original.Completed)
 	extra := bill
 	extra.Payment = &models.Payment{ID: uuid.New(), CustomerID: bill.CustomerID, Rail: models.RailNMI, PspID: &bill.PSPID,

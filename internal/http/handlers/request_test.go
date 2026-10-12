@@ -63,7 +63,7 @@ func TestCustomerActionRequiresTheAdmittedCustomer(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, rec.Code)
 		require.Contains(t, rec.Body.String(), "customer_action_required")
 	}
-	require.Equal(t, billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: payer.String(), Issuer: "host", Email: "a@example.test", EmailVerified: true}, checkoutVerifiedPrincipal(r))
+	require.Equal(t, billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: payer.String(), Issuer: "host", Email: "a@example.test", EmailVerified: true}, verifiedPrincipal(r))
 }
 
 // The payment Idempotency-Key is text that may be logged: it is bounded and

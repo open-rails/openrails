@@ -4,7 +4,7 @@
 // see docs/payment-method-custody.md. Everything a kind needs in order to be
 // declared, validated, armed and driven from a browser is DATA in this file:
 // its secret slots, its declared settings, which rails' charge paths can accept
-// its instruments, and how a checkout page tokenizes against it.
+// its instruments, and how a payment page tokenizes against it.
 //
 // The point of the registry is that adding a second vendor (HyperSwitch,
 // JusPay, Spreedly) is a Descriptor plus an implementation of the seams it
@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// Browser flows a custodian can require of a checkout page. Same vocabulary as
+// Browser flows a custodian can require of a payment page. Same vocabulary as
 // a rail's flow (internal/merchants): custody changes WHO the browser
 // tokenizes against, not the shape of the interaction.
 const FlowTokenize = "tokenize"
@@ -75,7 +75,7 @@ type Descriptor struct {
 	// WebhookSource is the event source this custodian's own webhooks arrive
 	// as. "" = the custodian sends none.
 	WebhookSource models.EventSource
-	// BrowserFlow is how a checkout page must drive it. "" = the browser never
+	// BrowserFlow is how a payment page must drive it. "" = the browser never
 	// talks to this custodian directly.
 	BrowserFlow string
 }
@@ -136,7 +136,7 @@ var registry = map[string]Descriptor{
 			{Name: SecretAPIKey, Required: true, MerchantWritable: true},
 		},
 		Settings: []SettingKey{
-			// The PUBLIC application key the checkout page tokenizes with.
+			// The PUBLIC application key the payment page tokenizes with.
 			{Name: SettingPublicAPIKey, Kind: ValueString, Required: true, Public: true, PublicField: "public_api_key"},
 			// Network-token provisioning at instrument creation (the $-add-on;
 			// never load-bearing — a provisioning failure warns and the

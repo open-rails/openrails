@@ -47,7 +47,7 @@ func setCustody(custody billing.CardCustody) billing.UpdateMerchantConfiguration
 }
 
 // A merchant chooses platform custody only where the deployment's platform
-// vault can serve every card PSP checkout offers; choosing it records the
+// vault can serve every card PSP purchase offers; choosing it records the
 // merchant's identity in the vault once, which platform cards are held by.
 func TestPlatformCardCustody(t *testing.T) {
 	t.Parallel()

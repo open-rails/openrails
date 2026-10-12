@@ -52,7 +52,7 @@ type transferRequest struct {
 	buyer *customer
 	order billing.OrderID
 	// id is the order's Solana attempt.
-	id        billing.CheckoutAttemptID
+	id        billing.OrderAttemptID
 	recipient string
 	mint      string
 	amount    uint64
@@ -122,29 +122,29 @@ func (p *solanaPay) restart(w *world) {
 	p.runWorkers(w)
 }
 
-func (p *solanaPay) checkout(buyer *customer) transferRequest {
-	return p.checkoutIn(buyer, "DUSD")
+func (p *solanaPay) purchase(buyer *customer) transferRequest {
+	return p.purchaseIn(buyer, "DUSD")
 }
 
-// checkoutIn is buyer paying an order for the pass in token from a wallet:
+// purchaseIn is buyer paying an order for the pass in token from a wallet:
 // the order awaits it, the wallet asks for the transaction and is handed it.
-func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
-	return p.walletCheckout(buyer, p.orderIn(buyer, token))
+func (p *solanaPay) purchaseIn(buyer *customer, token string) transferRequest {
+	return p.walletPayment(buyer, p.orderIn(buyer, token))
 }
 
-// merchantCheckout is buyer paying, from a wallet, an order of the pass the
+// merchantPaymentPage is buyer paying, from a wallet, an order of the pass the
 // merchant made for them: a second open order beside one of their own.
-func (p *solanaPay) merchantCheckout(buyer *customer) transferRequest {
+func (p *solanaPay) merchantPaymentPage(buyer *customer) transferRequest {
 	t := p.w.t
 	made, err := p.w.client[embedded].CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: buyer.cid(),
 		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID(p.prices["DUSD"])}}, IdempotencyKey: uuid.NewString()})
 	require.NoError(t, err)
-	return p.walletCheckout(buyer, p.payFromWallet(buyer, made.ID, "DUSD", strconv.FormatInt(made.Total, 10)))
+	return p.walletPayment(buyer, p.payFromWallet(buyer, made.ID, "DUSD", strconv.FormatInt(made.Total, 10)))
 }
 
-// walletCheckout is the wallet asking for order's transaction and being
+// walletPayment is the wallet asking for order's transaction and being
 // handed it.
-func (p *solanaPay) walletCheckout(buyer *customer, order billing.OrderID) transferRequest {
+func (p *solanaPay) walletPayment(buyer *customer, order billing.OrderID) transferRequest {
 	wallet := solanago.NewWallet().PublicKey()
 	status, encoded := p.walletPost(order, wallet)
 	require.Equal(p.w.t, http.StatusOK, status, encoded)
@@ -204,7 +204,7 @@ func (p *solanaPay) walletPostAt(base string, order billing.OrderID, wallet sola
 func (p *solanaPay) terms(buyer *customer, order billing.OrderID) transferRequest {
 	var attempt uuid.UUID
 	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT attempt_id FROM $schema.orders WHERE id = $1`), order.UUID()).Scan(&attempt))
-	req := p.sessionTerms(buyer, billing.CheckoutAttemptID(attempt))
+	req := p.sessionTerms(buyer, billing.OrderAttemptID(attempt))
 	req.order = order
 	return req
 }
@@ -255,7 +255,7 @@ func (p *solanaPay) sql(query string) string {
 
 func (p *solanaPay) status(req transferRequest) string {
 	var status string
-	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT status FROM $schema.checkout_attempts WHERE id = $1`), uuidOf(p.w.t, req.id)).Scan(&status))
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT status FROM $schema.order_attempts WHERE id = $1`), uuidOf(p.w.t, req.id)).Scan(&status))
 	return status
 }
 
@@ -295,7 +295,7 @@ func (p *solanaPay) receiptOn(req transferRequest, sig string) string {
 
 func (p *solanaPay) payments(req transferRequest) int {
 	var n int
-	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT count(*) FROM $schema.payments WHERE rail = 'solana' AND metadata->>'checkout_attempt_id' = $1 AND deleted_at IS NULL`),
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT count(*) FROM $schema.payments WHERE rail = 'solana' AND metadata->>'order_attempt_id' = $1 AND deleted_at IS NULL`),
 		uuidOf(p.w.t, req.id).String()).Scan(&n))
 	return n
 }
@@ -329,7 +329,7 @@ func (p *solanaPay) nextPoll(req transferRequest) time.Time {
 	return at
 }
 
-func uuidOf(_ *testing.T, id billing.CheckoutAttemptID) uuid.UUID { return id.UUID() }
+func uuidOf(_ *testing.T, id billing.OrderAttemptID) uuid.UUID { return id.UUID() }
 
 // Two replicas' pollers, each asked again and again by the customer's
 // confirm, race on one landed signature: the order is credited once.
@@ -337,7 +337,7 @@ func TestSolanaPayConcurrentConfirmationsCreditOnce(t *testing.T) {
 	p := newSolanaPay(t)
 	second := p.replica()
 	buyer := p.w.newCustomer()
-	req := p.checkout(buyer)
+	req := p.purchase(buyer)
 	sig := p.pay(req, req.amount)
 
 	var wg sync.WaitGroup
@@ -363,7 +363,7 @@ func TestSolanaPayConcurrentConfirmationsCreditOnce(t *testing.T) {
 // never credited; the first stays the one payment.
 func TestSolanaPaySecondTransferIsFlagged(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	first := p.pay(req, req.amount)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "first transfer credited")
 
@@ -385,10 +385,10 @@ func TestSolanaPaySecondTransferIsFlagged(t *testing.T) {
 }
 
 // A transfer that lands after the quote and its grace expired is recorded
-// for review; the checkout is not credited.
+// for review; the purchase is not credited.
 func TestSolanaPayLatePaymentIsFlagged(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	p.w.clock.Advance(15*time.Minute + 30*time.Minute + time.Minute)
 	p.until(func() bool { return p.referenceStatus(req) == "expired" }, "reference expired")
 
@@ -410,15 +410,15 @@ func TestSolanaPayLatePaymentIsFlagged(t *testing.T) {
 // overpaid is credited with the excess flagged.
 func TestSolanaPayAmountMismatch(t *testing.T) {
 	p := newSolanaPay(t)
-	short := p.checkout(p.w.newCustomer())
+	short := p.purchase(p.w.newCustomer())
 	under := p.pay(short, short.amount-1)
 	p.until(func() bool { d, _ := p.receipt(under); return d != "" }, "underpayment recorded")
 	d, reason := p.receipt(under)
 	require.Equal(t, []string{"review", "underpaid"}, []string{d, reason})
 	require.Equal(t, 0, p.payments(short))
-	require.Equal(t, "pending", p.referenceStatus(short), "the checkout can still be paid in full")
+	require.Equal(t, "pending", p.referenceStatus(short), "the purchase can still be paid in full")
 
-	extra := p.checkout(p.w.newCustomer())
+	extra := p.purchase(p.w.newCustomer())
 	over := p.pay(extra, extra.amount+1)
 	p.until(func() bool { return p.status(extra) == "succeeded" }, "overpayment credited")
 	d, reason = p.receipt(over)
@@ -426,13 +426,13 @@ func TestSolanaPayAmountMismatch(t *testing.T) {
 	require.Equal(t, 1, p.reviewAlerts(over))
 }
 
-// The only replica stops while a checkout awaits payment and the wallet pays
+// The only replica stops while a purchase awaits payment and the wallet pays
 // meanwhile; after the restart the pending state is intact and the transfer
 // is credited. The poller has read the reference before the stop, so the
 // restarted one reads it again on its schedule.
 func TestSolanaPayPendingSurvivesRestart(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	require.Equal(t, "pending", p.referenceStatus(req))
 	p.eventually(func() bool { return p.nextPoll(req).After(p.w.clock.Now()) }, "read while pending")
 
@@ -452,7 +452,7 @@ func TestSolanaPayPendingSurvivesRestart(t *testing.T) {
 // restarted process reads it at once, not after the claim's lease.
 func TestSolanaPayStopMidReadReleasesTheReference(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	stalled, release := p.fake.Hold()
 	t.Cleanup(release)
 	p.eventually(func() bool {
@@ -491,7 +491,7 @@ func (solanaPayGC) Kind() string { return "openrails.solana_pay_gc" }
 // review receipts stay.
 func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 	p := newSolanaPay(t)
-	paid := p.checkout(p.w.newCustomer())
+	paid := p.purchase(p.w.newCustomer())
 	credit := p.pay(paid, paid.amount)
 	p.until(func() bool { return p.status(paid) == "succeeded" }, "paid")
 	stray, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: solanago.NewWallet().PublicKey().String(),
@@ -502,12 +502,12 @@ func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 		d, _ := p.receipt(stray)
 		return d == "ignored"
 	}, "a transfer to someone else is ignored")
-	abandoned := p.checkout(p.w.newCustomer())
+	abandoned := p.purchase(p.w.newCustomer())
 	p.w.clock.Advance(time.Hour)
-	p.until(func() bool { return p.referenceStatus(abandoned) == "expired" }, "abandoned checkout expired")
+	p.until(func() bool { return p.referenceStatus(abandoned) == "expired" }, "abandoned purchase expired")
 
 	p.w.clock.Advance(8 * 24 * time.Hour)
-	fresh := p.checkout(p.w.newCustomer())
+	fresh := p.purchase(p.w.newCustomer())
 
 	res, err := p.w.jobs.Insert(t.Context(), solanaPayGC{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
@@ -574,11 +574,11 @@ func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 // One transfer naming two orders' references settles at most one of them:
 // the order its memo names. The signature is credited once, and the other
 // order stays unpaid.
-func TestSolanaPayOneTransferCreditsOneCheckout(t *testing.T) {
+func TestSolanaPayOneTransferCreditsOnePurchase(t *testing.T) {
 	p := newSolanaPay(t)
 	// Two buyers: one customer's request for the same lines answers its one
 	// open order.
-	a, b := p.checkout(p.w.newCustomer()), p.checkout(p.w.newCustomer())
+	a, b := p.purchase(p.w.newCustomer()), p.purchase(p.w.newCustomer())
 	require.Equal(t, a.amount, b.amount)
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: a.recipient, Mint: a.mint,
 		Amount: a.amount, Reference: a.reference, Also: []string{b.reference}, Memo: a.memo, BlockTime: p.w.clock.Now()})
@@ -599,10 +599,10 @@ func TestSolanaPayOneTransferCreditsOneCheckout(t *testing.T) {
 	require.NotEqual(t, p.status(a), p.status(b), "the other order is still unpaid")
 }
 
-// sessionTerms reads the quote a checkout attempt was bound to.
-func (p *solanaPay) sessionTerms(buyer *customer, id billing.CheckoutAttemptID) transferRequest {
+// sessionTerms reads the quote a order attempt was bound to.
+func (p *solanaPay) sessionTerms(buyer *customer, id billing.OrderAttemptID) transferRequest {
 	var recipient, mint, reference, amount string
-	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT rail_state->>'recipient', rail_state->>'token_mint', reference, rail_state->>'token_amount' FROM $schema.checkout_attempts WHERE id = $1`),
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT rail_state->>'recipient', rail_state->>'token_mint', reference, rail_state->>'token_amount' FROM $schema.order_attempts WHERE id = $1`),
 		uuidOf(p.w.t, id)).Scan(&recipient, &mint, &reference, &amount))
 	units, err := strconv.ParseUint(amount, 10, 64)
 	require.NoError(p.w.t, err)
@@ -614,8 +614,8 @@ func (p *solanaPay) sessionTerms(buyer *customer, id billing.CheckoutAttemptID) 
 // the victim's real payment is still credited.
 func TestSolanaPayPoisonedReferenceStillCredits(t *testing.T) {
 	p := newSolanaPay(t)
-	victim := p.checkout(p.w.newCustomer())
-	attacker := p.checkout(p.w.newCustomer())
+	victim := p.purchase(p.w.newCustomer())
+	attacker := p.purchase(p.w.newCustomer())
 	// The attacker pays their own order with a transfer that also names the
 	// victim's reference.
 	attack, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: attacker.recipient, Mint: attacker.mint,
@@ -634,7 +634,7 @@ func TestSolanaPayPoisonedReferenceStillCredits(t *testing.T) {
 // A versioned (v0) transaction is read, never left to poison the reference.
 func TestSolanaPayVersionedTransactionCredited(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: req.recipient, Mint: req.mint,
 		Amount: req.amount, Reference: req.reference, Memo: req.memo, V0: true, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
@@ -647,7 +647,7 @@ func TestSolanaPayVersionedTransactionCredited(t *testing.T) {
 // Token-2022 into the recipient's Token-2022 account.
 func TestSolanaPayToken2022(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkoutIn(p.w.newCustomer(), "PYUSD")
+	req := p.purchaseIn(p.w.newCustomer(), "PYUSD")
 	require.Equal(t, solanafake.DevnetPYUSDMint, req.mint)
 	sig := p.pay(req, req.amount)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "the Token-2022 payment is credited")
@@ -699,7 +699,7 @@ func TestSolanaPayWalkReadsTheWholeHistory(t *testing.T) {
 		{"a page before and after", 1_000, 1_000},
 		{"many pages after", 0, 6_500},
 	} {
-		req := p.checkout(p.w.newCustomer())
+		req := p.purchase(p.w.newCustomer())
 		p.stopWorkers[p.w]() // the whole history lands before any read
 		p.spam(req, c.before)
 		sig := p.pay(req, req.amount)
@@ -715,7 +715,7 @@ func TestSolanaPayWalkReadsTheWholeHistory(t *testing.T) {
 // still found once a node that holds it answers.
 func TestSolanaPayDroppedReadDoesNotSkipHistory(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	p.stopWorkers[p.w]()
 	sig := p.pay(req, req.amount)
 	spam := p.spam(req, 1_000)
@@ -728,7 +728,7 @@ func TestSolanaPayDroppedReadDoesNotSkipHistory(t *testing.T) {
 // A settled reference whose history walk has not finished is never collected.
 func TestSolanaPayGCKeepsAnUnfinishedWalk(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	p.pay(req, req.amount)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "paid")
 	p.stopWorkers[p.w]()
@@ -745,7 +745,7 @@ func TestSolanaPayGCKeepsAnUnfinishedWalk(t *testing.T) {
 // commitment credits nothing, however often the customer confirms.
 func TestSolanaPayCreditsOnlyFinalized(t *testing.T) {
 	p := newSolanaPay(t)
-	req := p.checkout(p.w.newCustomer())
+	req := p.purchase(p.w.newCustomer())
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: req.recipient, Mint: req.mint,
 		Amount: req.amount, Reference: req.reference, Memo: req.memo, Confirmed: true, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
@@ -770,7 +770,7 @@ func TestSolanaPayAmountIsWhatTheRecipientReceived(t *testing.T) {
 		"inside another program":    func(tr *solanafake.Transfer) { tr.Inner = true },
 		"into an account it owns":   func(tr *solanafake.Transfer) { tr.Account = solanago.NewWallet().PublicKey() },
 	} {
-		req := p.checkout(p.w.newCustomer())
+		req := p.purchase(p.w.newCustomer())
 		tr := solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: req.recipient, Mint: req.mint, Amount: req.amount,
 			Reference: req.reference, Memo: req.memo, BlockTime: p.w.clock.Now()}
 		shape(&tr)
@@ -780,7 +780,7 @@ func TestSolanaPayAmountIsWhatTheRecipientReceived(t *testing.T) {
 		require.Equal(t, "credited", p.receiptOn(req, sig), name)
 	}
 
-	wrong := p.checkout(p.w.newCustomer())
+	wrong := p.purchase(p.w.newCustomer())
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: wrong.recipient, Mint: solanafake.DevnetUSDCMint,
 		Amount: wrong.amount, Reference: wrong.reference, Memo: wrong.memo, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
@@ -838,8 +838,8 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(body), &refusal), body)
 		return refusal.Error.Metadata.Table
 	}
-	req := p.checkout(p.w.newCustomer())
-	require.Contains(t, []string{"checkout_attempts", "solana_pay_references"}, refusedBy(), "an order awaiting its wallet holds the archive")
+	req := p.purchase(p.w.newCustomer())
+	require.Contains(t, []string{"order_attempts", "solana_pay_references"}, refusedBy(), "an order awaiting its wallet holds the archive")
 
 	p.pay(req, req.amount)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "paid")
@@ -859,7 +859,7 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 func TestSolanaPayToken2022TransferFee(t *testing.T) {
 	p := newSolanaPay(t)
 	p.fake.SetTransferFee(solanafake.DevnetPYUSDMint, 100, 1_000_000_000) // 1%
-	req := p.checkoutIn(p.w.newCustomer(), "PYUSD")
+	req := p.purchaseIn(p.w.newCustomer(), "PYUSD")
 	net := p.sessionTerms(nil, req.id).amount
 	require.Greater(t, req.amount, net, "the wallet is asked for the gross")
 	sig := p.pay(req, req.amount)
@@ -867,7 +867,7 @@ func TestSolanaPayToken2022TransferFee(t *testing.T) {
 	d, reason := p.receipt(sig)
 	require.Equal(t, []string{"credited", ""}, []string{d, reason})
 
-	raised := p.checkoutIn(p.w.newCustomer(), "PYUSD")
+	raised := p.purchaseIn(p.w.newCustomer(), "PYUSD")
 	p.fake.SetTransferFee(solanafake.DevnetPYUSDMint, 200, 1_000_000_000)
 	short := p.pay(raised, raised.amount)
 	p.until(func() bool { return p.receiptOn(raised, short) != "" }, "the short transfer is recorded")
@@ -912,7 +912,7 @@ func TestSolanaPayRefusesTransferHookForTransactionRequest(t *testing.T) {
 func TestSolanaPayOrderRequotesAnExpiredQuote(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
-	first := p.checkout(buyer)
+	first := p.purchase(buyer)
 	p.w.clock.Advance(16 * time.Minute)
 	status, encoded := p.walletPost(first.order, solanago.NewWallet().PublicKey())
 	require.Equal(t, http.StatusOK, status, encoded)
@@ -948,7 +948,7 @@ func TestSolanaPayOrderRefusals(t *testing.T) {
 
 	// Another buyer: this one's request for the same lines answers its open
 	// order above.
-	paid := p.checkout(p.w.newCustomer())
+	paid := p.purchase(p.w.newCustomer())
 	p.pay(paid, paid.amount)
 	p.until(func() bool { return p.status(paid) == "succeeded" }, "paid")
 	status, _ = p.walletPost(paid.order, wallet)

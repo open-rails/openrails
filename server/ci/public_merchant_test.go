@@ -152,13 +152,13 @@ func TestPublicConfigHasNoMerchantPart(t *testing.T) {
 	require.Equal(t, billing.CodeAuthenticationRequired, errorCode(t, none))
 }
 
-// On the checkout host a checkout URL's secret reads its order's merchant's
+// On the payment origin a pay URL's secret reads its order's merchant's
 // payment setup and name, never stored by a cache; the deployment's
 // configuration there names no merchant either.
-func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
+func TestPurchaseSecretReadsItsMerchantConfig(t *testing.T) {
 	w := newWorld(t)
 	ctx := t.Context()
-	// secret is the secret of a checkout a merchant's backend made.
+	// secret is the secret of a purchase a merchant's backend made.
 	secret := func(mid billing.MerchantID) string {
 		t.Helper()
 		shop := handle(t, w.srv, mid)
@@ -171,10 +171,10 @@ func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
 		price, err := shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: key, Currency: "USD", UnitAmount: 5_000_000})
 		require.NoError(t, err)
 		order, err := shop.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}},
-			Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}, IdempotencyKey: uuid.NewString()})
+			PayURL: &billing.OrderPayURLParams{SuccessURL: "https://shop.e2e.test/thanks"}, IdempotencyKey: uuid.NewString()})
 		require.NoError(t, err)
-		require.NotNil(t, order.Checkout)
-		_, s, ok := strings.Cut(*order.Checkout.URL, "#")
+		require.NotNil(t, order.PayURLExpiresAt)
+		_, s, ok := strings.Cut(*order.PayURL, "#")
 		require.True(t, ok)
 		return s
 	}
@@ -188,7 +188,7 @@ func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
 	shop, mart := secret(w.shop), secret(w.mart)
 
 	for _, tc := range []struct{ secret, name, key string }{{shop, "Network Shop", "test"}, {mart, "Network Mart", "mart"}} {
-		got := read(checkoutHost, "/v1/me/config", tc.secret)
+		got := read(paymentHost, "/v1/me/config", tc.secret)
 		require.Equal(t, http.StatusOK, got.Code, got.Body.String())
 		require.Equal(t, "no-store", got.Header().Get("Cache-Control"))
 		var cfg billing.CustomerConfig
@@ -198,7 +198,7 @@ func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
 		require.Equal(t, tc.key, cfg.Payment.PSPs[0].Config["tokenization_key"])
 	}
 
-	deployment := read(checkoutHost, "/v1/config", shop)
+	deployment := read(paymentHost, "/v1/config", shop)
 	require.Equal(t, http.StatusOK, deployment.Code, deployment.Body.String())
 	require.Equal(t, "no-store", deployment.Header().Get("Cache-Control"))
 	var doc map[string]json.RawMessage
@@ -206,8 +206,8 @@ func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
 	require.NotContains(t, doc, "payment")
 	require.NotContains(t, doc, "merchant")
 
-	refused(t, read(checkoutHost, "/v1/me/config", ""), http.StatusNotFound, "checkout_not_found")
-	// The secret is a credential on the checkout host alone.
+	refused(t, read(paymentHost, "/v1/me/config", ""), http.StatusNotFound, "pay_url_not_found")
+	// The secret is a credential on the payment origin alone.
 	require.Equal(t, http.StatusUnauthorized, read(serverHost, "/v1/me/config", shop).Code)
 }
 

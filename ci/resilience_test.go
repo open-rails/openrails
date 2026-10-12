@@ -123,7 +123,7 @@ func probe(t *testing.T, rt *openrails.Engine, name string) error {
 	return nil
 }
 
-func checkoutPSP(t *testing.T, rt *openrails.Engine, rail string) (billing.PSPPaymentConfig, bool) {
+func routedPSP(t *testing.T, rt *openrails.Engine, rail string) (billing.PSPPaymentConfig, bool) {
 	t.Helper()
 	for _, psp := range customerConfig(t, rt).Payment.PSPs {
 		if psp.Rail == rail {
@@ -227,16 +227,16 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	require.Error(t, probe(t, rt, "openrails_psp_posture"), "the NMI verdict is still unknown")
 
 	for _, rail := range []string{"stripe", "nmi"} {
-		_, offered := checkoutPSP(t, rt, rail)
+		_, offered := routedPSP(t, rt, rail)
 		require.True(t, offered, rail)
 	}
-	_, armed := checkoutPSP(t, rt, "solana")
+	_, armed := routedPSP(t, rt, "solana")
 	require.False(t, armed, "a first boot without Vault leaves only the Solana rail disarmed")
 	_, err := sign(t, rt)
 	require.ErrorIs(t, err, vault.ErrUnavailable)
 
 	fake.SetUp(true)
-	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, rt, "solana"); return ok }, 30*time.Second, 50*time.Millisecond, "the Solana rail arms once Vault answers")
+	require.Eventually(t, func() bool { _, ok := routedPSP(t, rt, "solana"); return ok }, 30*time.Second, 50*time.Millisecond, "the Solana rail arms once Vault answers")
 	require.NoError(t, probe(t, rt, "openrails_vault"))
 	signature, err := sign(t, rt)
 	require.NoError(t, err)
@@ -260,14 +260,14 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	want := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 
 	first, _ := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
-	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
-	stored, _ := checkoutPSP(t, first, "solana")
+	require.Eventually(t, func() bool { _, ok := routedPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
+	stored, _ := routedPSP(t, first, "solana")
 	require.NoError(t, first.Close(context.Background()))
 
 	fake.SetUp(false)
 	second, client := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
 	waitReady(t, second)
-	again, ok := checkoutPSP(t, second, "solana")
+	again, ok := routedPSP(t, second, "solana")
 	require.True(t, ok, "the stored identity keeps the rail provisioned")
 	require.Equal(t, stored.PSPID, again.PSPID)
 	_, err := sign(t, second)
@@ -319,7 +319,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 
 	first, client := boot()
-	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { _, ok := routedPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
 	signerKey := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey))
 	once, monthly := solanaSession(t, first, client, nil, signerKey), solanaSession(t, first, client, chain, signerKey)
@@ -345,7 +345,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
 	// A session minted before the change no longer sells on Solana: the
 	// unapproved rail drops out of routing before anything is signed.
-	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, once), "a one-time Solana checkout is refused")
+	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, once), "a one-time Solana purchase is refused")
 	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, monthly), "a recurring Solana subscribe is refused")
 	signer := func(rt *openrails.Engine) solanaint.Signer {
 		r := engine.Graph(rt).Runtime
@@ -353,9 +353,9 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	}
 	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
 	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
-	psp, ok := checkoutPSP(t, second, "solana")
+	psp, ok := routedPSP(t, second, "solana")
 	require.True(t, ok)
-	require.Equal(t, billing.PSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
+	require.Equal(t, billing.PSPTemporarilyUnavailable, psp.Status, "purchase lists the unapproved rail as temporarily unavailable")
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
 
@@ -396,7 +396,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.NoError(t, second.Close(context.Background()))
 
 	third, client := boot()
-	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, third, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { _, ok := routedPSP(t, third, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, third, "openrails_solana_signer_identity"), "approval survives a restart")
 	require.NoError(t, railConfig(third, mid))
 }

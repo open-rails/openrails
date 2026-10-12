@@ -37,7 +37,7 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 
 | Bucket | Config key | Default rpm | Routes |
 |---|---|---|---|
-| `checkout` | `checkout` | 10 | Browser checkout mint/pay POSTs — see note |
+| `purchase` | `purchase` | 10 | Browser purchase mint/pay POSTs — see note |
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
@@ -54,9 +54,9 @@ model/tool limits still apply. These are HTTP abuse limits on both standalone
 and embedded routes; trusted in-process Client operations follow the normal
 library boundary and do not consume HTTP counters.
 
-> The `checkout` bucket covers `POST /v1/me/orders`, an order's `/pay` and
+> The `purchase` bucket covers `POST /v1/me/orders`, an order's `/pay` and
 > `/confirm`, and `POST /v1/orders/{id}/solana-pay`. Read-only GETs are not
-> limited. A hosted checkout URL is also limited per order, whatever address
+> limited. A pay URL is also limited per order, whatever address
 > presents it: 120 reads and 10 pays a minute.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
@@ -68,7 +68,7 @@ library boundary and do not consume HTTP counters.
 
 Before any counting, a declared `Content-Length` over the bucket ceiling is rejected with `413`
 (+ `Retry-After: 60`); the body is also wrapped in `MaxBytesReader` so chunked uploads are capped
-on read. Ceilings: `checkout`/`subscriptions`/`payment-methods` 64 KiB; every other route has the 1 MiB request body limit.
+on read. Ceilings: `purchase`/`subscriptions`/`payment-methods` 64 KiB; every other route has the 1 MiB request body limit.
 Webhooks are deliberately absent — the handler enforces per-rail caps (CCBill 16 KiB, NMI 64 KiB,
 Basis Theory 64 KiB, Stripe 256 KiB).
 
@@ -86,7 +86,7 @@ knob. `captcha.provider` is `turnstile` (default), `recaptcha-v3`, or `hcaptcha`
 URLs, thresholds, and TTLs are hardcoded policy, not config.
 
 - A subject whose request count reaches **3×** its bucket limit within the window is marked
-  challenged for **15 minutes**. Only the `checkout`, `payment-methods`, and `subscriptions`
+  challenged for **15 minutes**. Only the `purchase`, `payment-methods`, and `subscriptions`
   buckets escalate or ask for a solve. Merchant, console and server-to-server API routes never
   meet a captcha.
 - While challenged, requests get `403` with `X-Captcha-Required` and error code
@@ -107,7 +107,7 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 Cards the provider refused are counted like every other limit: in Redis, shared
 by every instance, or without it in the process's memory, one instance only;
 never in PostgreSQL. A request refused before any provider call (a
-missing field, an unconfigured PSP) is not a decline. Card saves and checkout
+missing field, an unconfigured PSP) is not a decline. Card saves and purchase
 payments check it before any provider call and answer `429` `card_attempts_blocked`
 with `Retry-After`:
 

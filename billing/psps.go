@@ -19,7 +19,7 @@ const (
 type PSP struct {
 	ID PSPID `json:"id"`
 	// Key is the merchant's name for the PSP: the value price psp_links and
-	// checkout's payment.rail name it by. A key names one PSP for good.
+	// purchase's payment.rail name it by. A key names one PSP for good.
 	Key         string `json:"key"`
 	Rail        Rail   `json:"rail"`
 	Environment string `json:"environment"`
@@ -86,7 +86,7 @@ type UpdatePSPParams struct {
 	// Archived retires the PSP: it takes no new work and serves its
 	// subscriptions until they drain; no provider call is made, and an
 	// archived PSP is never restored. The last active PSP on its rail
-	// archives only with AllowLast, and new checkout on the rail stops.
+	// archives only with AllowLast, and new purchase on the rail stops.
 	Archived  bool `json:"archived"`
 	AllowLast bool `json:"allow_last"`
 }
@@ -109,7 +109,7 @@ type RailDefinition struct {
 	SettingKeys    []string `json:"setting_keys"`
 }
 
-// PreviewPSPRoutingParams asks which PSP a checkout for a price would use.
+// PreviewPSPRoutingParams asks which PSP a purchase for a price would use.
 // PSP names one explicitly (a PSP key); empty asks what the merchant's
 // routing picks.
 type PreviewPSPRoutingParams struct {
@@ -119,7 +119,7 @@ type PreviewPSPRoutingParams struct {
 	PSP     string `json:"psp"`
 }
 
-// PSPRoutingPreview is the routing decision a checkout would get, and why
+// PSPRoutingPreview is the routing decision a purchase would get, and why
 // every other PSP was passed over. Nothing is created.
 type PSPRoutingPreview struct {
 	// Policy is who decided: explicit, merchant or default.

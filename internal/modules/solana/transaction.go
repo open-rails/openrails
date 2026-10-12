@@ -89,7 +89,7 @@ func (s *SolanaTransactionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a checkout attempt.
+// BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a order attempt.
 func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.Context, req *PaymentTransactionBuildRequest) (*TransactionBuildResponse, error) {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {
@@ -115,7 +115,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	}
 	if req.SessionID == uuid.Nil {
 		// Every purchase tx carries the memo stamp; refuse to build unstamped.
-		return nil, fmt.Errorf("checkout attempt id is required (purchase memo local-id)")
+		return nil, fmt.Errorf("order attempt id is required (purchase memo local-id)")
 	}
 
 	referenceStr := ""
@@ -147,7 +147,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		"token_amount": moneyutil.FormatBaseUnits(req.TokenAmount, req.TokenSymbol),
 		"from_wallet":  req.UserWallet,
 		"to_wallet":    req.Recipient,
-	}).Info("Built Solana payment transaction from checkout quote")
+	}).Info("Built Solana payment transaction from purchase quote")
 
 	return &TransactionBuildResponse{
 		TransactionBase64:    txResp.TransactionBase64,
@@ -196,7 +196,7 @@ const (
 var ErrReferenceUndetermined = errors.New("solana: could not determine whether a transfer landed on the reference")
 
 // ReferenceHasOurTransfer reports whether a transaction built for this
-// checkout (its memo) and paying the recipient has landed on the reference at
+// purchase (its memo) and paying the recipient has landed on the reference at
 // confirmed commitment. Failed, foreign and unreadable transactions do not
 // count, so they cannot stop the buyer from retrying. The check is bounded in
 // signatures read and time; past either bound it answers

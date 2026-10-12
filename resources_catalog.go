@@ -46,7 +46,7 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 
 // DeleteProduct deletes a product nothing ever referred to, with its prices:
 // reads leave it out, and creating its key again revives it. A product a
-// purchase, subscription, grant, access, checkout, migration, provider write,
+// purchase, subscription, grant, access, purchase, migration, provider write,
 // PSP link or rate card refers to is refused (billing.ErrConflict, code
 // product_in_use): archive it with UpdateProduct instead.
 func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) error {

@@ -614,7 +614,7 @@ func summarizePrune(logs []pullProviderPruneLog) pruneCounts {
 		add("subscriptions", "skipped", log.Result.SubscriptionsSkipped)
 		add("payments", key, log.Result.Payments)
 		add("payments", "skipped", log.Result.PaymentsSkipped)
-		add("checkout_attempts", key, log.Result.CheckoutAttempts)
+		add("order_attempts", key, log.Result.OrderAttempts)
 		add("product_access", key, log.Result.ProductAccess)
 	}
 	return out

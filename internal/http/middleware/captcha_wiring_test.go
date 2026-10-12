@@ -22,6 +22,6 @@ func TestEnabledCaptchaAlwaysHasVerifier(t *testing.T) {
 	for _, cfg := range []*config.CaptchaConfig{nil, {}, {SiteKey: "site"}, {SecretKey: "secret"}, {SiteKey: " ", SecretKey: "secret"}} {
 		require.False(t, config.CaptchaEnabled(cfg))
 		require.Nil(t, captcha.NewVerifier(cfg, nil))
-		require.False(t, captcha.ShouldApply(cfg, "checkout"), "disabled captcha must never enforce")
+		require.False(t, captcha.ShouldApply(cfg, "purchase"), "disabled captcha must never enforce")
 	}
 }

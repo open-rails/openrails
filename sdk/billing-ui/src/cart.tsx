@@ -1,13 +1,13 @@
 // Shows the customer's cart, priced live, removes lines and checks it out:
 // one order made from the cart (cart: true, at the total shown), then paid
-// here with OrderCheckout unless the host takes the order itself. Hosts add
+// here with OrderPayment unless the host takes the order itself. Hosts add
 // and change lines with client.setCartLine.
 import * as React from "react"
 
 import {
   appearanceStyle,
   appearanceTheme,
-  type CheckoutAppearance,
+  type BillingAppearance,
 } from "./appearance"
 import type { BillingClient } from "./client/client"
 import type { Cart as CartData, Order } from "./client/types"
@@ -15,7 +15,7 @@ import { PayButton } from "./components/pay-button"
 import { LoadingSkeleton } from "./components/states"
 import { useMessages } from "./i18n/context"
 import { formatAmount } from "./lib/money"
-import { OrderCheckout } from "./order-checkout"
+import { OrderPayment } from "./order-payment"
 import { useCurrencyScales } from "./react/config"
 import { useBillingContext } from "./react/context"
 import { cn } from "cn"
@@ -24,12 +24,12 @@ export interface CartProps {
   /** The client to read and buy through; default: the provider's. */
   client?: BillingClient
   /**
-   * The order made from the cart. Default: pay it here with OrderCheckout.
+   * The order made from the cart. Default: pay it here with OrderPayment.
    */
   onOrder?: (order: Order) => void
-  /** Passed to OrderCheckout: the order is complete, or processing. */
+  /** Passed to OrderPayment: the order is complete, or processing. */
   onSettled?: (order: Order) => void
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 
@@ -49,7 +49,7 @@ export function Cart({
   const [order, setOrder] = React.useState<Order>()
   const [error, setError] = React.useState<string>()
   const [busy, setBusy] = React.useState(false)
-  // One key per checkout attempt: a retry answers the same order.
+  // One key per order attempt: a retry answers the same order.
   const [key, setKey] = React.useState(() => crypto.randomUUID())
 
   React.useEffect(() => {
@@ -75,7 +75,7 @@ export function Cart({
 
   if (order && !onOrder)
     return (
-      <OrderCheckout
+      <OrderPayment
         orderId={order.id}
         client={client}
         onSettled={onSettled}
@@ -104,7 +104,7 @@ export function Cart({
       setKey(crypto.randomUUID())
     })
 
-  const checkout = () =>
+  const purchase = () =>
     act(async () => {
       const result = await client.createOrder({
         cart: true,
@@ -174,7 +174,7 @@ export function Cart({
           className="grid gap-2"
           onSubmit={(event) => {
             event.preventDefault()
-            void checkout()
+            void purchase()
           }}
         >
           <PayButton label="Check out" processing={busy} disabled={!buyable} />

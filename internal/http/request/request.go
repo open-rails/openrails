@@ -28,7 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/http/wireform"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -384,16 +384,16 @@ func (r *Request) Set(key string, value any) {
 	r.t.Set(key, value)
 }
 
-// GetUser is a customer route's admitted customer, as the checkout services
+// GetUser is a customer route's admitted customer, as the purchase services
 // take it: from the route gate only, never the request's path, query or body.
 // Nil anywhere else.
-func (r *Request) GetUser() *checkout.UserIdentity {
+func (r *Request) GetUser() *payment.UserIdentity {
 	scope, ok := r.CustomerScope()
 	if !ok {
 		return nil
 	}
 	c, _ := billingauth.IdentityFromContext(r.Request.Context())
-	user := &checkout.UserIdentity{ID: scope.Customer().String(), Username: c.Username, ClientIP: r.ClientIP()}
+	user := &payment.UserIdentity{ID: scope.Customer().String(), Username: c.Username, ClientIP: r.ClientIP()}
 	if c.EmailVerified && c.Email != "" {
 		email := c.Email
 		user.Email = &email

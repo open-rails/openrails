@@ -7,7 +7,7 @@ import (
 
 // CreditGrantSpec describes the prepaid currency balance delivered by a
 // successful payment. Exactly one of Amount and FromPayment is required.
-// The accepted terms are frozen at checkout; later catalog edits do not
+// The accepted terms are frozen at purchase; later catalog edits do not
 // alter a purchased lot. Expiry starts when the credits become available.
 type CreditGrantSpec struct {
 	Currency         string `json:"currency"`
@@ -18,7 +18,7 @@ type CreditGrantSpec struct {
 
 // CustomerAmount is an immutable, inclusive range, in native units of the
 // price's currency, that a customer may choose for a one-off credit deposit.
-// The price's UnitAmount is zero; checkout requires an amount within it.
+// The price's UnitAmount is zero; purchase requires an amount within it.
 type CustomerAmount struct {
 	MinAmount int64 `json:"min_amount,string"`
 	MaxAmount int64 `json:"max_amount,string"`

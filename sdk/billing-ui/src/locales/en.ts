@@ -143,7 +143,7 @@ export const en = {
     inUse:
       "This card pays for an active subscription. Switch that subscription to another card first.",
   },
-  checkout: {
+  purchase: {
     renews: "Renews {period}",
   },
   history: {

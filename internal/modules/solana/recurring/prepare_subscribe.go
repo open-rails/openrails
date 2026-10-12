@@ -104,9 +104,9 @@ type PrepareSubscribeInput struct {
 	PeriodHours      uint64
 	PlanCreatedAt    int64
 
-	// Reference is the checkout's Solana Pay REFERENCE (read-only, non-signer
+	// Reference is the purchase's Solana Pay REFERENCE (read-only, non-signer
 	// account meta). The merchant co-signs the bundle carrying it, which binds
-	// the first payment to that checkout (ConfirmEnrollment requires it), and the
+	// the first payment to that purchase (ConfirmEnrollment requires it), and the
 	// reference poller finds the landed tx via getSignaturesForAddress.
 	Reference string
 }
@@ -261,8 +261,8 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if s.signer == nil {
 		return nil, fmt.Errorf("recurring: atomic subscribe requires a cranker signer")
 	}
-	// Carry the checkout's reference (its own instruction — see
-	// referenceTagInstruction): it binds the bundle to the checkout and lets the
+	// Carry the purchase's reference (its own instruction — see
+	// referenceTagInstruction): it binds the bundle to the purchase and lets the
 	// poller detect it.
 	ixs, err = withReference(ixs, subscriber, in.Reference)
 	if err != nil {

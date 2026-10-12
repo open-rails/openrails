@@ -13,18 +13,18 @@ import (
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -91,8 +91,8 @@ func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID, en
 		r.InternalError("failed to read payment methods", err)
 		return
 	}
-	if _, ok := hostedcheckout.FromContext(r.Request.Context()); ok {
-		out = hostedcheckout.SavedCards(out)
+	if _, ok := paymentpage.FromContext(r.Request.Context()); ok {
+		out = paymentpage.SavedCards(out)
 	}
 	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out, Next: methods.Next})
 }
@@ -139,13 +139,13 @@ func CreatePaymentMethod(r *httprequest.Request) {
 					return
 				}
 			}
-			if r.State.CheckoutAttemptService == nil {
+			if r.State.OrderAttemptService == nil {
 				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 				return
 			}
 			ctx, cancel := r.Budget(createPaymentMethodTimeout)
 			defer cancel()
-			saved, err := r.State.CheckoutAttemptService.SaveCustodianCard(ctx, req, r.Header("Idempotency-Key"), user, billingDetailsInput(req.BillingDetails).metadata())
+			saved, err := r.State.OrderAttemptService.SaveCustodianCard(ctx, req, r.Header("Idempotency-Key"), user, billingDetailsInput(req.BillingDetails).metadata())
 			writeSavedCard(r, user, http.StatusCreated, saved, err)
 			return
 		}
@@ -246,15 +246,15 @@ func pspRail(r *httprequest.Request, merchantID, pspID uuid.UUID) string {
 }
 
 // saveStripeCard saves a card the page's Stripe fields tokenized.
-func saveStripeCard(r *httprequest.Request, user *checkout.UserIdentity, psp uuid.UUID, token string) {
+func saveStripeCard(r *httprequest.Request, user *payment.UserIdentity, psp uuid.UUID, token string) {
 	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok || r.State.CheckoutService == nil {
+	if !ok || r.State.PurchaseService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
 		return
 	}
 	ctx, cancel := r.Budget(createPaymentMethodTimeout)
 	defer cancel()
-	saved, err := r.State.CheckoutService.SaveStripeCard(ctx, psp, token, user, resolver)
+	saved, err := r.State.PurchaseService.SaveStripeCard(ctx, psp, token, user, resolver)
 	writeSavedCard(r, user, http.StatusCreated, saved, err)
 }
 
@@ -281,13 +281,13 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		return
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
-		if r.State.CheckoutAttemptService == nil {
+		if r.State.OrderAttemptService == nil {
 			r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 			return
 		}
 		ctx, cancel := r.Budget(createPaymentMethodTimeout)
 		defer cancel()
-		saved, err := r.State.CheckoutAttemptService.ConfirmCustodianCard(ctx, id.UUID(), user, req.Capture)
+		saved, err := r.State.OrderAttemptService.ConfirmCustodianCard(ctx, id.UUID(), user, req.Capture)
 		writeSavedCard(r, user, http.StatusOK, saved, err)
 		return
 	}
@@ -296,15 +296,15 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		return
 	}
 	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok || r.State.CheckoutService == nil {
+	if !ok || r.State.PurchaseService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
 		return
 	}
-	saved, err := r.State.CheckoutService.ConfirmStripeCard(r.Request.Context(), id.UUID(), user, resolver)
+	saved, err := r.State.PurchaseService.ConfirmStripeCard(r.Request.Context(), id.UUID(), user, resolver)
 	writeSavedCard(r, user, http.StatusOK, saved, err)
 }
 
-func writeSavedCard(r *httprequest.Request, user *checkout.UserIdentity, status int, saved checkout.SavedCard, err error) {
+func writeSavedCard(r *httprequest.Request, user *payment.UserIdentity, status int, saved payment.SavedCard, err error) {
 	var refused *paymentmethods.PaymentMethodError
 	switch {
 	case errors.As(err, &refused):
@@ -314,19 +314,19 @@ func writeSavedCard(r *httprequest.Request, user *checkout.UserIdentity, status 
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 		return
-	case errors.Is(err, checkout.ErrPaymentMethodStale):
+	case errors.Is(err, payment.ErrPaymentMethodStale):
 		writePaymentMethodStale(r)
 		return
-	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
+	case errors.Is(err, payment.ErrOrderAttemptValidation):
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid card save request").WithParam("psp_id"))
 		return
-	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
+	case errors.Is(err, payment.ErrCardCaptureUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 		return
-	case errors.Is(err, checkout.ErrCheckoutAttemptConflict):
+	case errors.Is(err, payment.ErrOrderAttemptConflict):
 		r.ErrorCode(billing.CodeResourceConflict, "card save conflicts with its accepted request")
 		return
-	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
+	case errors.Is(err, payment.ErrOrderAttemptExpired):
 		r.ErrorCode(billing.CodePaymentMethodStale, "card save expired")
 		return
 	case err != nil:

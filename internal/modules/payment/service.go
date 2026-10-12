@@ -1,0 +1,792 @@
+package payment
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/open-rails/openrails/billing"
+
+	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
+	log "github.com/sirupsen/logrus"
+)
+
+// TierChangeResponse represents the response from a tier change operation.
+type TierChangeResponse = billing.SubscriptionChange
+
+// TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
+// reports what a confirm WOULD charge now and at the next renewal, without
+// touching Stripe or the local subscription. The frontend renders it as a
+// "Right now: $X / On <date>: $Y" confirmation before calling change.
+type TierChangePreviewResponse = billing.SubscriptionChangePreview
+
+// PurchaseService handles unified purchase for subscriptions and one-time purchases
+type PurchaseService struct {
+	StripeClients            *stripeapi.Factory
+	SubscriptionService      *subscriptions.SubscriptionService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
+	PaymentService           *payments.PaymentService
+	EntitlementService       *entitlements.EntitlementService
+	Fulfillment              *FulfillmentService
+	PaymentMethodResolver    *PaymentMethodResolver
+	NMISaleService           *NMISaleService
+	CustodianSaleService     *CustodianSaleService
+	PaymentMethodService     *paymentmethods.PaymentMethodService
+	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	MerchantSecrets          merchants.MerchantSecretReader
+	ProviderSecrets          merchants.PSPSecretResolver
+	// RailCustomerService maps users to rail customer ids: one Stripe customer
+	// per user, recorded at purchase rather than only by webhooks.
+	RailCustomerService *payments.RailCustomerService
+	// StripeService resolves or creates the Stripe customer and runs the
+	// webhook-independent duplicate guard.
+	StripeService *subscriptions.StripeService
+	// Intents executes durable write-ahead provider intents; a new
+	// membership's charge goes through it.
+	Intents   intentExecutor
+	Lifecycle *subscriptions.SubscriptionLifecycleService
+	clock     clockwork.Clock
+	Config    *config.Config
+	// Posture gates provider writes per merchant; nil parks them.
+	Posture intents.ModeView
+	Rails   railresolve.Source
+	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
+	// one from Config.
+	NMIClients *railresolve.NMIFactory
+	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
+	// entirely (test seam; nil = the scoped resolution).
+	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
+	// StripeEngines reads a Stripe engine payment's issuer challenge for the
+	// customer's next action.
+	StripeEngines intents.StripeEngineServiceResolver
+}
+
+func (s *PurchaseService) SetSubscriptionLifecycleService(l *subscriptions.SubscriptionLifecycleService) {
+	s.Lifecycle = l
+}
+
+// now returns the current time from the service's clock, or time.Now() if no clock is set.
+func (s *PurchaseService) now() time.Time {
+	if s.clock != nil {
+		return s.clock.Now()
+	}
+	return time.Now()
+}
+
+func (s *PurchaseService) SetClock(c clockwork.Clock) {
+	s.clock = timeutil.FirstClock(c)
+	if s.Fulfillment != nil {
+		s.Fulfillment.SetClock(s.clock)
+	}
+}
+
+func (s *PurchaseService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+// NewPurchaseService creates a new PurchaseService
+func NewPurchaseService(
+	subscriptionService *subscriptions.SubscriptionService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
+	paymentService *payments.PaymentService,
+	entitlementService *entitlements.EntitlementService,
+	paymentMethodService *paymentmethods.PaymentMethodService,
+	railPMService *paymentmethods.RailPaymentMethodService,
+	railCustomerService *payments.RailCustomerService,
+	cfg *config.Config,
+	railSet railresolve.Source,
+	clocks ...clockwork.Clock,
+) *PurchaseService {
+	clock := timeutil.FirstClock(clocks...)
+	service := &PurchaseService{
+		SubscriptionService:      subscriptionService,
+		ProductService:           productService,
+		PriceService:             priceService,
+		PaymentService:           paymentService,
+		EntitlementService:       entitlementService,
+		Fulfillment:              NewFulfillmentService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		PaymentMethodResolver:    NewPaymentMethodResolver(paymentMethodService, railPMService),
+		PaymentMethodService:     paymentMethodService,
+		RailPaymentMethodService: railPMService,
+		RailCustomerService:      railCustomerService,
+		StripeService:            &subscriptions.StripeService{Config: cfg, Rails: railSet},
+		clock:                    clock,
+		Config:                   cfg,
+		Rails:                    railSet,
+	}
+	service.NMISaleService = NewNMISaleService(service.Fulfillment, service.PaymentMethodResolver, railPMService)
+	// The scoped resolver is the only NMI client source; armed once
+	// SetMerchantSecretStore wires the merchant secret store.
+	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
+	service.CustodianSaleService = &CustodianSaleService{
+		Fulfillment:          service.Fulfillment,
+		PaymentMethodService: paymentMethodService,
+		Rails:                railSet,
+		Config:               cfg,
+	}
+	if railPMService != nil {
+		service.CustodianSaleService.DB = railPMService.DB
+	}
+	service.NMISaleService.Custody = service.CustodianSaleService
+	return service
+}
+
+func (s *PurchaseService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
+	if s.Fulfillment == nil {
+		return nil, errors.New("purchase service unavailable")
+	}
+	return s.Fulfillment.CheckPurchaseEligibility(ctx, userID, priceID)
+}
+
+// GetUserProductCoverage reports a user's coverage of a product: an active or
+// pending subscription to it, or live product access windows.
+func (s *PurchaseService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
+	if s.Fulfillment == nil {
+		return nil, errors.New("purchase service unavailable")
+	}
+	return s.Fulfillment.GetUserProductCoverage(ctx, userID, product)
+}
+
+// processSubscription handles subscription purchases
+func (s *PurchaseService) processSubscription(
+	ctx context.Context,
+	req *PurchaseRequest,
+	user *UserIdentity,
+	price *models.Price,
+	product *models.Product,
+	coverage *CoverageInfo,
+	rail string,
+) (*PurchaseResponse, error) {
+	return nil, errors.New("new engine subscriptions require a saved-method order attempt and explicit agreement confirmation")
+}
+
+// processCCBillUpgrade handles CCBill subscription upgrades
+// Returns a FlexForm URL for the upgrade that the client can redirect to
+func (s *PurchaseService) processCCBillUpgrade(
+	ctx context.Context,
+	user *UserIdentity,
+	newPrice *models.Price,
+	existingSub *models.Subscription,
+) (*PurchaseResponse, error) {
+	ccbillClient, err := s.resolveCCBillClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if existingSub.Rail != models.RailCCBill {
+		return nil, errors.New("existing subscription is not a CCBill subscription")
+	}
+	if existingSub.RailSubscriptionID == "" {
+		return nil, errors.New("existing subscription is missing CCBill reference")
+	}
+
+	formName, flexID, hasCCBill := newPrice.GetCCBillFlexForm()
+	if !hasCCBill {
+		return nil, fmt.Errorf("target price %s is not configured for CCBill", newPrice.ID)
+	}
+
+	// User must have verified email for CCBill payments
+	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
+		return nil, errors.New("verified email required for CCBill payments")
+	}
+
+	// User must have a username for CCBill (used for webhook resolution via profiles.users)
+	if user.Username == "" {
+		return nil, errors.New("username required for CCBill payments")
+	}
+
+	upgradeParams := &ccbill.GenerateUpgradeFlexFormURLParams{
+		Username:               user.Username,
+		Email:                  *user.Email,
+		FormName:               formName,
+		FlexID:                 flexID,
+		Currency:               newPrice.Currency,
+		OriginalSubscriptionID: existingSub.RailSubscriptionID,
+	}
+
+	response, err := ccbillClient.GenerateUpgradeFlexFormURL(upgradeParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate CCBill upgrade FlexForm URL: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"user_id":              user.ID,
+		"subscription_id":      existingSub.ID,
+		"current_price_id":     existingSub.PriceID,
+		"target_price_id":      newPrice.ID,
+		"rail_subscription_id": existingSub.RailSubscriptionID,
+	}).Info("Generated CCBill upgrade FlexForm URL via purchase")
+
+	return &PurchaseResponse{
+		Status:         "redirect_required",
+		Action:         "upgrade",
+		Message:        "Redirect to CCBill upgrade form",
+		RedirectURL:    response.RedirectURL,
+		SubscriptionID: &existingSub.ID,
+	}, nil
+}
+
+// initialMembershipResponseFromIntent rebuilds the purchase response from a
+// succeeded create intent's evidence.
+func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*PurchaseResponse, error) {
+	if intent.Status == intents.StatusSucceeded {
+		if err := intents.ValidateInitialMembershipTerminal(intent); err != nil {
+			return nil, err
+		}
+	}
+	if intent.Status == intents.StatusFailedTerminal {
+		return nil, terminalPurchaseError(intent, "initial enrollment refused")
+	}
+	if intent.Status != intents.StatusSucceeded {
+		return nil, ErrPurchaseProcessing
+	}
+
+	var evidence struct {
+		SubscriptionID string `json:"subscription_id"`
+		TransactionID  string `json:"transaction_id"`
+		DelayedStart   string `json:"delayed_start"`
+		Status         string `json:"status"`
+		Message        string `json:"message"`
+	}
+	if len(intent.ResultEvidence) == 0 {
+		return nil, errors.New("subscription created but evidence unreadable")
+	}
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return nil, fmt.Errorf("subscription created but evidence unreadable: %w", err)
+	}
+	accepted, err := subscriptions.DecodeInitialMembershipPayload(intent)
+	if err != nil {
+		return nil, err
+	}
+	resp := &PurchaseResponse{
+		Status:        evidence.Status,
+		Action:        "new",
+		Message:       evidence.Message,
+		TransactionID: evidence.TransactionID,
+	}
+	if accepted.Terms.PaymentID != uuid.Nil {
+		resp.PaymentID = &accepted.Terms.PaymentID
+	}
+	if resp.Status == "" {
+		resp.Status = "success"
+	}
+	if resp.Message == "" {
+		resp.Message = "Subscription created successfully"
+	}
+	if evidence.SubscriptionID != "" {
+		if id, err := uuid.Parse(evidence.SubscriptionID); err == nil {
+			resp.SubscriptionID = &id
+		}
+	}
+	if evidence.DelayedStart != "" {
+		if t, err := time.Parse(time.RFC3339, evidence.DelayedStart); err == nil {
+			resp.DelayedStart = &t
+		}
+	}
+	return resp, nil
+}
+
+// railCustomerStore is the slice of RailCustomerService used for
+// Stripe customer resolution. Defined as an interface so the resolution logic
+// is unit-testable without a database.
+type railCustomerStore interface {
+	GetCustomerID(ctx context.Context, userID, rail string) (string, error)
+	Upsert(ctx context.Context, userID, rail, customerID string) error
+}
+
+// stripeCustomerClient is the slice of StripeService used for customer
+// resolution and the duplicate guard.
+type stripeCustomerClient interface {
+	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
+	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
+	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
+}
+
+func (s *PurchaseService) customerStore() railCustomerStore {
+	if s.RailCustomerService == nil {
+		return nil
+	}
+	return s.RailCustomerService
+}
+
+// resolveStripeCustomerWith returns the durable Stripe customer id for a user,
+// in priority order: the local mapping, Stripe Customer Search on
+// metadata[app_user_id], then a fresh idempotent customer. A resolved customer
+// is upserted into the local mapping so the link survives a missed webhook.
+// "" (no error) only when the dependencies are unavailable; the caller then
+// falls back to customer_email.
+func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		return "", nil
+	}
+	if store == nil || client == nil {
+		// Without these wired we cannot manage a durable customer; fall back to
+		// the email-only path rather than failing the purchase.
+		return "", nil
+	}
+
+	// 1. Local mapping.
+	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
+	if err != nil && !db.IsNotFound(err) {
+		return "", fmt.Errorf("lookup stripe customer mapping: %w", err)
+	}
+	customerID = strings.TrimSpace(customerID)
+
+	// 2. Stripe Customer Search by metadata.
+	if customerID == "" {
+		found, err := client.FindCustomerIDByAppUserID(ctx, user.ID)
+		if err != nil {
+			return "", fmt.Errorf("search stripe customer: %w", err)
+		}
+		customerID = strings.TrimSpace(found)
+	}
+
+	// 3. Create a new (idempotent) customer.
+	if customerID == "" {
+		created, err := client.CreateCustomer(ctx, userEmail(user), user.ID)
+		if err != nil {
+			return "", fmt.Errorf("create stripe customer: %w", err)
+		}
+		customerID = strings.TrimSpace(created)
+	}
+
+	if customerID == "" {
+		return "", nil
+	}
+
+	// Record the mapping at purchase time, not only via webhook.
+	if err := store.Upsert(ctx, user.ID, "stripe", customerID); err != nil {
+		return "", fmt.Errorf("record stripe customer mapping: %w", err)
+	}
+	return customerID, nil
+}
+
+// userEmail returns the caller's email when present, so Stripe Checkout can
+// prefill it on the hosted page and route the receipt. Empty when unknown —
+// Stripe collects it on the page in that case.
+func userEmail(user *UserIdentity) string {
+	if user == nil || user.Email == nil {
+		return ""
+	}
+	return strings.TrimSpace(*user.Email)
+}
+
+type stripeCheckoutInlinePrice struct {
+	Name        string
+	Currency    string
+	AmountMinor moneyutil.Cents
+}
+
+type stripeCheckoutParams struct {
+	InlinePrice    stripeCheckoutInlinePrice
+	SuccessURL     string
+	CancelURL      string
+	UserID         string
+	CustomerID     string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
+	CustomerEmail  string
+	OrderAttemptID string
+	// OrderID names the order a payment-mode session pays.
+	OrderID        string
+	IdempotencyKey string
+}
+
+// stripeCheckoutSession is a Checkout Session as OpenRails reads it.
+type stripeCheckoutSession struct {
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	Status        string `json:"status"`
+	PaymentStatus string `json:"payment_status"`
+	PaymentIntent string `json:"payment_intent"`
+	AmountTotal   int64  `json:"amount_total"`
+	Currency      string `json:"currency"`
+}
+
+func (s *PurchaseService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (stripeCheckoutSession, error) {
+	if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
+		return stripeCheckoutSession{}, err
+	}
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
+	if err != nil {
+		return stripeCheckoutSession{}, err
+	}
+	values := url.Values{}
+	values.Set("mode", "payment")
+	values.Set("success_url", params.SuccessURL)
+	values.Set("cancel_url", params.CancelURL)
+	values.Set("client_reference_id", params.UserID)
+	// Stripe Checkout: `customer` and `customer_email` are mutually exclusive.
+	// Prefer the resolved customer so one user maps to one Stripe customer;
+	// customer_email only when unresolved.
+	if customerID := strings.TrimSpace(params.CustomerID); customerID != "" {
+		values.Set("customer", customerID)
+	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
+		values.Set("customer_email", email)
+	}
+	if params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" || params.OrderID == "" {
+		return stripeCheckoutSession{}, errors.New("invalid order purchase price")
+	}
+	values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
+	values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
+	values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
+	values.Set("line_items[0][quantity]", "1")
+	values.Set("metadata[user_id]", params.UserID)
+	if strings.TrimSpace(params.OrderAttemptID) != "" {
+		values.Set("metadata[order_attempt_id]", strings.TrimSpace(params.OrderAttemptID))
+	}
+	if params.OrderID != "" {
+		values.Set("metadata[order_id]", params.OrderID)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
+	if err != nil {
+		return stripeCheckoutSession{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.Stripe.SecretKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
+
+	client := s.StripeClients.Client(s.Config, 0)
+	resp, err := client.Do(req)
+	if err != nil {
+		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		msg := parseStripeError(body)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe checkout failed (%d)", resp.StatusCode)
+		}
+		return stripeCheckoutSession{}, errors.New(msg)
+	}
+	var out stripeCheckoutSession
+	if err := json.Unmarshal(body, &out); err != nil {
+		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout parse failed: %w", err)
+	}
+	if strings.TrimSpace(out.URL) == "" || strings.TrimSpace(out.ID) == "" {
+		return stripeCheckoutSession{}, errors.New("stripe checkout returned no session")
+	}
+	return out, nil
+}
+
+func stripeCheckoutIdempotencyKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return "openrails-payment-page-" + hex.EncodeToString(sum[:])
+}
+
+func parseStripeError(body []byte) string {
+	var out struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.Error.Message)
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
+// RegisterPurchase records a confirmed one-time purchase and grants its
+// product, stamping the payment row with the PSP of req.Rail.
+func (s *PurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
+	if s.Fulfillment == nil {
+		return nil, errors.New("purchase service unavailable")
+	}
+	if req != nil {
+		ctx = s.stampPSP(ctx, req.Rail)
+	}
+	return s.Fulfillment.RegisterPurchase(ctx, req)
+}
+
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
+
+func validateTierChangeSubscriptionStatus(subscription *models.Subscription) error {
+	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPastDue {
+		return nil
+	}
+	return &TierChangeError{Code: codeSubscriptionNotActive, Message: "only active or past-due subscriptions can change tier"}
+}
+
+func (s *PurchaseService) validateTierChangePreviewTarget(
+	ctx context.Context,
+	existingSub *models.Subscription,
+	currentPrice, newPrice *models.Price,
+	user *UserIdentity,
+	action string,
+) error {
+	switch {
+	case existingSub.Rail == models.RailStripe:
+		if _, ok := newPrice.GetStripeConfig(); !ok {
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
+		}
+		if action == "downgrade" {
+			if _, ok := currentPrice.GetStripeConfig(); !ok {
+				return &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "current price not configured for Stripe"}
+			}
+		}
+	case rails.IsNMI(existingSub.Rail):
+		target, err := s.resolveRailTargetForPSP(ctx, string(existingSub.Rail), existingSub.PspID)
+		if err != nil {
+			return err
+		}
+		if _, err := requireNMIPlanForTarget(newPrice, target); err != nil {
+			return err
+		}
+	case existingSub.Rail == models.RailCCBill:
+		if action == "downgrade" {
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: "CCBill subscription downgrades are not supported"}
+		}
+		if _, _, ok := newPrice.GetCCBillFlexForm(); !ok {
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for CCBill"}
+		}
+		if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
+			return &TierChangeError{Code: codeCustomerEmailRequired, Message: "verified customer email and username are required for CCBill"}
+		}
+	case existingSub.Rail == models.RailSolana:
+		if !priceHasSolanaRecurring(newPrice) {
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
+		}
+	default:
+		return &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: fmt.Sprintf("unsupported rail: %s", existingSub.Rail)}
+	}
+	return nil
+}
+
+// formatMinorAmount renders an internal micro-unit amount as currency copy,
+// e.g. (60_010_000,"usd") -> "$60.010000".
+func formatMinorAmount(micros int64, currency string) string {
+	symbol := "$"
+	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
+		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
+	}
+	// The currency's own scale, trimmed to its minor unit: "$3.98", not
+	// "$3.980000".
+	amount, _, _ := strings.Cut(moneyutil.FormatAmount(micros, currency), " ")
+	if strings.HasPrefix(amount, "-") {
+		return "-" + symbol + strings.TrimPrefix(amount, "-")
+	}
+	return symbol + amount
+}
+
+// processTierChangeStripe freezes a Stripe tier change and runs it as a
+// durable operation (stripe_tier_change_intent.go). Upgrades are billed
+// immediately with a reset cycle; downgrades are scheduled for period end so
+// the customer keeps the tier already paid for.
+func (s *PurchaseService) processTierChangeStripe(
+	ctx context.Context,
+	req *SubscriptionChangeRequest,
+	user *UserIdentity,
+	newPrice *models.Price,
+	newProduct *models.Product,
+	existingSub *models.Subscription,
+	currentProduct *models.Product,
+	action string,
+) (*TierChangeResponse, error) {
+	stripePriceID, ok := newPrice.GetStripeConfig()
+	if !ok || strings.TrimSpace(stripePriceID) == "" {
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
+	}
+	if strings.TrimSpace(existingSub.RailSubscriptionID) == "" {
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "subscription missing Stripe reference"}
+	}
+	currentPrice := existingSub.Price
+	if currentPrice == nil {
+		var err error
+		if currentPrice, err = s.PriceService.GetByID(ctx, existingSub.PriceID); err != nil {
+			return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current price not found"}
+		}
+	}
+	currentStripePriceID, ok := currentPrice.GetStripeConfig()
+	if !ok || strings.TrimSpace(currentStripePriceID) == "" {
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "current price not configured for Stripe"}
+	}
+	if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), existingSub.ID); err != nil {
+		return nil, err
+	} else if pending != nil {
+		return &TierChangeResponse{
+			Status:  "blocked",
+			PriceID: newPrice.PublicID, Rail: "stripe",
+			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
+		}, nil
+	}
+	// The Stripe object is read once before anything is frozen: the item the
+	// change targets, and proof that Stripe bills the price the local
+	// subscription says it does. Nothing is written here.
+	stripeService := &subscriptions.StripeService{StripeClients: s.StripeClients, Config: s.Config, Rails: s.Rails}
+	state, found, err := stripeService.GetSubscriptionState(ctx, existingSub.RailSubscriptionID)
+	if err != nil {
+		return nil, &TierChangeError{Code: billing.CodeServiceUnavailable, Message: err.Error()}
+	}
+	switch {
+	case !found:
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe subscription not found"}
+	case state.ItemID == "":
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe subscription item not found"}
+	case state.ScheduleID != "":
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "subscription is managed by a Stripe schedule; release it before changing tier"}
+	case state.PriceID != currentStripePriceID:
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe bills a different price than the local subscription; reconcile before changing tier"}
+	}
+	now := s.now().UTC()
+	payload := StripeTierChangePayload{
+		Staff:          staffChange(req),
+		RequestedPrice: strings.TrimSpace(req.PriceID), UserID: user.ID, SubscriptionID: existingSub.ID,
+		StripeSubscriptionID: existingSub.RailSubscriptionID, StripeItemID: state.ItemID, Action: action,
+		OldPriceID: existingSub.PriceID, OldStripePriceID: currentStripePriceID,
+		PriceID: newPrice.ID, ProductID: newPrice.ProductID, ProductName: newProduct.DisplayName, StripePriceID: stripePriceID,
+		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount, AccessDurationHours: newPrice.AccessDurationHours,
+	}
+	if action == "downgrade" {
+		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
+			return nil, &TierChangeError{Code: billing.CodeSubscriptionChangePeriodUnknown, Message: "subscription missing current period end"}
+		}
+		periodStart := existingSub.StartedAt
+		if existingSub.CurrentPeriodStartsAt != nil && !existingSub.CurrentPeriodStartsAt.IsZero() {
+			periodStart = *existingSub.CurrentPeriodStartsAt
+		}
+		if !existingSub.CurrentPeriodEndsAt.After(periodStart) {
+			return nil, &TierChangeError{Code: billing.CodeSubscriptionChangePeriodUnknown, Message: "subscription current period is not open"}
+		}
+		payload.ProrationBehavior, payload.PeriodStart, payload.PeriodEnd = "none", periodStart.UTC(), existingSub.CurrentPeriodEndsAt.UTC()
+		payload.BillingCycleDays = newPrice.RecurringCycleDays()
+	} else {
+		// Model B: Stripe resets the cycle to now and invoices the proration
+		// immediately. The frozen now-amount is the local estimate (matching
+		// the preview); Stripe finalizes the exact proration.
+		quote, err := QuoteModelBUpgrade(providerUpgradeOf(existingSub, currentPrice, newPrice), now)
+		if err != nil {
+			return nil, err
+		}
+		payload.AmountDueNow, payload.ProrationBehavior, payload.BillingCycleAnchor = quote.ChargeNow, "always_invoice", "now"
+		payload.PaymentBehavior = stripePaymentBehaviorPaidOrRefused
+		payload.PeriodStart, payload.PeriodEnd = quote.PeriodStart, quote.PeriodEnd
+	}
+	return s.enqueueStripeTierChange(ctx, existingSub, payload, tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey))
+}
+
+// processTierChangeSolana refuses a server-side Solana tier change. Plan terms
+// are immutable and a subscription is bound to one plan, so a change is
+// cancel-old plus subscribe-new in one atomic transaction the customer's
+// wallet signs.
+func (s *PurchaseService) processTierChangeSolana(
+	ctx context.Context,
+	req *SubscriptionChangeRequest,
+	user *UserIdentity,
+	newPrice *models.Price,
+	newProduct *models.Product,
+	existingSub *models.Subscription,
+	currentProduct *models.Product,
+	action string,
+) (*TierChangeResponse, error) {
+	// Target price must carry a published Solana recurring plan, else the wallet
+	// has nothing valid to subscribe to (upgrade) / no terms to schedule (downgrade).
+	if !priceHasSolanaRecurring(newPrice) {
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
+	}
+
+	// A Solana tier change is one atomic on-chain transaction the customer's
+	// wallet signs: POST /v1/me/subscriptions/{id}/change answers it as
+	// next_action. Nothing server-side can make it.
+	return nil, &TierChangeError{Code: billing.CodeCustomerActionRequired, Message: "a Solana tier change is signed by the customer's wallet"}
+}
+
+// processTierChangeCCBill redirects an upgrade to CCBill's upgrade FlexForm
+// and refuses a downgrade, which CCBill cannot make programmatically.
+func (s *PurchaseService) processTierChangeCCBill(
+	ctx context.Context,
+	req *SubscriptionChangeRequest,
+	user *UserIdentity,
+	newPrice *models.Price,
+	newProduct *models.Product,
+	existingSub *models.Subscription,
+	currentProduct *models.Product,
+	action string,
+) (*TierChangeResponse, error) {
+	if action == "downgrade" {
+		return &TierChangeResponse{
+			Status:  "blocked",
+			PriceID: newPrice.PublicID,
+			Rail:    "ccbill",
+			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
+		}, nil
+	}
+
+	purchaseResp, err := s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
+	if err != nil {
+		return nil, err
+	}
+
+	subID := billing.SubscriptionID(existingSub.ID)
+	resp := &TierChangeResponse{
+		Status:         "requires_action",
+		Effective:      "now",
+		PriceID:        newPrice.PublicID,
+		SubscriptionID: &subID,
+		Rail:           "ccbill",
+		Message:        "Redirect to CCBill to complete upgrade",
+	}
+
+	if purchaseResp.RedirectURL != "" {
+		redirect := purchaseResp.RedirectURL
+		resp.NextAction = &billing.NextAction{Type: "redirect_to_url", URL: &redirect}
+	}
+
+	return resp, nil
+}
+
+// requireNMIPlanForTarget returns the NMI plan the resolved payment provider
+// charges for this price. It never scans or falls back across a rail: with
+// several accounts on one rail, each provider's plan is its own.
+func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, error) {
+	if price == nil {
+		return "", errors.New("price is required")
+	}
+	if id := strings.TrimSpace(pspLinkForTarget(price, target)[models.RailKeyPlanID]); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.PSP, target.Rail)
+}

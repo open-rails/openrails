@@ -16,7 +16,7 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-// registerUserRoutesAt mounts the buyer-facing checkout/catalog surface —
+// registerUserRoutesAt mounts the buyer-facing purchase/catalog surface —
 // browser tier (#765): every pattern registered here is also recorded into
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {

@@ -33,7 +33,7 @@ func TestServerNamesTheClientBehindItsProxy(t *testing.T) {
 	f := newFixture(t)
 	srv := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
 		cfg.Engine.TrustedProxies = []string{proxyPeer + "/32"}
-		cfg.Engine.RateLimits = &openrails.RateLimitsConfig{"checkout": {RequestsPerMinute: 2}}
+		cfg.Engine.RateLimits = &openrails.RateLimitsConfig{"purchase": {RequestsPerMinute: 2}}
 		// No client-IP posture of its own: AuthKit takes the engine's.
 		cfg.Auth.HTTP = &authkit.HTTPConfig{RateLimits: map[string]authkit.RateLimit{"password_login": {Limit: 2, Window: time.Hour}}}
 	})
@@ -42,23 +42,23 @@ func TestServerNamesTheClientBehindItsProxy(t *testing.T) {
 	front := behindProxy(t, handler)
 
 	pay := func() string { return "/v1/me/orders/" + billing.OrderID(uuid.New()).String() + "/pay" }
-	front.limitsTheClient(t, "engine checkout", pay, `{}`)
+	front.limitsTheClient(t, "engine purchase", pay, `{}`)
 	login := func() string { return "/" + f.schema + "/v1/password/login" }
 	front.limitsTheClient(t, "AuthKit password login", login, `{"identifier":"nobody@e2e.test","password":"wrong-password"}`)
 }
 
-// An embedded engine's hosted checkout logs the client its proxy forwards.
-func TestEmbeddedCheckoutLogsTheClientBehindItsProxy(t *testing.T) {
+// An embedded engine's payment page logs the client its proxy forwards.
+func TestEmbeddedPaymentLogsTheClientBehindItsProxy(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.TrustedProxies = []string{proxyPeer + "/32"}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"proxied-checkout": {DisplayName: "Proxied checkout"}}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"proxied-purchase": {DisplayName: "Proxied purchase"}}
 	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	_, handler, err := bill.HostedCheckout("https://pay.e2e.test", checkoutPage)
+	_, handler, err := bill.PaymentPage("https://pay.e2e.test", paymentPage)
 	require.NoError(t, err)
 	front := behindProxy(t, handler)
 
-	page := "/c/" + billing.OrderID(uuid.New()).String()
+	page := "/pay/" + billing.OrderID(uuid.New()).String()
 	status, ip := front.send(t, front.proxy, http.MethodGet, page, "", "198.51.100.1")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "198.51.100.1", ip, "the client behind the proxy")

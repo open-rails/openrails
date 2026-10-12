@@ -9,7 +9,7 @@ changes them against that revision where Vault holds the configuration
 configuration is a file declares the same document under `settings:` in its
 YAML.
 
-The settings hold the profile, usage billing and arrears policy, checkout routing, the
+The settings hold the profile, usage billing and arrears policy, PSP routing, the
 dunning policy, named billing policies, default/tier bindings and delegated
 wasted-spend limits. An update changes only the fields it names; an explicit
 empty list removes those declarations. Unknown fields are rejected.

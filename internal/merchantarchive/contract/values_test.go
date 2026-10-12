@@ -92,8 +92,8 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 		{"pending payment", "payments", map[string]string{"status": "pending"}, false},
 		{"settled payment", "payments", map[string]string{"status": "succeeded", "order_id": testMerchant}, true},
 		{"orderless payment", "payments", map[string]string{"status": "succeeded"}, false},
-		{"open checkout", "checkout_attempts", map[string]string{"status": "open"}, false},
-		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired", "order_id": testMerchant, "amount": "100", "currency": "USD"}, true},
+		{"open purchase", "order_attempts", map[string]string{"status": "open"}, false},
+		{"expired purchase", "order_attempts", map[string]string{"status": "expired", "order_id": testMerchant, "amount": "100", "currency": "USD"}, true},
 		{"admitted admission", "admission_operations", map[string]string{"state": "admitted"}, false},
 		{"captured admission", "admission_operations", map[string]string{"state": "captured"}, true},
 		{"claimed intent", "provider_intents", map[string]string{"status": "claimed"}, false},
@@ -194,7 +194,7 @@ func TestJSONContracts(t *testing.T) {
 func TestApplicationMetadata(t *testing.T) {
 	fields := []string{
 		"payments.metadata", "payments.discount_metadata", "payment_methods.metadata",
-		"usage_events.metadata", "owed_items.metadata", "checkout_attempts.metadata",
+		"usage_events.metadata", "owed_items.metadata", "order_attempts.metadata",
 		"subscriptions.gateway_response",
 	}
 	valid := []string{

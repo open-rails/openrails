@@ -17,11 +17,11 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Checkout money is the catalog's. Hosts forward browser-chosen price ids and
+// Purchase money is the catalog's. Hosts forward browser-chosen price ids and
 // saved-card ids; a price that does not grant the requested access, an
 // archived price, a price with a negative amount, or confirmation fields
 // naming another amount or currency never change what is charged.
-func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
+func TestSecurityPurchaseTermsAreServerSide(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
 		t.Run(rail, func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			code, _ = errorOf(body)
 			require.Equal(t, billing.CodeUnknownField, code)
 
-			c.mustCheckout(embedded, order{price: member.ID, rail: rail, method: method})
+			c.mustPurchase(embedded, order{price: member.ID, rail: rail, method: method})
 			ledger := w.railLedger(rail)
 			require.Len(t, ledger, 1)
 			require.EqualValues(t, 999, ledger[0].Amount, "the quoted catalog amount, in cents")
@@ -69,7 +69,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 	}
 }
 
-// One permanent product, one charge. A second checkout for the same product
+// One permanent product, one charge. A second purchase for the same product
 // racing the first's in-flight charge, on another replica, is refused, and a
 // completed purchase cannot be bought again.
 func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {

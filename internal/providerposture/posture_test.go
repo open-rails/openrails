@@ -174,7 +174,7 @@ func TestTrackedReportsCachedStateAndRecoversAfterBackoff(t *testing.T) {
 	require.Equal(t, []int{0, 0, 1, 2}, attempts, "consecutive unknowns back off further")
 }
 
-// A provider that never answers cannot hold checkouts: concurrent callers
+// A provider that never answers cannot hold purchases: concurrent callers
 // share one bounded check and each returns within its own context.
 func TestRequireIsSingleFlightBoundedAndContextAware(t *testing.T) {
 	r := NewRegistry(func(int) time.Duration { return time.Minute })

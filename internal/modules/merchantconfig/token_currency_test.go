@@ -8,10 +8,10 @@ import (
 
 func TestRoutingUsesRegisteredCurrencyCodes(t *testing.T) {
 	for _, code := range []string{"SOL", "USDC"} {
-		rules, err := NormalizeCheckoutRouting([]models.CheckoutRoutingRule{{Match: models.CheckoutRoutingMatch{Currency: code}, Prefer: []string{"solana"}}})
+		rules, err := NormalizePSPRouting([]models.PSPRoutingRule{{Match: models.PSPRoutingMatch{Currency: code}, Prefer: []string{"solana"}}})
 		require.NoError(t, err)
 		require.Equal(t, code, rules[0].Match.Currency)
 	}
-	_, err := NormalizeCheckoutRouting([]models.CheckoutRoutingRule{{Match: models.CheckoutRoutingMatch{Currency: "XYZ"}, Prefer: []string{"stripe"}}})
+	_, err := NormalizePSPRouting([]models.PSPRoutingRule{{Match: models.PSPRoutingMatch{Currency: "XYZ"}, Prefer: []string{"stripe"}}})
 	require.Error(t, err)
 }

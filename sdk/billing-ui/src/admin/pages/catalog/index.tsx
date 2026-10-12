@@ -440,7 +440,7 @@ function ProductDialog({ product }: { product?: Product }) {
                 <Field
                   label={adminText("Display name")}
                   id={"p-name"}
-                  hint="What customers see on checkout and invoices."
+                  hint="What customers see on purchase and invoices."
                 >
                   <Input
                     id={adminId("p-name")}

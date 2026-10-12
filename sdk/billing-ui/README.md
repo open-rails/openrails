@@ -1,19 +1,19 @@
 # @openrails/billing-ui
 
-Embeddable OpenRails billing UI: checkout, customer account billing, and staff
+Embeddable OpenRails billing UI: purchase, customer account billing, and staff
 administration inside the host's application.
 
 | Import                            | Contents                                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------- |
 | `@openrails/billing-ui/client`    | Framework-free typed client for `/billing/v1/me/*` and the catalog, `BillingError` |
 | `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
-| `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
+| `@openrails/billing-ui`           | `BillingProvider`, styled purchase and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 | `@openrails/billing-ui/admin` | `BillingAdmin`, `BillingCustomerSummary`, access and confirmation helpers |
 | `@openrails/billing-ui/admin.css` | Scoped staff administration styles |
 
-The checkout owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
-and `<OrderCheckout>`: the signed-in customer's order, read and paid with
+The purchase owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
+and `<OrderPayment>`: the signed-in customer's order, read and paid with
 their own credential. Card data is tokenized in the PSP's own fields
 (Collect.js, Stripe Elements) and never enters the host application.
 
@@ -74,11 +74,11 @@ price ("$4.99", "Rent for 3 days, $1.99", "$10.00 every 30 days").
 
 The purchase is theirs from start to payment: a button creates the customer's
 order (`POST /me/orders`) and pays it in a dialog. On a page of a site the
-merchant registered to frame its checkout (`merchant.embed_origins` in
-`GET /me/config`), it creates the order with its embedded checkout in the same
-call (`createOrder({ lines, checkout: { ui_mode: "embedded" } })`) and frames
-`order.checkout.url` from the checkout host (`<EmbeddedCheckout>`); anywhere
-else it pays on the page (`<OrderCheckout>`). The embedded checkout returns
+merchant registered to frame its pay URLs (`merchant.embed_origins` in
+`GET /me/config`), it creates the order with its embedded pay URL in the same
+call (`createOrder({ lines, payUrl: { embedded: true } })`) and frames
+`order.pay_url` from the payment origin (`<EmbeddedPayment>`); anywhere
+else it pays on the page (`<OrderPayment>`). The embedded pay URL returns
 nowhere: the frame says it is paid and tells the page (`onPaid`), and a
 redirect PSP comes back inside it. Nothing is stored: OpenRails answers the
 customer's open order of the same lines, so a second click, a reopened dialog
@@ -110,7 +110,7 @@ must be on one of your app's return origins.
 
 For prepaid credits, a fixed pack is another product/price. A
 `customer_amount` price takes the buyer's `amount`: collect it on your product
-page, and the checkout charges exactly that:
+page, and the purchase charges exactly that:
 
 ```tsx
 import { decimalToAmount } from "@openrails/billing-ui/client"
@@ -140,7 +140,7 @@ A server that decides what its customer buys creates the order with the Go
 customer's browser, which pays it signed in:
 
 ```tsx
-<OrderCheckout orderId={orderId} returnUrl={returnUrl} onSettled={(order) => refetchAccess(order)} />
+<OrderPayment orderId={orderId} returnUrl={returnUrl} onSettled={(order) => refetchAccess(order)} />
 ```
 
 `onSettled` follows a complete order, or one processing on an asynchronous
@@ -261,14 +261,14 @@ provider:
 
 - An order's `payment_options` are exactly the armed PSPs whose rail can make
   this sale (Solana for one-time lines when it is configured, never CCBill),
-  each with what it `accepts`. `OrderCheckout` renders one panel: the
+  each with what it `accepts`. `OrderPayment` renders one panel: the
   customer's saved cards on them, newest first, an inline new card and one Pay
   button. No provider chooser with one rail.
 - A new card is charged and saved in one pay; an `authenticate` next action
   runs 3-D Secure in the page, then `confirm`. A decline stays on the panel
   with its message, so the buyer can pick another card under a new
   idempotency key.
-- Only PSPs with `checkout !== false` (`checkoutPsps`) take new cards; others
+- Only PSPs with `routed !== false` (`routedPsps`) take new cards; others
   stay listed so existing cards and subscriptions keep working.
 - `<SavePaymentMethod psp={psp} onSaved={(id) => ...} />` saves a card in the
   page (needs `BillingProvider`); `canSavePaymentMethod(psp)` filters PSPs

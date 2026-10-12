@@ -117,10 +117,10 @@ type CreateMyOrderParams struct {
 	ExpectedTotal *int64              `json:"expected_total,omitempty,string"`
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`
-	// Checkout asks, instead of Payment, for the order's embedded checkout:
-	// Order.Checkout.URL on the checkout host, fresh on every answer (the
-	// last one stops working).
-	Checkout *MyOrderCheckoutParams `json:"checkout,omitempty"`
+	// PayURL asks, instead of Payment, for the order's embedded pay URL:
+	// Order.PayURL on the payment origin, fresh on every answer (the last
+	// one stops working).
+	PayURL *MyOrderPayURLParams `json:"pay_url,omitempty"`
 }
 
 // PreviewOrderParams prices lines for one customer, as a merchant order
@@ -132,18 +132,18 @@ type PreviewOrderParams struct {
 
 // CreateOrderParams creates a merchant order: an unpaid order for one
 // customer, which they pay on the merchant's own site
-// (POST /v1/me/orders/{id}/pay), or, with Checkout, at a hosted checkout. It
-// never charges. ExpiresAt defaults to 30 days, or to the checkout's expiry
-// with Checkout, and is at most 120 days away. IdempotencyKey is required: a
-// retry with it answers the same order.
+// (POST /v1/me/orders/{id}/pay), or, with PayURL, at its pay URL. It never
+// charges. ExpiresAt defaults to 30 days, or to the pay URL's expiry with
+// PayURL, and is at most 120 days away. IdempotencyKey is required: a retry
+// with it answers the same order.
 type CreateOrderParams struct {
 	CustomerID CustomerID        `json:"customer_id"`
 	Lines      []OrderLineParams `json:"lines"`
 	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
-	// Checkout asks for a hosted checkout: the order's Checkout.URL, where
-	// the customer pays. The deployment must serve one.
-	Checkout       *OrderCheckoutParams `json:"checkout,omitempty"`
-	IdempotencyKey string               `json:"-"`
+	// PayURL asks for the order's pay URL (Order.PayURL), where the
+	// customer pays. The deployment must serve a payment origin.
+	PayURL         *OrderPayURLParams `json:"pay_url,omitempty"`
+	IdempotencyKey string             `json:"-"`
 }
 
 // PayOrderParams pays an open order; Reusable as in CreateMyOrderParams.
@@ -192,8 +192,20 @@ type Order struct {
 	Payment  OrderPayment `json:"payment"`
 	// PaymentOptions are the PSPs that can take this order while it is open.
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`
-	// Checkout is the order's hosted checkout; null without one.
-	Checkout *OrderCheckout `json:"checkout"`
+	// PayURL is where the customer pays the order on the payment origin,
+	// /pay/<order>#<secret>; the secret stays in the fragment and is stored
+	// hashed. Creation and a re-ask while the order is open answer it;
+	// other reads are null.
+	PayURL *string `json:"pay_url"`
+	// PayURLExpiresAt is when the pay URL stops working; null without one.
+	PayURLExpiresAt *time.Time `json:"pay_url_expires_at"`
+	// Embedded: the merchant's page frames the pay URL.
+	Embedded bool `json:"embedded"`
+	// SuccessURL and CancelURL are where a merchant order's pay URL returns
+	// and its back link; a customer's embedded one has neither.
+	SuccessURL          *string `json:"success_url"`
+	CancelURL           *string `json:"cancel_url"`
+	SavedPaymentMethods bool    `json:"saved_payment_methods"`
 	// Renewal is the subscription period a renewal order (origin
 	// subscription) bills; null on any other.
 	Renewal *OrderRenewal `json:"renewal"`

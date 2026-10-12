@@ -47,9 +47,9 @@ type MerchantConfiguration struct {
 	// collection.DefaultPolicy.
 	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
 
-	// CheckoutRouting is the merchant's processor preference: ordered rules,
+	// PSPRouting is the merchant's processor preference: ordered rules,
 	// first match wins. Empty ⇒ the built-in default order.
-	CheckoutRouting []CheckoutRoutingRule `json:"checkout_routing,omitempty"`
+	PSPRouting []PSPRoutingRule `json:"psp_routing,omitempty"`
 
 	// BalanceNotices are the customers' default low-balance lines.
 	BalanceNotices BalanceNoticeConfiguration `json:"balance_notices,omitempty"`
@@ -63,8 +63,8 @@ type BalanceNoticeConfiguration struct {
 	LowAmounts  map[string]int64 `json:"low_amounts,omitempty"`
 }
 
-type CheckoutRoutingRule = billing.CheckoutRoutingRule
-type CheckoutRoutingMatch = billing.CheckoutRoutingMatch
+type PSPRoutingRule = billing.PSPRoutingRule
+type PSPRoutingMatch = billing.PSPRoutingMatch
 
 // MerchantProfileConfiguration is merchant-owned public/communication metadata.
 // It is stored per merchant, not in process-wide runtime config.

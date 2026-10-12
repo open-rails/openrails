@@ -38,7 +38,7 @@ var (
 	proseMethod = regexp.MustCompile(`\b[cC]lient\.([A-Z]\w*)`)
 	// A bare Go name in a code span that reads as a Client operation.
 	proseVerb  = regexp.MustCompile("`((?:Get|List|Create|Update|Delete|Set|Ensure|Apply|Archive|Cancel|Resume|Refund|Record|Capture|Release|Extend|Admit|Open|Preview|Refresh|Resolve|Revoke|Confirm|Check|Has|Import|Export|Provision|Rename|Declare|Retry|Mark|Void|Ask|Query|Generate|Verify|Acknowledge|Report|Change|Retire|Complete)[A-Z]\\w*)(?:\\([^`]*\\))?`")
-	proseField = regexp.MustCompile(`(?:^|[^.\w])(Config|Deps|HTTPConfig|MerchantDeclaration|PSPConfig|CheckoutConfig)\.([A-Z]\w*)`)
+	proseField = regexp.MustCompile(`(?:^|[^.\w])(Config|Deps|HTTPConfig|MerchantDeclaration|PSPConfig|PaymentPageConfig)\.([A-Z]\w*)`)
 	proseTable = regexp.MustCompile(`\bbilling\.([a-z][a-z0-9_]*)\b(\.?)`)
 	proseCode  = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
 	prosePerm  = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)

@@ -11,7 +11,7 @@ import (
 // Return URLs are an open-redirect vector: an order paid on Stripe's hosted
 // page must return to an exact allowed host origin, whichever Client created
 // the order.
-func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
+func TestSecurityPurchaseReturnURLsStayOnHost(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.permanent("content:post")

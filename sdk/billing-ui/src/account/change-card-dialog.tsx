@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import { cn } from "cn"
 
 import type { BillingError } from "#orck/client/errors"
@@ -50,7 +50,7 @@ export interface ChangeCardDialogProps {
    * null on success; the dialog then closes.
    */
   onConfirm: (paymentMethodId: string | null) => Promise<BillingError | null>
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
 }
 
 export function ChangeCardDialog({

@@ -126,14 +126,14 @@ answers 403 `captcha_required` (null when none is configured) and the customer
 network's sign-in (`network`). It names no merchant.
 
 `GET /v1/me/config` is the merchant's, for a credential bound to that merchant:
-a customer's token, or a checkout URL's secret on the checkout host. It holds
+a customer's token, or a pay URL's secret on the payment origin. It holds
 `merchant` (its `display_name`, https `logo_url` and `support_url`, and
 `embed_origins`) and `payment`, which answers "what can this merchant take
 money with, and what do I need in the browser to do it?" so you never hard-code
 a rail or duplicate a tokenization key in your own config. It is `Cache-Control:
 private`. An order carries its own `payment_options`; `payment` is what the page
 loads to take a card. `@openrails/billing-ui` reads each document once and shares
-it (`useConfig()`, `useCustomerConfig()`): `OrderCheckout`, `AccountBilling` and
+it (`useConfig()`, `useCustomerConfig()`): `OrderPayment`, `AccountBilling` and
 `PaymentMethodsPanel` take their PSPs from the second.
 
 `payment` looks like this:
@@ -142,14 +142,14 @@ it (`useConfig()`, `useCustomerConfig()`): `OrderCheckout`, `AccountBilling` and
 {
   "psps": [
     { "psp_id": "psp_...", "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
-      "flow": "tokenize", "checkout": true,
+      "flow": "tokenize", "routed": true,
       "config": { "tokenization_key": "<public Collect.js key>",
                   "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js" } },
     { "key": "mobius-bt", "rail": "nmi", "custodian": "basis_theory", "display_name": "Credit Card",
       "flow": "tokenize",
       "config": { "public_api_key": "<public Basis Theory application key>" } },
     { "key": "stripe", "rail": "stripe", "custodian": "psp", "display_name": "Stripe",
-      "flow": "elements", "checkout": true, "config": { "publishable_key": "pk_test_..." } },
+      "flow": "elements", "routed": true, "config": { "publishable_key": "pk_test_..." } },
     { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
     { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
   ]
@@ -165,9 +165,9 @@ it (`useConfig()`, `useCustomerConfig()`): `OrderCheckout`, `AccountBilling` and
     in one call, or `POST /v1/me/payment-methods` saves without buying.
   - `redirect` — nothing needed in the browser; paying answers a `redirect_to_url`
     `next_action` (Stripe without a publishable key, one-off prices only).
-- `checkout` is true for PSPs that take new purchases and new cards under the
-  merchant's checkout routing (a catch-all `checkout_routing` rule naming one PSP
-  makes it the only checkout PSP). Other armed PSPs stay listed for existing cards.
+- `routed` is true for PSPs that take new purchases and new cards under the
+  merchant's PSP routing (a catch-all `psp_routing` rule naming one PSP
+  makes it the only routed PSP). Other armed PSPs stay listed for existing cards.
   - `wallet` — the buyer's wallet pays; `payment.solana` carries the network and
     accepted tokens.
 - `status: "temporarily_unavailable"` marks a PSP whose credentials could not be
@@ -274,7 +274,7 @@ onto provider-specific first and last name fields only at the rail boundary. A
 field the route does not declare is refused (`unknown_field`).
 
 The chosen PSP and the reason for it are recorded on the order's attempt
-(`checkout_attempts.routing_reason`). Merchants can preview a decision without
+(`order_attempts.routing_reason`). Merchants can preview a decision without
 creating anything: `POST /v1/merchant/psps/routing-preview`
 (`Client.PreviewPSPRouting`) with `{"price_id": "..."}`
 returns the winner, the ranked fallbacks, and every skipped candidate with its
@@ -338,14 +338,14 @@ transaction is the subscription's delegated approval and its first period's
 pull. The order completes when that payment lands, naming the subscription on
 its line; `confirm` with `{signature}` reads that transaction at once.
 
-billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
+billing-ui's `<OrderPayment orderId=…>` shows an order and pays it: a saved
 card, a new card in the PSP's fields, the PSP's hosted page (`returnUrl`) or a
 Solana wallet, then any `next_action` and `confirm`. With `wallets` it offers
 Apple Pay and Google Pay through a Stripe PSP's Express Checkout Element; the
 page's host must be a payment-method domain registered on that Stripe account.
-`<EmbeddedCheckout url>` frames a merchant order's embedded checkout
-(`checkout.ui_mode: embedded`) on the merchant's own page; see [Hosted
-checkout](hosted-checkout.md#embedded-checkout).
+`<EmbeddedPayment url>` frames an order's embedded pay URL
+(`pay_url.embedded: true`) on the merchant's own page; see [Payment
+page](payment-page.md#embedded-payment-page).
 It uses only the order API and the two configuration reads, through the
 provider's client or one passed as `client`.
 
@@ -379,7 +379,7 @@ place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for 
 buys). The card number never changes: a new card is a new payment method. A method's `status` is `active`, `closed` (the bank closed it), `replaced` or
 `removed`; only an active one is charged. When its issuer reissues it under another brand,
 its `mandates` turn `requires_reconsent`; paying an order with it (a renewal it bills
-included), with the customer present, verifies the card and restores them. Checkout with a fresh `payment_token` also persists a payment method
+included), with the customer present, verifies the card and restores them. Purchase with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 
@@ -414,15 +414,15 @@ Handle in the frontend:
   while the original is still running) or `provider_outcome_unknown` (read the
   resource before trying again).
 - **422** — `idempotency_key_reused` (same key, different terms).
-- **410** — `checkout_session_expired` (or `checkout_attempt_expired`); create a new one.
-- **413** — request body over the bucket cap (64 KiB on checkout/subscription/
+- **410** — `checkout_session_expired` (or `order_attempt_expired`); create a new one.
+- **413** — request body over the bucket cap (64 KiB on purchase/subscription/
   payment-method routes). Carries `Retry-After`.
 - **429** — rate limited. Fixed 1-minute windows, counted per IP **and** per
-  authenticated user; defaults: checkout 10/min, subscription mutations
+  authenticated user; defaults: purchase 10/min, subscription mutations
   20/min, payment methods 40/min; other routes are not limited by OpenRails. Read
   `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` and back off for
-  `Retry-After` seconds. The tight checkout limit deters card-testing — don't
-  auto-retry checkout POSTs in a loop.
+  `Retry-After` seconds. The tight purchase limit deters card-testing — don't
+  auto-retry purchase POSTs in a loop.
 - When captcha escalation is enabled, an IP/user far past its limit must solve a
   challenge and send `X-Captcha-Token` until the challenge TTL expires.
 

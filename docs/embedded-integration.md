@@ -133,7 +133,7 @@ refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
 live gateway. See [operations.md](operations.md).
 
 **Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
-on checkout, card and subscription writes and webhooks (tight on checkout to
+on purchase, card and subscription writes and webhooks (tight on purchase to
 deter card testing; counted in Redis with `Deps.Redis`, else in the process's
 memory, so several instances need Redis). Other routes are
 not limited: a per-address ceiling belongs to your proxy. Override the limits,
@@ -314,7 +314,7 @@ callers. YAML is decoded into the same `catalog.Application` as JSON
 (`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
 record, and `prune: true` removes omitted products and prices that only
-documents set (deleted when never referenced, archived otherwise). Price keys are unique within their product. Key lookups and checkout selections
+documents set (deleted when never referenced, archived otherwise). Price keys are unique within their product. Key lookups and purchase selections
 therefore carry both `product_key` and `price_key`; price IDs select one immutable
 record directly. Each product/key chain has automatic price revisions starting at
 zero. New financial terms create a new revision; repeating or reactivating old
@@ -500,7 +500,7 @@ error)`.
 allows: bound it with the context's deadline.
 
 Orders and their previews use the shared client too. See
-[checkout](api/commerce.md).
+[purchase](api/commerce.md).
 
 A host that must start or stop a running charge in the same commit as its own
 rows obtains a `LocalClient` from `engine.LocalMerchant(merchantID)` and uses its
@@ -608,12 +608,12 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 OpenRails serves no team or API-key routes: the host owns its identity and
 team UI. Worker health is the engine's `Probes` (`openrails_job_progress`).
 
-### Merchant checkout authority
+### Merchant purchase authority
 
 A customer usually buys with their own credential: their browser creates and
 pays an order at `/v1/me/orders`. `Client.CreateOrder` creates an unpaid order
 for them with the merchant's credential instead, in process or remote with an
 application key holding `root:orders:manage`, for a host whose own purchase
 rules decide what a customer may buy. Either way only the customer pays it,
-signed in (billing-ui's `<OrderCheckout orderId>`): staff never buy for
+signed in (billing-ui's `<OrderPayment orderId>`): staff never buy for
 someone else.

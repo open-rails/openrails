@@ -106,7 +106,7 @@ func (q *Queries) CompleteUsageOrder(ctx context.Context, arg CompleteUsageOrder
 }
 
 const countOrderAttempts = `-- name: CountOrderAttempts :one
-SELECT count(*)::bigint FROM billing.checkout_attempts
+SELECT count(*)::bigint FROM billing.order_attempts
 WHERE merchant_id = $1::uuid AND order_id = $2::uuid
 `
 
@@ -342,7 +342,7 @@ func (q *Queries) GetUsageMonthlyCollectionPeriod(ctx context.Context, merchantI
 }
 
 const getUsageOrderByPeriod = `-- name: GetUsageOrderByPeriod :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND origin = 'usage'
   AND currency = $3::text
   AND period_starts_at = $4::timestamptz AND period_ends_at = $5::timestamptz
@@ -389,17 +389,16 @@ func (q *Queries) GetUsageOrderByPeriod(ctx context.Context, arg GetUsageOrderBy
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PaymentStatus,
-		&i.CheckoutSecretHash,
-		&i.CheckoutExpiresAt,
-		&i.CheckoutSuccessUrl,
-		&i.CheckoutCancelUrl,
-		&i.CheckoutSavedPaymentMethods,
+		&i.PayUrlSecretHash,
+		&i.PayUrlExpiresAt,
+		&i.SuccessUrl,
+		&i.CancelUrl,
+		&i.SavedPaymentMethods,
 		&i.SubscriptionID,
 		&i.PeriodStartsAt,
 		&i.PeriodEndsAt,
 		&i.DueAt,
 		&i.VoidedAt,
-		&i.CheckoutUiMode,
 		&i.AmountPaid,
 		&i.UncollectibleAt,
 		&i.CollectionMethod,
@@ -413,6 +412,7 @@ func (q *Queries) GetUsageOrderByPeriod(ctx context.Context, arg GetUsageOrderBy
 		&i.CollectionOwner,
 		&i.SubscriptionBillKind,
 		&i.LinesDigest,
+		&i.Embedded,
 	)
 	return i, err
 }
@@ -671,7 +671,7 @@ func (q *Queries) ListChargeableUsageOrders(ctx context.Context, arg ListChargea
 }
 
 const listOpenUsageOrdersOfCurrency = `-- name: ListOpenUsageOrdersOfCurrency :many
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
   AND origin = 'usage' AND status = 'open' AND amount_paid < total
 ORDER BY created_at, id
@@ -724,17 +724,16 @@ func (q *Queries) ListOpenUsageOrdersOfCurrency(ctx context.Context, arg ListOpe
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.PaymentStatus,
-			&i.CheckoutSecretHash,
-			&i.CheckoutExpiresAt,
-			&i.CheckoutSuccessUrl,
-			&i.CheckoutCancelUrl,
-			&i.CheckoutSavedPaymentMethods,
+			&i.PayUrlSecretHash,
+			&i.PayUrlExpiresAt,
+			&i.SuccessUrl,
+			&i.CancelUrl,
+			&i.SavedPaymentMethods,
 			&i.SubscriptionID,
 			&i.PeriodStartsAt,
 			&i.PeriodEndsAt,
 			&i.DueAt,
 			&i.VoidedAt,
-			&i.CheckoutUiMode,
 			&i.AmountPaid,
 			&i.UncollectibleAt,
 			&i.CollectionMethod,
@@ -748,6 +747,7 @@ func (q *Queries) ListOpenUsageOrdersOfCurrency(ctx context.Context, arg ListOpe
 			&i.CollectionOwner,
 			&i.SubscriptionBillKind,
 			&i.LinesDigest,
+			&i.Embedded,
 		); err != nil {
 			return nil, err
 		}
@@ -1047,7 +1047,7 @@ func (q *Queries) ListUsageThresholdCandidates(ctx context.Context, arg ListUsag
 }
 
 const lockUsageOrder = `-- name: LockUsageOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid AND origin = 'usage'
 FOR UPDATE
 `
@@ -1084,17 +1084,16 @@ func (q *Queries) LockUsageOrder(ctx context.Context, arg LockUsageOrderParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PaymentStatus,
-		&i.CheckoutSecretHash,
-		&i.CheckoutExpiresAt,
-		&i.CheckoutSuccessUrl,
-		&i.CheckoutCancelUrl,
-		&i.CheckoutSavedPaymentMethods,
+		&i.PayUrlSecretHash,
+		&i.PayUrlExpiresAt,
+		&i.SuccessUrl,
+		&i.CancelUrl,
+		&i.SavedPaymentMethods,
 		&i.SubscriptionID,
 		&i.PeriodStartsAt,
 		&i.PeriodEndsAt,
 		&i.DueAt,
 		&i.VoidedAt,
-		&i.CheckoutUiMode,
 		&i.AmountPaid,
 		&i.UncollectibleAt,
 		&i.CollectionMethod,
@@ -1108,6 +1107,7 @@ func (q *Queries) LockUsageOrder(ctx context.Context, arg LockUsageOrderParams) 
 		&i.CollectionOwner,
 		&i.SubscriptionBillKind,
 		&i.LinesDigest,
+		&i.Embedded,
 	)
 	return i, err
 }
@@ -1174,7 +1174,7 @@ SET amount_paid = amount_paid + $1::bigint,
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND origin = 'usage'
   AND (status IN ('open', 'uncollectible') OR (status = 'processing' AND attempt_id = $5::uuid))
   AND amount_paid + $1::bigint <= total
-RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest
+RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded
 `
 
 type PayUsageOrderParams struct {
@@ -1219,17 +1219,16 @@ func (q *Queries) PayUsageOrder(ctx context.Context, arg PayUsageOrderParams) (B
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PaymentStatus,
-		&i.CheckoutSecretHash,
-		&i.CheckoutExpiresAt,
-		&i.CheckoutSuccessUrl,
-		&i.CheckoutCancelUrl,
-		&i.CheckoutSavedPaymentMethods,
+		&i.PayUrlSecretHash,
+		&i.PayUrlExpiresAt,
+		&i.SuccessUrl,
+		&i.CancelUrl,
+		&i.SavedPaymentMethods,
 		&i.SubscriptionID,
 		&i.PeriodStartsAt,
 		&i.PeriodEndsAt,
 		&i.DueAt,
 		&i.VoidedAt,
-		&i.CheckoutUiMode,
 		&i.AmountPaid,
 		&i.UncollectibleAt,
 		&i.CollectionMethod,
@@ -1243,6 +1242,7 @@ func (q *Queries) PayUsageOrder(ctx context.Context, arg PayUsageOrderParams) (B
 		&i.CollectionOwner,
 		&i.SubscriptionBillKind,
 		&i.LinesDigest,
+		&i.Embedded,
 	)
 	return i, err
 }

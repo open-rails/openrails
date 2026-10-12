@@ -356,7 +356,7 @@ func (s *NMIWebhookService) markDirtyFromRecurringEvent(ctx context.Context) err
 // markDirtyFromTransactionEvent parses only the subscription/order reference
 // from a transaction.sale.* event and enqueues fetch-and-converge. Events
 // without any reference (one-off sales) carry no subscription state — the
-// checkout path owns those.
+// purchase path owns those.
 func (s *NMIWebhookService) markDirtyFromTransactionEvent(ctx context.Context) error {
 	body, err := s.parseTransactionEventBody()
 	if err != nil {

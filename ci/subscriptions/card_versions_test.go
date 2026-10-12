@@ -161,8 +161,8 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
 	// The merchant sells cards through its custodian's PSP.
-	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"nmi-bt"}}}
-	w.settings = billing.MerchantSettings{CheckoutRouting: &routing}
+	routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi-bt"}}}
+	w.settings = billing.MerchantSettings{PSPRouting: &routing}
 	w.start()
 	keyed := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
 	bt.gateway = func(form url.Values, number string) string {
@@ -170,13 +170,13 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 			InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id")}).TransactionID
 	}
 	rt := engine.Graph(w.rt).Runtime
-	rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
+	rt.PurchaseService.CustodianSaleService.BTBaseURLOverride = btURL
 	ctx := merchant.WithID(t.Context(), rt.DeclaredMerchants()[0])
 	// The page's Basis Theory Elements collect the card; its token intent
 	// pays the order on the custodian's PSP.
 	buy := func(c *customer, price billing.PriceID, number string) {
 		t.Helper()
-		c.mustCheckout(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
+		c.mustPurchase(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
 	}
 	var custodian uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.custodians`)).Scan(&custodian))

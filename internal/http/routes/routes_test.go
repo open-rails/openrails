@@ -132,7 +132,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 
 	// Retired and control-plane-only management routes are not mounted.
 	for _, key := range routeKeys(table) {
-		for _, retired := range []string{"/api-keys", "/team", "/orphans", "/reconcile", "/merchant-configuration", "/checkout-attempts"} {
+		for _, retired := range []string{"/api-keys", "/team", "/orphans", "/reconcile", "/merchant-configuration", "/order-attempts"} {
 			require.NotContains(t, key, retired)
 		}
 	}

@@ -7,7 +7,7 @@ import { DiagnosticCategory } from "typescript"
 import { defineConfig } from "vite"
 import dts from "vite-plugin-dts"
 
-import { checkoutCssPlugin } from "./tooling/checkout-css/vite-plugin.ts"
+import { scopedCssPlugin } from "./tooling/scoped-css/vite-plugin.ts"
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const src = (p: string) => path.resolve(root, "src", p)
@@ -48,7 +48,7 @@ export default defineConfig({
         }
       },
     }),
-    checkoutCssPlugin({ entries: ["index"] }),
+    scopedCssPlugin({ entries: ["index"] }),
   ],
   resolve: {
     alias: {

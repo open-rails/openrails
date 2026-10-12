@@ -18,19 +18,19 @@ import (
 type attempt struct {
 	Kind, Owner, CardEntry, Category          string
 	Reason, CVV, TransactionID, Target, Last4 *string
-	Checkout, Payment                         *uuid.UUID
+	Purchase, Payment                         *uuid.UUID
 }
 
 func (w *world) attempts(customerID string) []attempt {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), `SELECT kind, owner, card_entry, category, reason, cvv_result, transaction_id, checkout_target, card_last4, checkout_id, payment_id
+	rows, err := w.pool.Query(w.t.Context(), `SELECT kind, owner, card_entry, category, reason, cvv_result, transaction_id, purchase_target, card_last4, purchase_id, payment_id
 		FROM `+pgx.Identifier{w.schema}.Sanitize()+`.payment_attempts WHERE customer_id = $1 ORDER BY attempted_at, id`, customerID)
 	require.NoError(w.t, err)
 	defer rows.Close()
 	var out []attempt
 	for rows.Next() {
 		var a attempt
-		require.NoError(w.t, rows.Scan(&a.Kind, &a.Owner, &a.CardEntry, &a.Category, &a.Reason, &a.CVV, &a.TransactionID, &a.Target, &a.Last4, &a.Checkout, &a.Payment))
+		require.NoError(w.t, rows.Scan(&a.Kind, &a.Owner, &a.CardEntry, &a.Category, &a.Reason, &a.CVV, &a.TransactionID, &a.Target, &a.Last4, &a.Purchase, &a.Payment))
 		out = append(out, a)
 	}
 	require.NoError(w.t, rows.Err())
@@ -71,7 +71,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	require.Equal(t, []string{"initial", "approved"}, []string{charged.Kind, charged.Category})
 	for _, a := range rows {
 		require.Equal(t, "new", a.CardEntry)
-		require.Equal(t, *rows[0].Checkout, *a.Checkout, "one checkout")
+		require.Equal(t, *rows[0].Purchase, *a.Purchase, "one purchase")
 	}
 	paid := completed(w.payments(embedded, h.c.id))
 	require.Len(t, paid, 1)
@@ -79,7 +79,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 }
 
 // An issuer decline on the sale is recorded with its reason; the next card in
-// the same hour continues the checkout.
+// the same hour continues the purchase.
 func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -101,7 +101,7 @@ func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	require.NotEmpty(t, str(declined.TransactionID))
 	require.Nil(t, declined.Payment, "a decline moved no money")
 	for _, a := range rows {
-		require.Equal(t, *rows[0].Checkout, *a.Checkout)
+		require.Equal(t, *rows[0].Purchase, *a.Purchase)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	}
 	require.Equal(t, "incorrect_cvc", str(rows[0].Reason))
 	require.Equal(t, "approved", rows[1].Category)
-	require.Equal(t, *rows[0].Checkout, *rows[1].Checkout)
+	require.Equal(t, *rows[0].Purchase, *rows[1].Purchase)
 
 	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
 	require.NoError(t, err)

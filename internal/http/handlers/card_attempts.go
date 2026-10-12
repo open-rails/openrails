@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 )
 
-// Every card save, checkout and confirmation consults the failure ledger
+// Every card save, purchase and confirmation consults the failure ledger
 // before the provider sees the card, and every refused card is counted.
 
 func cardAttemptLedger(r *httprequest.Request) (*abuse.FailureLedger, uuid.UUID, bool) {

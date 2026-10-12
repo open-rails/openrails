@@ -11,9 +11,9 @@ import (
 // minimal deployment is discoverable; the merchant's part (its payment setup
 // and name) answers only a credential bound to that merchant.
 var configRoutes = []Route{
-	{Method: GET, Path: "/v1/config", Name: "GetPublicConfig", Group: Meta, Auth: AuthPublic, NoConn: true, Checkout: CheckoutPublic,
+	{Method: GET, Path: "/v1/config", Name: "GetPublicConfig", Group: Meta, Auth: AuthPublic, NoConn: true, PayURL: PayURLPublic,
 		Responses: []Reply{{200, billing.PublicConfig{}}}, Bind: publicConfig},
-	{Method: GET, Path: "/v1/me/config", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutMerchant,
+	{Method: GET, Path: "/v1/me/config", Group: Customer, Auth: AuthCustomer, PayURL: PayURLMerchant,
 		Responses: []Reply{{200, billing.CustomerConfig{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetCustomerConfig)},
 }
 

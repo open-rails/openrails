@@ -37,7 +37,7 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	require.NoError(t, err)
 	first, err := priceByKey(t.Context(), c, "retained-video", "buy")
 	require.NoError(t, err)
-	paid := buyer.mustCheckout(embedded, order{price: first.ID, rail: "nmi", method: method})
+	paid := buyer.mustPurchase(embedded, order{price: first.ID, rail: "nmi", method: method})
 	_, err = c.ApplyCatalog(t.Context(), declaration(7000000), billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	// Archiving retires the product; the purchase keeps pointing at it.

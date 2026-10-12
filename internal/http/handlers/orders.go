@@ -17,11 +17,11 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -48,7 +48,7 @@ func orderActor(r *httprequest.Request, present bool) *billingservice.OrderActor
 		}
 		ip = addr.Unmap().String()
 	}
-	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: checkoutVerifiedPrincipal(r), ClientIP: ip}
+	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: verifiedPrincipal(r), ClientIP: ip}
 }
 
 // signedInPerson refuses, 403 customer_session_required, anyone but the
@@ -155,16 +155,16 @@ func PreviewMyOrder(r *httprequest.Request) {
 }
 
 // CreateMyOrder handles POST /v1/me/orders: the one-call buy when a payment
-// is named, the order and its embedded checkout when a checkout is, an open
+// is named, the order and its embedded pay URL when a pay URL is, an open
 // order to pay later otherwise. Asked again for the same lines, it answers
-// the customer's open order of them. A checkout offers the customer's saved cards,
-// so only the merchant's own signed-in person asks for one.
+// the customer's open order of them. A pay URL offers the customer's saved
+// cards, so only the merchant's own signed-in person asks for one.
 func CreateMyOrder(r *httprequest.Request) {
 	var body billing.CreateMyOrderParams
 	if !r.BindJSON(&body) {
 		return
 	}
-	if body.Checkout != nil && !signedInPerson(r) {
+	if body.PayURL != nil && !signedInPerson(r) {
 		return
 	}
 	actor := orderActor(r, body.Payment != nil)
@@ -197,7 +197,7 @@ func PayMyOrder(r *httprequest.Request) {
 	if !r.BindJSON(&body) {
 		return
 	}
-	if !checkoutPayment(r, body) {
+	if !payURLPayment(r, body) {
 		return
 	}
 	actor := orderActor(r, true)
@@ -358,7 +358,7 @@ func writeOrderError(r *httprequest.Request, err error) {
 		r.APIError(out)
 		return
 	}
-	var blocked *checkout.CardAttemptsBlockedError
+	var blocked *payment.CardAttemptsBlockedError
 	var refused *paymentmethods.PaymentMethodError
 	switch {
 	case errors.As(err, &blocked):
@@ -367,11 +367,11 @@ func writeOrderError(r *httprequest.Request, err error) {
 		writePaymentMethodError(r, refused)
 	case errors.Is(err, pgx.ErrNoRows):
 		r.ErrorCode(billing.CodeResourceNotFound, "")
-	case errors.Is(err, checkout.ErrPaymentMethodStale):
+	case errors.Is(err, payment.ErrPaymentMethodStale):
 		writePaymentMethodStale(r)
 	case errors.Is(err, billing.ErrIdempotencyKeyReused):
 		r.ErrorCode(billing.CodeIdempotencyKeyReused, "")
-	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
+	case errors.Is(err, payment.ErrOrderAttemptValidation):
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()))
 	default:
 		writeRefusal(r, err, "order request failed")
@@ -439,12 +439,12 @@ func CancelMerchantOrder(r *httprequest.Request) {
 	writeOrder(r, order)
 }
 
-// checkoutPayment refuses on the hosted checkout host what its secret does
-// not open: a saved card the checkout does not offer (the merchant's opt-in,
+// payURLPayment refuses on the payment origin what its secret does
+// not open: a saved card the pay URL does not offer (the merchant's opt-in,
 // and cards the customer allowed to be shown again), or another attempt once
 // the order took its most declines.
-func checkoutPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
-	c, ok := hostedcheckout.FromContext(r.Request.Context())
+func payURLPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
+	c, ok := paymentpage.FromContext(r.Request.Context())
 	if !ok {
 		return true
 	}
@@ -462,20 +462,20 @@ func checkoutPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
 				r.InternalError("failed to read the payment method", err)
 				return false
 			}
-			offered = len(hostedcheckout.SavedCards(views)) == 1
+			offered = len(paymentpage.SavedCards(views)) == 1
 		}
 		if !offered {
 			r.APIError(api.Coded(billing.CodeResourceNotFound, "payment method not found").WithParam("payment.payment_method_id"))
 			return false
 		}
 	}
-	exhausted, err := hostedcheckout.NewStore(r.State.DB).Exhausted(ctx, c)
+	exhausted, err := paymentpage.NewStore(r.State.DB).Exhausted(ctx, c)
 	if err != nil {
-		r.InternalError("failed to count the checkout's attempts", err)
+		r.InternalError("failed to count the pay URL's attempts", err)
 		return false
 	}
 	if exhausted {
-		r.ErrorCode("checkout_attempts_exhausted", "")
+		r.ErrorCode("pay_url_attempts_exhausted", "")
 		return false
 	}
 	return true

@@ -73,26 +73,30 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
-		// Orders before usage orders had none of their columns; before ui_mode
-		// hosted checkouts only; before renewals none of their columns; before
-		// hosted checkout none of its; before the payment axis one status.
+		// Orders before usage orders had none of their columns; before
+		// embedded pay URLs hosted ones only; before renewals none of their
+		// columns; before pay URLs none of theirs; before the payment axis one
+		// status. Before migration 88, embedded was a ui_mode.
 		if p.Name == "orders" && len(r.Values) < len(p.Columns) {
 			missing := len(p.Columns) - 2 - len(r.Values)
-			if missing == orderUsageColumns+1+orderRenewalColumns+orderCheckoutColumns+1 {
+			if missing == orderUsageColumns+1+orderRenewalColumns+orderPayURLColumns+1 {
 				r.Values = splitOrderStatus(p, r.Values)
 				missing--
 			}
 			switch missing {
 			case orderUsageColumns:
 				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
-			case orderUsageColumns + 1, orderUsageColumns + 1 + orderRenewalColumns, orderUsageColumns + 1 + orderRenewalColumns + orderCheckoutColumns:
+			case orderUsageColumns + 1, orderUsageColumns + 1 + orderRenewalColumns, orderUsageColumns + 1 + orderRenewalColumns + orderPayURLColumns:
 				r.Values = append(r.Values, make([]*string, missing-orderUsageColumns-1)...)
-				r.Values = append(r.Values, hostedIfCheckout(p, r.Values))
+				r.Values = append(r.Values, hostedIfPayURL(p, r.Values))
 				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
 			}
 			if len(r.Values) == len(p.Columns)-2 {
 				r.Values = append(r.Values, new("engine"), nil)
 			}
+		}
+		if p.Name == "orders" {
+			embeddedFromUIMode(p, r.Values)
 		}
 		// Order lines before usage orders named no accrual source.
 		if p.Name == "order_lines" {
@@ -137,23 +141,39 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	return info, err
 }
 
-// The column groups later migrations appended to orders, in order: hosted
-// checkout's, renewals', checkout_ui_mode, usage orders'.
+// The column groups later migrations appended to orders, in order: the pay
+// URL's, renewals', embedded, usage orders'.
 const (
-	orderCheckoutColumns = 5
-	orderRenewalColumns  = 5
-	orderUsageColumns    = 10
+	orderPayURLColumns  = 5
+	orderRenewalColumns = 5
+	orderUsageColumns   = 10
 )
 
-// hostedIfCheckout is the ui_mode of an order archived before it had one:
-// hosted when it has a checkout.
-func hostedIfCheckout(p Profile, values []*string) *string {
+// hostedIfPayURL is embedded for an order archived before it had one: false
+// (hosted) when it has a pay URL.
+func hostedIfPayURL(p Profile, values []*string) *string {
 	for i, c := range p.Columns[:len(values)] {
-		if c.Name == "checkout_secret_hash" && values[i] != nil {
-			return new("hosted")
+		if c.Name == "pay_url_secret_hash" && values[i] != nil {
+			return new("false")
 		}
 	}
 	return nil
+}
+
+// embeddedFromUIMode reads an order archived before migration 88, whose
+// embedded column was its ui_mode, hosted or embedded.
+func embeddedFromUIMode(p Profile, values []*string) {
+	for i, c := range p.Columns[:min(len(p.Columns), len(values))] {
+		if c.Name != "embedded" || values[i] == nil {
+			continue
+		}
+		switch *values[i] {
+		case "hosted":
+			values[i] = new("false")
+		case "embedded":
+			values[i] = new("true")
+		}
+	}
 }
 
 // usageRenames are the tables usage orders renamed.

@@ -124,7 +124,7 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 
 		status, body = w.newCustomer().cardSave(ip(100), visa)
 		require.Equal(t, http.StatusCreated, status, "a fresh buyer saves a card: %s", body)
-		buyer.subscribe(embedded, "nmi", price.ID.String(), "vip", method) // confirms a checkout with the saved card
+		buyer.subscribe(embedded, "nmi", price.ID.String(), "vip", method) // confirms a purchase with the saved card
 		require.True(t, buyer.entitled("vip"))
 	})
 	t.Run("not_an_attack", func(t *testing.T) {

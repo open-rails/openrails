@@ -311,7 +311,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 
 -- name: CountOrderAttempts :one
 -- An order's attempts so far: a scheduled collection's ordinal.
-SELECT count(*)::bigint FROM billing.checkout_attempts
+SELECT count(*)::bigint FROM billing.order_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid;
 
 -- name: InsertOrderPayment :exec

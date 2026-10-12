@@ -1,11 +1,11 @@
 // BuyButton buys one price the host's page carries: it creates the signed-in
-// customer's order and pays it, in OrderCheckout on the page, or, on a site
-// the merchant registered to frame its checkout, in the order's embedded
-// checkout on the checkout host. The app never handles the order itself.
+// customer's order and pays it, in OrderPayment on the page, or, on a site
+// the merchant registered to frame its pay URLs, in the order's embedded
+// pay URL on the payment origin. The app never handles the order itself.
 import * as React from "react"
 import { cn } from "cn"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import { isBillingError, localError, toBillingError } from "#orck/client/errors"
 import type { Order, Price } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
@@ -38,13 +38,13 @@ export interface BuyButtonProps {
    */
   onPaid: (order: Order) => void
   /**
-   * Buying needs a signed-in customer: called instead of the checkout when
+   * Buying needs a signed-in customer: called instead of paying when
    * `signedIn` is false or OpenRails answers 401.
    */
   onSignInRequired: () => void
   /** false when the host knows the visitor is signed out. */
   signedIn?: boolean
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 
@@ -58,12 +58,12 @@ function heldBy(err: unknown): string | undefined {
     : undefined
 }
 
-// Where the order is paid: on this page, or framed from the checkout host.
+// Where the order is paid: on this page, or framed from the payment origin.
 type Paying =
   | { kind: "inline"; orderId: string }
   | { kind: "embedded"; orderId: string; url: string }
 
-// A page on an origin the merchant registered to frame its checkout pays
+// A page on an origin the merchant registered to frame its pay URLs pays
 // there; any other pays on the page.
 const framesPayment = (origins: string[]) =>
   typeof window !== "undefined" && origins.includes(window.location.origin)
@@ -107,11 +107,11 @@ export function BuyButton({
         // so a second click, a reopened dialog or a reload pays the same one.
         ;({ order } = await client.createOrder({
           lines: [{ price_id: price.id, ...(amount ? { amount } : {}) }],
-          ...(embedded ? { checkout: { ui_mode: "embedded" } } : {}),
+          ...(embedded ? { payUrl: { embedded: true } } : {}),
         }))
       } catch (err) {
         const held = heldBy(err)
-        // Only an order made with a checkout answers its URL.
+        // Only an order made with a pay URL answers its URL.
         if (!held || embedded) throw err
         setPaying({ kind: "inline", orderId: held })
         return
@@ -121,11 +121,11 @@ export function BuyButton({
         setPaying({ kind: "inline", orderId: order.id })
         return
       }
-      const url = order.checkout?.url
+      const url = order.pay_url
       if (!url)
         throw localError(
           "invalid_response",
-          "the order answered no checkout URL"
+          "the order answered no pay URL"
         )
       setPaying({ kind: "embedded", orderId: order.id, url })
     } catch (err) {

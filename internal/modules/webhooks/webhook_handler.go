@@ -30,8 +30,8 @@ const (
 	WebhookEventRefund                    WebhookEventType = "refund"
 	WebhookEventVoid                      WebhookEventType = "void"
 	WebhookEventChargeback                WebhookEventType = "chargeback"
-	WebhookEventCheckoutCompleted         WebhookEventType = "checkout_completed"
-	WebhookEventCheckoutExpired           WebhookEventType = "checkout_expired"
+	WebhookEventCheckoutCompleted         WebhookEventType = "payment_completed"
+	WebhookEventCheckoutExpired           WebhookEventType = "pay_url_expired"
 	WebhookEventCustomerUpdated           WebhookEventType = "customer_updated"
 )
 

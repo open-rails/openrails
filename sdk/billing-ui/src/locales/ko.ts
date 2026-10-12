@@ -143,7 +143,7 @@ export const ko: BillingUiMessageBundle = {
     inUse:
       "이 카드는 활성 구독의 결제에 사용 중입니다. 먼저 해당 구독을 다른 카드로 변경하세요.",
   },
-  checkout: {
+  purchase: {
     renews: "{period} 갱신",
   },
   history: {

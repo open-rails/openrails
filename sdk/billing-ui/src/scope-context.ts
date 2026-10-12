@@ -3,14 +3,14 @@ import { createContext, useContext, type CSSProperties } from "react"
 import {
   appearanceStyle,
   appearanceTheme,
-  type CheckoutAppearance,
-  type CheckoutTheme,
+  type BillingAppearance,
+  type BillingTheme,
 } from "./appearance"
 
 export type Navigate = (to: string) => void
 
 export interface UiSettings {
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   locale?: string
   navigate?: Navigate
 }
@@ -21,12 +21,12 @@ export const useUiSettings = (): UiSettings => useContext(UiContext)
 
 export interface ScopeProps {
   className: string
-  "data-orck-theme": CheckoutTheme
+  "data-orck-theme": BillingTheme
   style?: CSSProperties
 }
 
 /** Props that make an element a styling root; portals carry them too. */
-export function useScopeProps(appearance?: CheckoutAppearance): ScopeProps {
+export function useScopeProps(appearance?: BillingAppearance): ScopeProps {
   const settings = useUiSettings()
   const resolved = appearance ?? settings.appearance
   return {

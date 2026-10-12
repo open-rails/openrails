@@ -31,7 +31,7 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Equal(t, int64(1_000_000), *m.Settings.MonthlyFloor)
 	require.Equal(t, 7, *m.Settings.ArrearsGraceDays)
 	require.Equal(t, []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000}, {Key: "sustained", WindowSeconds: 18_000, Limit: 20_000_000}}, m.Settings.DelegatedInvokerWastedSpendLimits)
-	require.Len(t, *m.Settings.CheckoutRouting, 3)
+	require.Len(t, *m.Settings.PSPRouting, 3)
 	require.Equal(t, "Local Stack Billing", m.DisplayName)
 
 	byName, railOf := m.PSPs, map[string]string{}

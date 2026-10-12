@@ -1,5 +1,5 @@
 // A visitor without access lands on the buy page, signs in with auth-ui, pays
-// with billing-ui's OrderCheckout (Collect.js is a stand-in; nmimock is the
+// with billing-ui's OrderPayment (Collect.js is a stand-in; nmimock is the
 // gateway) and is sent back to the content, which the server now serves.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 
@@ -51,11 +51,11 @@ async function signIn(page: Page, buy: Locator, user: string) {
 // Pays the order in BuyButton's dialog with a new card.
 async function pay(page: Page, buy: Locator, confirm: RegExp) {
   await buy.click()
-  const checkout = page.getByRole("dialog")
-  await checkout.getByLabel("Name on card").fill("Card Holder")
-  await checkout.getByLabel("Country").selectOption("US")
-  await checkout.getByLabel(/ZIP/).fill("10001")
-  await checkout.getByRole("button", { name: confirm }).click()
+  const purchase = page.getByRole("dialog")
+  await purchase.getByLabel("Name on card").fill("Card Holder")
+  await purchase.getByLabel("Country").selectOption("US")
+  await purchase.getByLabel(/ZIP/).fill("10001")
+  await purchase.getByRole("button", { name: confirm }).click()
 }
 
 const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true })

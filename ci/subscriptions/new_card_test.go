@@ -174,7 +174,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method})
+			c.mustPurchase(embedded, order{price: price.ID, rail: rail, method: method})
 			require.True(t, c.entitled("content:members"))
 		})
 	}

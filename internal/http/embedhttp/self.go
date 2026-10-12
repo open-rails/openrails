@@ -83,7 +83,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 }
 
 // armedProviderRoutes derives the route surface from mid's armed PSPs (#775) — the mount-time analogue of the per-request DB fallback
-// checkoutRailConfigured / effectiveSolanaRailConfig use. This runs ONCE at
+// railConfigured / effectiveSolanaRailConfig use. This runs ONCE at
 // handler-assembly time (not per request), so one query per rail is not a hot
 // path concern.
 func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid billing.MerchantID) routesurface.ProviderRoutes {

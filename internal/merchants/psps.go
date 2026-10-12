@@ -63,7 +63,7 @@ type LastActivePSPError struct {
 }
 
 func (e *LastActivePSPError) Error() string {
-	return fmt.Sprintf("merchants: PSP %s is the only active PSP on its rail; pass allow_last to archive it and refuse new checkout on the rail", e.PSP)
+	return fmt.Sprintf("merchants: PSP %s is the only active PSP on its rail; pass allow_last to archive it and refuse new purchase on the rail", e.PSP)
 }
 
 // pspSettingKeys are the settings a PSP on rail takes through the API.

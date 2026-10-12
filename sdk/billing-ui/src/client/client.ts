@@ -561,9 +561,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * customer saw; `idempotencyKey`, required with `payment`, names the
      * payment attempt. A failed payment resolves as payOrder's does. Without
      * `payment` the customer's open order of the same lines is answered when
-     * there is one. With `checkout` the order answers its embedded checkout,
-     * `order.checkout.url` on the checkout host, for `<EmbeddedCheckout>`,
-     * fresh on every answer: the merchant's own signed-in person only.
+     * there is one. With `payUrl` the order answers its embedded pay URL,
+     * `order.pay_url` on the payment origin, for `<EmbeddedPayment>`, fresh
+     * on every answer: the merchant's own signed-in person only.
      */
     createOrder(input: {
       lines?: { price_id: string; quantity?: number; amount?: string }[]
@@ -571,7 +571,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       expectedTotal?: string
       payment?: OrderPaymentInput
       reusable?: boolean
-      checkout?: wire.MyOrderCheckoutParams
+      payUrl?: wire.MyOrderPayURLParams
       idempotencyKey?: string
     }): Promise<OrderResult> {
       return orderResult("/me/orders", {
@@ -583,7 +583,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
             : { expected_total: input.expectedTotal }),
           ...(input.payment === undefined ? {} : { payment: input.payment }),
           ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
-          ...(input.checkout === undefined ? {} : { checkout: input.checkout }),
+          ...(input.payUrl === undefined ? {} : { pay_url: input.payUrl }),
         },
         headers: input.idempotencyKey
           ? { "Idempotency-Key": input.idempotencyKey }

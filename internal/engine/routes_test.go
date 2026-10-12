@@ -227,7 +227,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 // One limiter per runtime: a second host mount must not reset the counters.
 func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 	rt := httpRuntime()
-	rt.App.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	rt.App.Config.RateLimits = &config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
 	sel := config.Routes{Auth: &authtest.Fake{}}
 	first, second := mountAt(t, rt, sel, "/first"), mountAt(t, rt, sel, "/second")
 	for i, tc := range []struct {

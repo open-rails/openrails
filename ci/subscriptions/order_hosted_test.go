@@ -12,7 +12,7 @@ import (
 )
 
 // An order of one-time lines paid on Stripe's hosted page: the customer goes
-// to Checkout for the order's total and comes back to the host. The session's
+// to Purchase for the order's total and comes back to the host. The session's
 // completion completes the order once, however often Stripe delivers it. An
 // expired page lets the order take another payment; canceling an order
 // expires its page.

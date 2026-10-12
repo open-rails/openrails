@@ -33,7 +33,7 @@ function Asker() {
         answers.push(
           await confirm({
             title: "Archive psp-a?",
-            description: "New checkout stops routing to it.",
+            description: "New purchase stops routing to it.",
             confirmLabel: "Archive PSP",
             tone: "destructive",
           })
@@ -52,7 +52,7 @@ it("resolves true on confirm and false on cancel", async () => {
     expect(document.body.textContent).toContain("Archive psp-a?")
   )
   expect(document.body.textContent).toContain(
-    "New checkout stops routing to it."
+    "New purchase stops routing to it."
   )
   await click("Archive PSP")
   await click("Ask")

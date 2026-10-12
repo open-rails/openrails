@@ -52,9 +52,9 @@ func (id *NetworkAccountID) UnmarshalText(b []byte) error {
 type CustomerLinkMethod string
 
 const (
-	// CustomerLinkCheckout: at hosted or embedded checkout, by the order's
-	// checkout URL and a network sign-in on the checkout page.
-	CustomerLinkCheckout CustomerLinkMethod = "checkout"
+	// CustomerLinkPaymentPage: on the payment page, by the order's pay URL
+	// and a network sign-in there.
+	CustomerLinkPaymentPage CustomerLinkMethod = "payment_page"
 	// CustomerLinkConnect: from the merchant's site, by the customer's own
 	// token there and a network sign-in through the merchant's client.
 	CustomerLinkConnect CustomerLinkMethod = "connect"

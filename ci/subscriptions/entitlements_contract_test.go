@@ -154,7 +154,7 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 
 			next := w.newCustomer()
 			nextMethod := next.saveCard("nmi", visa)
-			next.mustCheckout(topology, order{price: price.ID, rail: "nmi", method: nextMethod})
+			next.mustPurchase(topology, order{price: price.ID, rail: "nmi", method: nextMethod})
 			require.True(t, next.entitled("post:202"))
 			require.False(t, next.entitled("post:101"))
 			require.False(t, next.entitled("premium"))

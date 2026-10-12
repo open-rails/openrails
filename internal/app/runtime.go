@@ -37,7 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -45,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -155,14 +155,14 @@ type Runtime struct {
 	// CopilotService answers catalog questions and drafts price changes for a
 	// person to review (off without an LLM and its consent).
 	CopilotService *copilot.Service
-	// HostedCheckoutOrigin is where a server serving the hosted checkout
-	// serves it; merchant orders take a checkout only when it is set.
-	hostedCheckoutOrigin atomic.Pointer[string]
-	// checkoutDomains are the (PSP, host) registrations known queued.
-	checkoutDomains sync.Map
-	// CheckoutNetwork is the checkout page's sign-in to the customer
+	// PaymentOrigin is where a server serving the payment page
+	// serves it; merchant orders take a purchase only when it is set.
+	paymentOrigin atomic.Pointer[string]
+	// paymentDomains are the (PSP, host) registrations known queued.
+	paymentDomains sync.Map
+	// PaymentPageNetwork is the payment page's sign-in to the customer
 	// network, set by a server running both.
-	CheckoutNetwork *billing.PublicNetwork
+	PaymentPageNetwork *billing.PublicNetwork
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
@@ -231,8 +231,8 @@ type Runtime struct {
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
 
-	CheckoutService        *checkout.CheckoutService
-	CheckoutAttemptService *checkout.CheckoutAttemptService
+	PurchaseService     *payment.PurchaseService
+	OrderAttemptService *payment.OrderAttemptService
 	// Orders are purchases (#1168).
 	Orders *orders.Service
 	// Idempotency claims request keys (#1099).
@@ -634,12 +634,12 @@ func (r *Runtime) SetSolanaPrepareTierChangeService(svc *recurring.PrepareTierCh
 	r.SolanaPrepareTierChangeService = svc
 }
 
-// HostedCheckoutOrigin is safe to read from provider posture hooks started
-// during New, while the host composes its checkout surface before Start.
-func (r *Runtime) HostedCheckoutOrigin() string {
-	if value := r.hostedCheckoutOrigin.Load(); value != nil {
+// PaymentOrigin is safe to read from provider posture hooks started
+// during New, while the host composes its payment page surface before Start.
+func (r *Runtime) PaymentOrigin() string {
+	if value := r.paymentOrigin.Load(); value != nil {
 		return *value
 	}
 	return ""
 }
-func (r *Runtime) SetHostedCheckoutOrigin(origin string) { r.hostedCheckoutOrigin.Store(&origin) }
+func (r *Runtime) SetPaymentOrigin(origin string) { r.paymentOrigin.Store(&origin) }

@@ -57,7 +57,7 @@ modes"](operations.md#operating-modes-the-safety-levers).
 - **`provider_write_mode`** (`PROVIDER_WRITE_MODE`, `--provider-write-mode`) —
   the behavior dial: `full | limited | readonly`. Required explicitly
   (boot refuses without it); unset fail-closes to `readonly` wherever it is
-  consulted. `limited` = humans can do everything (checkout, cancel, refund),
+  consulted. `limited` = humans can do everything (purchase, cancel, refund),
   the system initiates nothing; `readonly` = nothing writes to a provider at
   all, wire-enforced. Provider reads and verified local financial recovery
   continue in every mode.
@@ -71,7 +71,7 @@ modes"](operations.md#operating-modes-the-safety-levers).
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
 | Real money can move | yes | yes | no |
-| User checkout / charge / refund / cancel | yes | yes | no (fails loudly) |
+| User purchase / charge / refund / cancel | yes | yes | no (fails loudly) |
 | Dunning charges + expiry cancellations | yes | dry-run, intents parked | no |
 | Usage order collection, Solana pulls | yes | no | no |
 | Catalog provider-object writes | yes | deferred | deferred |
@@ -227,12 +227,12 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 
 ### Processor routing
 
-Checkout is one processor at a time, chosen **before** the session exists. A request that
+Purchase is one processor at a time, chosen **before** the session exists. A request that
 names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is routed.
 
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
-- **Policy**: the `checkout_routing` merchant setting, declared under `settings:`
+- **Policy**: the `psp_routing` merchant setting, declared under `settings:`
   in the merchant's YAML or set through `PATCH /v1/merchant/configuration`. Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
@@ -240,7 +240,7 @@ names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is
   catch-all and must be last.
 
 ```yaml
-checkout_routing:
+psp_routing:
   - match: { currency: EUR, mode: subscription }
     prefer: [ccbill, mobius]
   - prefer: [mobius, ccbill, solana]
@@ -250,7 +250,7 @@ checkout_routing:
   `credentials_missing`, `link_missing`, `mode_unsupported`, `service_unavailable`,
   `ambiguous_selector`, `unknown_selector`, `resolve_failed`. A **decline is not one of
   them** — routing never retries a charge on a second processor.
-- **Why did this customer get CCBill?** `checkout_attempts.routing_reason` holds the
+- **Why did this customer get CCBill?** `order_attempts.routing_reason` holds the
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
 - **Preview without charging**: `POST /v1/merchant/psps/routing-preview`

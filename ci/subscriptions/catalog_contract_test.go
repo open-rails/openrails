@@ -255,7 +255,7 @@ func TestArchivingAProductKeepsItsBuyers(t *testing.T) {
 	price, err := priceByKey(t.Context(), c, key, "buy")
 	require.NoError(t, err)
 	buyer := w.newCustomer()
-	buyer.mustCheckout(embedded, order{price: price.ID, rail: "nmi", method: buyer.saveCard("nmi", visa)})
+	buyer.mustPurchase(embedded, order{price: price.ID, rail: "nmi", method: buyer.saveCard("nmi", visa)})
 
 	product, err := c.UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 	require.NoError(t, err)

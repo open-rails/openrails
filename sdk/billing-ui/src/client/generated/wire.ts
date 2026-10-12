@@ -472,7 +472,7 @@ export type CheckEntitlementsParams = {
   at?: string
 }
 
-export type CheckoutRoutingMatch = {
+export type PSPRoutingMatch = {
   currency?: string
   product?: string
   price?: string
@@ -480,8 +480,8 @@ export type CheckoutRoutingMatch = {
   country?: string
 }
 
-export type CheckoutRoutingRule = {
-  match?: CheckoutRoutingMatch
+export type PSPRoutingRule = {
+  match?: PSPRoutingMatch
   prefer: string[]
 }
 
@@ -529,7 +529,7 @@ export type CreateMyOrderParams = {
   expected_total?: string
   payment?: OrderPaymentParams
   reusable?: boolean
-  checkout?: MyOrderCheckoutParams
+  purchase?: MyOrderPayURLParams
 }
 
 export type CreateNetworkLinkParams = {
@@ -541,7 +541,7 @@ export type CreateOrderParams = {
   customer_id?: string
   lines?: OrderLineParams[]
   expires_at?: string
-  checkout?: OrderCheckoutParams
+  purchase?: OrderPayURLParams
 }
 
 export type CreatePSPParams = {
@@ -741,7 +741,7 @@ export type CustomerLink = {
   merchant_id: string
   customer_id: string
   account_id: string
-  method: "checkout" | "connect" | "sign_in"
+  method: "purchase" | "connect" | "sign_in"
   status: "active" | "revoked"
   linked_at: string
   revoked_at: string | null
@@ -751,13 +751,13 @@ export type CustomerLink = {
 export type CustomerNetwork = {
   account_id: string
   linked_at: string
-  method: "checkout" | "connect" | "sign_in"
+  method: "purchase" | "connect" | "sign_in"
 }
 
 export type CustomerNetworkHostEvent = {
   customer_id: string
   account_id: string
-  method: "checkout" | "connect" | "sign_in" | null
+  method: "purchase" | "connect" | "sign_in" | null
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
@@ -1180,7 +1180,7 @@ export type MatrixCell = {
   maximum_amount?: string
 }
 
-export type MerchantCheckoutSettings = {
+export type MerchantPaymentPageSettings = {
   embed_origins?: string[]
 }
 
@@ -1209,9 +1209,9 @@ export type MerchantSettings = {
   provider_refund_access?: string
   arrears_grace_days?: number
   arrears_delinquency_floor?: string
-  checkout_routing?: CheckoutRoutingRule[]
+  psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
-  checkout?: MerchantCheckoutSettings
+  purchase?: MerchantPaymentPageSettings
   balance_notices?: BalanceNoticeSettings
   card_custody?: "hosted" | "merchant" | "platform"
   billing_policies?: BillingPolicy[]
@@ -1332,7 +1332,7 @@ export type MetricsSchema = {
   query_shape: string
 }
 
-export type MyOrderCheckoutParams = {
+export type MyOrderPayURLParams = {
   ui_mode?: "embedded" | "hosted"
 }
 
@@ -1402,7 +1402,7 @@ export type Order = {
   lines: OrderLine[]
   payment: OrderPayment
   payment_options: OrderPaymentOption[]
-  checkout: OrderCheckout | null
+  purchase: OrderPayment | null
   renewal: OrderRenewal | null
   usage: OrderUsage | null
   expires_at: string | null
@@ -1414,7 +1414,7 @@ export type Order = {
   created_at: string
 }
 
-export type OrderCheckout = {
+export type OrderPayment = {
   url: string | null
   ui_mode: "embedded" | "hosted"
   expires_at: string
@@ -1423,7 +1423,7 @@ export type OrderCheckout = {
   saved_payment_methods: boolean
 }
 
-export type OrderCheckoutParams = {
+export type OrderPayURLParams = {
   ui_mode?: "embedded" | "hosted"
   success_url?: string
   cancel_url?: string
@@ -1582,7 +1582,7 @@ export type PSPPaymentConfig = {
   custodian: string
   display_name: string
   flow: string
-  checkout: boolean
+  purchase: boolean
   config?: Record<string, string>
   status?: string
   retry_after?: number

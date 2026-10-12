@@ -19,7 +19,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanasubscriptions "github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
@@ -118,7 +118,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 	if err != nil || oldProduct == nil {
 		return nil, fmt.Errorf("load current product: %w", errors.Join(err, errNilRow))
 	}
-	isUpgrade, err := checkout.SolanaTierChange(oldSub, oldProduct, newProduct, oldPrice, newPrice)
+	isUpgrade, err := payment.SolanaTierChange(oldSub, oldProduct, newProduct, oldPrice, newPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 
 	if isUpgrade && quoteUpgrade {
 		ctx := db.WithPSPID(r.Request.Context(), oldSub.PspID)
-		quote, err := checkout.QuoteSolanaUpgrade(ctx, r.State.DB, oldSub, oldPrice, newPrice, nowOrDefault(r))
+		quote, err := payment.QuoteSolanaUpgrade(ctx, r.State.DB, oldSub, oldPrice, newPrice, nowOrDefault(r))
 		if err != nil {
 			return nil, err
 		}
@@ -204,11 +204,11 @@ func parseResolvedPlanTerms(cfg map[string]string) (solanaResolvedPlanTerms, boo
 	return t, true
 }
 
-// nowOrDefault reads the clock the checkout attempt service uses (so tests can
+// nowOrDefault reads the clock the order attempt service uses (so tests can
 // pin time), falling back to wall-clock.
 func nowOrDefault(r *httprequest.Request) time.Time {
-	if r.State != nil && r.State.CheckoutAttemptService != nil {
-		if c := r.State.CheckoutAttemptService.Clock(); c != nil {
+	if r.State != nil && r.State.OrderAttemptService != nil {
+		if c := r.State.OrderAttemptService.Clock(); c != nil {
 			return c.Now()
 		}
 	}

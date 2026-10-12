@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	log "github.com/sirupsen/logrus"
 )
@@ -33,12 +33,12 @@ func AdminChangeSubscription(r *httprequest.Request) {
 	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
 	// A replay is answered from the durable operation before the admission
 	// guards: once the change committed, the subscription no longer passes them.
-	resp, found, err := r.State.CheckoutService.ReplayTierChange(r.Request.Context(), req, customer)
+	resp, found, err := r.State.PurchaseService.ReplayTierChange(r.Request.Context(), req, customer)
 	if !found && err == nil {
 		if !adminTierChangeAdmissible(r, subscription) {
 			return
 		}
-		resp, err = r.State.CheckoutService.ChangeSubscription(r.Request.Context(), req, customer)
+		resp, err = r.State.PurchaseService.ChangeSubscription(r.Request.Context(), req, customer)
 	}
 	if err != nil {
 		logAdminTierChange(r, req, nil, err)
@@ -58,7 +58,7 @@ func AdminPreviewSubscriptionChange(r *httprequest.Request) {
 		return
 	}
 
-	resp, err := r.State.CheckoutService.PreviewSubscriptionChange(r.Request.Context(), req, customer)
+	resp, err := r.State.PurchaseService.PreviewSubscriptionChange(r.Request.Context(), req, customer)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -69,7 +69,7 @@ func AdminPreviewSubscriptionChange(r *httprequest.Request) {
 
 func adminChangeRequest(
 	r *httprequest.Request,
-) (*checkout.SubscriptionChangeRequest, *checkout.UserIdentity, *models.Subscription, bool) {
+) (*payment.SubscriptionChangeRequest, *payment.UserIdentity, *models.Subscription, bool) {
 	var body ChangeSubscriptionRequest
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
@@ -83,7 +83,7 @@ func adminChangeRequest(
 		return nil, nil, nil, false
 	}
 	req.Staff = true
-	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil {
+	if r.State.PurchaseService == nil || r.State.SubscriptionService == nil {
 		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
 		return nil, nil, nil, false
 	}
@@ -102,7 +102,7 @@ func adminChangeRequest(
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
-	user := &checkout.UserIdentity{ID: subscription.CustomerID.String()}
+	user := &payment.UserIdentity{ID: subscription.CustomerID.String()}
 	if r.State.Contacts != nil {
 		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
 		if err != nil {
@@ -148,8 +148,8 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 
 func logAdminTierChange(
 	r *httprequest.Request,
-	req *checkout.SubscriptionChangeRequest,
-	resp *checkout.TierChangeResponse,
+	req *payment.SubscriptionChangeRequest,
+	resp *payment.TierChangeResponse,
 	err error,
 ) {
 	fields := log.Fields{

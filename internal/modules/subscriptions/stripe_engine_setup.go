@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// StripeEngineSetupParams binds a nonfinancial card setup to an owned checkout
+// StripeEngineSetupParams binds a nonfinancial card setup to an owned purchase
 // resource. A successful SetupIntent alone never creates a paid membership.
 type StripeEngineSetupParams struct {
 	MerchantID, PSPID, CustomerID, SessionID uuid.UUID

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { defineConfig } from "vite"
-import { isolateCheckoutCss } from "./tooling/checkout-css/isolate"
+import { isolateCss } from "./tooling/scoped-css/isolate"
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 
@@ -19,7 +19,7 @@ export default defineConfig({
         for (const asset of Object.values(bundle)) {
           if (asset.type === "asset" && asset.fileName.endsWith(".css"))
             asset.source = (
-              await isolateCheckoutCss(String(asset.source))
+              await isolateCss(String(asset.source))
             ).replaceAll("orck", "orba")
         }
       },

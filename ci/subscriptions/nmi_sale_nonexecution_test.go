@@ -42,7 +42,7 @@ func TestNMISaleNonExecutionNeedsProviderEvidence(t *testing.T) {
 				w.nmi.HideSales(1)
 			}
 			w.nmi.DropSaleResponses(1)
-			paid, err := c.checkout(embedded, order{price: price.ID, rail: "nmi", method: method})
+			paid, err := c.buyOrder(embedded, order{price: price.ID, rail: "nmi", method: method})
 			require.NoError(t, err)
 			t.Logf("pay with the sale's answer lost: %+v", paid.Order)
 			require.NoError(t, w.jobs.Stop(t.Context()))

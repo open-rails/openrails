@@ -20,7 +20,7 @@ import (
 
 // receiptWorld is a world whose customers' receipts go over SMTP to the
 // addresses the host's directory holds. hosted sells Stripe through hosted
-// Checkout, whose events Stripe sends to the world's webhook route.
+// Purchase, whose events Stripe sends to the world's webhook route.
 func receiptWorld(t *testing.T, hosted bool) (*world, *smtptest.Server, *openrailstest.UserInfo) {
 	t.Helper()
 	srv := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: "SG.e2e-key"})
@@ -78,11 +78,11 @@ func TestCreditDepositEmitsReceiptFact(t *testing.T) {
 	require.Equal(t, http.StatusOK, out.status, "%v", out.body)
 	require.Equal(t, "requires_action", paymentOf(out)["status"], "%v", out.body)
 	require.Empty(t, srv.Messages(), "nothing is paid yet")
-	checkout := w.stripe.CheckoutSessions()
-	require.Len(t, checkout, 1)
-	require.Equal(t, checkout[0]["url"], paymentOf(out)["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
+	purchase := w.stripe.CheckoutSessions()
+	require.Len(t, purchase, 1)
+	require.Equal(t, purchase[0]["url"], paymentOf(out)["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
 
-	paid, err := w.stripe.CompleteCheckoutSession(ctx, checkout[0]["id"].(string))
+	paid, err := w.stripe.CompleteCheckoutSession(ctx, purchase[0]["id"].(string))
 	require.NoError(t, err)
 	w.settle()
 	grants, err := client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: c.customerID()})

@@ -72,7 +72,7 @@ billing_archive_platform_cards`.
 
 A successful export leaves the source merchant readonly, and an import lands
 the destination readonly: no provider write (charge, renewal, refund, cancel,
-checkout) happens for that merchant on either copy until an operator arms one
+purchase) happens for that merchant on either copy until an operator arms one
 with `openrails merchant arm --merchant NAME --by NAME`. A refused or failed
 export restores the posture it found. Stopping the source writers is still
 the procedure; the fence keeps a forgotten worker from billing.

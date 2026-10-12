@@ -125,7 +125,7 @@ func (p *lifePass) newCardSpikes(ctx context.Context, now time.Time) ([]Converge
 			continue
 		}
 		out = append(out, spikeFinding(findingNewCardDeclineSpike, k, cur, base, fmt.Sprintf(
-			"New-card declines on %s (%s) rose to %s over the last 24 hours against %s over the 28 days before: look for a checkout regression or card testing.",
+			"New-card declines on %s (%s) rose to %s over the last 24 hours against %s over the 28 days before: look for a purchase regression or card testing.",
 			k.account, k.owner, cur, base)))
 	}
 	return out, nil

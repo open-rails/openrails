@@ -191,7 +191,7 @@ func newHyperSwitchMember(t *testing.T) (*world, *hyperSwitchMember) {
 
 	price := w.membershipEvery("content:hs", 9_990_000, monthHours)
 	// The HyperSwitch-held card pays the order that opens the membership.
-	paid := m.c.mustCheckout(embedded, order{price: price.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
+	paid := m.c.mustPurchase(embedded, order{price: price.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
 	require.NotNil(t, paid.SubscriptionID, "%+v", paid.Order)
 	m.sub = *paid.SubscriptionID
 	require.Equal(t, 1, hs.sales(), "the first period is charged through the proxy")
@@ -261,7 +261,7 @@ func TestHyperSwitchCardPaysSubscriptionOrdersOnly(t *testing.T) {
 	w, m := newHyperSwitchMember(t)
 	life := w.permanent("content:hs-once")
 	sales := m.hs.sales()
-	_, err := m.c.checkout(embedded, order{price: life.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
+	_, err := m.c.buyOrder(embedded, order{price: life.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
 	var status *billing.StatusError
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, billing.CodePaymentOptionUnavailable, status.Code)

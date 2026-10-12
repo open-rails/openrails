@@ -76,7 +76,7 @@ var excludedColumns = map[string]string{
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"admission_denials_hourly":      "merchant_id customer_id denial_reason hour_at denials updated_at",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
-	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id order_id",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id order_id",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"carts":                         "merchant_id customer_id lines last_changed_at created_at",
@@ -93,8 +93,8 @@ var excludedColumns = map[string]string{
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
 	"nmi_history_months":            "merchant_id psp_id month_at kind category reason authorizations",
 	"nmi_history_reads":             "merchant_id psp_id read_at",
-	"solana_pay_references":         "merchant_id reference checkout_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
-	"solana_pay_receipts":           "merchant_id reference signature checkout_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
+	"solana_pay_references":         "merchant_id reference order_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
+	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class change source evidence_digest approval_run_id",
 	"account_updater_batches":       "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
@@ -114,15 +114,15 @@ var omittedColumns = map[string]string{
 	"prices": "public_id",
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
-	"psps":              "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",
-	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
-	"customers":         "access_version",
-	"payments":          "destructive_run_class",
-	"checkout_attempts": "destructive_run_class",
-	"product_access":    "destructive_run_class",
-	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
-	"provider_intents":  "destructive_run_class destructive_action_id",
-	"price_migrations":  "destructive_action_id",
+	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",
+	"subscriptions":    "destructive_run_class lifecycle_rev row_version",
+	"customers":        "access_version",
+	"payments":         "destructive_run_class",
+	"order_attempts":   "destructive_run_class",
+	"product_access":   "destructive_run_class",
+	"maintenance_runs": "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
+	"provider_intents": "destructive_run_class destructive_action_id",
+	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open order is not found by it.
 	"orders": "lines_digest",
 }
@@ -252,7 +252,7 @@ type rowCheck struct{ table, predicate string }
 var preflightChecks = []rowCheck{
 	{"notification_events", `EXISTS (SELECT 1 FROM billing.notification_consumers c WHERE (c.merchant_id IS NULL OR c.merchant_id=notification_events.merchant_id) AND NOT EXISTS(SELECT 1 FROM billing.notification_event_acks a WHERE a.consumer_id=c.id AND a.merchant_id=notification_events.merchant_id AND a.event_id=notification_events.id))`},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
-	{"checkout_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
+	{"order_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
 	// would miss; settled, failed and lapsed claims are not moved (#1099).
 	{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},

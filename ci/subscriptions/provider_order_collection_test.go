@@ -14,12 +14,12 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
-// An accepted checkout can be bound to a provider bill after a reader loaded
+// An accepted purchase can be bound to a provider bill after a reader loaded
 // it. Neither the API nor a stale internal read may start another collector.
 func TestProviderOrderRefusesGenericCollection(t *testing.T) {
 	for _, owner := range []string{observed.OwnerProvider, observed.OwnerNMISchedule} {
@@ -74,8 +74,8 @@ func TestProviderOrderRefusesGenericCollection(t *testing.T) {
 			}
 			_, _, err = rt.Orders.RecordRemittance(ctx, orders.Remittance{OrderID: id.UUID(), Amount: stale.Total, TransactionID: "not-a-provider-settlement"})
 			require.ErrorIs(t, err, orders.ErrNotPayable, "the locked writer refuses generic remittance")
-			_, err = rt.CheckoutAttemptService.PayOrder(ctx, checkout.OrderPayInput{Order: stale, PaymentMethodID: methodID.UUID(),
-				Key: "stale-engine-read", User: &checkout.UserIdentity{ID: c.id}, Prices: quote.Prices(), Products: quote.Products()})
+			_, err = rt.OrderAttemptService.PayOrder(ctx, payment.OrderPayInput{Order: stale, PaymentMethodID: methodID.UUID(),
+				Key: "stale-engine-read", User: &payment.UserIdentity{ID: c.id}, Prices: quote.Prices(), Products: quote.Products()})
 			require.ErrorIs(t, err, orders.ErrNotPayable, "the row lock must recheck a stale engine-owned read")
 			canceled := c.order(http.MethodPost, "/orders/"+id.String()+"/cancel", "", nil)
 			require.Equal(t, http.StatusConflict, canceled.status)

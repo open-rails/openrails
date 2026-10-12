@@ -3,7 +3,7 @@
 INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
-    card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
+    card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
     card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id, order_id
 ) VALUES (
@@ -14,7 +14,7 @@ INSERT INTO billing.payment_attempts (
     sqlc.narg(transaction_id)::text, sqlc.narg(avs_result)::text, sqlc.narg(cvv_result)::text,
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(token_type)::text,
     sqlc.arg(amount)::bigint, sqlc.narg(currency)::text, sqlc.arg(attempted_at)::timestamptz,
-    sqlc.narg(checkout_id)::uuid, sqlc.narg(checkout_target)::text, sqlc.narg(subscription_id)::uuid,
+    sqlc.narg(purchase_id)::uuid, sqlc.narg(purchase_target)::text, sqlc.narg(subscription_id)::uuid,
     sqlc.narg(payment_method_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(provider_intent_id)::uuid,
     sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid,
     sqlc.narg(card_bin)::text, sqlc.narg(issuer_code)::text, sqlc.narg(issuer_text)::text,
@@ -23,25 +23,25 @@ INSERT INTO billing.payment_attempts (
 )
 ON CONFLICT DO NOTHING;
 
--- name: LatestPaymentCheckoutAttempt :one
--- The buyer's most recent attempt on one checkout target since a moment.
-SELECT checkout_id::uuid AS checkout_id, kind, category
+-- name: LatestPaymentOrderAttempt :one
+-- The buyer's most recent attempt on one purchase target since a moment.
+SELECT purchase_id::uuid AS purchase_id, kind, category
 FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
-  AND checkout_target = sqlc.arg(checkout_target)::text
+  AND purchase_target = sqlc.arg(purchase_target)::text
   AND attempted_at > sqlc.arg(since)::timestamptz
 ORDER BY attempted_at DESC, id DESC
 LIMIT 1;
 
--- name: CheckoutVerifiedPaymentMethod :one
+-- name: PurchaseVerifiedPaymentMethod :one
 -- Whether this checkout itself verified the card, i.e. the buyer typed it here.
 SELECT EXISTS (
     SELECT 1 FROM billing.payment_attempts
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND customer_id = sqlc.arg(customer_id)::uuid
-      AND checkout_target = sqlc.arg(checkout_target)::text
-      AND checkout_id = sqlc.arg(checkout_id)::uuid
+      AND purchase_target = sqlc.arg(purchase_target)::text
+      AND purchase_id = sqlc.arg(purchase_id)::uuid
       AND payment_method_id = sqlc.arg(payment_method_id)::uuid
       AND kind = 'verify' AND category = 'approved'
 )::boolean AS verified;

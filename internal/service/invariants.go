@@ -7,9 +7,9 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -78,15 +78,15 @@ func (s *Service) requirePriceService() (*catalog.PriceService, error) {
 	return rt.PriceService, nil
 }
 
-func (s *Service) requireCheckoutAttemptService() (*checkout.CheckoutAttemptService, error) {
+func (s *Service) requireOrderAttemptService() (*payment.OrderAttemptService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	if rt.CheckoutAttemptService == nil {
+	if rt.OrderAttemptService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
-	return rt.CheckoutAttemptService, nil
+	return rt.OrderAttemptService, nil
 }
 
 func (s *Service) requireUserSubscriptionService() (*subscriptions.UserSubscriptionService, error) {

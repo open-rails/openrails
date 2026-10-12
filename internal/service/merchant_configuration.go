@@ -223,14 +223,14 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.ArrearsDelinquencyFloor != nil {
 		current.ArrearsDelinquencyFloor = patch.ArrearsDelinquencyFloor
 	}
-	if patch.CheckoutRouting != nil {
-		current.CheckoutRouting = patch.CheckoutRouting
+	if patch.PSPRouting != nil {
+		current.PSPRouting = patch.PSPRouting
 	}
 	if patch.DunningPolicy != nil {
 		current.DunningPolicy = patch.DunningPolicy
 	}
-	if patch.Checkout != nil {
-		current.Checkout = patch.Checkout
+	if patch.PaymentPage != nil {
+		current.PaymentPage = patch.PaymentPage
 	}
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices

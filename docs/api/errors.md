@@ -27,7 +27,7 @@ request ID takes precedence, with `X-Request-ID` as a fallback.
 
 ## Payment refusals
 
-A checkout the provider refused returns HTTP 402 and `errors.Is(err,
+A purchase the provider refused returns HTTP 402 and `errors.Is(err,
 billing.ErrPaymentRefused)`; nothing was charged and the customer may try again
 with another instrument on the same order. The code says what happened,
 `metadata` says why:

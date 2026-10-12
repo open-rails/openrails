@@ -72,7 +72,7 @@ type PSPScope struct {
 	Environment string
 	AccountID   string
 	// Key is the merchant's name for the PSP: the payment-provider vocabulary
-	// catalog links and checkout use.
+	// catalog links and purchase use.
 	Key      string
 	Settings map[string]any
 	// Archived PSPs take no new work and drain: an archived document, an
@@ -149,12 +149,12 @@ type PSPScopeResolver interface {
 }
 
 // PSPKeyResolver resolves a live PSP by its key: the payment-provider name
-// checkout requests and catalog provider_links use.
+// purchase requests and catalog provider_links use.
 type PSPKeyResolver interface {
 	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key, environment string) (PSPScope, bool, error)
 }
 
-// PSPRailScopesResolver lists every live PSP on a rail: checkout's
+// PSPRailScopesResolver lists every live PSP on a rail: purchase's
 // unambiguous rail-kind fallback (#848).
 type PSPRailScopesResolver interface {
 	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail, environment string) ([]PSPScope, error)

@@ -90,7 +90,7 @@ var merchantCols = map[Family]string{
 	FamWebhookHealth:  "wh.merchant_id",
 	FamWebhookDaily:   "whd.merchant_id",
 	FamAttempts:       "a.merchant_id",
-	FamCheckouts:      "ck.merchant_id",
+	FamPurchases:      "ck.merchant_id",
 	FamRebillCycles:   "cy.merchant_id",
 	FamNMIHistory:     "h.merchant_id",
 	FamFindings:       "f.merchant_id",

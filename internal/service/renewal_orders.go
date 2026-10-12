@@ -14,9 +14,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -35,47 +35,47 @@ var (
 
 // payRenewal pays the open renewal order. replayed: key's collection already
 // existed.
-func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, bool, error) {
+func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *orders.Order, pay orderPayment, key string) (payment.OrderCharge, bool, error) {
 	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
-		return checkout.OrderCharge{}, false, orders.ErrNotPayable
+		return payment.OrderCharge{}, false, orders.ErrNotPayable
 	}
 	if pay.method == uuid.Nil {
-		return checkout.OrderCharge{}, false, errRenewalSavedCard
+		return payment.OrderCharge{}, false, errRenewalSavedCard
 	}
 	if order.SubscriptionID == nil {
-		return checkout.OrderCharge{}, false, errors.New("renewal order has no subscription")
+		return payment.OrderCharge{}, false, errors.New("renewal order has no subscription")
 	}
 	switch {
 	case order.Status == string(billing.OrderProcessing) || order.AwaitsCustomer():
-		return checkout.OrderCharge{}, false, orders.ErrInProgress
+		return payment.OrderCharge{}, false, orders.ErrInProgress
 	case order.Status != string(billing.OrderOpen):
-		return checkout.OrderCharge{}, false, orders.ErrNotPayable
+		return payment.OrderCharge{}, false, orders.ErrNotPayable
 	}
 	rt, err := s.runtime()
 	if err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	customer := actor.Customer.UUID()
 	admitKey := orderPayKey(order.ID, key)
 	if err := s.reconsentPaying(ctx, customer, pay.method, admitKey); err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	sub, err := subscriptions.NewSubscriptionRepo(rt.DB).GetByID(ctx, *order.SubscriptionID)
 	if err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	charged, err := subscriptions.PaymentMethodOf(ctx, rt.DB.Gen(ctx), sub)
 	if err != nil {
-		return checkout.OrderCharge{}, false, err
+		return payment.OrderCharge{}, false, err
 	}
 	if charged == nil || *charged != pay.method {
 		if err := rt.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, sub.ID, customer, &pay.method, rt.RecurringVerifier(sub.MerchantID, intents.OriginUser)); err != nil {
-			return checkout.OrderCharge{}, false, err
+			return payment.OrderCharge{}, false, err
 		}
 	}
 	accepted, replayed, err := s.moneyService().AdmitCustomerSubscriptionCollection(ctx, sub.ID, customer, admitKey, &pay.method, actor.Principal)
 	if err != nil {
-		return checkout.OrderCharge{}, false, renewalRefusal(err)
+		return payment.OrderCharge{}, false, renewalRefusal(err)
 	}
 	var result gen.BillingProviderIntent
 	if accepted.Status == intents.StatusUnknownNeedsVerify {
@@ -84,16 +84,16 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 		result, err = rt.IntentRunner().ExecuteByID(ctx, accepted.ID)
 	}
 	if err != nil {
-		return checkout.OrderCharge{}, replayed, err
+		return payment.OrderCharge{}, replayed, err
 	}
 	if result.Status != intents.StatusFailedTerminal {
-		return checkout.OrderCharge{}, replayed, nil
+		return payment.OrderCharge{}, replayed, nil
 	}
 	var evidence struct {
 		Declined bool `json:"declined"`
 	}
 	_ = json.Unmarshal(result.ResultEvidence, &evidence)
-	return checkout.OrderCharge{Failed: true, Declined: evidence.Declined}, replayed, nil
+	return payment.OrderCharge{Failed: true, Declined: evidence.Declined}, replayed, nil
 }
 
 // orderPayKey is the collection key of one /pay request on a renewal or
@@ -113,7 +113,7 @@ func renewalRefusal(err error) error {
 	case errors.Is(err, intents.ErrRebillKeyConflict):
 		return errOrderKeyReused
 	case errors.Is(err, money.ErrEngineMethodUnusable):
-		return fmt.Errorf("%w: %w", checkout.ErrPaymentMethodStale, err)
+		return fmt.Errorf("%w: %w", payment.ErrPaymentMethodStale, err)
 	case errors.Is(err, providerrecovery.ErrPending):
 		return errOrdersFenced
 	case errors.Is(err, money.ErrEngineCollectionNotDue), errors.Is(err, intents.ErrRebillNotRetryable), errors.Is(err, intents.ErrRebillUnsupported):

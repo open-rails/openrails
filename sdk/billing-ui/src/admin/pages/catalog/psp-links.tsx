@@ -27,12 +27,12 @@ import type { PSPLinkState, Price } from "#orck/client/generated/wire"
 // psp_links and never edits them. It answers two different questions:
 //   - Link state (`price.providers`): does OpenRails hold a link for this PSP,
 //     and does the remote object still match?
-//   - Checkout readiness (the routing preview): would a real checkout land
+//   - Purchase readiness (the routing preview): would a real purchase land
 //     here now? A linked price can still be unroutable (PSP unarmed,
 //     credentials missing).
 
 // SKIP_LABELS renders the routing skip vocabulary for operators. Keep the keys
-// in lockstep with internal/db/models/checkout_attempt.go.
+// in lockstep with internal/db/models/order_attempt.go.
 const SKIP_LABELS: Record<PSPRoutingSkip, string> = {
   unknown_selector: "That name matches no provider you have set up.",
   ambiguous_selector:
@@ -280,16 +280,16 @@ export function PSPLinksCard({
   )
 }
 
-// CheckoutReadinessCard answers "can someone buy this right now, and if not,
-// why?" with the routing preview, so the console and checkout never disagree.
-export function CheckoutReadinessCard({ price }: { price: Price }) {
+// PSPReadinessCard answers "can someone buy this right now, and if not,
+// why?" with the routing preview, so the console and purchase never disagree.
+export function PSPReadinessCard({ price }: { price: Price }) {
   const { adminQueries } = useAdminServices()
 
   const {
     data: decision,
     isFetching: busy,
     refetch: reload,
-  } = useQuery(adminQueries.checkoutRouting(price.id))
+  } = useQuery(adminQueries.pspRouting(price.id))
 
   const eligible = decision?.candidates.filter((c) => !c.skip) ?? []
 
@@ -303,7 +303,7 @@ export function CheckoutReadinessCard({ price }: { price: Price }) {
           <CardDescription>
             <AdminMessage
               id={
-                "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real checkout asks, without starting one."
+                "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real purchase asks, without starting one."
               }
             />
           </CardDescription>

@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/authkit"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
+	"github.com/open-rails/openrails/internal/paymentpage"
 )
 
 // groupScopes are what a merchant's client may ask an account for, with the
@@ -21,21 +21,21 @@ var groupScopes = []authkit.GroupClientScope{
 // Configure sets the network's product constants on the server's AuthKit:
 // the server's resource takes the network scopes, merchants' clients may ask
 // for them, and an account accepts the network terms before approving one.
-// With a hosted checkout at checkout (an origin), the checkout page's own
+// With a payment page at purchase (an origin), the payment page's own
 // client signs shoppers in there. The network needs the server's resource
 // (auth.resource.id).
-func Configure(cfg *authkit.Config, checkout string) error {
+func Configure(cfg *authkit.Config, purchase string) error {
 	resource := cfg.Resource.ID
 	if resource == "" {
 		return errors.New("network: the customer network needs the server's resource: auth.resource.id")
 	}
 	as := &cfg.AuthorizationServer
-	if slices.ContainsFunc(as.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == CheckoutClientID }) {
-		return fmt.Errorf("network: auth.authorization_server.clients declares %s, the checkout page's client, which the server declares itself", CheckoutClientID)
+	if slices.ContainsFunc(as.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == PaymentPageClientID }) {
+		return fmt.Errorf("network: auth.authorization_server.clients declares %s, the payment page's client, which the server declares itself", PaymentPageClientID)
 	}
-	if checkout != "" {
-		as.Clients = append(as.Clients, authkit.OAuthClientConfig{ID: CheckoutClientID, Name: "Checkout",
-			RedirectURIs: []string{checkout + hostedcheckout.SignInPath}, Agreements: []string{TermsAgreement}})
+	if purchase != "" {
+		as.Clients = append(as.Clients, authkit.OAuthClientConfig{ID: PaymentPageClientID, Name: "Purchase",
+			RedirectURIs: []string{purchase + paymentpage.SignInPath}, Agreements: []string{TermsAgreement}})
 	}
 	i := slices.IndexFunc(as.Resources, func(r authkit.ResourceServerConfig) bool { return r.ID == resource })
 	if i < 0 {

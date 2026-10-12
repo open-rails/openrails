@@ -218,9 +218,9 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 }
 
 // Secrets stay where they are given: through a customer token's redemption
-// and use, a console exchange, API key calls and a hosted checkout, no
-// access token, assertion, API key or checkout secret reaches a log line or
-// a request URL; a checkout URL carries its secret in the fragment alone,
+// and use, a console exchange, API key calls and a payment page, no
+// access token, assertion, API key or pay URL secret reaches a log line or
+// a request URL; a pay URL carries its secret in the fragment alone,
 // and the answers carrying one are not stored.
 func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	hook := logtest.NewGlobal()
@@ -229,7 +229,7 @@ func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{w: &slogged}, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	s := newCheckoutShop(t)
+	s := newPayShop(t)
 	var mu sync.Mutex
 	var urls []string
 	inner := s.handler
@@ -241,18 +241,18 @@ func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	})
 	var secrets []string
 
-	// A hosted checkout: the order's answer carries the URL, its secret in
+	// A payment page: the order's answer carries the URL, its secret in
 	// the fragment, and is not stored.
 	created := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{
-		"customer_id": uuid.NewString(), "lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"},
+		"customer_id": uuid.NewString(), "lines": []map[string]any{{"price_id": s.price()}}, "purchase": map[string]any{"success_url": "https://shop.e2e.test/thanks"},
 	})
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	require.Equal(t, "no-store", created.Header().Get("Cache-Control"))
 	order := decode[billing.Order](t, created)
-	page, secret, ok := strings.Cut(*order.Checkout.URL, "#")
+	page, secret, ok := strings.Cut(*order.PayURL, "#")
 	require.True(t, ok)
 	require.NotContains(t, page, secret)
-	read := s.call(checkoutHost, http.MethodGet, "/v1/me/orders/"+order.ID.String(), secret, "", nil)
+	read := s.call(paymentHost, http.MethodGet, "/v1/me/orders/"+order.ID.String(), secret, "", nil)
 	require.Equal(t, http.StatusOK, read.Code, read.Body.String())
 	require.Equal(t, "no-store", read.Header().Get("Cache-Control"))
 	secrets = append(secrets, secret, s.backend)

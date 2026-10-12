@@ -534,7 +534,12 @@ export const aUsageOrder = (
     payment_id: null,
   },
   payment_options: [],
-  checkout: null,
+  pay_url: null,
+  pay_url_expires_at: null,
+  embedded: false,
+  success_url: null,
+  cancel_url: null,
+  saved_payment_methods: false,
   renewal: null,
   usage: {
     period_starts_at: "2026-09-01T00:00:00Z",

@@ -51,7 +51,7 @@ The root owner always needs a second factor, so the server refuses to start
 unless one can be enrolled: a 16, 24 or 32-byte `totp.key` beside `keys.json`
 under `auth.keys.path`, or an email or SMS sender.
 
-`rate_limits` names the limited buckets (`checkout`, `payment`, `subscribe`,
+`rate_limits` names the limited buckets (`purchase`, `payment`, `subscribe`,
 `webhook`; any other key refuses boot) and defaults to the built-in limits;
 `rate_limits_disabled` declares that the host supplies rate limiting instead
 ([rate limiting](rate-limiting.md)).
@@ -83,7 +83,7 @@ terms fail admission; they do not fall back to provider-owned enrollment.
 Existing/imported subscriptions retain their stored collector and provider
 references. Startup configuration does not transfer collection ownership or
 retire provider schedules. Accepted sessions replay their persisted terms.
-Stripe one-off checkout uses accepted inline product and price data. Native
+Stripe one-off purchase uses accepted inline product and price data. Native
 catalog requirements follow the operation and rail, independently of stored
 subscription ownership. Explicit historical provider catalog links remain usable.
 

@@ -12,7 +12,7 @@ four hours plus the five-minute provider window delay) holds renewal and usage
 collection dispatch and destructive work. A refresh that is due or still running holds
 nothing: coverage ends at a refresh's start, and each cycle staggers its
 merchants. A new account without older
-billing facts can serve its initial checkout. A fresh row never hides an older
+billing facts can serve its initial purchase. A fresh row never hides an older
 book. Known unresolved financial findings hold writes even when the last
 completion marker is recent; ignoring an alert does not settle its receipt.
 Verified receipt recovery continues while the gate is closed. Configured full

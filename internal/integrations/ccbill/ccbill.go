@@ -31,7 +31,7 @@ type GenerateFlexFormURLParams struct {
 	Currency string `json:"currency"`
 }
 
-// FlexFormResponse contains the hosted checkout URL for CCBill.
+// FlexFormResponse contains the pay URL for CCBill.
 type FlexFormResponse struct {
 	RedirectURL string `json:"redirect_url"`
 }
@@ -76,7 +76,7 @@ func NewClient(cfg *config.CCBillConfig, testMode bool) (*CCBillClient, error) {
 	}, nil
 }
 
-// GenerateFlexFormURL builds a signed FlexForm subscription checkout URL.
+// GenerateFlexFormURL builds a signed FlexForm subscription pay URL.
 func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*FlexFormResponse, error) {
 	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
 		return nil, err

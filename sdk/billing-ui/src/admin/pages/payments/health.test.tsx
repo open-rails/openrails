@@ -53,7 +53,7 @@ const tile = (id: string) => TILES.find((t) => t.id === id)!
 // because the scenario runs on a test clock.
 const builders = (scope: Scope): Record<string, MetricsQuery> => ({
   tileNewCard: tile("new-card-decline").query(scope),
-  tileCheckout: tile("checkout-failure").query(scope),
+  tilePurchase: tile("purchase-failure").query(scope),
   tileCycles: tile("rebill-first-failure").query(scope),
   trendNewCard: trendQueries(scope).newCard,
   trendRebill: trendQueries(scope).rebill,

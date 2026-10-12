@@ -33,7 +33,7 @@ import {
 } from "#orck/admin/pages/catalog/price-format"
 import { PriceChangeWizard } from "#orck/admin/pages/catalog/price-wizard"
 import {
-  CheckoutReadinessCard,
+  PSPReadinessCard,
   PSPLinksCard,
 } from "#orck/admin/pages/catalog/psp-links"
 import { useCatalogWrites } from "#orck/admin/lib/capabilities"
@@ -150,7 +150,7 @@ export function PriceDetailPage() {
         onVerify={() => (verify ? void reload() : setVerify(true))}
       />
 
-      <CheckoutReadinessCard price={price} />
+      <PSPReadinessCard price={price} />
 
       <Card>
         <CardHeader>

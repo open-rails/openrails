@@ -37,7 +37,7 @@ func siteverify(t *testing.T, provider string, status int, body string) (Verifie
 func TestVerifierFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	v, form := siteverify(t, config.CaptchaProviderTurnstile, 200, `{"success":true}`)
-	res, err := v.Verify(ctx, VerifyRequest{Token: " tok ", RemoteIP: "203.0.113.5", Bucket: "checkout"})
+	res, err := v.Verify(ctx, VerifyRequest{Token: " tok ", RemoteIP: "203.0.113.5", Bucket: "purchase"})
 	require.NoError(t, err)
 	require.True(t, res.Success)
 	require.Equal(t, url.Values{"secret": {"secret-key"}, "response": {"tok"}, "remoteip": {"203.0.113.5"}}, *form)
@@ -82,10 +82,10 @@ func TestVerifierFailsClosed(t *testing.T) {
 
 func TestPolicy(t *testing.T) {
 	on := &config.CaptchaConfig{SiteKey: "s", SecretKey: "k"}
-	for bucket, want := range map[string]bool{"checkout": true, " Payment-Methods ": true, "subscriptions": true, "webhook": false, "default": false, "": false} {
+	for bucket, want := range map[string]bool{"purchase": true, " Payment-Methods ": true, "subscriptions": true, "webhook": false, "default": false, "": false} {
 		require.Equal(t, want, ShouldApply(on, bucket), bucket)
 	}
-	require.False(t, ShouldApply(&config.CaptchaConfig{SiteKey: "s"}, "checkout"))
+	require.False(t, ShouldApply(&config.CaptchaConfig{SiteKey: "s"}, "purchase"))
 	require.Nil(t, NewVerifier(nil, nil))
 	require.Equal(t, 30, ExtremeThreshold(&config.RateLimit{RequestsPerMinute: 10}, on))
 	require.Equal(t, 180, ExtremeThreshold(nil, on))

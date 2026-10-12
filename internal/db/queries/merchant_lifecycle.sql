@@ -87,11 +87,11 @@ SELECT count(*) FROM billing.psp_customers WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsRailCustomers :exec
 DELETE FROM billing.psp_customers WHERE merchant_id = $1;
 
--- name: CountMerchantRowsCheckoutAttempts :one
-SELECT count(*) FROM billing.checkout_attempts WHERE merchant_id = $1;
+-- name: CountMerchantRowsOrderAttempts :one
+SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsCheckoutAttempts :exec
-DELETE FROM billing.checkout_attempts WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsOrderAttempts :exec
+DELETE FROM billing.order_attempts WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsExternalProviderMutationLogs :one
 SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1;

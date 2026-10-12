@@ -13,7 +13,7 @@ the doc map. Follow it top to bottom.
 - **Entitlements are the access truth.** The host app gates features on active
   entitlements, never by inspecting subscription rows. See
   [entitlements_timeline.md](entitlements_timeline.md).
-- **Card data never touches OpenRails or the host.** Checkout is redirect or
+- **Card data never touches OpenRails or the host.** Purchase is redirect or
   tokenized-vault (SAQ-A). Do not build any flow that posts PAN/CVV to the host.
   The one exception is a PSP the merchant declared `card_entry: server`
   ([docs/rails/nmi.md](rails/nmi.md)), which puts the deployment in SAQ D; never
@@ -63,8 +63,8 @@ milestone order, each verifiable before the next:
    `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.
 5. **Backend calls.** Use the Client where the host needs admission/holds, usage,
    or entitlement reads. Verify: `Admit` + `CaptureAdmissions` round-trip in a test.
-6. **Checkout end-to-end.** Frontend work per
-   [frontend-integration.md](frontend-integration.md). Verify: sandbox checkout →
+6. **Purchase end-to-end.** Frontend work per
+   [frontend-integration.md](frontend-integration.md). Verify: sandbox purchase →
    webhook (use [dev/local-webhooks.md](dev/local-webhooks.md) for a public URL) →
    entitlement active → host feature unlocks. Then verify cancel.
 
@@ -87,7 +87,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    [frontend-integration.md](frontend-integration.md) / [auth.md](auth.md).
    Never send the host's own session tokens to OpenRails.
 5. **Webhooks + end-to-end.** Rails point directly at OpenRails. Verify the same
-   checkout → webhook → entitlement loop as Plan A step 6.
+   purchase → webhook → entitlement loop as Plan A step 6.
 
 ## Doc map
 
@@ -115,7 +115,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 - Do not build a billing proxy in the host app (host route that forwards to
   OpenRails billing routes). Embedded mounts the routes; standalone is called
   browser-direct with access tokens.
-- Checkout endpoints are tightly rate-limited by design; retry loops in tests will
+- Purchase endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
 - Embedded config is programmatic: no file or environment is read, so nothing is
   defaulted for you; unset `TestMode` refusing to boot is the designed behavior.

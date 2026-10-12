@@ -18,11 +18,11 @@ internal/intents/store.go|}, time.Now().UTC()); err != nil {|infrastructure_time
 internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/alerting/service.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/catalog/stripe_webhooks.go|now = time.Now()|business_time_boundary|Provider rollover default only when explicit Now is unset|2
-internal/modules/checkout/custodian_sale.go|now := time.Now().UTC()|db_audit_timestamp|New saved payment method creation and update audit timestamp|1
-internal/modules/checkout/purchase_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/checkout/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/checkout/attempt_repo.go|now = time.Now()|db_audit_timestamp|Default updated_at timestamp; expiry lookup requires caller time|1
-internal/modules/checkout/attempt_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/payment/custodian_sale.go|now := time.Now().UTC()|db_audit_timestamp|New saved payment method creation and update audit timestamp|1
+internal/modules/payment/purchase_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/payment/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/payment/attempt_repo.go|now = time.Now()|db_audit_timestamp|Default updated_at timestamp; expiry lookup requires caller time|1
+internal/modules/payment/attempt_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/copilot/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/copilot/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/dashboard/dashboard.go|return validateWidgetsAt(widgets, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1

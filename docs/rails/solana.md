@@ -98,7 +98,7 @@ whose stored settings are misdeclared does not arm.
 
 ### One-time payments (buyer's view)
 
-Prices are defined in fiat; the token amount is quoted at checkout from live
+Prices are defined in fiat; the token amount is quoted at purchase from live
 token pricing (quotes carry an expiry). `GET /v1/me/config` lists the
 merchant's accepted tokens to its customers in `payment.solana.tokens`.
 

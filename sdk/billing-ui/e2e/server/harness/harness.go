@@ -32,7 +32,7 @@ const (
 	PSPAccountID = "billing-ui-e2e"
 	SolanaPSPKey = "solana"
 	// CardPSPKey is an armed NMI account on the loopback gateway (nmimock):
-	// hosted checkout sells card subscriptions and one-time sales through it.
+	// payment page sells card subscriptions and one-time sales through it.
 	CardPSPKey = "cards"
 	// CardTokenizationKey is public; the browser's Collect.js is the test's.
 	CardTokenizationKey = "e2e-tokenization"
@@ -91,8 +91,8 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		ReturnOrigins:        []string{baseURL},
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
 		// AuthKit's issuer is baseURL: its users are this merchant's customers.
-		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting}, PSPs: map[string]openrails.PSPConfig{
-			// An armed Solana PSP on devnet: checkout offers it.
+		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: map[string]openrails.PSPConfig{
+			// An armed Solana PSP on devnet: purchase offers it.
 			SolanaPSPKey: openrails.SolanaPSP{
 				PrivateKey:  signer.String(),
 				RPCProvider: "public",
@@ -106,7 +106,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			}.PSPConfig(),
 		}}},
 		// Every browser of the suite is one address, 127.0.0.1, which one
-		// checkout limit would soon refuse.
+		// purchase limit would soon refuse.
 		RateLimitsDisabled: true,
 	}
 	engine, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
@@ -178,10 +178,10 @@ func authConfig(issuer string) (authkit.Config, map[string]iam.Role) {
 	}, staff
 }
 
-// checkoutRouting sells the card product through the card PSP and everything
+// pspRouting sells the card product through the card PSP and everything
 // else through Solana; the declared-only NMI account never sells.
-var checkoutRouting = []billing.CheckoutRoutingRule{
-	{Match: billing.CheckoutRoutingMatch{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
+var pspRouting = []billing.PSPRoutingRule{
+	{Match: billing.PSPRoutingMatch{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
 	{Prefer: []string{SolanaPSPKey}},
 }
 

@@ -196,7 +196,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if v == "pending" {
 				return bad()
 			}
-		case "checkout_attempts.status":
+		case "order_attempts.status":
 			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
@@ -220,7 +220,7 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "payment_methods" {
 		if raw := value(p, values, "capture"); raw != nil && *raw != "null" {
-			var capture models.CheckoutCapture
+			var capture models.CardCapture
 			if json.Unmarshal([]byte(*raw), &capture) != nil {
 				return fmt.Errorf("invalid card capture binding")
 			}
@@ -231,21 +231,21 @@ func ValidateValues(p Profile, values []*string) error {
 			if v := value(p, values, "customer_id"); v != nil {
 				customer, _ = uuid.Parse(*v)
 			}
-			status := models.CheckoutAttemptStatusExpired
+			status := models.OrderAttemptStatusExpired
 			if capture.PaymentMethodID != uuid.Nil {
-				status = models.CheckoutAttemptStatusSucceeded
+				status = models.OrderAttemptStatusSucceeded
 			}
-			if _, err := models.DecodeCheckoutCapture([]byte(*raw), owner, customer, capture.PSPID, status, &capture.ExpiresAt); err != nil {
+			if _, err := models.DecodeCardCapture([]byte(*raw), owner, customer, capture.PSPID, status, &capture.ExpiresAt); err != nil {
 				return err
 			}
 		}
 	}
-	if p.Name == "checkout_attempts" {
+	if p.Name == "order_attempts" {
 		if id := value(p, values, "order_id"); id == nil || !uuidPattern.MatchString(*id) {
-			return fmt.Errorf("checkout attempt requires its order")
+			return fmt.Errorf("order attempt requires its order")
 		}
 		if value(p, values, "amount") == nil || value(p, values, "currency") == nil {
-			return fmt.Errorf("checkout attempt requires its monetary terms")
+			return fmt.Errorf("order attempt requires its monetary terms")
 		}
 	}
 

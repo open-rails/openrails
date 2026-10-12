@@ -58,11 +58,11 @@ func remapWorld(t *testing.T) (w *world, bt *btFake, proxied func(number string)
 		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
 	// The merchant sells cards through its custodian's PSP.
-	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"nmi-bt"}}}
-	w.settings = billing.MerchantSettings{CheckoutRouting: &routing}
+	routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi-bt"}}}
+	w.settings = billing.MerchantSettings{PSPRouting: &routing}
 	w.booted = func(e *openrails.Engine) {
 		rt := engine.Graph(e).Runtime
-		rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
+		rt.PurchaseService.CustodianSaleService.BTBaseURLOverride = btURL
 		rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.BTBaseURL = btURL
 	}
 	w.start()
@@ -142,7 +142,7 @@ func TestCustodyRemapNeverCitesAnotherAccount(t *testing.T) {
 
 	// The customer pays with a card on the new account: present, the sale
 	// starts its agreement there.
-	c.mustCheckout(embedded, order{price: w.permanent("content:remapped").ID, rail: "nmi-bt", token: bt.collect(replacement)})
+	c.mustPurchase(embedded, order{price: w.permanent("content:remapped").ID, rail: "nmi-bt", token: bt.collect(replacement)})
 	stored := bt.salesOf(replacement)
 	require.Equal(t, [][]string{{"e2e-nmi-bt-key", "customer", "stored", ""}}, proxied(replacement))
 	var card string
@@ -181,7 +181,7 @@ func TestRemappedCardPaysCustomerPresent(t *testing.T) {
 	require.Equal(t, vault, from, "the custody record keeps the old vault")
 	require.Nil(t, ref, "the card holds only its live custody")
 
-	paid := c.mustCheckout(embedded, order{price: w.permanent("content:remapped").ID, rail: "nmi-bt", token: bt.collect(number)})
+	paid := c.mustPurchase(embedded, order{price: w.permanent("content:remapped").ID, rail: "nmi-bt", token: bt.collect(number)})
 	require.Equal(t, [][]string{{"e2e-nmi-bt-key", "customer", "stored", ""}}, proxied(number), "present, the card stores on the new account")
 	var charged string
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT 'pm_' || payment_method_id FROM billing.orders WHERE id = $1`), paid.Order.ID.UUID()).Scan(&charged))

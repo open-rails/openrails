@@ -28,25 +28,25 @@ func (q *Queries) DeclareRetentionSweep(ctx context.Context, tableName string) e
 	return err
 }
 
-const deleteAbandonedCheckoutAttemptsBefore = `-- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
-DELETE FROM billing.checkout_attempts
+const deleteAbandonedOrderAttemptsBefore = `-- name: DeleteAbandonedOrderAttemptsBefore :execrows
+DELETE FROM billing.order_attempts
 WHERE merchant_id = $1::uuid
   AND deleted_at IS NULL
   AND id IN (
-    SELECT ca.id FROM billing.checkout_attempts ca
+    SELECT ca.id FROM billing.order_attempts ca
     WHERE ca.merchant_id = $1::uuid
       AND ca.status = 'expired' AND ca.deleted_at IS NULL
       AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < $2::timestamptz
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
     ORDER BY ca.expires_at
     LIMIT $3::int
 )
 `
 
-type DeleteAbandonedCheckoutAttemptsBeforeParams struct {
+type DeleteAbandonedOrderAttemptsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
@@ -57,8 +57,8 @@ type DeleteAbandonedCheckoutAttemptsBeforeParams struct {
 // reference or receipt names it. Its checkout session, if one still exists,
 // goes with it. A soft-deleted attempt belongs to a destructive run that can
 // still be undone, and is left to it.
-func (q *Queries) DeleteAbandonedCheckoutAttemptsBefore(ctx context.Context, arg DeleteAbandonedCheckoutAttemptsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAbandonedCheckoutAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+func (q *Queries) DeleteAbandonedOrderAttemptsBefore(ctx context.Context, arg DeleteAbandonedOrderAttemptsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAbandonedOrderAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -296,7 +296,7 @@ const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 SELECT q.mid AS merchant_id
 FROM (
     (SELECT DISTINCT cs.merchant_id AS mid
-       FROM billing.checkout_attempts cs
+       FROM billing.order_attempts cs
       WHERE ($1::uuid IS NULL OR cs.merchant_id > $1::uuid)
         AND cs.expires_at IS NOT NULL AND cs.expires_at < $2::timestamptz
         AND cs.deleted_at IS NULL
@@ -357,14 +357,14 @@ FROM (
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ca.merchant_id AS mid
-       FROM billing.checkout_attempts ca
+       FROM billing.order_attempts ca
       WHERE ($1::uuid IS NULL OR ca.merchant_id > $1::uuid)
         AND ca.status = 'expired' AND ca.deleted_at IS NULL
         AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
         AND ca.expires_at < $11::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
@@ -420,7 +420,7 @@ type ListRetentionWorkMerchantsParams struct {
 	LifecycleCutoff        time.Time
 	AttemptCutoff          time.Time
 	TransitionCutoff       time.Time
-	CheckoutAttemptCutoff  time.Time
+	OrderAttemptCutoff     time.Time
 	FindingCutoff          time.Time
 	RunCutoff              time.Time
 	ProviderWriteCutoff    time.Time
@@ -444,7 +444,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.LifecycleCutoff,
 		arg.AttemptCutoff,
 		arg.TransitionCutoff,
-		arg.CheckoutAttemptCutoff,
+		arg.OrderAttemptCutoff,
 		arg.FindingCutoff,
 		arg.RunCutoff,
 		arg.ProviderWriteCutoff,

@@ -11,7 +11,7 @@ import (
 // kind-agnostic on purpose: every kind's knobs are declared in its Descriptor,
 // so a second vendor adds rows to the registry, not a second parser.
 type Settings struct {
-	// PublicAPIKey is the checkout-page key (public by nature, not a secret).
+	// PublicAPIKey is the payment-page key (public by nature, not a secret).
 	PublicAPIKey string
 	// ProfileID selects the one merchant-owned HyperSwitch business profile.
 	ProfileID string

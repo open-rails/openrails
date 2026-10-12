@@ -70,7 +70,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := w.DB.NewWithPgxTx(tx)
 		if a.SubscriptionID == nil {
-			return errors.New("unattributed charge requires its accepted checkout order; price alone is not a bill")
+			return errors.New("unattributed charge requires its accepted purchase order; price alone is not a bill")
 		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *a.SubscriptionID)
 		if err != nil {

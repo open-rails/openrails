@@ -106,10 +106,10 @@ type Descriptor struct {
 	// cover exactly these and CredentialKeys.
 	SettingKeys []string
 
-	// OneOffSale: checkout can sell a one-time price on this rail.
+	// OneOffSale: purchase can sell a one-time price on this rail.
 	OneOffSale bool
 
-	// NewSubscription is how checkout enrolls a NEW subscription on this rail.
+	// NewSubscription is how purchase enrolls a NEW subscription on this rail.
 	// Existing and imported agreements keep working regardless.
 	NewSubscription NewSubscription
 
@@ -213,7 +213,7 @@ var descriptors = []Descriptor{
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
 		true,     // SupportsCatalogTrial (subscription_data[trial_end]; a PAID intro is refused separately)
-		false,    // SupportsPaymentMethodCRUD (Checkout / Billing Portal own instrument mutation)
+		false,    // SupportsPaymentMethodCRUD (Purchase / Billing Portal own instrument mutation)
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
 		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
 		autoBilledNever,
@@ -295,7 +295,7 @@ func SupportsCatalogTrial(rail models.Rail) bool {
 	return ok && d.SupportsCatalogTrial
 }
 
-// CanSellNew reports whether checkout can make a NEW sale of this kind on the
+// CanSellNew reports whether purchase can make a NEW sale of this kind on the
 // rail: a one-time purchase, or a new subscription. Trial first phases are
 // sold by no new-subscription path. Unknown rails: false.
 func CanSellNew(rail models.Rail, recurring, trial bool) bool {

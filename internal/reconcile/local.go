@@ -502,7 +502,7 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 
 // SolanaLocalRecordResolverFromDB resolves pull-intent memo ids. Order
 // transfers settle through their reference ledger and order attempts; the
-// retired price-checkout backfill is not reconstructed. (nil,nil) leaves an
+// retired price-purchase backfill is not reconstructed. (nil,nil) leaves an
 // unmatched wallet scan for operator review.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 	return func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error) {

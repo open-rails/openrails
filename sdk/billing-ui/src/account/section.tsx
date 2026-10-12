@@ -1,7 +1,7 @@
 import * as React from "react"
 import { cn } from "cn"
 
-import type { CheckoutAppearance } from "#orck/appearance"
+import type { BillingAppearance } from "#orck/appearance"
 import type { BillingError } from "#orck/client/errors"
 import { Button } from "#orck/components/ui/button"
 import {
@@ -21,7 +21,7 @@ export interface SectionProps {
   title: string
   description?: string
   action?: React.ReactNode
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
   children?: React.ReactNode
   "data-testid"?: string

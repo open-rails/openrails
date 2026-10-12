@@ -67,7 +67,7 @@ var Tables = map[string]Table{
 	"provider_mutation_logs":          {Rows, "rows are deleted 25 months (761 days) after created_at."},
 	"reconciliation_findings":         {Rows, "resolved findings are deleted 12 months (366 days) after they were resolved and last seen."},
 	"maintenance_runs":                {Rows, "reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent."},
-	"checkout_attempts":               {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
+	"order_attempts":                  {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
 	"orders":                          {Rows, "unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent."},
 	"order_lines":                     {Rows, "deleted with their order."},
 	"carts":                           {Rows, "carts are deleted 30 days after last_changed_at."},

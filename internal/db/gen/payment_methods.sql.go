@@ -615,7 +615,7 @@ type GetPaymentMethodByRailInstrumentParams struct {
 }
 
 // #297: resolve the stored instrument for a charge that only knows the rail
-// handles (checkout intents carry vault/billing ids, not the local row id).
+// handles (purchase intents carry vault/billing ids, not the local row id).
 // One-vault-per-card minting (#682) makes rail_customer_ref alone decisive for
 // NMI; the method-ref predicate narrows within shared (imported) vaults and is
 // skipped when either side has no billing id.

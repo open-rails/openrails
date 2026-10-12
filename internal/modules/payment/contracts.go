@@ -1,0 +1,116 @@
+package payment
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/attempts"
+)
+
+type UserIdentity struct {
+	ID       string
+	Email    *string
+	Username string
+	Roles    []string
+	// ClientIP is the customer's client address; empty when unknown.
+	ClientIP string
+}
+
+// customerIDFromUser derives the payable customer id from the verified
+// caller's user id. The auth boundary already refuses non-UUID subjects, so a
+// zero derivation means a broken boundary: the write must not attribute money
+// rows to uuid.Nil or another subject.
+func customerIDFromUser(userID string) (uuid.UUID, error) {
+	id := identity.CustomerIDFromString(userID)
+	if id.IsZero() {
+		return uuid.Nil, fmt.Errorf("payer subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
+	}
+	return id.UUID(), nil
+}
+
+type PurchaseRequest struct {
+	// attempt places a new card's verification in its purchase.
+	attempt         cardAttempt
+	PriceID         string `json:"price_id"`
+	PriceKey        string `json:"price_key,omitempty"`
+	ProductKey      string `json:"product_key,omitempty"`
+	Amount          *int64 `json:"amount,string,omitempty"`
+	PaymentMethodID string `json:"payment_method_id,omitempty"`
+	PaymentToken    string `json:"payment_token,omitempty"`
+	// Card is a new card for a PSP whose card_entry is server.
+	Card *cardguard.Card `json:"-"`
+	// BTTokenIntentID is the Basis Theory token-intent id from BT Elements:
+	// the only card handle custodian-held-card purchase accepts (PAN firewall).
+	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`
+	Rail            string `json:"rail"`
+	SuccessURL      string `json:"success_url,omitempty"`
+	CancelURL       string `json:"cancel_url,omitempty"`
+
+	IdempotencyKey    string            `json:"-"`
+	OrderAttemptID    string            `json:"-"`
+	PurchaseStartedAt time.Time         `json:"-"`
+	Email             string            `json:"email,omitempty"`
+	NameOnCard        string            `json:"name_on_card,omitempty"`
+	FirstName         string            `json:"first_name,omitempty"`
+	LastName          string            `json:"last_name,omitempty"`
+	Address1          string            `json:"address1,omitempty"`
+	Address2          string            `json:"address2,omitempty"`
+	Phone             string            `json:"phone,omitempty"`
+	City              string            `json:"city,omitempty"`
+	State             string            `json:"state,omitempty"`
+	Zip               string            `json:"zip,omitempty"`
+	Country           string            `json:"country,omitempty"`
+	LastFour          string            `json:"last_four,omitempty"`
+	CardType          string            `json:"card_type,omitempty"`
+	ExpiryDate        string            `json:"expiry_date,omitempty"`
+	Metadata          map[string]string `json:"-"`
+}
+
+type PurchaseResponse struct {
+	Status string `json:"status"`
+	Action string `json:"action,omitempty"`
+	// Code is the machine-readable reason for a blocked purchase (the
+	// Conflict* consts), so clients can route to the right remedy.
+	Code           string     `json:"code,omitempty"`
+	Message        string     `json:"message,omitempty"`
+	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
+	PaymentID      *uuid.UUID `json:"payment_id,omitempty"`
+	TransactionID  string     `json:"transaction_id,omitempty"`
+	RedirectURL    string     `json:"redirect_url,omitempty"`
+	DelayedStart   *time.Time `json:"delayed_start,omitempty"`
+}
+
+type CoverageInfo struct {
+	HasCoverage  bool
+	IsIndefinite bool
+	EndDate      *time.Time
+	SourceType   string
+	SourceID     *uuid.UUID
+}
+
+type EligibilityStatus string
+
+const (
+	EligibilityAllowed   EligibilityStatus = "allowed"
+	EligibilityBlocked   EligibilityStatus = "blocked"
+	EligibilityUpgrade   EligibilityStatus = "upgrade"
+	EligibilityDowngrade EligibilityStatus = "downgrade"
+)
+
+type EligibilityResult struct {
+	Status               EligibilityStatus
+	Reason               string
+	Coverage             *CoverageInfo
+	ExistingSubscription *models.Subscription
+	ExistingProduct      *models.Product
+}
+
+// cardAttempt is the purchase a new card's verification belongs to.
+type cardAttempt struct {
+	target string
+	owner  attempts.Owner
+}

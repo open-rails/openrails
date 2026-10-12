@@ -1,0 +1,287 @@
+package payment
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
+)
+
+// A durable tier change — an NMI upgrade (nmi_upgrade_intent.go) or a Stripe
+// tier change (stripe_tier_change_intent.go) — answers the change routes
+// with one contract on every rail: the request's Idempotency-Key names the
+// operation and replays its stored result; an unresolved provider outcome
+// answers "processing" (HTTP 202) with operation_id; another key while one is
+// unresolved is refused subscription_change_in_flight naming it; a terminal operation
+// is a coded subscription_change_refused.
+
+// tierChangeSubjectConstraint is the one-unresolved-tier-change-per-
+// subscription unique index shared by every durable tier change type.
+const tierChangeSubjectConstraint = "provider_intents_subscription_id_tier_change_subscription_key"
+
+// One client key names one tier change of one customer, independent of rail.
+// The ledger's (merchant_id, idempotency_key) unique constraint arbitrates
+// concurrent requests before either provider-specific handler can execute.
+// The customer scope keeps another customer from pre-claiming a predictable
+// key.
+func tierChangeIdempotencyKey(customerID, key string) string {
+	customerID = strings.TrimSpace(customerID)
+	if id, err := uuid.Parse(customerID); err == nil {
+		customerID = id.String()
+	}
+	return "tier_change:" + customerID + ":" + strings.TrimSpace(key)
+}
+
+func tierChangeCustomer(user *UserIdentity) string {
+	if user == nil {
+		return ""
+	}
+	return user.ID
+}
+
+// tierChangeSubject is what a replay must name again: the customer, the
+// subscription the change was requested on and the target price.
+type tierChangeSubject struct {
+	UserID         string
+	SubscriptionID uuid.UUID
+	RequestedPrice string
+	PriceID        uuid.UUID
+	Quantity       *int
+}
+
+func nmiUpgradeSubject(p subscriptions.NMIUpgradePayload) tierChangeSubject {
+	return tierChangeSubject{UserID: p.UserID, SubscriptionID: p.OldSubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.PriceID}
+}
+
+func (p StripeTierChangePayload) subject() tierChangeSubject {
+	return tierChangeSubject{UserID: p.UserID, SubscriptionID: p.SubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.PriceID}
+}
+
+func decodeTierChangeSubject(in gen.BillingProviderIntent) (tierChangeSubject, error) {
+	switch in.IntentType {
+	case TypeNMIUpgrade:
+		var p subscriptions.NMIUpgradePayload
+		if err := json.Unmarshal(in.Payload, &p); err != nil {
+			return tierChangeSubject{}, err
+		}
+		return nmiUpgradeSubject(p), nil
+	case TypeStripeTierChange:
+		var p StripeTierChangePayload
+		if err := json.Unmarshal(in.Payload, &p); err != nil {
+			return tierChangeSubject{}, err
+		}
+		return p.subject(), nil
+	case TypeInitialMembership:
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return tierChangeSubject{}, err
+		}
+		if changed, ok := p.Terms.Changed(); ok {
+			return tierChangeSubject{UserID: p.Terms.CustomerID.String(), SubscriptionID: changed, RequestedPrice: p.RequestedPrice, PriceID: p.Terms.PriceID, Quantity: p.Terms.Quantity}, nil
+		}
+	}
+	return tierChangeSubject{}, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
+}
+
+// tierChangeOwnedBy accepts the canonical row an enqueue returned only when it
+// is this request's operation. Two requests under one merchant-scoped key can
+// both miss the replay lookup; the later enqueue then gets the earlier row
+// through ON CONFLICT, and it must neither run nor answer for a different
+// customer, subscription or target.
+func tierChangeOwnedBy(row gen.BillingProviderIntent, want tierChangeSubject) error {
+	got, err := decodeTierChangeSubject(row)
+	if err != nil || !sameCustomer(got.UserID, want.UserID) || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID || !subscriptions.SameQuantity(got.Quantity, want.Quantity) {
+		return tierChangeIdempotencyConflict()
+	}
+	return nil
+}
+
+// ReplayTierChange answers a request whose Idempotency-Key names a durable
+// tier change before any admission the completed change would fail (its
+// subscription has moved and its price may be archived). found=false when the
+// key is new. A tier change without a key is refused here, before any
+// admission or mutation: the key is the client's only handle on a lost
+// response.
+func (s *PurchaseService) ReplayTierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, false, tierChangeKeyRequired()
+	}
+	if s.SubscriptionService == nil {
+		return nil, false, nil
+	}
+	store := intents.NewStore(s.SubscriptionService.Database())
+	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
+	in, err := store.GetByIdempotencyKey(ctx, key)
+	if db.IsNotFound(err) {
+		// An engine upgrade is an initial_membership operation under the same key.
+		in, err = store.GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
+	}
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	response, err := s.replayTierChangeOperation(ctx, in, req, user)
+	return response, true, err
+}
+
+// replayTierChangeOperation answers a request that names an existing
+// operation: its stored result, or its live state after claiming committed
+// work that is still runnable. The frozen payload is never refreshed.
+func (s *PurchaseService) replayTierChangeOperation(ctx context.Context, in gen.BillingProviderIntent, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+	subject, err := decodeTierChangeSubject(in)
+	if err != nil {
+		return nil, err
+	}
+	publicPrice, err := s.PriceService.GetByID(ctx, subject.PriceID)
+	if err != nil {
+		return nil, err
+	}
+	price := strings.TrimSpace(req.PriceID)
+	if user == nil || !sameCustomer(subject.UserID, user.ID) ||
+		(req.SubscriptionID != uuid.Nil && req.SubscriptionID != subject.SubscriptionID) ||
+		(price != subject.RequestedPrice && (price == "" || price != publicPrice.PublicID.String())) ||
+		(req.Quantity != nil && !subscriptions.SameQuantity(req.Quantity, subject.Quantity)) {
+		return nil, tierChangeIdempotencyConflict()
+	}
+	// Staff may inspect a previously accepted operation, but only the customer
+	// or automatic worker may resume a charge that is still runnable.
+	if !req.Staff && s.Intents != nil && (in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable) {
+		psp := derefUUID(in.PspID)
+		ctx = db.WithPSPID(ctx, psp)
+		if in, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: psp, SubscriptionID: in.SubscriptionID, PriceID: in.PriceID, IntentType: in.IntentType, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: s.now(), Origin: intents.Origin(in.Origin), OriginReason: "resume tier change"}); err != nil {
+			return nil, err
+		}
+	}
+	return s.tierChangeResponse(ctx, in)
+}
+
+// tierChangeResponse renders an operation's durable state: the stored
+// result, its coded refusal, or "processing" naming it while the provider
+// outcome is unresolved.
+func (s *PurchaseService) tierChangeResponse(ctx context.Context, in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+	subject, err := decodeTierChangeSubject(in)
+	if err != nil {
+		return nil, err
+	}
+	price, err := s.PriceService.GetByID(ctx, subject.PriceID)
+	if err != nil {
+		return nil, err
+	}
+	switch in.IntentType {
+	case TypeNMIUpgrade:
+		return nmiUpgradeTierChangeResponse(in, price.PublicID)
+	case TypeStripeTierChange:
+		return stripeTierChangeResponse(in, price.PublicID)
+	case TypeInitialMembership:
+		return engineChangeResponse(in, price.PublicID)
+	}
+	return nil, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
+}
+
+// effectiveOf is when a provider tier change takes effect: an upgrade now, a
+// downgrade (or a change by staff) at the end of the current period.
+func effectiveOf(action string) string {
+	if action == "downgrade" {
+		return "period_end"
+	}
+	return "now"
+}
+
+// tierChangeProcessing marks a rendered operation as accepted but unresolved
+// (HTTP 202): the same Idempotency-Key reads the result once it settles.
+func tierChangeProcessing(resp *TierChangeResponse) (*TierChangeResponse, error) {
+	resp.Status = "processing"
+	resp.Message = "The change is being confirmed with the provider; retry with the same Idempotency-Key to read the result"
+	return resp, nil
+}
+
+// tierChangeRefused renders a terminal operation. A provider payment refusal
+// (402) is a decline; NMI's attested non-execution keeps its code
+// (payment_duplicate_refused); any other refusal, or one before submission
+// (providerStatus 0), is subscription_change_refused: the change did not happen and a
+// new request needs a new key.
+func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus int, code string) error {
+	message := "tier change was not executed"
+	if in.LastFailureReason != nil && *in.LastFailureReason != "" {
+		message = *in.LastFailureReason
+	}
+	switch {
+	case providerStatus == http.StatusPaymentRequired:
+		return &TierChangeDeclinedError{Rail: rail, FailureCode: code, Message: message}
+	case providerStatus == http.StatusConflict && code == billing.CodePaymentDuplicateRefused:
+		return &TierChangeError{Code: code, Message: message}
+	}
+	return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: message}
+}
+
+// refuseTierChangeInFlight points a new request at the unresolved tier change
+// that owns the subscription, before anything reads provider state it may be
+// moving. An engine upgrade owns it through its tier group's unresolved
+// enrollment.
+func (s *PurchaseService) refuseTierChangeInFlight(ctx context.Context, sub *models.Subscription) error {
+	database := s.SubscriptionService.Database()
+	_, err := intents.NewStore(database).LiveTierChange(ctx, sub.ID)
+	switch {
+	case err == nil:
+		return &TierChangeInFlightError{}
+	case !db.IsNotFound(err):
+		return err
+	}
+	if sub.CollectionPolicy != models.CollectionPolicyEngine {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = database.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ProductID: sub.ProductID})
+	switch {
+	case err == nil:
+		return &TierChangeInFlightError{}
+	case db.IsNotFound(err):
+		return nil
+	default:
+		return err
+	}
+}
+
+// sameCustomer compares customer ids by value, not spelling.
+func sameCustomer(a, b string) bool {
+	left, errLeft := uuid.Parse(strings.TrimSpace(a))
+	right, errRight := uuid.Parse(strings.TrimSpace(b))
+	if errLeft != nil || errRight != nil {
+		return strings.TrimSpace(a) == strings.TrimSpace(b)
+	}
+	return left == right
+}
+
+// tierChangeInFlight answers an enqueue that lost the subject index race: the
+// conflict proves an operation owned the subscription, so the answer is a
+// conflict even if it settled since.
+func (s *PurchaseService) tierChangeInFlight(ctx context.Context, subscriptionID uuid.UUID) error {
+	if _, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID); err != nil {
+		return ErrTierChangePending
+	}
+	return &TierChangeInFlightError{}
+}
+
+func derefUUID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
+}

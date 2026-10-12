@@ -65,7 +65,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		set, err := r.syncMerchantConfig(ctx, id, previous, loaded)
 		if err == nil {
 			r.followPSPPosture(id, previous, set)
-			r.followCheckoutDomain(id, previous, set)
+			r.followPaymentDomain(id, previous, set)
 		}
 		return set, err
 	})
@@ -204,7 +204,7 @@ func recordDanglingPolicies(ctx context.Context, q *gen.Queries, id billing.Merc
 }
 
 // ArmMerchantsService installs the merchants service and wires its
-// credential reader into the request-time consumers (checkout, payment
+// credential reader into the request-time consumers (purchase, payment
 // methods, alerting).
 func (r *Runtime) ArmMerchantsService(svc *merchants.Service) {
 	if r == nil || svc == nil {
@@ -217,9 +217,9 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service) {
 	if r.AlertService != nil {
 		r.AlertService.SetMerchantConfig(svc.Config())
 	}
-	if r.CheckoutService != nil {
-		r.CheckoutService.SetMerchantSecretStore(store)
-		r.CheckoutService.SetPSPSecretResolver(svc)
+	if r.PurchaseService != nil {
+		r.PurchaseService.SetMerchantSecretStore(store)
+		r.PurchaseService.SetPSPSecretResolver(svc)
 	}
 	if r.RailPaymentMethodService != nil {
 		r.RailPaymentMethodService.SetMerchantSecretStore(store)

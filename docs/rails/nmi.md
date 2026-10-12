@@ -31,7 +31,7 @@ Three values, all found in (or issued for) the NMI merchant dashboard:
 1. **Security key** (`security_key`) — the private API key. It is also the v5
    API credential (no separate key needed). Treat it like a Stripe secret key.
 2. **Tokenization key** (`tokenization_key`) — the *public* Collect.js key.
-   Your checkout page loads Collect.js with it; the raw card goes browser →
+   Your payment page loads Collect.js with it; the raw card goes browser →
    NMI, and OpenRails only ever receives the opaque `payment_token` (SAQ-A).
    Not needed with `card_entry: server` (below).
 3. **Gateway ID** (`account_id`) — shown in the dashboard as "Gateway ID".
@@ -82,8 +82,8 @@ Where a new card is typed is a PSP setting, `settings.card_entry`:
   NMI; OpenRails receives a single-use `payment_token`. Your servers never
   see a card number: PCI **SAQ A**.
 - `server`: your page posts the card to OpenRails, which vaults it at NMI.
-  Checkout options advertise driver `card`, billing-ui renders plain card
-  inputs, and no NMI script loads in the browser. The checkout, saved-card
+  Purchase options advertise driver `card`, billing-ui renders plain card
+  inputs, and no NMI script loads in the browser. The purchase, saved-card
   and card-update bodies take
   `"card": {"number", "exp_month", "exp_year", "cvc"}` (never beside
   `payment_token`).
@@ -234,7 +234,7 @@ NMI PSP then declares which NMI deployment its credentials belong to, in
 
 Verification runs once per loaded credential set (startup, credential
 create/rotate), bound to merchant + PSP + endpoint + credential fingerprint.
-Every NMI client (checkout, card save, rebills, refunds, pulls,
+Every NMI client (purchase, card save, rebills, refunds, pulls,
 custodian proxies) is built from that same PSP scope, so all of them share the
 one verdict; see [sandbox posture](../sandbox-posture.md). A false, unknown or
 unavailable verdict disarms the PSP: every NMI mutation is refused before

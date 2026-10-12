@@ -66,7 +66,7 @@ func (w *retentionWorld) count(sql string, args ...any) int {
 }
 
 // unpaidOrder is the payable an attempt belongs to; card setups live on
-// payment_methods and no longer provide checkout-attempt retention fixtures.
+// payment_methods and no longer provide order-attempt retention fixtures.
 func (w *retentionWorld) unpaidOrder(customer uuid.UUID) uuid.UUID {
 	id := uuid.New()
 	w.exec(`INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,expires_at)
@@ -382,16 +382,16 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.NoError(t, tx.Rollback(ctx))
 	require.Equal(t, 404, transitions())
 
-	// Checkout attempts: one expired 91 days ago, one expired 89 days ago, and
+	// Order attempts: one expired 91 days ago, one expired 89 days ago, and
 	// one that failed long ago and is kept.
 	attempt := func(status string, expiredAgo time.Duration) uuid.UUID {
 		var id uuid.UUID
-		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.checkout_attempts (merchant_id, customer_id, psp_id, order_id, rail, status, amount, currency, expires_at)
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.order_attempts (merchant_id, customer_id, psp_id, order_id, rail, status, amount, currency, expires_at)
             VALUES ($1,$2,$3,$4,'stripe',$5,1000000,'USD',now()-$6::interval) RETURNING id`), w.merchant, customer.UUID(), psp, w.unpaidOrder(customer.UUID()), status, expiredAgo).Scan(&id))
 		return id
 	}
-	staleAttempt := attempt("expired", retention.ExpiredCheckoutAttempts+day)
-	freshAttempt := attempt("expired", retention.ExpiredCheckoutAttempts-day)
+	staleAttempt := attempt("expired", retention.ExpiredOrderAttempts+day)
+	freshAttempt := attempt("expired", retention.ExpiredOrderAttempts-day)
 	failedAttempt := attempt("failed", 400*day)
 
 	// Reconciliation: a run and its resolved finding past 12 months, a run a
@@ -455,16 +455,16 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	for range 4 {
 		r := w.sweep(150)
 		total.SubscriptionTransitions += r.SubscriptionTransitions
-		total.CheckoutAttempts += r.CheckoutAttempts
+		total.OrderAttempts += r.OrderAttempts
 		total.ReconciliationFindings += r.ReconciliationFindings
 		total.ReconciliationRuns += r.ReconciliationRuns
 	}
 	require.EqualValues(t, 250, total.SubscriptionTransitions)
-	require.EqualValues(t, 1, total.CheckoutAttempts)
+	require.EqualValues(t, 1, total.OrderAttempts)
 	require.EqualValues(t, 1, total.ReconciliationFindings)
 	require.EqualValues(t, 1, total.ReconciliationRuns)
 	idle := w.sweep(150)
-	require.Zero(t, idle.SubscriptionTransitions+idle.CheckoutAttempts+idle.ReconciliationFindings+idle.ReconciliationRuns)
+	require.Zero(t, idle.SubscriptionTransitions+idle.OrderAttempts+idle.ReconciliationFindings+idle.ReconciliationRuns)
 	require.Zero(t, idle.MerchantsBudgetCapped)
 
 	// What is left is exactly what is still inside its period, or permanent.
@@ -473,9 +473,9 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	exists := func(table string, id uuid.UUID) bool {
 		return w.count(`SELECT count(*) FROM billing.`+table+` WHERE merchant_id = $1 AND id = $2`, w.merchant, id) == 1
 	}
-	require.False(t, exists("checkout_attempts", staleAttempt))
-	require.True(t, exists("checkout_attempts", freshAttempt))
-	require.True(t, exists("checkout_attempts", failedAttempt))
+	require.False(t, exists("order_attempts", staleAttempt))
+	require.True(t, exists("order_attempts", freshAttempt))
+	require.True(t, exists("order_attempts", failedAttempt))
 	require.False(t, exists("maintenance_runs", staleRun))
 	require.True(t, exists("maintenance_runs", pinnedRun), "a run an open finding names is kept")
 	require.True(t, exists("maintenance_runs", seenRun), "a run a kept finding names is kept")
@@ -534,14 +534,14 @@ func TestProviderWriteRetention(t *testing.T) {
 	// Records of money, a membership and an erasure, just as old.
 	collection := intent("subscription_collection", "succeeded", old, map[string]any{"previous_period_end": "2020-01-01T00:00:00Z", "attempt": 1})
 	refusedEnrollment := intent("initial_membership", "failed_terminal", old, map[string]any{})
-	refusedSale := intent("nmi_sale", "failed_terminal", old, map[string]any{"checkout_attempt_id": attemptID})
+	refusedSale := intent("nmi_sale", "failed_terminal", old, map[string]any{"order_attempt_id": attemptID})
 	refund := intent("stripe_refund", "succeeded", old, map[string]any{})
 	erasure := intent("nmi_vault_delete", "succeeded", old, map[string]any{"rail_customer_ref": "vault-1"})
 
 	// An attempt that expired long ago, but that an intent names: it reached a
 	// provider, and its sale's outcome is read against it.
-	w.exec(`INSERT INTO billing.checkout_attempts (id,merchant_id,customer_id,psp_id,order_id,rail,status,amount,currency,expires_at)
-        VALUES($1,$2,$3,$4,$5,'stripe','expired',1000000,'USD',now()-$6::interval)`, attemptID, w.merchant, customer.UUID(), psp, w.unpaidOrder(customer.UUID()), retention.ExpiredCheckoutAttempts+30*day)
+	w.exec(`INSERT INTO billing.order_attempts (id,merchant_id,customer_id,psp_id,order_id,rail,status,amount,currency,expires_at)
+        VALUES($1,$2,$3,$4,$5,'stripe','expired',1000000,'USD',now()-$6::interval)`, attemptID, w.merchant, customer.UUID(), psp, w.unpaidOrder(customer.UUID()), retention.ExpiredOrderAttempts+30*day)
 
 	// The mutation log: two old entries (one names an intent that is deleted,
 	// one an intent that is kept) and a recent one naming the deleted intent.
@@ -563,7 +563,7 @@ func TestProviderWriteRetention(t *testing.T) {
 	result := w.sweep(0)
 	require.EqualValues(t, 2, result.ProviderIntents)
 	require.EqualValues(t, 2, result.ProviderMutationLogs)
-	require.Zero(t, result.CheckoutAttempts)
+	require.Zero(t, result.OrderAttempts)
 
 	exists := func(table string, id uuid.UUID) bool {
 		return w.count(`SELECT count(*) FROM billing.`+table+` WHERE merchant_id = $1 AND id = $2`, w.merchant, id) == 1
@@ -577,7 +577,7 @@ func TestProviderWriteRetention(t *testing.T) {
 	} {
 		require.True(t, exists("provider_intents", id), "%s must be kept", name)
 	}
-	require.True(t, exists("checkout_attempts", attemptID), "an attempt an intent names is kept")
+	require.True(t, exists("order_attempts", attemptID), "an attempt an intent names is kept")
 	require.False(t, exists("provider_mutation_logs", oldLog))
 	require.False(t, exists("provider_mutation_logs", oldLogOfKept))
 	// The recent entry outlives the intent it described; only its link is gone.

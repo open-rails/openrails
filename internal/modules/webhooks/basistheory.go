@@ -144,7 +144,7 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 	case basistheory.EventTokenUpdated:
 		return s.refreshInstrumentFromToken(ctx, evt)
 	case basistheory.EventTokenPropertyExpired:
-		// Expected post-checkout: the intent/token CVC retention lapse.
+		// Expected post-purchase: the intent/token CVC retention lapse.
 		return nil
 	case basistheory.EventTokenIntentConverted:
 		return s.reconcileIntentConversion(ctx, evt)
@@ -248,7 +248,7 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 	if !db.IsNotFound(err) {
 		return fmt.Errorf("basistheory token-intent.converted: lookup instrument: %w", err)
 	}
-	log.WithContext(ctx).Warn("basistheory webhook: converted token has no instrument row (checkout crash window); repair via checkout replay or manual re-link")
+	log.WithContext(ctx).Warn("basistheory webhook: converted token has no instrument row (purchase crash window); repair via purchase replay or manual re-link")
 	return nil
 }
 

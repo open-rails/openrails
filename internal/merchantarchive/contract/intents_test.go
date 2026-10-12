@@ -17,15 +17,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-func TestCheckoutRailStateContracts(t *testing.T) {
+func TestPurchaseRailStateContracts(t *testing.T) {
 	for _, raw := range []string{`{"accepted_purchase":{}}`, `{"initial_membership_quote":"{}"}`, `{"capture":{}}`, `{"_openrails_request_fingerprint":"old"}`} {
-		if err := validateJSON("checkout_attempts.rail_state", raw); err == nil {
-			t.Errorf("retired checkout state accepted: %s", raw)
+		if err := validateJSON("order_attempts.rail_state", raw); err == nil {
+			t.Errorf("retired purchase state accepted: %s", raw)
 		}
 	}
 	const session = `"12345678-1234-4234-8234-123456789012"`
-	for _, raw := range []string{session, `"checkout_attempt:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
-		err := validateJSON("provider_intents.initial_membership.payload", `{"checkout_attempt_id":`+raw+`}`)
+	for _, raw := range []string{session, `"order_attempt:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
+		err := validateJSON("provider_intents.initial_membership.payload", `{"order_attempt_id":`+raw+`}`)
 		if (err == nil) != (raw == session) {
 			t.Errorf("session binding %s: %v", raw, err)
 		}

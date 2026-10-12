@@ -43,7 +43,7 @@ func TestVaultEditReachesEveryReplica(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond, "the other replica reloads on the announcement, well inside the recheck")
 }
 
-// A PSP armed through one replica is offered by another's checkout without
+// A PSP armed through one replica is offered by another's purchase without
 // a restart: each replica verifies a PSP again when its document changes.
 func TestPSPArmedOnOneReplicaServesOnAnother(t *testing.T) {
 	t.Parallel()

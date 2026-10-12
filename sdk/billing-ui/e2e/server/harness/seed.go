@@ -275,7 +275,7 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 	return Seeded{SubscriptionSourceID: railSub, PaymentMethodRef: railMethod, TransactionID: txn, Import: result}, nil
 }
 
-// CustomerBilling is what the customer holds after checkout.
+// CustomerBilling is what the customer holds after purchase.
 type CustomerBilling struct {
 	Subscriptions  []billing.Subscription  `json:"subscriptions"`
 	PaymentMethods []billing.PaymentMethod `json:"payment_methods"`

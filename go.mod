@@ -5,7 +5,7 @@ go 1.26.9
 // Frontend dependencies can contain Go files; they are not Go packages.
 ignore ./sdk/billing-ui/node_modules
 
-ignore ./web/checkout/node_modules
+ignore ./web/pay/node_modules
 
 require (
 	github.com/ccoveille/go-safecast/v2 v2.0.1

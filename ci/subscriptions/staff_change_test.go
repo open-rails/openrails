@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
 // requireStaffSchedule: the staff change pending on sub keeps its reason and
@@ -245,17 +245,17 @@ func TestStaffSubscriptionReplayCannotResumeACharge(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		payload := checkout.StripeTierChangePayload{UserID: customer.id, SubscriptionID: sub.UUID(), RequestedPrice: pro.ID.String(), PriceID: price.ID, OldPriceID: current.PriceID,
+		payload := payment.StripeTierChangePayload{UserID: customer.id, SubscriptionID: sub.UUID(), RequestedPrice: pro.ID.String(), PriceID: price.ID, OldPriceID: current.PriceID,
 			StripeSubscriptionID: "legacy-subscription", StripeItemID: "legacy-item", OldStripePriceID: "legacy-basic", StripePriceID: "legacy-pro", Action: "upgrade", PaymentBehavior: "error_if_incomplete",
 			Currency: "USD", RecurringAmount: 20_000_000, AmountDueNow: 15_000_000, PeriodStart: *current.CurrentPeriodStartsAt, PeriodEnd: *current.CurrentPeriodEndsAt}
-		operation, err = intents.NewStore(runtime.DB).Enqueue(ctx, intents.EnqueueParams{MerchantID: current.MerchantID, Provider: "stripe", PspID: current.PspID, IntentType: checkout.TypeStripeTierChange,
+		operation, err = intents.NewStore(runtime.DB).Enqueue(ctx, intents.EnqueueParams{MerchantID: current.MerchantID, Provider: "stripe", PspID: current.PspID, IntentType: payment.TypeStripeTierChange,
 			SubscriptionID: &current.ID, PriceID: &price.ID, Payload: payload, IdempotencyKey: "tier_change:" + customer.id + ":" + key, NextAttemptAt: time.Now().Add(24 * time.Hour), Origin: intents.OriginAdmin})
 		return err
 	}))
 	recorder := &tierReplayExecutor{operation: operation}
-	original := runtime.CheckoutService.Intents
-	runtime.CheckoutService.Intents = recorder
-	defer func() { runtime.CheckoutService.Intents = original }()
+	original := runtime.PurchaseService.Intents
+	runtime.PurchaseService.Intents = recorder
+	defer func() { runtime.PurchaseService.Intents = original }()
 	before := len(w.railLedger("stripe"))
 	params := billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID), IdempotencyKey: key, Reason: "inspect previous change"}
 	result, err := w.client[remote].ChangeSubscription(t.Context(), sub, params)

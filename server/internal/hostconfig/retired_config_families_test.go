@@ -18,7 +18,7 @@ func TestRetiredConfigFamiliesRefuseBoot(t *testing.T) {
 	}{
 		{"STORE_NAME", "Acme", "store:\n  name: Acme\n", "store config was removed (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars"},
 		{"MERCHANT", "acme", "merchant: acme\n", "merchant config was removed (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant — delete the merchant yaml key and MERCHANT env var"},
-		{"CORS_ORIGINS", "https://app.example.test", "cors_origins:\n  - https://app.example.test\n", "cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var"},
+		{"CORS_ORIGINS", "https://app.example.test", "cors_origins:\n  - https://app.example.test\n", "cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (purchase/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var"},
 		{"DB_REQUIRE_RLS", "true", "db:\n  require_rls: true\n", "db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var"},
 		{"AUTH_ISSUERS", `["http://a.test"]`, "auth:\n  issuers:\n    - http://a.test\n", issuers},
 		{"AUTH_EXPECTED_AUDIENCE", "legacy", "auth:\n  expected_audience: legacy\n", issuers},

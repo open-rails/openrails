@@ -3,7 +3,7 @@ import * as React from "react"
 import {
   appearanceStyle,
   appearanceTheme,
-  type CheckoutAppearance,
+  type BillingAppearance,
 } from "./appearance"
 import { isBillingError } from "./client/errors"
 import { CardBillingFields } from "./components/billing-fields"
@@ -36,7 +36,7 @@ export interface SavePaymentMethodProps {
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
   submitLabel?: string
-  appearance?: CheckoutAppearance
+  appearance?: BillingAppearance
   className?: string
 }
 

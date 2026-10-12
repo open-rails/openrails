@@ -327,9 +327,9 @@ func TestConfirmTierChangeNeverMirrorsUnprovenSwitch(t *testing.T) {
 			in.Signature = c.land(t, signAs(t, tx, c.subscriber)).String()
 			return in
 		}, nil, ErrPaymentUnverified},
-		{"a checkout change without the checkout's reference", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
+		{"a purchase change without the purchase's reference", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
 			in, _ := c.change(t, true)
-			in.CheckoutAttemptID, in.Reference = uuid.New(), randAddr(t)
+			in.OrderAttemptID, in.Reference = uuid.New(), randAddr(t)
 			return in
 		}, nil, ErrPaymentUnverified},
 		{"reverted", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {

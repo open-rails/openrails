@@ -147,7 +147,7 @@ export const es: BillingUiMessageBundle = {
     inUse:
       "Esta tarjeta paga una suscripción activa. Cambia primero esa suscripción a otra tarjeta.",
   },
-  checkout: {
+  purchase: {
     renews: "Se renueva {period}",
   },
   history: {

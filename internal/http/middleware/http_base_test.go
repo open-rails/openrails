@@ -191,7 +191,7 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 
 	for sent, want := range map[string]string{" request-965 ": "request-965", "": "", strings.Repeat("x", 129): ""} {
 		buf.Reset()
-		req := httptest.NewRequest(http.MethodPost, "/v1/me/checkout", nil)
+		req := httptest.NewRequest(http.MethodPost, "/v1/me/purchase", nil)
 		req.Header.Set("X-Request-ID", sent)
 		w := httptest.NewRecorder()
 		RequestLogHTTP(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(w, req)

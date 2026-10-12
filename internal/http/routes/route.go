@@ -34,8 +34,8 @@ type Group string
 const (
 	// Meta is the process surface: health, metrics, capability discovery.
 	Meta Group = "meta"
-	// Checkout is the public buyer-facing surface: a wallet paying an order.
-	Checkout Group = "checkout"
+	// Payment is the public buyer-facing surface: a wallet paying an order.
+	Payment Group = "payment"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
 	// Admin is customer support, staff work on customers: staff, machines
@@ -147,23 +147,23 @@ type MerchantSource string
 // MerchantOrder: the merchant of the order its {id} names.
 const MerchantOrder MerchantSource = "order"
 
-// CheckoutAccess is how the hosted checkout host serves a route under a
-// checkout URL's secret, which acts as its order's customer.
-type CheckoutAccess string
+// PayURLAccess is how the payment origin serves a route under a
+// pay URL's secret, which acts as its order's customer.
+type PayURLAccess string
 
 const (
-	// CheckoutPublic: a public route.
-	CheckoutPublic CheckoutAccess = "public"
-	// CheckoutMerchant: a customer route about the order's merchant.
-	CheckoutMerchant CheckoutAccess = "merchant"
-	// CheckoutOrder: a customer route whose {id} is the secret's order.
-	CheckoutOrder CheckoutAccess = "order"
-	// CheckoutSavedCards: a customer route served only when the checkout
+	// PayURLPublic: a public route.
+	PayURLPublic PayURLAccess = "public"
+	// PayURLMerchant: a customer route about the order's merchant.
+	PayURLMerchant PayURLAccess = "merchant"
+	// PayURLOrder: a customer route whose {id} is the secret's order.
+	PayURLOrder PayURLAccess = "order"
+	// PayURLSavedCards: a customer route served only when the pay URL
 	// offers saved cards.
-	CheckoutSavedCards CheckoutAccess = "saved_cards"
-	// CheckoutLink: a customer route the order's customer uses to link its
-	// openrails.dev account, the checkout URL proving the merchant's side.
-	CheckoutLink CheckoutAccess = "link"
+	PayURLSavedCards PayURLAccess = "saved_cards"
+	// PayURLLink: a customer route the order's customer uses to link its
+	// openrails.dev account, the pay URL proving the merchant's side.
+	PayURLLink PayURLAccess = "link"
 )
 
 // Reply is one success outcome of a route: its status and body. Body is a
@@ -314,9 +314,9 @@ type Route struct {
 	Merchant MerchantSource
 	// IdempotencyKey: the route reads the Idempotency-Key header.
 	IdempotencyKey bool
-	// Checkout is what a checkout URL's secret opens of the route on the
-	// hosted checkout host; none is not served there.
-	Checkout CheckoutAccess
+	// PayURL is what a pay URL's secret opens of the route on the
+	// payment origin; none is not served there.
+	PayURL PayURLAccess
 
 	// Query lists the query parameters; Request is a zero value of the JSON
 	// body's type (nil for none); Responses is every success outcome.
@@ -436,18 +436,18 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		default:
 			panic("routes: " + r.Key() + ": unknown merchant source " + string(r.Merchant))
 		}
-		switch r.Checkout {
+		switch r.PayURL {
 		case "":
-		case CheckoutPublic:
+		case PayURLPublic:
 			if r.Auth != AuthPublic {
-				panic("routes: " + r.Key() + ": a public checkout route takes no credential")
+				panic("routes: " + r.Key() + ": a public pay URL route takes no credential")
 			}
-		case CheckoutOrder, CheckoutSavedCards, CheckoutLink, CheckoutMerchant:
-			if r.Auth != AuthCustomer || (r.Checkout == CheckoutOrder) != strings.Contains(r.Path, "{id}") {
-				panic("routes: " + r.Key() + ": a checkout customer route is a customer route; an order route names the order as {id}")
+		case PayURLOrder, PayURLSavedCards, PayURLLink, PayURLMerchant:
+			if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
+				panic("routes: " + r.Key() + ": a pay URL customer route is a customer route; an order route names the order as {id}")
 			}
 		default:
-			panic("routes: " + r.Key() + ": unknown checkout access " + string(r.Checkout))
+			panic("routes: " + r.Key() + ": unknown pay URL access " + string(r.PayURL))
 		}
 		byKey[r.Key()] = r
 	}

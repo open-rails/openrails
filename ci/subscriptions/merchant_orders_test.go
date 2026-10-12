@@ -15,20 +15,20 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Reopening checkout through its create key materializes a due order's expiry:
+// Reopening purchase through its create key materializes a due order's expiry:
 // the same order is returned, and a deliberate new purchase can claim its item.
 func TestMerchantOrderReplayExpiresDueOrder(t *testing.T) {
 	t.Parallel()
-	w := merchantCheckoutWorld(t)
+	w := merchantPaymentPageWorld(t)
 	life := w.lifetime("orders:replay-expiry", 5_000_000)
 	for _, tp := range []topology{embedded, remote} {
 		c := w.newCustomer()
 		client := w.client[tp]
 		params := billing.CreateOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: life.ID}},
-			IdempotencyKey: uuid.NewString(), Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://e2e.test/thanks"}}
+			IdempotencyKey: uuid.NewString(), PayURL: &billing.OrderPayURLParams{SuccessURL: "https://e2e.test/thanks"}}
 		order, err := client.CreateOrder(t.Context(), params)
 		require.NoError(t, err, tp)
-		require.Equal(t, order.Checkout.ExpiresAt, *order.ExpiresAt)
+		require.Equal(t, *order.PayURLExpiresAt, *order.ExpiresAt)
 		w.advance(order.ExpiresAt.Sub(w.clock.Now()) + time.Second)
 
 		// Reads and refused replays leave lifecycle writes to a valid command.
@@ -48,7 +48,7 @@ func TestMerchantOrderReplayExpiresDueOrder(t *testing.T) {
 		require.Equal(t, order.ID, again.ID)
 		require.Equal(t, billing.OrderExpired, again.Status)
 		require.NotNil(t, again.ExpiredAt)
-		require.Nil(t, again.Checkout.URL)
+		require.Nil(t, again.PayURL)
 		replayed, err := client.CreateOrder(t.Context(), params)
 		require.NoError(t, err)
 		require.Equal(t, again.ExpiredAt, replayed.ExpiredAt, "replay does not expire twice")
@@ -58,31 +58,31 @@ func TestMerchantOrderReplayExpiresDueOrder(t *testing.T) {
 		require.NotEqual(t, order.ID, next.ID)
 		require.Equal(t, billing.OrderOpen, next.Status)
 	}
-	require.Empty(t, w.nmi.saleOrders(), "reopening checkout never charges")
+	require.Empty(t, w.nmi.saleOrders(), "reopening purchase never charges")
 }
 
-// A checkout capability can expire before its order. Replaying the creation
+// A purchase capability can expire before its order. Replaying the creation
 // must not cancel that still-payable order or free its ownership claim.
 func TestMerchantOrderReplayKeepsFutureOrder(t *testing.T) {
 	t.Parallel()
-	w := merchantCheckoutWorld(t)
+	w := merchantPaymentPageWorld(t)
 	life := w.lifetime("orders:replay-future", 5_000_000)
 	for _, tp := range []topology{embedded, remote} {
 		c := w.newCustomer()
 		client := w.client[tp]
 		params := billing.CreateOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: life.ID}},
 			IdempotencyKey: uuid.NewString(), ExpiresAt: new(w.clock.Now().Add(48 * time.Hour)),
-			Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://e2e.test/thanks"}}
+			PayURL: &billing.OrderPayURLParams{SuccessURL: "https://e2e.test/thanks"}}
 		order, err := client.CreateOrder(t.Context(), params)
 		require.NoError(t, err, tp)
-		w.advance(order.Checkout.ExpiresAt.Sub(w.clock.Now()) + time.Second)
+		w.advance(order.PayURLExpiresAt.Sub(w.clock.Now()) + time.Second)
 		require.True(t, order.ExpiresAt.After(w.clock.Now()))
 		again, err := client.CreateOrder(t.Context(), params)
 		require.NoError(t, err, tp)
 		require.Equal(t, order.ID, again.ID)
 		require.Equal(t, billing.OrderOpen, again.Status)
 		require.Nil(t, again.ExpiredAt)
-		require.Nil(t, again.Checkout.URL)
+		require.Nil(t, again.PayURL)
 		params.IdempotencyKey = uuid.NewString()
 		_, err = client.CreateOrder(t.Context(), params)
 		requireCode(t, err, http.StatusConflict, billing.CodeAlreadyOwned)
@@ -126,11 +126,11 @@ func TestMerchantOrderReplayKeepsProcessingOrder(t *testing.T) {
 	require.Len(t, w.nmi.saleOrders(), 2, "one charge per order, including its lost answer")
 }
 
-func merchantCheckoutWorld(t *testing.T) *world {
+func merchantPaymentPageWorld(t *testing.T) *world {
 	t.Helper()
 	w := prepareWorld(t, 12)
 	w.booted = func(e *openrails.Engine) {
-		_, _, err := e.HostedCheckout("https://checkout.e2e.test", nil)
+		_, _, err := e.PaymentPage("https://purchase.e2e.test", nil)
 		require.NoError(t, err)
 	}
 	w.start()

@@ -49,7 +49,7 @@ VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text,
     $8::text, $9::text, $10::uuid,
     $11::timestamptz, $12::timestamptz, $13::timestamptz,
     $14::timestamptz, $15::timestamptz, $15::timestamptz)
-RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest
+RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded
 `
 
 type CreateObservedOrderParams struct {
@@ -112,17 +112,16 @@ func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrd
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PaymentStatus,
-		&i.CheckoutSecretHash,
-		&i.CheckoutExpiresAt,
-		&i.CheckoutSuccessUrl,
-		&i.CheckoutCancelUrl,
-		&i.CheckoutSavedPaymentMethods,
+		&i.PayUrlSecretHash,
+		&i.PayUrlExpiresAt,
+		&i.SuccessUrl,
+		&i.CancelUrl,
+		&i.SavedPaymentMethods,
 		&i.SubscriptionID,
 		&i.PeriodStartsAt,
 		&i.PeriodEndsAt,
 		&i.DueAt,
 		&i.VoidedAt,
-		&i.CheckoutUiMode,
 		&i.AmountPaid,
 		&i.UncollectibleAt,
 		&i.CollectionMethod,
@@ -136,6 +135,7 @@ func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrd
 		&i.CollectionOwner,
 		&i.SubscriptionBillKind,
 		&i.LinesDigest,
+		&i.Embedded,
 	)
 	return i, err
 }

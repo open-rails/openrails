@@ -32,12 +32,12 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
 | `catalog_benefit_overlap` | 409 | `invalid_request_error` | Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group. |
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
-| `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
-| `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
-| `checkout_attempts_exhausted` | 409 | `invalid_request_error` | The checkout took its most card attempts; the merchant creates a new order. |
-| `checkout_embed_origins_required` | 400 | `invalid_request_error` | An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
-| `checkout_expired` | 410 | `invalid_request_error` | The checkout URL expired; the merchant creates a new order. |
-| `checkout_not_found` | 404 | `invalid_request_error` | The checkout URL is unknown or no longer valid. |
+| `order_attempt_closed` | 409 | `invalid_request_error` | The order attempt already completed or was canceled. |
+| `order_attempt_expired` | 410 | `invalid_request_error` | The order attempt expired before it was paid. |
+| `pay_url_attempts_exhausted` | 409 | `invalid_request_error` | The purchase took its most card attempts; the merchant creates a new order. |
+| `embed_origins_required` | 400 | `invalid_request_error` | An embedded payment page needs the origins that may frame it: the merchant's settings payment_page.embed_origins. |
+| `pay_url_expired` | 410 | `invalid_request_error` | The pay URL expired; the merchant creates a new order. |
+| `pay_url_not_found` | 404 | `invalid_request_error` | The pay URL is unknown or no longer valid. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
 | `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
@@ -65,7 +65,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant, or names an invalid invoker. |
-| `hosted_checkout_unavailable` | 400 | `invalid_request_error` | This deployment serves no hosted checkout, or the order cannot take one. |
+| `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no payment page, or the order cannot take one. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |
 | `idempotency_key_reused` | 422 | `invalid_request_error` | The idempotency key already committed with different terms. |
@@ -124,7 +124,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
 | `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant. |
-| `platform_vault_unreachable` | 409 | `invalid_request_error` | A card PSP checkout offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant. |
+| `platform_vault_unreachable` | 409 | `invalid_request_error` | A card PSP purchase offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant. |
 | `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
 | `price_change_target_archived` | 422 | `invalid_request_error` | The target price is archived. |
 | `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |

@@ -30,7 +30,7 @@ const StaleAfter = 2*RefreshInterval + SafetyLag
 
 var ErrPending = errors.New("provider recovery required")
 
-// CheckPSP is for writes on existing obligations. Initial checkout is not a
+// CheckPSP is for writes on existing obligations. Initial purchase is not a
 // restore operation and does not call this gate. Known receipt verification
 // must remain possible while writes are held, so it can settle accepted work.
 func CheckPSP(ctx context.Context, database *db.DB, mid, psp uuid.UUID, now time.Time) error {

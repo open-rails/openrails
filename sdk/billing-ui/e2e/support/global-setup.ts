@@ -61,7 +61,7 @@ export default async function globalSetup() {
   }
 }
 
-// Bundles the account, checkout and purchase pages against a fresh package build (dist/).
+// Bundles the account, purchase and purchase pages against a fresh package build (dist/).
 async function buildHostApp() {
   execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit" })
   await build({
@@ -77,7 +77,7 @@ async function buildHostApp() {
         input: {
           account: path.join(root, "e2e/openrails/app/main.tsx"),
           admin: path.join(root, "e2e/openrails/app/admin.tsx"),
-          checkout: path.join(root, "e2e/openrails/app/checkout.tsx"),
+          purchase: path.join(root, "e2e/openrails/app/purchase.tsx"),
           purchase: path.join(root, "e2e/openrails/app/purchase.tsx"),
         },
         output: {

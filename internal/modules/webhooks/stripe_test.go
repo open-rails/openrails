@@ -108,20 +108,20 @@ func TestStripeRefundAndDisputeDecisions(t *testing.T) {
 	}
 }
 
-type recordingCheckoutAttemptStore struct {
+type recordingOrderAttemptStore struct {
 	closedID     uuid.UUID
-	closedStatus models.CheckoutAttemptStatus
+	closedStatus models.OrderAttemptStatus
 }
 
-func (s *recordingCheckoutAttemptStore) SettleOrderCheckout(context.Context, uuid.UUID, string, string, string, int64) error {
+func (s *recordingOrderAttemptStore) SettleOrderHosted(context.Context, uuid.UUID, string, string, string, int64) error {
 	return nil
 }
 
-func (s *recordingCheckoutAttemptStore) CloseOrderCheckout(_ context.Context, id uuid.UUID, failed bool) error {
+func (s *recordingOrderAttemptStore) CloseOrderHosted(_ context.Context, id uuid.UUID, failed bool) error {
 	s.closedID = id
-	s.closedStatus = models.CheckoutAttemptStatusExpired
+	s.closedStatus = models.OrderAttemptStatusExpired
 	if failed {
-		s.closedStatus = models.CheckoutAttemptStatusFailed
+		s.closedStatus = models.OrderAttemptStatusFailed
 	}
 	return nil
 }
@@ -187,17 +187,17 @@ func TestStripeWebhookRouting(t *testing.T) {
 	require.Error(t, bare.HandleStripeWebhook(ctx, []byte(`{"id":"evt_1","type":"invoice.paid"} {}`)), "trailing data")
 
 	sessionID := uuid.New()
-	store := &recordingCheckoutAttemptStore{}
-	svc := &StripeWebhookService{CheckoutAttemptService: store}
-	meta := map[string]any{"metadata": map[string]string{"checkout_attempt_id": billing.CheckoutAttemptID(sessionID).String(), "order_id": billing.OrderID(uuid.New()).String()}}
+	store := &recordingOrderAttemptStore{}
+	svc := &StripeWebhookService{OrderAttemptService: store}
+	meta := map[string]any{"metadata": map[string]string{"order_attempt_id": billing.OrderAttemptID(sessionID).String(), "order_id": billing.OrderID(uuid.New()).String()}}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.async_payment_failed", meta)))
 	require.Equal(t, sessionID, store.closedID)
-	require.Equal(t, models.CheckoutAttemptStatusFailed, store.closedStatus)
-	*store = recordingCheckoutAttemptStore{}
+	require.Equal(t, models.OrderAttemptStatusFailed, store.closedStatus)
+	*store = recordingOrderAttemptStore{}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", meta)))
 	require.Equal(t, sessionID, store.closedID)
-	require.Equal(t, models.CheckoutAttemptStatusExpired, store.closedStatus)
-	*store = recordingCheckoutAttemptStore{}
-	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", map[string]any{"metadata": map[string]string{"checkout_attempt_id": "garbage"}})))
+	require.Equal(t, models.OrderAttemptStatusExpired, store.closedStatus)
+	*store = recordingOrderAttemptStore{}
+	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", map[string]any{"metadata": map[string]string{"order_attempt_id": "garbage"}})))
 	require.Equal(t, uuid.Nil, store.closedID, "an unparseable session id closes nothing")
 }

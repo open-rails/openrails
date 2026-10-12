@@ -254,7 +254,7 @@ remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 timeouts, and 5xx. Every server error is a `*StatusError` carrying the HTTP
 status and wire code/message ([api/errors.md](api/errors.md)). Identifiers are typed (`billing.CustomerID`,
 `ProductID`, `PriceID`, `SubscriptionID`, `PaymentID`, `PaymentMethodID`,
-`CheckoutAttemptID`): a zero id, or a blank, whitespace or dot key, is refused
+`OrderAttemptID`): a zero id, or a blank, whitespace or dot key, is refused
 by the Client before any request with the same `400 invalid_param`
 `StatusError` the server returns for a malformed identifier, so embedded and
 remote callers observe one error.
@@ -302,13 +302,13 @@ Your users' browsers call OpenRails' self-service surface (`/v1/me/*`:
 entitlements, subscriptions, payment methods, orders) **directly**, using
 a short-lived access token with scope `openrails:self` that your
 identity provider mints for OpenRails — your session tokens never leave your
-trust domain. The token contract and checkout flows are in
+trust domain. The token contract and purchase flows are in
 [frontend-integration.md](frontend-integration.md); the trust model is in
 [auth.md](auth.md). CORS requires zero configuration (see below).
 
 To let customers pay off your site instead, turn on the server's hosted
-checkout and create merchant orders with `checkout`: see
-[hosted-checkout.md](hosted-checkout.md).
+purchase and create merchant orders with `purchase`: see
+[payment-page.md](payment-page.md).
 
 ### Trusted issuers: staff, machines and customers
 
@@ -421,7 +421,7 @@ request acts on the merchant its credential is bound to
 reaches merchant B, even though it verifies.
 
 **CORS** is a fixed policy — not configurable, no origin registration: the
-API routes (checkout, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer
+API routes (purchase, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer
 `Access-Control-Allow-Origin: *`, allow and expose the headers the server's
 AuthKit advertises for its credentials, and never allow credentials (OpenRails
 issues no cookies; every browser call is an explicit bearer token). Webhooks
@@ -440,7 +440,7 @@ go get github.com/open-rails/openrails/server@vX.Y.Z
 
 The `openrails` binary comes from the GitHub release or the Docker image, not
 `go install …@vX.Y.Z`: the server module builds against the root's source,
-including the embedded checkout page, so its tagged `go.mod` keeps a replace.
+including the embedded payment page page, so its tagged `go.mod` keeps a replace.
 
 ```go
 srv, err := server.New(ctx, server.Config{

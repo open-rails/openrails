@@ -9,7 +9,7 @@ import (
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
 // OpenRails-minted resources travel as prefixed text (prod_, sub_,
-// pay_, pm_, mdt_, chk_, att_, cyc_, psp_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
+// pay_, pm_, mdt_, oat_, att_, cyc_, psp_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
 // id marshals to "" and "" decodes to the zero id; use IsZero (and the json
@@ -25,8 +25,8 @@ type (
 	PaymentID       uuid.UUID
 	PaymentMethodID uuid.UUID
 	// MandateID names one stored-credential agreement on a saved card.
-	MandateID         uuid.UUID
-	CheckoutAttemptID uuid.UUID
+	MandateID      uuid.UUID
+	OrderAttemptID uuid.UUID
 	// PaymentAttemptID names one authorization a PSP answered (#1110).
 	PaymentAttemptID uuid.UUID
 	// RenewalID names one paid period that came due (#1111).
@@ -39,17 +39,17 @@ type (
 )
 
 const (
-	ProductIDPrefix         = "prod_"
-	SubscriptionIDPrefix    = "sub_"
-	PaymentIDPrefix         = "pay_"
-	PaymentMethodIDPrefix   = "pm_"
-	MandateIDPrefix         = "mdt_"
-	CheckoutAttemptIDPrefix = "chk_"
-	PaymentAttemptIDPrefix  = "att_"
-	RenewalIDPrefix         = "cyc_"
-	PSPIDPrefix             = "psp_"
-	OrderIDPrefix           = "ord_"
-	OrderLineIDPrefix       = "oli_"
+	ProductIDPrefix        = "prod_"
+	SubscriptionIDPrefix   = "sub_"
+	PaymentIDPrefix        = "pay_"
+	PaymentMethodIDPrefix  = "pm_"
+	MandateIDPrefix        = "mdt_"
+	OrderAttemptIDPrefix   = "oat_"
+	PaymentAttemptIDPrefix = "att_"
+	RenewalIDPrefix        = "cyc_"
+	PSPIDPrefix            = "psp_"
+	OrderIDPrefix          = "ord_"
+	OrderLineIDPrefix      = "oli_"
 )
 
 // MerchantID is the merchant's own UUID (billing.merchants.id, never an
@@ -101,9 +101,9 @@ func ParseOrderLineID(s string) (OrderLineID, error) {
 	u, err := parsePrefixedID("order line", OrderLineIDPrefix, s)
 	return OrderLineID(u), err
 }
-func ParseCheckoutAttemptID(s string) (CheckoutAttemptID, error) {
-	u, err := parsePrefixedID("checkout attempt", CheckoutAttemptIDPrefix, s)
-	return CheckoutAttemptID(u), err
+func ParseOrderAttemptID(s string) (OrderAttemptID, error) {
+	u, err := parsePrefixedID("order attempt", OrderAttemptIDPrefix, s)
+	return OrderAttemptID(u), err
 }
 
 func ParsePaymentAttemptID(s string) (PaymentAttemptID, error) {
@@ -125,31 +125,31 @@ func ParseCustomerID(s string) (CustomerID, error) {
 	return CustomerID(u), err
 }
 
-func (id CustomerID) UUID() uuid.UUID        { return uuid.UUID(id) }
-func (id ProductID) UUID() uuid.UUID         { return uuid.UUID(id) }
-func (id SubscriptionID) UUID() uuid.UUID    { return uuid.UUID(id) }
-func (id PaymentID) UUID() uuid.UUID         { return uuid.UUID(id) }
-func (id PaymentMethodID) UUID() uuid.UUID   { return uuid.UUID(id) }
-func (id MandateID) UUID() uuid.UUID         { return uuid.UUID(id) }
-func (id CheckoutAttemptID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id OrderID) UUID() uuid.UUID           { return uuid.UUID(id) }
-func (id OrderLineID) UUID() uuid.UUID       { return uuid.UUID(id) }
-func (id PaymentAttemptID) UUID() uuid.UUID  { return uuid.UUID(id) }
-func (id RenewalID) UUID() uuid.UUID         { return uuid.UUID(id) }
-func (id PSPID) UUID() uuid.UUID             { return uuid.UUID(id) }
+func (id CustomerID) UUID() uuid.UUID       { return uuid.UUID(id) }
+func (id ProductID) UUID() uuid.UUID        { return uuid.UUID(id) }
+func (id SubscriptionID) UUID() uuid.UUID   { return uuid.UUID(id) }
+func (id PaymentID) UUID() uuid.UUID        { return uuid.UUID(id) }
+func (id PaymentMethodID) UUID() uuid.UUID  { return uuid.UUID(id) }
+func (id MandateID) UUID() uuid.UUID        { return uuid.UUID(id) }
+func (id OrderAttemptID) UUID() uuid.UUID   { return uuid.UUID(id) }
+func (id OrderID) UUID() uuid.UUID          { return uuid.UUID(id) }
+func (id OrderLineID) UUID() uuid.UUID      { return uuid.UUID(id) }
+func (id PaymentAttemptID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id RenewalID) UUID() uuid.UUID        { return uuid.UUID(id) }
+func (id PSPID) UUID() uuid.UUID            { return uuid.UUID(id) }
 
-func (id CustomerID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
-func (id ProductID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
-func (id SubscriptionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id PaymentID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
-func (id PaymentMethodID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
-func (id MandateID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
-func (id CheckoutAttemptID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
-func (id OrderID) IsZero() bool           { return uuid.UUID(id) == uuid.Nil }
-func (id OrderLineID) IsZero() bool       { return uuid.UUID(id) == uuid.Nil }
-func (id PaymentAttemptID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
-func (id RenewalID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
-func (id PSPID) IsZero() bool             { return uuid.UUID(id) == uuid.Nil }
+func (id CustomerID) IsZero() bool       { return uuid.UUID(id) == uuid.Nil }
+func (id ProductID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
+func (id SubscriptionID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
+func (id PaymentID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
+func (id PaymentMethodID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
+func (id MandateID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
+func (id OrderAttemptID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
+func (id OrderID) IsZero() bool          { return uuid.UUID(id) == uuid.Nil }
+func (id OrderLineID) IsZero() bool      { return uuid.UUID(id) == uuid.Nil }
+func (id PaymentAttemptID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
+func (id RenewalID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
+func (id PSPID) IsZero() bool            { return uuid.UUID(id) == uuid.Nil }
 
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
@@ -162,8 +162,8 @@ func (id PaymentMethodID) String() string {
 	return formatPrefixedID(PaymentMethodIDPrefix, uuid.UUID(id))
 }
 func (id MandateID) String() string { return formatPrefixedID(MandateIDPrefix, uuid.UUID(id)) }
-func (id CheckoutAttemptID) String() string {
-	return formatPrefixedID(CheckoutAttemptIDPrefix, uuid.UUID(id))
+func (id OrderAttemptID) String() string {
+	return formatPrefixedID(OrderAttemptIDPrefix, uuid.UUID(id))
 }
 func (id OrderID) String() string     { return formatPrefixedID(OrderIDPrefix, uuid.UUID(id)) }
 func (id OrderLineID) String() string { return formatPrefixedID(OrderLineIDPrefix, uuid.UUID(id)) }
@@ -173,18 +173,18 @@ func (id PaymentAttemptID) String() string {
 func (id RenewalID) String() string { return formatPrefixedID(RenewalIDPrefix, uuid.UUID(id)) }
 func (id PSPID) String() string     { return formatPrefixedID(PSPIDPrefix, uuid.UUID(id)) }
 
-func (id CustomerID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
-func (id ProductID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
-func (id SubscriptionID) MarshalText() ([]byte, error)    { return []byte(id.String()), nil }
-func (id PaymentID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
-func (id PaymentMethodID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
-func (id MandateID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
-func (id CheckoutAttemptID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
-func (id OrderID) MarshalText() ([]byte, error)           { return []byte(id.String()), nil }
-func (id OrderLineID) MarshalText() ([]byte, error)       { return []byte(id.String()), nil }
-func (id PaymentAttemptID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
-func (id RenewalID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
-func (id PSPID) MarshalText() ([]byte, error)             { return []byte(id.String()), nil }
+func (id CustomerID) MarshalText() ([]byte, error)       { return []byte(id.String()), nil }
+func (id ProductID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
+func (id SubscriptionID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
+func (id PaymentID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
+func (id PaymentMethodID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
+func (id MandateID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
+func (id OrderAttemptID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
+func (id OrderID) MarshalText() ([]byte, error)          { return []byte(id.String()), nil }
+func (id OrderLineID) MarshalText() ([]byte, error)      { return []byte(id.String()), nil }
+func (id PaymentAttemptID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id RenewalID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
+func (id PSPID) MarshalText() ([]byte, error)            { return []byte(id.String()), nil }
 
 func (id *CustomerID) UnmarshalText(text []byte) error {
 	parsed, err := ParseCustomerID(string(text))
@@ -227,8 +227,8 @@ func (id *OrderLineID) UnmarshalText(text []byte) error {
 	*id = parsed
 	return err
 }
-func (id *CheckoutAttemptID) UnmarshalText(text []byte) error {
-	parsed, err := ParseCheckoutAttemptID(string(text))
+func (id *OrderAttemptID) UnmarshalText(text []byte) error {
+	parsed, err := ParseOrderAttemptID(string(text))
 	*id = parsed
 	return err
 }

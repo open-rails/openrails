@@ -49,7 +49,7 @@ type CreateInput struct {
 	// order's transaction.
 	FromCart bool
 	// Attach runs in the order's transaction once the order exists, before a
-	// zero total completes it: the hosted checkout is written with it.
+	// zero total completes it: the payment page is written with it.
 	Attach func(ctx context.Context, q *gen.Queries, order uuid.UUID) error
 	// LinesDigest names a customer order's lines (LinesDigest): FindOrCreate
 	// answers the customer's open order of the same lines instead.

@@ -1,5 +1,5 @@
-// The payment dialogs — hosts, not flows: one Dialog around OrderCheckout, or
-// around the order's embedded checkout on the checkout host. Closing is always
+// The payment dialogs — hosts, not flows: one Dialog around OrderPayment, or
+// around the order's embedded payment page on the payment origin. Closing is always
 // possible; an accepted payment settles on the server whether or not the
 // dialog stays open, and the order stays the customer's to pay.
 import type { ReactNode } from "react"
@@ -7,7 +7,7 @@ import type { ReactNode } from "react"
 import {
   appearanceStyle,
   appearanceTheme,
-  type CheckoutAppearance,
+  type BillingAppearance,
 } from "#orck/appearance"
 import {
   Dialog,
@@ -16,10 +16,10 @@ import {
   DialogTitle,
 } from "#orck/components/ui/dialog"
 import {
-  EmbeddedCheckout,
-  type EmbeddedCheckoutProps,
-} from "#orck/embedded-checkout"
-import { OrderCheckout, type OrderCheckoutProps } from "#orck/order-checkout"
+  EmbeddedPayment,
+  type EmbeddedPaymentProps,
+} from "#orck/embedded-payment"
+import { OrderPayment, type OrderPaymentProps } from "#orck/order-payment"
 
 interface DialogProps {
   open: boolean
@@ -31,7 +31,7 @@ function PayDialog({
   onOpenChange,
   appearance,
   children,
-}: DialogProps & { appearance?: CheckoutAppearance; children: ReactNode }) {
+}: DialogProps & { appearance?: BillingAppearance; children: ReactNode }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -40,7 +40,7 @@ function PayDialog({
         style={appearanceStyle(appearance)}
         showCloseButton
       >
-        <DialogTitle className="sr-only">Checkout</DialogTitle>
+        <DialogTitle className="sr-only">Payment</DialogTitle>
         <DialogDescription className="sr-only">
           Complete your payment
         </DialogDescription>
@@ -52,37 +52,37 @@ function PayDialog({
   )
 }
 
-export interface OrderModalProps extends OrderCheckoutProps, DialogProps {}
+export interface OrderModalProps extends OrderPaymentProps, DialogProps {}
 
 export function OrderModal({
   open,
   onOpenChange,
-  ...checkout
+  ...payment
 }: OrderModalProps) {
   return (
     <PayDialog
       open={open}
       onOpenChange={onOpenChange}
-      appearance={checkout.appearance}
+      appearance={payment.appearance}
     >
-      <OrderCheckout {...checkout} />
+      <OrderPayment {...payment} />
     </PayDialog>
   )
 }
 
-export interface EmbeddedModalProps extends EmbeddedCheckoutProps, DialogProps {
-  appearance?: CheckoutAppearance
+export interface EmbeddedModalProps extends EmbeddedPaymentProps, DialogProps {
+  appearance?: BillingAppearance
 }
 
 export function EmbeddedModal({
   open,
   onOpenChange,
   appearance,
-  ...checkout
+  ...payment
 }: EmbeddedModalProps) {
   return (
     <PayDialog open={open} onOpenChange={onOpenChange} appearance={appearance}>
-      <EmbeddedCheckout {...checkout} />
+      <EmbeddedPayment {...payment} />
     </PayDialog>
   )
 }

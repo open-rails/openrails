@@ -50,7 +50,7 @@ type Assembler struct {
 	CaptchaStore *captcha.ChallengeStore
 	AdminLimiter *middleware.AdminOperationLimiter
 	// Auth is the mount's Routes.Auth: who a staff, programmatic or
-	// checkout-session request is.
+	// purchase-session request is.
 	Auth billingauth.Authenticator
 }
 
@@ -97,7 +97,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
-	// browserTier tracks the configuration and checkout patterns mounted
+	// browserTier tracks the configuration and purchase patterns mounted
 	// below (#765): the ONLY routes on this combined handler that belong to
 	// the permissive-CORS browser tier.
 	browserRoutes := make(map[string]bool)
@@ -150,7 +150,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		return middleware.ChainHTTP(entry.Handler,
 			middleware.WithRoutePath(entry.Path),
 			middleware.SecurityHeadersHTTP(),
-			// #765: static permissive CORS on exactly the checkout patterns
+			// #765: static permissive CORS on exactly the purchase patterns
 			// registered into browserTier above — `*` from any origin, no
 			// credentials, nothing on merchant-admin/catalog/psps/
 			// merchant-API/webhooks.

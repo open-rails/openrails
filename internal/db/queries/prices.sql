@@ -189,7 +189,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(produc
 
 -- name: PricesHoldReferences :one
 -- Whether a record refers to any of the prices: a purchase line,
--- a subscription, a checkout, a price migration, a scheduled change, a
+-- a subscription, a purchase, a price migration, a scheduled change, a
 -- provider write or a PSP link.
 SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))

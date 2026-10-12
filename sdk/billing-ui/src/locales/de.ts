@@ -148,7 +148,7 @@ export const de: BillingUiMessageBundle = {
     inUse:
       "Diese Karte bezahlt ein aktives Abonnement. Stelle das Abonnement zuerst auf eine andere Karte um.",
   },
-  checkout: {
+  purchase: {
     renews: "Verlängert sich {period}",
   },
   history: {

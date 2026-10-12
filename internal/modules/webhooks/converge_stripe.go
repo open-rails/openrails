@@ -47,7 +47,7 @@ type StripeConvergeService struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	CheckoutAttemptService       webhookCheckoutAttemptStore
+	OrderAttemptService          webhookOrderAttemptStore
 }
 
 func (s *StripeConvergeService) now() time.Time {
@@ -125,7 +125,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 
 // createFromFetchedRecord is the signup/first-invoice leg: a Stripe checkout
 // subscription has no local row until its first paid invoice. All facts come
-// from the FETCHED record (metadata stamped by checkout, latest invoice).
+// from the FETCHED record (metadata stamped by purchase, latest invoice).
 func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (uuid.UUID, error) {
 	userID := normalize.FirstNonEmpty(rec.Metadata["user_id"], rec.Metadata["userId"], rec.Metadata["uid"])
 	if userID == "" && s.RailCustomerService != nil && rec.CustomerID != "" {
@@ -163,7 +163,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	if invoice.SubscriptionID != railSubID || invoice.CustomerID != rec.CustomerID || invoice.Status != "paid" {
 		return uuid.Nil, fmt.Errorf("stripe converge: initial invoice identity or settlement mismatch")
 	}
-	// Subscription metadata holds the accepted checkout identity; invoice
+	// Subscription metadata holds the accepted purchase identity; invoice
 	// metadata alone need not carry it.
 	if invoice.Metadata == nil {
 		invoice.Metadata = map[string]string{}
@@ -202,7 +202,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 }
 
 // resolveFetchedPrice maps the fetched record to a local price: metadata
-// internal_price_id (checkout-stamped) first, then the Stripe price id.
+// internal_price_id (purchase-stamped) first, then the Stripe price id.
 func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec subscriptions.StripeLivenessRecord) (uuid.UUID, *models.Price, error) {
 	if idStr := normalize.FirstNonEmpty(rec.Metadata["internal_price_id"], rec.Metadata["price_id"]); idStr != "" {
 		if priceID, err := uuid.Parse(idStr); err == nil {

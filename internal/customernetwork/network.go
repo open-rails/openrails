@@ -19,13 +19,13 @@ type Credential string
 const (
 	// CustomerToken: the customer's own token at the merchant.
 	CustomerToken Credential = "customer_token"
-	// CheckoutURL: the secret of an order's checkout URL, which the
+	// PayURL: the secret of an order's pay URL, which the
 	// merchant's backend created for its customer.
-	CheckoutURL Credential = "checkout_url"
+	PayURL Credential = "pay_url"
 )
 
 // Proof is the merchant side of a link: the customer a request is, at its
-// merchant, and by what. Order is a checkout URL's order.
+// merchant, and by what. Order is a pay URL's order.
 type Proof struct {
 	Merchant   billing.MerchantID
 	Customer   billing.CustomerID

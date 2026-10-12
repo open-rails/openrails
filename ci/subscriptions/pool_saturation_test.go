@@ -15,10 +15,10 @@ import (
 )
 
 // A request holds one pool connection and never waits for a second, so
-// checkout traffic well past the pool's size completes instead of
+// purchase traffic well past the pool's size completes instead of
 // deadlocking: each request previews the order (custodians and PSPs), then
 // creates and pays it.
-func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
+func TestPurchaseBeyondPoolSizeCompletes(t *testing.T) {
 	t.Parallel()
 	const poolSize, requests = 6, 20
 	w := prepareWorld(t, poolSize)

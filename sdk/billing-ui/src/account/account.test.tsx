@@ -408,7 +408,7 @@ describe("PaymentMethodsPanel", () => {
     custodian: "psp",
     display_name: "Card",
     flow: "card",
-    checkout: true,
+    routed: true,
   }
 
   it("reads the payment configuration itself and saves a card", async () => {

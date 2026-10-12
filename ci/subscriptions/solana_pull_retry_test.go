@@ -26,7 +26,7 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	s := openSolanaShop(t)
 	w := s.w
 	b := s.buyer(t, false)
-	c := s.checkout(t, b, b.wallet.PublicKey())
+	c := s.purchase(t, b, b.wallet.PublicKey())
 	sig := s.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now())
 	done, err := b.confirm(c, sig)
 	require.NoError(t, err)

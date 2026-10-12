@@ -76,8 +76,8 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	sub, err := resolveNMISubscriptionByReference(ctx, rail, s.SubscriptionService, s.PaymentService, reference)
 	if err != nil {
 		if db.IsNotFound(err) {
-			// One-time sale, foreign object, or the checkout row hasn't landed
-			// yet. The webhook is no state source for those: the checkout path
+			// One-time sale, foreign object, or the purchase row hasn't landed
+			// yet. The webhook is no state source for those: the purchase path
 			// and the pull sweep own them.
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail": rail, "subscription_reference": reference,
@@ -131,7 +131,7 @@ func (s *NMIConvergeService) activatePendingFromProbe(ctx context.Context, rail 
 	if delayedStart := nmiFutureDelayedStart(sub.Metadata, now); delayedStart != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": sub.ID, "delayed_start": delayedStart.UTC().Format(time.RFC3339),
-		}).Info("nmi converge: checkout delayed_start is in the future; keeping pending")
+		}).Info("nmi converge: purchase delayed_start is in the future; keeping pending")
 		return nil
 	}
 

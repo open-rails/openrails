@@ -14,11 +14,11 @@ var networkLinkErrors = codes(billing.CodeNetworkLinkChallengeInvalid, billing.C
 // customerNetworkRoutes link a merchant's customer to its openrails.dev
 // account, where the deployment runs the customer network: the customer
 // asks for a challenge, answers it with a network sign-in, and redeems it,
-// with its own token or, on the checkout host, its order's checkout URL.
+// with its own token or, on the payment origin, its order's pay URL.
 var customerNetworkRoutes = []Route{
-	{Method: POST, Path: "/v1/me/network-link/challenges", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, Checkout: CheckoutLink,
+	{Method: POST, Path: "/v1/me/network-link/challenges", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, PayURL: PayURLLink,
 		Responses: []Reply{{201, billing.NetworkLinkChallenge{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.CreateNetworkLinkChallenge)},
-	{Method: POST, Path: "/v1/me/network-link", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, Checkout: CheckoutLink,
+	{Method: POST, Path: "/v1/me/network-link", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, PayURL: PayURLLink,
 		Request: billing.CreateNetworkLinkParams{}, Responses: []Reply{{200, billing.CustomerLink{}}, {201, billing.CustomerLink{}}},
 		Errors: networkLinkErrors, Handler: h(handlers.CreateNetworkLink)},
 	{Method: GET, Path: "/v1/app/customers", Group: App, Auth: AuthApplication, Name: "ListNetworkCustomers", Permission: needCustomers, When: FeatureCustomerNetwork,
@@ -78,7 +78,7 @@ func throughLink(key string, sensitive bool) Route {
 				continue
 			}
 			r.Path = linkPrefix + strings.TrimPrefix(r.Path, "/v1/me")
-			r.Group, r.Auth, r.When, r.Sensitive, r.Checkout = Network, AuthNetwork, FeatureCustomerNetwork, sensitive, ""
+			r.Group, r.Auth, r.When, r.Sensitive, r.PayURL = Network, AuthNetwork, FeatureCustomerNetwork, sensitive, ""
 			return r
 		}
 	}

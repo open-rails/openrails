@@ -29,8 +29,8 @@ import (
 )
 
 // A Solana subscription activates only from its first payment: the prepared,
-// merchant co-signed bundle, signed by the checkout's wallet and landed within
-// the checkout's validity, pulling the full first period to the merchant. Any
+// merchant co-signed bundle, signed by the purchase's wallet and landed within
+// the purchase's validity, pulling the full first period to the merchant. Any
 // other signature grants nothing.
 
 const solanaPlanAmount = 23_000_000
@@ -88,10 +88,10 @@ func (s *solanaShop) buyer(t *testing.T, returning bool) *solanaBuyer {
 	return b
 }
 
-type solanaCheckout struct {
+type solanaPurchase struct {
 	order billing.OrderID
 	// id is the order's Solana attempt.
-	id        billing.CheckoutAttemptID
+	id        billing.OrderAttemptID
 	reference solanago.PublicKey
 	// expiresAt ends the offer: a later first payment is late.
 	expiresAt time.Time
@@ -100,10 +100,10 @@ type solanaCheckout struct {
 	bundle *solanago.Transaction
 }
 
-// checkout is b buying the plan on an order paid from a Solana wallet: the
+// purchase is b buying the plan on an order paid from a Solana wallet: the
 // wallet asks the order's transaction request with account and is handed
 // the subscribe transaction.
-func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, account solanago.PublicKey) *solanaCheckout {
+func (s *solanaShop) purchase(t *testing.T, b *solanaBuyer, account solanago.PublicKey) *solanaPurchase {
 	t.Helper()
 	order := s.order(t, b)
 	status, encoded := s.request(t, order, account)
@@ -154,15 +154,15 @@ func (s *solanaShop) request(t *testing.T, order billing.OrderID, account solana
 }
 
 // offer is the order's current Solana attempt.
-func (s *solanaShop) offer(t *testing.T, order billing.OrderID) *solanaCheckout {
+func (s *solanaShop) offer(t *testing.T, order billing.OrderID) *solanaPurchase {
 	t.Helper()
 	var attempt uuid.UUID
 	var reference, offered string
 	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT a.id, a.reference, a.rail_state->>'quote_expires_at' FROM billing.orders o
-		JOIN billing.checkout_attempts a ON a.merchant_id = o.merchant_id AND a.id = o.attempt_id WHERE o.id = $1`), order.UUID()).Scan(&attempt, &reference, &offered))
+		JOIN billing.order_attempts a ON a.merchant_id = o.merchant_id AND a.id = o.attempt_id WHERE o.id = $1`), order.UUID()).Scan(&attempt, &reference, &offered))
 	expiresAt, err := time.Parse(time.RFC3339, offered)
 	require.NoError(t, err)
-	return &solanaCheckout{order: order, id: billing.CheckoutAttemptID(attempt), reference: solanago.MustPublicKeyFromBase58(reference), expiresAt: expiresAt}
+	return &solanaPurchase{order: order, id: billing.OrderAttemptID(attempt), reference: solanago.MustPublicKeyFromBase58(reference), expiresAt: expiresAt}
 }
 
 // confirmed is the order a confirm answered.
@@ -173,7 +173,7 @@ type confirmed struct {
 
 // confirm is the customer confirming the order with the signature its
 // wallet sent. A refusal is its HTTP status and code.
-func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (*confirmed, error) {
+func (b *solanaBuyer) confirm(c *solanaPurchase, signature string) (*confirmed, error) {
 	call := b.order(http.MethodPost, "/orders/"+c.order.String()+"/confirm", "", map[string]any{"signature": signature})
 	if call.status != http.StatusOK {
 		return nil, &billing.StatusError{Status: call.status, ErrorDetails: billing.ErrorDetails{Code: orderError(call), Message: fmt.Sprint(call.body)}}
@@ -200,8 +200,8 @@ func requireRefused(t *testing.T, err error, status int, code string) {
 }
 
 // requireNothingGranted: no subscription, payment or entitlement, and the
-// checkout still awaits its payment.
-func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *solanaCheckout) {
+// purchase still awaits its payment.
+func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *solanaPurchase) {
 	t.Helper()
 	subs, err := s.w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: b.customerID()})
 	require.NoError(t, err)
@@ -282,7 +282,7 @@ func build(t *testing.T, ixs []solanago.Instruction, signers ...solanago.Private
 
 // withPull is the prepared bundle with its pull replaced, co-signed as the
 // merchant would have to: the server itself never builds such a pull.
-func (s *solanaShop) withPull(t *testing.T, c *solanaCheckout, b *solanaBuyer, amount uint64, receiver solanago.PublicKey) *solanago.Transaction {
+func (s *solanaShop) withPull(t *testing.T, c *solanaPurchase, b *solanaBuyer, amount uint64, receiver solanago.PublicKey) *solanago.Transaction {
 	t.Helper()
 	var ixs []solanago.Instruction
 	for _, ix := range instructions(t, c.bundle, b.wallet.PublicKey(), s.merchant.PublicKey()) {
@@ -307,12 +307,12 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 	var paid struct {
 		buyer   *solanaBuyer
-		session billing.CheckoutAttemptID
+		session billing.OrderAttemptID
 		sig     string
 	}
 	t.Run("the prepared first payment activates", func(t *testing.T) {
 		b := s.buyer(t, false) // first-time: the bundle initializes the authority too
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		sig := s.land(t, signAs(t, c.bundle, b.wallet), s.w.clock.Now())
 		done, err := b.confirm(c, sig)
 		require.NoError(t, err)
@@ -334,7 +334,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 	t.Run("subscribe without the first pull is refused", func(t *testing.T) {
 		b := s.buyer(t, true)
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		var ixs []solanago.Instruction
 		for _, ix := range instructions(t, c.bundle, b.wallet.PublicKey()) {
 			if !isPull(ix) {
@@ -371,7 +371,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		})}, victim.wallet), s.w.clock.Now())
 
 		attacker := s.buyer(t, true)
-		c := s.checkout(t, attacker, victim.wallet.PublicKey())
+		c := s.purchase(t, attacker, victim.wallet.PublicKey())
 		_, err := s.fake.Land(c.bundle, s.w.clock.Now())
 		require.Error(t, err, "the prepared payment cannot land without the victim's signature")
 		for _, sig := range []string{"not-a-real-signature", victimSubscribe} {
@@ -383,11 +383,11 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 	})
 
 	t.Run("a replayed signature is refused", func(t *testing.T) {
-		// Another checkout for the same wallet and plan: only the landed
-		// payment's checkout binding tells them apart.
+		// Another purchase for the same wallet and plan: only the landed
+		// payment's purchase binding tells them apart.
 		require.NotEmpty(t, paid.sig, "needs the activated payment")
 		b := s.buyer(t, true)
-		c := s.checkout(t, b, paid.buyer.wallet.PublicKey())
+		c := s.purchase(t, b, paid.buyer.wallet.PublicKey())
 		_, err := b.confirm(c, paid.sig)
 		requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		s.requireNothingGranted(t, b, c)
@@ -396,7 +396,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 	t.Run("a pull of the wrong amount or to the wrong recipient is refused", func(t *testing.T) {
 		b := s.buyer(t, true)
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		elsewhere := s.fake.Fund(solanago.NewWallet().PublicKey(), s.mint, 0)
 		for _, tx := range []*solanago.Transaction{
 			s.withPull(t, c, b, solanaPlanAmount-1, merchantATA),
@@ -411,7 +411,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 	t.Run("a payment landing after the quote expired is refused", func(t *testing.T) {
 		b := s.buyer(t, true)
-		c := s.checkout(t, b, b.wallet.PublicKey())
+		c := s.purchase(t, b, b.wallet.PublicKey())
 		sig := s.land(t, signAs(t, c.bundle, b.wallet), c.expiresAt.Add(solanaint.LateSettlementWindow+time.Minute))
 		_, err := b.confirm(c, sig)
 		requireRefused(t, err, http.StatusConflict, "resource_conflict")
@@ -440,26 +440,26 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.NotEqual(t, second.id, s.offer(t, order).id)
 	})
 
-	t.Run("a landed transfer settles one checkout", func(t *testing.T) {
+	t.Run("a landed transfer settles one purchase", func(t *testing.T) {
 		// Two PSPs sharing a payout wallet could otherwise both accept one
-		// transfer that carries both checkouts' references: the claim is keyed by
+		// transfer that carries both purchases' references: the claim is keyed by
 		// the signature alone, across every merchant and PSP.
 		require.NotEmpty(t, paid.sig, "needs the activated payment")
 		other := s.buyer(t, true)
-		c := s.checkout(t, other, other.wallet.PublicKey())
+		c := s.purchase(t, other, other.wallet.PublicKey())
 		d, err := db.NewWithPGXPool(s.w.pool, s.w.schema)
 		require.NoError(t, err)
 		first, second := paid.session, c.id
 		require.NoError(t, d.RunInMerchantScope(t.Context(), s.w.client[embedded].MerchantID(), "solana claim", func(ctx context.Context) error {
-			require.ErrorIs(t, settlement.ClaimCheckout(ctx, d, second.UUID(), paid.sig), settlement.ErrClaimed)
-			require.NoError(t, settlement.ClaimCheckout(ctx, d, first.UUID(), paid.sig), "the same claim repeats")
+			require.ErrorIs(t, settlement.ClaimOrder(ctx, d, second.UUID(), paid.sig), settlement.ErrClaimed)
+			require.NoError(t, settlement.ClaimOrder(ctx, d, first.UUID(), paid.sig), "the same claim repeats")
 			tag := system.NewTransferInstruction(0, other.wallet.PublicKey(), other.wallet.PublicKey()).Build()
 			another := s.land(t, build(t, []solanago.Instruction{tag}, other.wallet), s.w.clock.Now())
-			require.ErrorIs(t, settlement.ClaimCheckout(ctx, d, first.UUID(), another), settlement.ErrClaimed, "a settled checkout takes no second transfer")
+			require.ErrorIs(t, settlement.ClaimOrder(ctx, d, first.UUID(), another), settlement.ErrClaimed, "a settled purchase takes no second transfer")
 			return nil
 		}))
 		var def string
-		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'checkout_attempts_transaction_id_key'`, s.w.schema).Scan(&def))
+		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'order_attempts_transaction_id_key'`, s.w.schema).Scan(&def))
 		require.Contains(t, def, "(transaction_id)")
 		s.requireNothingGranted(t, other, c)
 	})
@@ -476,7 +476,7 @@ func TestSolanaSubscribeOrderCompletesFromThePoller(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done })
 
 	b := s.buyer(t, false)
-	c := s.checkout(t, b, b.wallet.PublicKey())
+	c := s.purchase(t, b, b.wallet.PublicKey())
 	sig := s.land(t, signAs(t, c.bundle, b.wallet), s.w.clock.Now())
 	asked := b.order(http.MethodPost, "/orders/"+c.order.String()+"/confirm", "", nil)
 	require.Equal(t, http.StatusOK, asked.status, "%v", asked.body)

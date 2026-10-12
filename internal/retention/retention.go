@@ -51,9 +51,9 @@ const (
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
 	PaymentAttempts = 761 * Day
-	// ExpiredCheckoutAttempts keeps a checkout attempt that expired without
+	// ExpiredOrderAttempts keeps a order attempt that expired without
 	// reaching a provider 90 days past its expiry.
-	ExpiredCheckoutAttempts = 90 * Day
+	ExpiredOrderAttempts = 90 * Day
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day
@@ -135,7 +135,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 // OutboxIntentTypes are the provider intents that only carried an instruction
 // to a provider: once finished, nothing reads them back, and they are deleted
 // after ProviderWrites. Every other intent type is the record of money moved
-// or refused, a membership enrolled, a card erased or a checkout host
+// or refused, a membership enrolled, a card erased or a payment origin
 // registered, and is permanent. The
 // baseline's provider_intents_updated_at_idx lists the same types.
 var OutboxIntentTypes = []string{

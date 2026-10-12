@@ -39,7 +39,7 @@ func TestStripeCredentialsMatchDeclaredPosture(t *testing.T) {
 	for _, malformed := range []string{"sk_test_", "pk_test_abc", "whsec_abc"} {
 		require.ErrorContains(t, ValidateStripeCredentialPosture(postureConfig(true), malformed), "invalid Stripe secret key format")
 	}
-	require.NoError(t, ValidateStripeCredentialPosture(postureConfig(false), ""), "an absent key only disables checkout")
+	require.NoError(t, ValidateStripeCredentialPosture(postureConfig(false), ""), "an absent key only disables purchase")
 
 	for _, sandbox := range []bool{true, false} {
 		cfg := postureConfig(sandbox)

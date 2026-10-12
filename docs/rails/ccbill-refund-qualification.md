@@ -26,7 +26,7 @@ and prove the outcome:
   subscription-management refund simulation switch.
   [Data Link Extract guide](https://ccbill.com/doc/data-link-extract-system-user-guide)
 - CCBill documents test users matched to email/IP/card and account/subaccount
-  setup. Those checkout settings do not by themselves establish a supported
+  setup. Those purchase settings do not by themselves establish a supported
   DataLink refund sandbox.
   [Transaction test settings](https://ccbill.com/doc/transaction-test-settings)
 - Refund webhook payloads carry transaction and subscription references,

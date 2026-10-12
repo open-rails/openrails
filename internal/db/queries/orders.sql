@@ -222,7 +222,7 @@ WHERE o.ctid IN (
     WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.collection_owner = 'engine' AND c.status IN ('canceled', 'expired')
       AND c.payment_id IS NULL AND c.attempt_id IS NULL
       AND COALESCE(c.canceled_at, c.expired_at) < sqlc.arg(before)::timestamptz
-      AND NOT EXISTS (SELECT 1 FROM billing.checkout_attempts a WHERE a.merchant_id = c.merchant_id AND a.order_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.order_attempts a WHERE a.merchant_id = c.merchant_id AND a.order_id = c.id)
     LIMIT sqlc.arg(row_limit)::int
 );
 
@@ -281,7 +281,7 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(c
 -- name: CreateOrderAttempt :exec
 -- A card attempt starts created; a Solana one requires_action, with its
 -- reference.
-INSERT INTO billing.checkout_attempts (
+INSERT INTO billing.order_attempts (
     id, merchant_id, customer_id, order_id, rail, status, reference, amount, currency,
     expires_at, rail_state, psp_id, created_at, updated_at
 ) VALUES (
@@ -292,12 +292,12 @@ INSERT INTO billing.checkout_attempts (
 );
 
 -- name: GetOrderAttempt :one
-SELECT * FROM billing.checkout_attempts
+SELECT * FROM billing.order_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND order_id IS NOT NULL AND deleted_at IS NULL;
 
 -- name: SetOrderAttemptStatus :execrows
 -- A terminal attempt never moves again.
-UPDATE billing.checkout_attempts
+UPDATE billing.order_attempts
 SET status = sqlc.arg(status)::text,
     payment_id = COALESCE(sqlc.narg(payment_id)::uuid, payment_id),
     transaction_id = COALESCE(sqlc.narg(transaction_id)::text, transaction_id),

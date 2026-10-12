@@ -74,7 +74,7 @@ func decimal(t *testing.T, v any) float64 {
 
 // A buyer mistypes the security code, then pays; the membership's first
 // renewal declines twice and is collected on the second retry. The decline
-// metrics count it all: attempts, the checkout and the rebill cycle (#1116).
+// metrics count it all: attempts, the purchase and the rebill cycle (#1116).
 func TestDeclineMetrics(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -118,11 +118,11 @@ func TestDeclineMetrics(t *testing.T) {
 	}
 	require.Equal(t, map[string]float64{"incorrect_cvc": 1, "insufficient_funds": 2}, byReason)
 
-	require.Equal(t, 1.0, w.metricTotal(since, "checkouts", nil))
-	require.Equal(t, 0.0, w.metricTotal(since, "failed_checkouts", nil))
-	require.Equal(t, 0.0, w.metricTotal(since, "checkout_failure_rate", nil), "the buyer got through")
-	require.Equal(t, 1.0, w.metricTotal(since, "checkout_recovery_rate", nil))
-	require.Equal(t, 2.0, w.metricTotal(since, "attempts_per_checkout", nil))
+	require.Equal(t, 1.0, w.metricTotal(since, "purchases", nil))
+	require.Equal(t, 0.0, w.metricTotal(since, "failed_purchases", nil))
+	require.Equal(t, 0.0, w.metricTotal(since, "purchase_failure_rate", nil), "the buyer got through")
+	require.Equal(t, 1.0, w.metricTotal(since, "purchase_recovery_rate", nil))
+	require.Equal(t, 2.0, w.metricTotal(since, "attempts_per_purchase", nil))
 
 	require.Equal(t, 1.0, w.metricTotal(since, "rebills_due", nil))
 	require.Equal(t, 0.0, w.metricTotal(since, "rebills_open", nil))
@@ -137,7 +137,7 @@ func TestDeclineMetrics(t *testing.T) {
 	// Every dimension of every new family compiles and runs.
 	families := map[string][]string{
 		"attempts":    {"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"},
-		"checkouts":   {"currency", "rail", "psp", "owner", "card_entry"},
+		"purchases":   {"currency", "rail", "psp", "owner", "card_entry"},
 		"rebills_due": {"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"},
 	}
 	for measure, dims := range families {

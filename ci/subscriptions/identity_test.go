@@ -24,7 +24,7 @@ import (
 
 // A merchant order is its customer's to pay: only the customer, signed in,
 // pays it, and a saved card only its own. Staff create no orders, and the
-// machine checkout-attempt routes are gone.
+// machine order-attempt routes are gone.
 func TestMerchantOrderIsTheCustomersToPay(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
@@ -35,11 +35,11 @@ func TestMerchantOrderIsTheCustomersToPay(t *testing.T) {
 	charges := len(w.railLedger("nmi"))
 
 	staff := w.auth.token(t, "support")
-	attempt := billing.CheckoutAttemptID(uuid.New()).String()
+	attempt := billing.OrderAttemptID(uuid.New()).String()
 	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/v1/admin/checkout-attempts"},
-		{http.MethodGet, "/v1/admin/checkout-attempts/" + attempt},
-		{http.MethodPost, "/v1/admin/checkout-attempts/" + attempt + "/confirm"},
+		{http.MethodPost, "/v1/admin/order-attempts"},
+		{http.MethodGet, "/v1/admin/order-attempts/" + attempt},
+		{http.MethodPost, "/v1/admin/order-attempts/" + attempt + "/confirm"},
 	} {
 		status, out := w.merchantCall(staff, route.method, route.path)
 		require.Equal(t, http.StatusNotFound, status, "%s %s is not mounted: %s", route.method, route.path, out)

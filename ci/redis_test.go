@@ -60,7 +60,7 @@ func degraded(t *testing.T, bill *openrails.Engine) bool {
 	return ok && dep.Optional && !dep.Available && dep.Err != nil
 }
 
-// pay is a checkout payment from addr: the rate-limited checkout bucket.
+// pay is a purchase payment from addr: the rate-limited purchase bucket.
 func pay(h http.Handler, addr string) int {
 	req := httptest.NewRequest(http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", strings.NewReader(`{}`))
 	req.RemoteAddr = addr
@@ -107,7 +107,7 @@ func TestRedisOverTLSWithACLUser(t *testing.T) {
 			}
 			keys, err := direct.Keys(t.Context(), "rl:*"+ip+"*").Result()
 			require.NoError(t, err)
-			require.NotEmpty(t, keys, "the checkout window is counted in this Redis")
+			require.NotEmpty(t, keys, "the purchase window is counted in this Redis")
 		})
 	}
 

@@ -75,7 +75,7 @@ type StripePSP struct {
 	WebhookSigningSecretPrevious string    `psp:"secrets.webhook_signing_secret_previous"`
 	WebhookOverlapExpiresAt      time.Time `psp:"settings.webhook_overlap_expires_at"`
 
-	// PublishableKey (pk_…) enables embedded Elements; without it checkout
+	// PublishableKey (pk_…) enables embedded Elements; without it purchase
 	// redirects to Stripe Checkout.
 	PublishableKey string `psp:"settings.publishable_key"`
 }

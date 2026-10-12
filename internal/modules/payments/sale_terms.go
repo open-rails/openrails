@@ -30,7 +30,7 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
 	LegacyEntitlements map[string]*int             `json:"legacy_entitlements,omitzero"`
-	CheckoutAttemptID  uuid.UUID                   `json:"checkout_attempt_id,omitempty"`
+	OrderAttemptID     uuid.UUID                   `json:"order_attempt_id,omitempty"`
 	RequestFingerprint string                      `json:"request_fingerprint"`
 	Provider           string                      `json:"provider"`
 	PSP                string                      `json:"psp"`
@@ -55,8 +55,8 @@ type NMISalePayload struct {
 	OwnershipStart      time.Time       `json:"ownership_start"`
 	OwnershipEnd        *time.Time      `json:"ownership_end"`
 	Eligibility         string          `json:"eligibility"`
-	// OrderID is the order the sale pays, through its checkout attempt
-	// CheckoutAttemptID. An order sale carries no price, product or benefit:
+	// OrderID is the order the sale pays, through its order attempt
+	// OrderAttemptID. An order sale carries no price, product or benefit:
 	// paying settles the order's own frozen lines.
 	OrderID uuid.UUID `json:"order_id,omitzero"`
 	// Recurring: the order has a recurring line, so the charge stores the
@@ -174,7 +174,7 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 // none of a price sale's benefits.
 func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
 	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID != nil ||
-		p.CheckoutAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
+		p.OrderAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
 		p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount != p.Amount || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || !p.AcceptedAt.Equal(p.AcceptedAt.Truncate(time.Microsecond)) {
 		return errors.New("order sale contradicts its order")
 	}

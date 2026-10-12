@@ -99,7 +99,7 @@ var luhnTrippingUUIDs = []string{
 	"abcdefab-cdef-4abc-8111-111111111112", "a4111111-1111-4111-8119-abcdefabcdef",
 }
 
-var typedIDPrefixes = []string{"", "sub_", "price_", "pay_", "pm_", "prod_", "cs_", "in_", "chk_"}
+var typedIDPrefixes = []string{"", "sub_", "price_", "pay_", "pm_", "prod_", "cs_", "in_", "oat_"}
 
 func acceptsIdentifier(t *testing.T, id string) {
 	t.Helper()

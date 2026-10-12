@@ -16,12 +16,12 @@ COPY server/web/console/ ./
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps-before-run=false run build
 
 
-# Stage 1b: the hosted checkout page into web/checkout/dist, built from this
+# Stage 1b: the payment page into web/pay/dist, built from this
 # checkout's billing-ui.
-FROM billing-ui AS checkout
+FROM billing-ui AS payment-page
 
-WORKDIR /src/web/checkout
-COPY web/checkout/ ./
+WORKDIR /src/web/pay
+COPY web/pay/ ./
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps-before-run=false run build
 
 
@@ -58,7 +58,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Copy source code, then the console build into the dir go:embed reads.
 COPY . /app
 COPY --from=console /src/server/web/console/dist /app/server/web/console/dist
-COPY --from=checkout /src/web/checkout/dist /app/web/checkout/dist
+COPY --from=payment-page /src/web/pay/dist /app/web/pay/dist
 
 # Release identity (internal/buildinfo); unset falls back to "dev".
 ARG VERSION=
@@ -70,7 +70,7 @@ ARG TARGETARCH
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    test -f web/console/dist/index.html && test -f ../web/checkout/dist/index.html && \
+    test -f web/console/dist/index.html && test -f ../web/pay/dist/index.html && \
     mkdir -p ../bin && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \

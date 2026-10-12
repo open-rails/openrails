@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// Feature requests use the same HTTP limiter as checkout. Neither a missing
+// Feature requests use the same HTTP limiter as purchase. Neither a missing
 // Redis nor a Redis error makes repeated requests unlimited, and reaching one
 // feature's limit does not consume another feature's allowance.
 func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
@@ -40,7 +40,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			}
 			limits := config.RateLimitsConfig{
 				"catalog-ask": {RequestsPerMinute: 2},
-				"checkout":    {RequestsPerMinute: 2},
+				"purchase":    {RequestsPerMinute: 2},
 			}
 			calls := 0
 			h := RateLimitHTTP(&limits, captchaOn, stillState(rdb), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -66,7 +66,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				}
 				require.Equal(t, before+2, calls, "blocked requests never reach the feature")
 			}
-			// Feature limits neither consume the checkout budget nor become
+			// Feature limits neither consume the purchase budget nor become
 			// a blanket limit on the merchant's non-model endpoints.
 			call{path: "/v1/me/orders", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			call{path: "/v1/me/orders", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)

@@ -206,7 +206,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 							rail = key
 						}
 						if request.CustomerAmount != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
-							return nil, apperr.Invalidf("customer_amount requires Stripe or NMI checkout without provider catalog links")
+							return nil, apperr.Invalidf("customer_amount requires Stripe or NMI purchase without provider catalog links")
 						}
 						if request.Quantity != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
 							return nil, apperr.Invalidf(errQuantityRail)
@@ -379,7 +379,7 @@ func sameCatalogLinks(a, b map[string]map[string]string) bool {
 
 // requireSellablePrice refuses an active price that declares PSPs yet no rail
 // can sell new: none of its declared rails supports its kind, and no armed
-// rail sells it on local terms (#1078). Checkout would otherwise be empty.
+// rail sells it on local terms (#1078). Purchase would otherwise be empty.
 func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []merchants.PSPScope, environment string) error {
 	recurring := request.BillingIntervalHours != nil
 	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil

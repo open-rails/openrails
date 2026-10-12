@@ -87,7 +87,7 @@ func GetCustomerConfig(r *httprequest.Request) {
 func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilities) billing.PublicConfig {
 	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
 	if r.State != nil {
-		doc.Network = r.State.CheckoutNetwork
+		doc.Network = r.State.PaymentPageNetwork
 	}
 	if r.State != nil && r.State.Config != nil && config.CaptchaEnabled(r.State.Config.Captcha) {
 		cfg := r.State.Config.Captcha
@@ -144,7 +144,7 @@ func httpsURL(raw string) *string {
 }
 
 // pspArmed reports whether a declared account resolves with its full credential
-// shape — the same question checkout routing asks before charging. Resolution
+// shape — the same question PSP routing asks before charging. Resolution
 // errors fail closed.
 func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope) (bool, error) {
 	return func(ctx context.Context, scope merchants.PSPScope) (bool, error) {

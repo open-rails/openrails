@@ -274,7 +274,7 @@ func pin(r *httprequest.Request, target billingauth.Target) {
 //     the Authenticator's root authority, its id the merchant's; a scope that
 //     is not never falls through to the next binding;
 //   - the merchant that declares its issuer (MerchantDeclaration.Issuer);
-//   - the row an OpenRails credential of its own names (a checkout URL's
+//   - the row an OpenRails credential of its own names (a pay URL's
 //     secret, a provisioning token, the in-process host).
 //
 // A credential bound to no live merchant is merchant_unresolved.
@@ -489,8 +489,8 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 				refuseCode(r, route, a, billing.CodeAuthenticationRequired, "the Verified's Identity names a customer that is not a canonical UUID")
 				return
 			}
-			if e.checkout {
-				// A checkout URL acts as its order's customer, whose row the
+			if e.payURL {
+				// A pay URL acts as its order's customer, whose row the
 				// order holds, whatever its issuer: nothing to admit.
 				bindCustomer(r, c, id, target)
 				next(r)

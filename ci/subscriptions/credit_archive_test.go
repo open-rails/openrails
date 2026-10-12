@@ -43,7 +43,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	require.NoError(t, err)
 	buy := func(price billing.PriceID, amount *int64) *paidOrder {
 		t.Helper()
-		return buyer.mustCheckout(embedded, order{price: price, amount: amount, rail: rail, method: method})
+		return buyer.mustPurchase(embedded, order{price: price, amount: amount, rail: rail, method: method})
 	}
 	buy(selected.ID, new(int64(100_000_000)))
 	paidBonus := buy(fixed.ID, nil)

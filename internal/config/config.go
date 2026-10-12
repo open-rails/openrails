@@ -110,7 +110,7 @@ type Config struct {
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
 
-	// ReturnOrigins are the exact origins (scheme://host[:port]) that checkout
+	// ReturnOrigins are the exact origins (scheme://host[:port]) that purchase
 	// and billing-portal return URLs may name. Empty allows only the origin of
 	// PublicBillingBaseURL.
 	ReturnOrigins []string `yaml:"return_origins" json:"return_origins"`
@@ -570,7 +570,7 @@ type ResolvedPSP struct {
 	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string
 	// Archived keeps an account addressable for existing obligations and inbound
-	// provider events, but excludes it from new checkout/subscription work.
+	// provider events, but excludes it from new purchase/subscription work.
 	Archived bool
 
 	// Exactly one provider block is set, matching Type. Credentials live ONLY in
@@ -649,7 +649,7 @@ type ResolvedCustodian struct {
 	// APIKey is the custodian's PRIVATE application key — the only custodial
 	// secret; it authorizes detokenization, never a charge on its own.
 	APIKey string
-	// PublicAPIKey is checkout-page config (not a secret).
+	// PublicAPIKey is payment-page config (not a secret).
 	PublicAPIKey string
 	// ProfileID is the merchant-owned HyperSwitch business profile.
 	ProfileID string
@@ -890,7 +890,7 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 type RateLimitsConfig map[string]*RateLimit
 
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
-var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "catalog-ask"}
+var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
 // mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
@@ -941,7 +941,7 @@ const (
 
 // CaptchaConfig is the captcha account. Setting both keys enables the
 // challenge, which is asked only of a client that keeps hitting a rate limit
-// on checkout, payment methods or subscriptions.
+// on purchase, payment methods or subscriptions.
 type CaptchaConfig struct {
 	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
 	Provider  string `yaml:"provider" json:"provider"`
@@ -1000,7 +1000,7 @@ const (
 
 // CaptchaChallengeBuckets are the rate-limit buckets a challenge guards.
 func CaptchaChallengeBuckets() []string {
-	return []string{"checkout", "payment-methods", "subscriptions"}
+	return []string{"purchase", "payment-methods", "subscriptions"}
 }
 
 // Validate validates the billing configuration
@@ -1349,7 +1349,7 @@ func validateStripeRail(name string, proc *ResolvedPSP) error {
 		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
 	}
 	if strings.TrimSpace(stripe.SecretKey) == "" {
-		log.Warnf("rail '%s' (stripe): secret_key not configured; checkout unavailable", name)
+		log.Warnf("rail '%s' (stripe): secret_key not configured; purchase unavailable", name)
 	}
 
 	if strings.TrimSpace(stripe.WebhookSigningSecret) == "" {
@@ -1384,7 +1384,7 @@ func validateSolanaRail(name string, proc *ResolvedPSP) error {
 // validateCustody validates a PSP's third-party custody arrangement
 // (or#879/or#880). Custody is a MODIFIER on a rail, so it is checked for every
 // rail: only rails the custodian's registry entry names as proxy rails may
-// reference it, and a referenced custodian must be fully armed or the checkout
+// reference it, and a referenced custodian must be fully armed or the purchase
 // it backs is silently dead.
 func validateCustody(name string, proc *ResolvedPSP) error {
 	if !proc.HasThirdPartyCustody() {
@@ -1569,7 +1569,7 @@ func DefaultRateLimits() *RateLimitsConfig {
 		// Mutation endpoint; the per-user limit is the real fraud control.
 		"subscribe": &RateLimit{RequestsPerMinute: 20},
 		// Kept tight to deter card testing.
-		"checkout": &RateLimit{RequestsPerMinute: 10},
+		"purchase": &RateLimit{RequestsPerMinute: 10},
 		// Per source IP. All webhooks from a rail share one bucket (fixed rail
 		// IPs), so this must absorb rebill runs without refusing legitimate
 		// payment events. Webhooks are already authenticated; this is a DoS
@@ -1601,7 +1601,7 @@ func logOperatingModeStatus(cfg *Config) {
 	case ProviderWriteModeLimited:
 		log.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
 		log.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
-		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
+		log.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
 		log.Info("   Set provider_write_mode=full to resume proactive operations")
 	case ProviderWriteModeFull:
 		log.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")

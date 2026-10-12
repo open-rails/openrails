@@ -41,8 +41,8 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/customernetwork"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/server"
@@ -52,14 +52,14 @@ import (
 )
 
 const (
-	networkTerms   = "2026-10"
-	checkoutReturn = "https://" + checkoutHost + hostedcheckout.SignInPath
-	merchantReturn = "https://shop.e2e.test/openrails/callback"
+	networkTerms      = "2026-10"
+	paymentPageReturn = "https://" + paymentHost + paymentpage.SignInPath
+	merchantReturn    = "https://shop.e2e.test/openrails/callback"
 )
 
 // world is openrails.dev: a standalone server running the customer network,
 // its AuthKit the OpenID provider merchants' clients sign accounts in at,
-// served over HTTPS at its issuer, with a hosted checkout host whose page's
+// served over HTTPS at its issuer, with a payment origin whose page's
 // client the server declares. The shop has its own login (a trusted issuer)
 // and an NMI PSP; the rival has its own login. The mart has an NMI PSP too,
 // at a gateway of its own.
@@ -118,8 +118,8 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 	t.Cleanup(ts.Close)
 	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
-		cfg.HostedCheckoutURL = "https://" + checkoutHost
-		deps.CheckoutAssets = checkoutPage
+		cfg.PaymentOrigin = "https://" + paymentHost
+		deps.PaymentPageAssets = paymentPage
 		cfg.Auth.Token.Issuer = ts.URL
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
@@ -244,11 +244,11 @@ func (w *world) signIn(u authtest.User, c iam.OAuthClientCreated, nonce, resourc
 		RedirectURI: merchantReturn, Resource: resource, Scopes: scopes, Nonce: nonce, Consent: true})
 }
 
-// checkoutSignIn signs u in afresh on the checkout page.
-func (w *world) checkoutSignIn(u authtest.User, nonce string) authtest.OAuthTokens {
+// paymentPageSignIn signs u in afresh on the payment page.
+func (w *world) paymentPageSignIn(u authtest.User, nonce string) authtest.OAuthTokens {
 	w.t.Helper()
-	return w.as.AuthorizeAs(w.t, authtest.SignIn(w.t, w.srv.AuthKit(), u), authtest.CodeFlow{ClientID: network.CheckoutClientID,
-		RedirectURI: checkoutReturn, Scopes: []string{"openid", "email"}, Nonce: nonce})
+	return w.as.AuthorizeAs(w.t, authtest.SignIn(w.t, w.srv.AuthKit(), u), authtest.CodeFlow{ClientID: network.PaymentPageClientID,
+		RedirectURI: paymentPageReturn, Scopes: []string{"openid", "email"}, Nonce: nonce})
 }
 
 func (w *world) redeem(authorization, challenge, idToken string) *httptest.ResponseRecorder {
@@ -411,11 +411,11 @@ func TestCustomerLinkBySigningIn(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, r.Code, "none was made: %s", r.Body.String())
 }
 
-// Hosted (and embedded) checkout proves the merchant side by the order's
-// checkout URL: on the checkout host its secret asks for the challenge and
-// redeems it, answered only by the checkout page's client; the account must
+// The payment page (hosted or embedded) proves the merchant side by the order's
+// pay URL: on the payment origin its secret asks for the challenge and
+// redeems it, answered only by the payment page's client; the account must
 // have accepted the network terms.
-func TestCustomerLinkAtCheckout(t *testing.T) {
+func TestCustomerLinkOnThePaymentPage(t *testing.T) {
 	w := newWorld(t)
 	shop := handle(w.t, w.srv, w.shop)
 	key := "linked-" + uuid.NewString()[:8]
@@ -437,72 +437,72 @@ func TestCustomerLinkAtCheckout(t *testing.T) {
 		w.handler.ServeHTTP(res, req)
 		return res
 	}
-	// checkout is the secret of a checkout URL the shop's backend made for a
+	// payURL is the secret of a pay URL the shop's backend made for a
 	// customer of its own.
-	checkout := func() (billing.Order, string) {
+	payURL := func() (billing.Order, string) {
 		t.Helper()
 		sub := uuid.NewString()
 		require.Equal(t, http.StatusOK, w.me(http.MethodGet, "", w.customer(w.shopLogin, sub, nil), nil).Code)
 		r := host(serverHost, http.MethodPost, "/v1/app/orders", w.shopKey.Secret, map[string]any{"customer_id": sub,
-			"lines": []map[string]any{{"price_id": price.ID}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}})
+			"lines": []map[string]any{{"price_id": price.ID}}, "pay_url": map[string]any{"success_url": "https://shop.e2e.test/thanks"}})
 		require.Equal(t, http.StatusCreated, r.Code, r.Body.String())
 		var o billing.Order
 		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &o))
-		_, secret, ok := strings.Cut(*o.Checkout.URL, "#")
+		_, secret, ok := strings.Cut(*o.PayURL, "#")
 		require.True(t, ok)
 		return o, secret
 	}
 	challenge := func(secret string) billing.NetworkLinkChallenge {
 		t.Helper()
-		r := host(checkoutHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
+		r := host(paymentHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
 		require.Equal(t, http.StatusCreated, r.Code, r.Body.String())
 		var c billing.NetworkLinkChallenge
 		require.NoError(t, json.Unmarshal(r.Body.Bytes(), &c))
 		return c
 	}
 	redeem := func(secret, challenge, idToken string) *httptest.ResponseRecorder {
-		return host(checkoutHost, http.MethodPost, "/v1/me/network-link", secret, billing.CreateNetworkLinkParams{ChallengeID: challenge, IDToken: idToken})
+		return host(paymentHost, http.MethodPost, "/v1/me/network-link", secret, billing.CreateNetworkLinkParams{ChallengeID: challenge, IDToken: idToken})
 	}
 
-	order, secret := checkout()
-	r := host(checkoutHost, http.MethodGet, "/v1/me/orders/"+order.ID.String(), secret, nil)
-	require.Equal(t, http.StatusOK, r.Code, "the merchant's own login's customer pays on the checkout host: %s", r.Body.String())
+	order, secret := payURL()
+	r := host(paymentHost, http.MethodGet, "/v1/me/orders/"+order.ID.String(), secret, nil)
+	require.Equal(t, http.StatusOK, r.Code, "the merchant's own login's customer pays on the payment origin: %s", r.Body.String())
 	ch := challenge(secret)
 	fay := w.account(true)
-	r = redeem(secret, ch.ID, w.checkoutSignIn(fay, ch.Nonce).IDToken)
+	r = redeem(secret, ch.ID, w.paymentPageSignIn(fay, ch.Nonce).IDToken)
 	require.Equal(t, http.StatusCreated, r.Code, r.Body.String())
 	var link billing.CustomerLink
 	require.NoError(t, json.Unmarshal(r.Body.Bytes(), &link))
-	require.Equal(t, billing.CustomerLinkCheckout, link.Method)
+	require.Equal(t, billing.CustomerLinkPaymentPage, link.Method)
 	require.Equal(t, fay.ID, link.AccountID.String())
 	require.Equal(t, order.CustomerID, link.CustomerID, "the order's customer")
 	customer, _ := w.adminCustomer(w.shopKey, order.CustomerID.String())
 	require.NotNil(t, customer.Network)
-	require.Equal(t, billing.CustomerLinkCheckout, customer.Network.Method)
+	require.Equal(t, billing.CustomerLinkPaymentPage, customer.Network.Method)
 
-	_, secret = checkout()
+	_, secret = payURL()
 	ch = challenge(secret)
 	w.refused(redeem(secret, ch.ID, w.signIn(w.account(true), w.shopClient, ch.Nonce, "", "openid", network.ScopeLink).IDToken),
-		http.StatusBadRequest, billing.CodeNetworkLinkChallengeInvalid, "a merchant's client never answers a checkout URL")
+		http.StatusBadRequest, billing.CodeNetworkLinkChallengeInvalid, "a merchant's client never answers a pay URL")
 	token := w.customer(w.shopLogin, uuid.NewString(), nil)
 	ch = w.challenge(token)
-	w.refused(w.redeem(token, ch.ID, w.checkoutSignIn(w.account(true), ch.Nonce).IDToken),
-		http.StatusBadRequest, billing.CodeNetworkLinkChallengeInvalid, "the checkout page's client answers only a checkout URL")
+	w.refused(w.redeem(token, ch.ID, w.paymentPageSignIn(w.account(true), ch.Nonce).IDToken),
+		http.StatusBadRequest, billing.CodeNetworkLinkChallengeInvalid, "the payment page's client answers only a pay URL")
 	// The page's sign-in itself asks for the network terms.
 	gus := w.account(false)
 	dpop := authtest.NewDPoPKey(t)
-	id := w.as.BeginAuthorization(t, authtest.CodeFlow{ClientID: network.CheckoutClientID, RedirectURI: checkoutReturn, Scopes: []string{"openid"},
+	id := w.as.BeginAuthorization(t, authtest.CodeFlow{ClientID: network.PaymentPageClientID, RedirectURI: paymentPageReturn, Scopes: []string{"openid"},
 		Nonce: "n-" + uuid.NewString(), DPoP: dpop}, "verifier-"+uuid.NewString(), "state")
 	r = serve(w.handler, rsRequest{method: http.MethodPost, path: w.srv.AuthKit().APIBase() + "/oauth2/authorizations/" + url.PathEscape(id) + "/approve",
 		authorization: "Bearer " + authtest.SignIn(t, w.srv.AuthKit(), gus).AccessToken})
 	require.Equal(t, http.StatusConflict, r.Code, r.Body.String())
 	require.Contains(t, r.Body.String(), "agreement_required", "an account that never accepted the network terms")
-	r = host(checkoutHost, http.MethodGet, hostedcheckout.SignInPath+"?code=c&state=s", "", nil)
+	r = host(paymentHost, http.MethodGet, paymentpage.SignInPath+"?code=c&state=s", "", nil)
 	require.Equal(t, http.StatusOK, r.Code, "the page answers its sign-in's return")
 	require.Contains(t, r.Header().Get("Content-Security-Policy"), "connect-src 'self' ")
 	require.Regexp(t, `connect-src [^;]*`+regexp.QuoteMeta(w.as.URL), r.Header().Get("Content-Security-Policy"), "the page redeems its code at the server's AuthKit")
 	r = host(serverHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
-	require.Equal(t, http.StatusUnauthorized, r.Code, "a checkout URL opens nothing on the API host: %s", r.Body.String())
+	require.Equal(t, http.StatusUnauthorized, r.Code, "a pay URL opens nothing on the API host: %s", r.Body.String())
 }
 
 // Nothing but both sides proven in one exchange links: not a stale sign-in,
@@ -574,7 +574,7 @@ func TestCustomerLinkRefusals(t *testing.T) {
 }
 
 // subscribe buys a monthly plan as the customer: a card saved at the
-// merchant's NMI PSP and a checkout paid with it.
+// merchant's NMI PSP and a purchase paid with it.
 func (w *world) subscribe(mid billing.MerchantID, authorization string) billing.SubscriptionID {
 	w.t.Helper()
 	ctx, shop := w.t.Context(), handle(w.t, w.srv, mid)
@@ -870,13 +870,13 @@ func TestLinkChallengesCrossInstancesThroughRedis(t *testing.T) {
 	proof := func() customernetwork.Proof {
 		sub := uuid.NewString()
 		require.Equal(t, http.StatusOK, w.me(http.MethodGet, "", w.customer(w.shopLogin, sub, nil), nil).Code)
-		return customernetwork.Proof{Merchant: w.shop, Customer: billing.CustomerID(uuid.MustParse(sub)), Credential: customernetwork.CheckoutURL, Order: billing.OrderID(uuid.New())}
+		return customernetwork.Proof{Merchant: w.shop, Customer: billing.CustomerID(uuid.MustParse(sub)), Credential: customernetwork.PayURL, Order: billing.OrderID(uuid.New())}
 	}
 	redeem := func(a, b *network.Service) error {
 		p := proof()
 		ch, err := a.Challenge(ctx, p)
 		require.NoError(t, err)
-		_, _, err = b.Link(ctx, p, billing.CreateNetworkLinkParams{ChallengeID: ch.ID, IDToken: w.checkoutSignIn(w.account(true), ch.Nonce).IDToken})
+		_, _, err = b.Link(ctx, p, billing.CreateNetworkLinkParams{ChallengeID: ch.ID, IDToken: w.paymentPageSignIn(w.account(true), ch.Nonce).IDToken})
 		return err
 	}
 	require.NoError(t, redeem(instance(shared()), instance(shared())), "minted on one instance, redeemed on another")
@@ -953,17 +953,17 @@ func TestNativeCustomersLinkWhenTheyAcceptNewTerms(t *testing.T) {
 		"user.agreement_accepted links the merchants whose client the account let act as itself")
 }
 
-// The checkout page's client is the server's: an operator declaring it is
+// The payment page's client is the server's: an operator declaring it is
 // refused at boot.
-func TestTheServerDeclaresTheCheckoutClient(t *testing.T) {
+func TestTheServerDeclaresThePaymentPageClient(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
-		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.CheckoutClientID, RedirectURIs: []string{checkoutReturn}}}
+		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.PaymentPageClientID, RedirectURIs: []string{paymentPageReturn}}}
 		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
-		cfg.HostedCheckoutURL = "https://" + checkoutHost
-		deps.CheckoutAssets = checkoutPage
+		cfg.PaymentOrigin = "https://" + paymentHost
+		deps.PaymentPageAssets = paymentPage
 	})
-	require.ErrorContains(t, err, "declares "+network.CheckoutClientID)
+	require.ErrorContains(t, err, "declares "+network.PaymentPageClientID)
 }

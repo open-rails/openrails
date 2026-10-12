@@ -83,7 +83,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	result, err := svc.RetrySubscriptionNow(r.Request.Context(), payer, body, checkoutVerifiedPrincipal(r))
+	result, err := svc.RetrySubscriptionNow(r.Request.Context(), payer, body, verifiedPrincipal(r))
 	if err != nil {
 		customerPaymentError(r, err)
 		return

@@ -17,12 +17,12 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/scim"
 )
 
@@ -87,9 +87,9 @@ type Env struct {
 	live func(context.Context, billing.MerchantID) (bool, error)
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
-	// checkout scopes customer routes to the order a checkout URL's secret
-	// opened (the hosted checkout host).
-	checkout bool
+	// payURL scopes customer routes to the order a pay URL's secret
+	// opened (the payment origin).
+	payURL bool
 	// applicationPermissions are the mounted application routes' permission pairs.
 	applicationPermissions []Pair
 }
@@ -216,8 +216,8 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(e.appGates(route), conn...)
 	case AuthCustomer:
 		mw = e.customerGates(route)
-		if e.checkout {
-			mw = append(mw, checkoutScope(route), e.checkoutLimit(route))
+		if e.payURL {
+			mw = append(mw, payURLScope(route), e.payURLLimit(route))
 		}
 		mw = append(append(mw, e.cardAttack(route)...), conn...)
 	case AuthSignedIn:
@@ -357,7 +357,7 @@ func RegisterMetaRoutes(rr router.Router, opts Options) {
 // RegisterUserRoutes mounts the buyer-facing surface, on a router rooted at
 // /v1.
 func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
+	newEnv(rt, opts).mount(rr, "/v1", in(Payment))
 }
 
 // RegisterStaffRoutes mounts the staff groups opts.Groups turns on, each
@@ -436,41 +436,41 @@ const SCIMRoot = "/v1/app/scim/v2"
 // credential the mount's Auth accepts.
 const SelfRoutePrefix = "/me"
 
-// RegisterCheckoutRoutes mounts, on a router rooted at the hosted checkout
-// host's root, the routes a checkout URL's secret opens. The host's own
-// middleware (hostedcheckout.ResolveHTTP) admits the secret; customer routes
+// RegisterPaymentPageRoutes mounts, on a router rooted at the payment page
+// host's root, the routes a pay URL's secret opens. The host's own
+// middleware (paymentpage.ResolveHTTP) admits the secret; customer routes
 // act as the order's customer at the order's merchant
-// (hostedcheckout.Authenticator), for that order alone.
-func RegisterCheckoutRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	opts.Auth = hostedcheckout.Authenticator{}
+// (paymentpage.Authenticator), for that order alone.
+func RegisterPaymentPageRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	opts.Auth = paymentpage.Authenticator{}
 	env := newEnv(rt, opts)
-	env.Customers, env.checkout = opts.Auth, true
-	env.mount(rr, "", func(r Route) bool { return r.Checkout != "" })
+	env.Customers, env.payURL = opts.Auth, true
+	env.mount(rr, "", func(r Route) bool { return r.PayURL != "" })
 }
 
-// checkoutLimit bounds the reads and the pays under one checkout URL.
-func (e *Env) checkoutLimit(route Route) router.Middleware {
-	bucket, perMinute := "checkout-url-read", middleware.CheckoutURLReadsPerMinute
+// payURLLimit bounds the reads and the pays under one pay URL.
+func (e *Env) payURLLimit(route Route) router.Middleware {
+	bucket, perMinute := "pay-url-read", middleware.PayURLReadsPerMinute
 	if route.Method != GET {
-		bucket, perMinute = "checkout-url-pay", middleware.CheckoutURLPaysPerMinute
+		bucket, perMinute = "pay-url-pay", middleware.PayURLPaysPerMinute
 	}
-	return middleware.CheckoutURLRateLimit(e.Runtime, bucket, perMinute, func(r *httprequest.Request) string {
-		c, _ := hostedcheckout.FromContext(r.Request.Context())
+	return middleware.PayURLRateLimit(e.Runtime, bucket, perMinute, func(r *httprequest.Request) string {
+		c, _ := paymentpage.FromContext(r.Request.Context())
 		return c.OrderID.UUID().String()
 	})
 }
 
-// checkoutScope refuses what the checkout's secret does not open: another
-// order, or saved cards the checkout does not offer.
-func checkoutScope(route Route) router.Middleware {
+// payURLScope refuses what the pay URL's secret does not open: another
+// order, or saved cards the pay URL does not offer.
+func payURLScope(route Route) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			c, ok := hostedcheckout.FromContext(r.Request.Context())
+			c, ok := paymentpage.FromContext(r.Request.Context())
 			switch {
 			case !ok:
-				r.AbortCode("checkout_not_found", "")
-			case route.Checkout == CheckoutOrder && r.Param("id") != c.OrderID.String(),
-				route.Checkout == CheckoutSavedCards && !c.SavedPaymentMethods:
+				r.AbortCode("pay_url_not_found", "")
+			case route.PayURL == PayURLOrder && r.Param("id") != c.OrderID.String(),
+				route.PayURL == PayURLSavedCards && !c.SavedPaymentMethods:
 				r.AbortCode(billing.CodeResourceNotFound, "")
 			default:
 				next(r)

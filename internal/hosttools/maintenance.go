@@ -119,10 +119,10 @@ func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID billing.
 	if err := initialized(a); err != nil {
 		return err
 	}
-	if a.Runtime.CheckoutAttemptService == nil {
-		return fmt.Errorf("openrails: this engine has no checkout attempts")
+	if a.Runtime.OrderAttemptService == nil {
+		return fmt.Errorf("openrails: this engine has no order attempts")
 	}
-	return a.Runtime.CheckoutAttemptService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
+	return a.Runtime.OrderAttemptService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
 }
 
 // ApproveSolanaSigner accepts the Solana identity a Vault Transit signer key

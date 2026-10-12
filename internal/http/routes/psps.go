@@ -23,7 +23,7 @@ var pspsRoutes = []Route{
 	// never calls the provider: a terminated account archives too.
 	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdatePSP", When: FeatureMerchantConfigManages,
 		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_last_active", "psp_not_found"), Handler: h(handlers.UpdatePSP)},
-	// or#288: which PSP a checkout would get, and why. A projection of the
+	// or#288: which PSP a purchase would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
 	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "PreviewPSPRouting",
 		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PreviewPSPRouting)},

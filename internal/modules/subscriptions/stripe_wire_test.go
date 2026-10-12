@@ -67,7 +67,7 @@ func wireService(baseURL string) *StripeService {
 }
 
 // Customer creation is idempotent on the app user, so retries and parallel
-// checkouts cannot mint duplicate Stripe customers.
+// purchases cannot mint duplicate Stripe customers.
 func TestStripeCreateCustomerWire(t *testing.T) {
 	srv, got := stripeFake(t, map[string]string{"POST /v1/customers": `{"id":"cus_created"}`})
 	svc := wireService(srv.URL)
@@ -238,7 +238,7 @@ func TestStripeRefundServiceFailsClosed(t *testing.T) {
 }
 
 // Only a Stripe charge or PaymentIntent is refundable; metadata wins over the
-// transaction id, and a legacy checkout-session id is refused.
+// transaction id, and a legacy purchase-session id is refused.
 func TestResolveStripeRefundTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name string

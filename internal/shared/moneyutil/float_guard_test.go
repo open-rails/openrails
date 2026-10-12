@@ -26,7 +26,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/grants/",
 		"internal/modules/budgets/",
 		"internal/modules/entitlements/",
-		"internal/modules/checkout/",
+		"internal/modules/payment/",
 		"internal/modules/subscriptions/",
 		"internal/modules/admission/",
 		"internal/modules/solana/",
@@ -74,8 +74,8 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		// --- Balance watch: the usage rate's decay -----------------------
 		"internal/modules/money/balance_watch.go:decayRate": "decays a usage RATE per hour, an estimate rounded back to an integer rate",
 
-		// --- Checkout: the persisted quote's rates ------------------------
-		"internal/modules/checkout/attempt_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
+		// --- Purchase: the persisted quote's rates ------------------------
+		"internal/modules/payment/attempt_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
 
 		// --- Solana token feed + display: rates, not amounts ---------------
 		"internal/integrations/pyth/client.go:Price":               "Pyth Price/Conf are the feed's quoted RATE and its confidence interval",

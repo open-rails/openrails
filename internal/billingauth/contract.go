@@ -138,7 +138,7 @@ func VerifiedFrom(ctx context.Context) (Verified, bool) {
 }
 
 // MerchantBinding is embedded by OpenRails' own Verified types, whose
-// credential is bound to the merchant of one row: a checkout URL's secret,
+// credential is bound to the merchant of one row: a pay URL's secret,
 // a provisioning token, the in-process host. Its method is unexported, so no
 // host's Verified can claim a merchant, and such a type reports no bound
 // scope (authkit/auth Bound).
