@@ -214,13 +214,20 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 		require.Contains(t, res.Body.String(), `"param":"`+name+`"`)
 	}
 
-	// A host serving no checkout refuses one.
-	_, embedded := newFixture(t).runtime(t, uniqueName("embedded"))
+	// An enabled merchant on a host serving no checkout refuses one.
+	// Keep the provider-write fence out of this capability check.
+	f := newFixture(t)
+	cfg := f.config()
+	cfg.ProviderWriteMode = openrails.ProviderWritesFull
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{uniqueName("embedded"): {DisplayName: "Embedded"}}
+	_, embedded := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	_, err := embedded.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
 		Lines: []billing.OrderLineParams{{PriceID: billing.PriceID("test:" + uuid.NewString() + ":v1")}}, Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://shop.e2e.test/thanks"}})
 	var refusal *billing.StatusError
 	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, http.StatusBadRequest, refusal.Status)
 	require.Equal(t, "hosted_checkout_unavailable", refusal.Code)
+	require.Equal(t, new("checkout"), refusal.Param)
 }
 
 // Creation retries recover only a live capability, while the order itself is
