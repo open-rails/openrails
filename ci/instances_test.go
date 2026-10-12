@@ -256,10 +256,10 @@ products:
 		read, err := instances[2].client.GetProduct(t.Context(), products.Items[0].ID)
 		require.NoError(t, err)
 		require.Equal(t, "Renamed", read.DisplayName)
-		rec := httptest.NewRecorder()
-		instances[1].mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/products?merchant="+instances[1].client.MerchantID().String()+"&keys="+key, nil))
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		require.Contains(t, rec.Body.String(), `"Renamed"`, "the public catalog of another replica")
+		listed, err := instances[1].client.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{key}})
+		require.NoError(t, err)
+		require.Len(t, listed.Items, 1)
+		require.Equal(t, "Renamed", listed.Items[0].DisplayName, "the catalog as another replica lists it")
 	})
 
 	t.Run("the leader stops", func(t *testing.T) {

@@ -83,7 +83,6 @@ read or manage permissions do not grant access to this operator inbox.
 | Routes | Credential |
 |---|---|
 | Public: `/v1/config` | none: it is the deployment's, the same for every caller |
-| Public: `/v1/products` | none: the request names its merchant, `?merchant=<merchant id>` |
 | Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link, and the order names its merchant |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
 | Customer support: `/v1/admin/*`; metrics: `/v1/metrics/*`; catalog: `/v1/catalog/*`; merchant configuration: `/v1/merchant/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |

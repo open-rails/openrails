@@ -1,28 +1,29 @@
-// BuyButton buys one price: it creates the signed-in customer's order and
-// pays it in OrderModal, so the app never handles the order itself.
+// BuyButton buys one price the host's page carries: it creates the signed-in
+// customer's order and pays it, in OrderCheckout on the page, or, on a site
+// the merchant registered to frame its checkout, in the order's embedded
+// checkout on the checkout host. The app never handles the order itself.
 import * as React from "react"
 import { cn } from "cn"
 
 import type { CheckoutAppearance } from "#orck/appearance"
-import { isBillingError, toBillingError } from "#orck/client/errors"
-import type { Order } from "#orck/client/types"
+import { isBillingError, localError, toBillingError } from "#orck/client/errors"
+import type { Order, Price } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
 import { priceLabel } from "#orck/lib/price-label"
-import { OrderModal } from "#orck/modal"
+import { EmbeddedCheckoutModal, OrderModal } from "#orck/modal"
 import { useCurrencyScales } from "#orck/react/config"
 import { useBillingContext } from "#orck/react/context"
-import { useProducts } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
 
 export interface BuyButtonProps {
-  /** The id of the merchant that sells the product. */
-  merchant: string
-  /** The product's catalog key. */
-  product: string
-  /** The price's key within the product. */
-  price: string
-  /** The button's text; by default the price's amount and terms, from the catalog. */
+  /**
+   * The price to buy, from a product the host's server put in its page (the
+   * Go Client's ListProducts, its prices as a buyer sees them:
+   * `billing.BuyerPrices`). The browser never reads the catalog.
+   */
+  price: Price
+  /** The button's text; by default the price's amount and terms. */
   label?: string
   /**
    * A customer-chosen deposit, in the price currency's native units, for a
@@ -47,37 +48,6 @@ export interface BuyButtonProps {
   className?: string
 }
 
-export function BuyButton({
-  merchant,
-  product,
-  price: priceKey,
-  ...props
-}: BuyButtonProps) {
-  const m = useMessages()
-  const { locale } = useUiSettings()
-  const scales = useCurrencyScales()
-  const { products } = useProducts({ merchant, keys: [product] })
-  const price = products
-    ?.find((p) => p.key === product)
-    ?.prices.find((p) => p.key === priceKey)
-  return (
-    <Purchase
-      {...props}
-      priceId={price?.id}
-      label={props.label ?? (price ? priceLabel(price, scales, m, locale) : "")}
-    />
-  )
-}
-
-export type PurchaseProps = Omit<
-  BuyButtonProps,
-  "merchant" | "product" | "price"
-> & {
-  /** The price to buy; the button waits while it is unknown. */
-  priceId?: string
-  label: string
-}
-
 // An unpaid order of the customer's that holds what is being bought: the
 // refusal names it, and the customer pays that one instead.
 function heldBy(err: unknown): string | undefined {
@@ -88,9 +58,19 @@ function heldBy(err: unknown): string | undefined {
     : undefined
 }
 
+// Where the order is paid: on this page, or framed from the checkout host.
+type Checkout =
+  | { kind: "inline"; orderId: string }
+  | { kind: "embedded"; orderId: string; url: string }
+
+// A page on an origin the merchant registered to frame its checkout pays
+// there; any other pays on the page.
+const framesCheckout = (origins: string[]) =>
+  typeof window !== "undefined" && origins.includes(window.location.origin)
+
 /** One price's button and its order. Requires `BillingProvider`. */
-export function Purchase({
-  priceId,
+export function BuyButton({
+  price,
   label,
   amount,
   returnUrl,
@@ -99,38 +79,68 @@ export function Purchase({
   signedIn,
   appearance,
   className,
-}: PurchaseProps) {
+}: BuyButtonProps) {
   const m = useMessages()
+  const { locale } = useUiSettings()
+  const scales = useCurrencyScales()
   const scope = useScopeProps(appearance)
   const { client } = useBillingContext()
-  const [orderId, setOrderId] = React.useState<string>()
+  const [checkout, setCheckout] = React.useState<Checkout>()
   const [starting, setStarting] = React.useState(false)
   const [failure, setFailure] = React.useState<string>()
   // One key per purchase: a second click before it is paid answers the same
   // order instead of creating another.
   const [key, setKey] = React.useState(() => crypto.randomUUID())
 
+  const paid = (order: Order) => {
+    if (order.status !== "complete") return
+    setCheckout(undefined)
+    setKey(crypto.randomUUID())
+    onPaid(order)
+  }
+
   const buy = async () => {
     if (signedIn === false) return onSignInRequired()
-    if (!priceId) return
     setFailure(undefined)
     setStarting(true)
     try {
-      const { order } = await client.createOrder({
-        lines: [{ price_id: priceId, ...(amount ? { amount } : {}) }],
-        idempotencyKey: key,
-      })
-      setOrderId(order.id)
+      const { merchant } = await client.getCustomerConfig()
+      const embedded = framesCheckout(merchant.embed_origins)
+      let order: Order
+      try {
+        ;({ order } = await client.createOrder({
+          lines: [{ price_id: price.id, ...(amount ? { amount } : {}) }],
+          ...(embedded ? { checkout: { ui_mode: "embedded" } } : {}),
+          idempotencyKey: key,
+        }))
+      } catch (err) {
+        const held = heldBy(err)
+        // Only an order made with a checkout answers its URL.
+        if (!held || embedded) throw err
+        setCheckout({ kind: "inline", orderId: held })
+        return
+      }
+      if (order.status === "complete") return paid(order)
+      if (!embedded) {
+        setCheckout({ kind: "inline", orderId: order.id })
+        return
+      }
+      const url = order.checkout?.url
+      if (!url)
+        throw localError(
+          "invalid_response",
+          "the order answered no checkout URL"
+        )
+      setCheckout({ kind: "embedded", orderId: order.id, url })
     } catch (err) {
-      const held = heldBy(err)
-      if (held) setOrderId(held)
-      else if (isBillingError(err) && err.status === 401) onSignInRequired()
+      if (isBillingError(err) && err.status === 401) onSignInRequired()
       else setFailure(m.error(toBillingError(err)))
     } finally {
       setStarting(false)
     }
   }
 
+  const close = (open: boolean) => !open && setCheckout(undefined)
   return (
     <span
       className={cn(scope.className, "inline-flex flex-col gap-1", className)}
@@ -138,30 +148,34 @@ export function Purchase({
       // A styling root is a size container; a button sizes to its label.
       style={{ ...scope.style, containerType: "normal" }}
     >
-      <Button
-        disabled={(signedIn !== false && !priceId) || starting}
-        onClick={() => void buy()}
-      >
-        {label}
+      <Button disabled={starting} onClick={() => void buy()}>
+        {label ?? priceLabel(price, scales, m, locale)}
       </Button>
       {failure ? (
         <span role="alert" className="text-sm text-destructive">
           {failure}
         </span>
       ) : null}
-      {orderId ? (
+      {checkout?.kind === "inline" ? (
         <OrderModal
           open
-          onOpenChange={(open) => !open && setOrderId(undefined)}
-          orderId={orderId}
+          onOpenChange={close}
+          orderId={checkout.orderId}
           returnUrl={returnUrl}
           appearance={appearance}
-          onSettled={(order) => {
-            if (order.status !== "complete") return
-            setOrderId(undefined)
-            setKey(crypto.randomUUID())
-            onPaid(order)
-          }}
+          onSettled={paid}
+        />
+      ) : null}
+      {checkout?.kind === "embedded" ? (
+        <EmbeddedCheckoutModal
+          open
+          onOpenChange={close}
+          url={checkout.url}
+          appearance={appearance}
+          // The frame's word is a hint: the order says whether it is paid.
+          onComplete={() =>
+            void client.getOrder(checkout.orderId).then(paid, () => undefined)
+          }
         />
       ) : null}
     </span>

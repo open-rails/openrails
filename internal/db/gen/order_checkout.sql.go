@@ -192,6 +192,48 @@ func (q *Queries) SaveOrderCheckoutReceipt(ctx context.Context, arg SaveOrderChe
 	return err
 }
 
+const setMyOrderCheckout = `-- name: SetMyOrderCheckout :execrows
+UPDATE billing.orders
+SET checkout_secret_hash = $1::bytea,
+    checkout_expires_at = $2::timestamptz,
+    checkout_success_url = $3::text,
+    checkout_cancel_url = NULL,
+    checkout_saved_payment_methods = true,
+    checkout_ui_mode = 'embedded',
+    updated_at = $4::timestamptz
+WHERE merchant_id = $5::uuid AND id = $6::uuid AND customer_id = $7::uuid
+  AND origin = 'customer' AND status = 'open' AND collection_owner = 'engine'
+  AND (expires_at IS NULL OR expires_at > $4::timestamptz)
+`
+
+type SetMyOrderCheckoutParams struct {
+	SecretHash []byte
+	ExpiresAt  time.Time
+	SuccessUrl string
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// A customer's own open order takes its embedded checkout, in place of the
+// one it had: the last secret stops working.
+func (q *Queries) SetMyOrderCheckout(ctx context.Context, arg SetMyOrderCheckoutParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMyOrderCheckout,
+		arg.SecretHash,
+		arg.ExpiresAt,
+		arg.SuccessUrl,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.CustomerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setOrderCheckout = `-- name: SetOrderCheckout :execrows
 UPDATE billing.orders
 SET checkout_secret_hash = $1::bytea,

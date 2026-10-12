@@ -1,5 +1,5 @@
 // Framework-free client for the OpenRails customer surface (`/billing/v1/me/*`)
-// and public catalog.
+// and the deployment's public configuration.
 export {
   CANCEL_REASON_MAX,
   CANCEL_REASON_MIN,
@@ -13,7 +13,6 @@ export {
   type BillingClientOptions,
   type ListOptions,
   type OrderResult,
-  type ProductListOptions,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
   type UsageOptions,
@@ -56,6 +55,7 @@ export type {
   CardCaptureReference,
   NextAction,
   Order,
+  OrderCheckout,
   OrderLine,
   OrderLineRefusal,
   OrderPaymentInput,

@@ -222,21 +222,15 @@ func TestAdminOperationLimits(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an authorized call reaches its handler")
 }
 
-// Buyer routes are public or addressed by a checkout session or attempt id;
-// Solana routes exist only for configured rails. A browser buys only through
-// a checkout session.
+// The public buyer surface is a wallet paying an order, only for configured
+// rails: no public route reads the catalog, and a browser buys on /v1/me.
 func TestUserRoutes(t *testing.T) {
 	inventory := func(providers routesurface.ProviderRoutes) []string {
 		table := &router.Table{}
 		RegisterUserRoutes(router.NewMux(table, "/v1", nil), nil, Options{ProviderRoutes: &providers})
 		return routeKeys(table)
 	}
-	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/products"})
-	for _, key := range none {
-		require.NotContains(t, key, "solana")
-		require.NotRegexp(t, `/v1/checkout(/|$)`, key, "no engine checkout door for browsers")
-	}
+	require.Empty(t, inventory(routesurface.ProviderRoutes{}))
 	oneOff := inventory(routesurface.ProviderRoutes{Solana: true})
 	require.Subset(t, oneOff, []string{"POST /v1/orders/{id}/solana-pay"})
 	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {

@@ -26,17 +26,16 @@ func productsOf(t *testing.T, w *httptest.ResponseRecorder) []billing.Product {
 	return page.Items
 }
 
-// The public catalog takes no credential: its merchant is the id ?merchant=
-// names, and it answers that merchant's products on sale alone. The
-// parameter opens nothing else: on a staff or programmatic route the
-// credential's merchant answers, whatever the query names.
-func TestPublicCatalogNamesItsMerchant(t *testing.T) {
+// No public route reads the catalog: a host's backend reads it with its own
+// credential, which names the merchant. A ?merchant= parameter opens nothing:
+// the credential's merchant answers, whatever the query names.
+func TestCatalogReadsNameNoMerchant(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	srv := f.resourceServer(t)
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	a, b, gone := provision(t, srv, uniqueName("catalog-a")), provision(t, srv, uniqueName("catalog-b")), provision(t, srv, uniqueName("catalog-gone"))
+	a, b := provision(t, srv, uniqueName("catalog-a")), provision(t, srv, uniqueName("catalog-b"))
 	key := "course-" + uuid.NewString()[:8]
 	sell := func(mid billing.MerchantID, amount int64) billing.ProductID {
 		shop := handle(t, srv, mid)
@@ -46,15 +45,8 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 		require.NoError(t, err)
 		return product.ID
 	}
-	productA, productB := sell(a, 5_000_000), sell(b, 7_000_000)
-	sell(gone, 9_000_000)
-	_, err = srv.DeleteMerchant(ctx, gone)
-	require.NoError(t, err)
-
-	const catalog = "/v1/products?"
-	named := func(mid billing.MerchantID) string {
-		return catalog + url.Values{"merchant": {mid.String()}, "keys": {key}}.Encode()
-	}
+	productA := sell(a, 5_000_000)
+	sell(b, 7_000_000)
 	// one is the single product an answer lists, with its one price.
 	one := func(w *httptest.ResponseRecorder) (billing.ProductID, int64) {
 		t.Helper()
@@ -64,25 +56,21 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 		return products[0].ID, products[0].Prices[0].UnitAmount
 	}
 
-	// No Authorization, no header, any Host.
-	id, amount := one(serve(handler, rsRequest{path: named(a)}))
-	require.Equal(t, productA, id)
-	require.EqualValues(t, 5_000_000, amount)
-	id, amount = one(serve(handler, rsRequest{path: "https://anything.e2e.test" + named(b)}))
-	require.Equal(t, productB, id)
-	require.EqualValues(t, 7_000_000, amount)
-
-	// The route reads no credential and no header: the query alone decides.
+	// The public catalog is gone, signed in or out.
 	keyA := merchantKey(t, srv, a, "owner")
-	id, _ = one(serve(handler, rsRequest{path: named(b), authorization: "Bearer " + keyA.Secret, header: map[string]string{retiredMerchantHeader: "id:" + a.String()}}))
-	require.Equal(t, productB, id)
+	public := "/v1/products?" + url.Values{"merchant": {a.String()}, "keys": {key}}.Encode()
+	for _, authorization := range []string{"", "Bearer " + keyA.Secret} {
+		w := serve(handler, rsRequest{path: public, authorization: authorization})
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	}
 
-	// The public list cannot collide with or bypass catalog-management auth.
+	// Catalog reads are catalog management's, behind its auth.
 	management := "/v1/catalog/products?keys=" + url.QueryEscape(key)
 	require.Equal(t, http.StatusUnauthorized, serve(handler, rsRequest{path: management}).Code)
 	viewer := merchantKey(t, srv, a, "viewer")
-	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}))
+	id, amount := one(serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}))
 	require.Equal(t, productA, id)
+	require.EqualValues(t, 5_000_000, amount)
 	write := serve(handler, rsRequest{method: http.MethodPost, path: "/v1/catalog/products", authorization: "Bearer " + viewer.Secret})
 	require.Equal(t, http.StatusForbidden, write.Code, write.Body.String())
 	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + keyA.Secret}))
@@ -92,24 +80,6 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	access := serve(handler, rsRequest{path: "/v1/admin/access", authorization: "Bearer " + keyA.Secret})
 	require.Equal(t, http.StatusOK, access.Code, access.Body.String())
 	require.Contains(t, access.Body.String(), `"scope_id":"`+a.String()+`"`)
-
-	for name, query := range map[string]string{
-		"missing":   "keys=" + key,
-		"empty":     "merchant=&keys=" + key,
-		"a slug":    "merchant=catalog-a&keys=" + key,
-		"not an id": "merchant=" + strings.ToUpper(a.String()) + "&keys=" + key,
-		"repeated":  "merchant=" + a.String() + "&merchant=" + b.String() + "&keys=" + key,
-	} {
-		w := serve(handler, rsRequest{path: catalog + query})
-		require.Equal(t, http.StatusBadRequest, w.Code, "%s: %s", name, w.Body.String())
-		require.Equal(t, billing.CodeInvalidQuery, errorCode(t, w), name)
-		require.Contains(t, w.Body.String(), `"param":"merchant"`, name)
-	}
-	for name, mid := range map[string]string{"unknown": uuid.NewString(), "deleted": gone.String()} {
-		w := serve(handler, rsRequest{path: catalog + "merchant=" + mid + "&keys=" + key})
-		require.Equal(t, http.StatusNotFound, w.Code, "%s: %s", name, w.Body.String())
-		require.Equal(t, billing.CodeResourceNotFound, errorCode(t, w), name)
-	}
 
 	// Elsewhere the parameter names nothing: A's key reads A's rows, or the
 	// route refuses the parameter; it never reads B's.

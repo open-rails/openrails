@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,6 +68,15 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 			return
 		}
 		reply(w, http.StatusOK, rt.Catalog)
+	})
+	// The host's own page data: the products it sells, read on the server.
+	mux.HandleFunc("GET /api/products", func(w http.ResponseWriter, r *http.Request) {
+		products, err := rt.Products(r.Context(), strings.Split(r.URL.Query().Get("keys"), ","))
+		if err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		reply(w, http.StatusOK, map[string]any{"products": products})
 	})
 	mux.HandleFunc("POST /__test/staff/{role}", func(w http.ResponseWriter, r *http.Request) {
 		user, err := rt.CreateStaff(r.Context(), r.PathValue("role"))

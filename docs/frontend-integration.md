@@ -109,20 +109,12 @@ report it came from: another currency, grouping or window is `400
 invalid_cursor`, and a window the request leaves out is the cursor's.
 billing-ui's `getUsage` sends it.
 
-The public catalog needs no auth and is a lookup by product key in one
-merchant's catalog:
-`GET /v1/products?merchant=<merchant id>&keys=course-101&keys=course-bundle`
-returns each named product that merchant has on sale, with its current prices,
-in one page. It reads no credential, so `merchant` is required signed in or
-out: one merchant id (not its name), else `400 invalid_query`; `404
-resource_not_found` when no live merchant has it. It takes `keys` beside it, 1
-to 100 of them: no entitlement filter, no listing, and any other parameter is
-`400 invalid_query`. billing-ui's `<BuyButton merchant>`, `<ProductList merchant
-keys>` and `listProducts({ merchant, keys })` send it. Which products to sell
-is your server's call: the Go `Client.ListProducts` (`GET
-/v1/catalog/products`) filters by product keys or entitlements; use
-`Archived: new(false), ForSale: new(true)` for products on sale. Every product
-includes its current prices.
+The browser never reads the catalog. Which products to sell is your server's
+call: the Go `Client.ListProducts` filters by product keys or entitlements
+(`Archived: new(false), ForSale: new(true)` for products on sale; each comes
+with its current prices). Put them in your own page's response with their
+prices as a buyer sees them, `billing.BuyerPrices`, and billing-ui's
+`<ProductList products>` and `<BuyButton price>` sell them.
 
 ### Configuration: `GET /v1/config` and `GET /v1/me/config`
 

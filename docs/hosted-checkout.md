@@ -50,10 +50,10 @@ dashboard and declared merchant issuers, including equivalent port/host spelling
 When two applications share a merchant's billing database and one serves the
 payment domain, the other calls `engine.HostedCheckout(origin, nil)` only to
 configure URL issuance; its returned handler is nil. Each application still
-owns its authentication. Its purchase endpoint authorizes the signed-in user,
-creates an unpaid order for that customer, and supplies `Checkout`. Retain the
-idempotency key across retries and dialog reloads. A publisher's inbox and
-notification receipt state remain independent of checkout.
+owns its authentication. Its pages sell with billing-ui's `<BuyButton>`, which
+creates the signed-in customer's order with its embedded checkout on the
+payment domain (below); it needs no purchase route of its own. A publisher's
+inbox and notification receipt state remain independent of checkout.
 
 ## Creating one
 
@@ -168,6 +168,32 @@ the merchant's Stripe accounts (as the checkout host is): Stripe shows Apple
 Pay and Google Pay in a frame only when the framing page's domain is
 registered. Apple Pay there also needs the site itself to serve Stripe's
 domain-association file at the same path.
+
+### The customer's own order
+
+A customer creates its own order with its embedded checkout in one call, as
+billing-ui's `<BuyButton>` does on a registered origin:
+
+```
+POST /v1/me/orders  {"lines": [{"price_id": "…"}], "checkout": {"ui_mode": "embedded"}}  (Idempotency-Key)
+→ 201 the order, with checkout {url, expires_at, ui_mode: "embedded", success_url, …}
+```
+
+- Only the merchant's own person signed in asks for one: a user of the issuer
+  the merchant declares, acting itself in a session or with a device key, its
+  credential bound to no scope. Anyone else is `403 customer_session_required`.
+- The checkout is the order's own, as on a merchant order. It lasts 15 minutes
+  (less when the order expires sooner), offers the customer's saved cards and
+  returns to the merchant's first registered origin; the request names no URL
+  and takes no payment beside it.
+- The order is idempotent; its URL is a fresh credential on every answer: a
+  retry with the key answers the same order with a new URL, and the last one
+  stops working. A paid or closed order answers without one.
+- Without registered origins it is `400 checkout_embed_origins_required`,
+  without a checkout host `400 hosted_checkout_unavailable`; neither makes an
+  order.
+- On the checkout host the secret opens that order alone, as a merchant's
+  checkout URL does.
 
 ## Save with the customer network
 

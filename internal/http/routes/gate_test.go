@@ -44,7 +44,6 @@ var openTiers = []Tier{AuthPublic, AuthProvider}
 // reviewed change.
 var openRoutes = []string{
 	"GET /health/live", "GET /health/ready", "GET /v1/config",
-	"GET /v1/products",
 	"GET /v1/orders/{id}/solana-pay", "POST /v1/orders/{id}/solana-pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
 }

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -44,23 +43,20 @@ func (w *world) staffCall(method, path string, body, out any) int {
 	return res.StatusCode
 }
 
-// public reads the merchant's public catalog for keys, with no credential.
-func (w *world) public(keys ...string) map[string]any {
+// onSale is the merchant's products on sale named by keys as a host puts them
+// in its pages: read with the Go client, their prices as a buyer sees them.
+func (w *world) onSale(keys ...string) []billing.Product {
 	w.t.Helper()
-	query := url.Values{"merchant": {w.client[embedded].MerchantID().String()}, "keys": keys}
-	req, err := http.NewRequestWithContext(w.t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/products?"+query.Encode(), nil)
+	page, err := w.client[remote].ListProducts(w.t.Context(), billing.ProductListParams{Keys: keys, Archived: new(false), ForSale: new(true), PageRequest: billing.PageRequest{Limit: len(keys)}})
 	require.NoError(w.t, err)
-	res, err := http.DefaultClient.Do(req)
-	require.NoError(w.t, err)
-	defer res.Body.Close()
-	require.Equal(w.t, http.StatusOK, res.StatusCode)
-	var out map[string]any
-	require.NoError(w.t, json.NewDecoder(res.Body).Decode(&out))
-	return out
+	for i := range page.Items {
+		page.Items[i].Prices = billing.BuyerPrices(page.Items[i].Prices)
+	}
+	return page.Items
 }
 
 // One product and one price shape on every route that returns them: the
-// merchant's, the public catalog's and the Go client's. Lists are one cursor
+// merchant's and the Go client's, and a buyer's view of it. Lists are one cursor
 // envelope; a product carries its current prices.
 func TestCatalogOneShapePerNoun(t *testing.T) {
 	t.Parallel()
@@ -123,26 +119,25 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	archived := true
 	_, err = c.UpdateProduct(t.Context(), products[2].ID, billing.UpdateProductParams{Archived: catalog.Value(archived)})
 	require.NoError(t, err)
-	listed := w.public(products[0].Key, products[2].Key)
 	keys := map[string]bool{}
-	for _, item := range listed["data"].([]any) {
-		product := item.(map[string]any)
-		keys[product["key"].(string)] = true
-		if product["key"] == products[0].Key {
-			require.Len(t, product["prices"], 1, "a product embeds its prices on sale")
+	for _, product := range w.onSale(products[0].Key, products[2].Key) {
+		keys[product.Key] = true
+		if product.Key == products[0].Key {
+			require.Len(t, product.Prices, 1, "a product embeds its prices on sale")
 		}
-		for _, p := range product["prices"].([]any) {
-			psp := p.(map[string]any)["psps"].(map[string]any)["nmi"].(map[string]any)
-			require.Equal(t, "linked", psp["status"])
-			require.Nil(t, psp["ids"], "PSP identifiers stay with the merchant")
+		for _, p := range product.Prices {
+			psp := p.PSPs["nmi"]
+			require.Equal(t, billing.PSPLinkLinked, psp.Status)
+			require.Nil(t, psp.IDs, "PSP identifiers stay with the merchant")
+			require.Empty(t, p.PendingManualActions)
 		}
 	}
 	require.True(t, keys[products[0].Key])
 	require.False(t, keys[products[2].Key], "an archived product is not on sale")
-	require.Contains(t, listed, "next_cursor")
 
 	// Retired routes and fields are gone.
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodGet, "/v1/prices", nil, nil), "a product embeds its prices")
+	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodGet, "/v1/products?keys="+products[0].Key, nil, nil), "no public catalog")
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/catalog/products/"+products[0].ID.String()+"/activate", nil, nil))
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/catalog/prices/"+price.ID.String()+"/key", map[string]any{"key": "x"}, nil))
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/catalog/products/"+products[0].ID.String(), map[string]any{"set_tier_group": true}, nil))

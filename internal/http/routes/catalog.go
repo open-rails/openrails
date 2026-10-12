@@ -21,15 +21,11 @@ var (
 )
 
 // catalogRoutes is what a merchant sells: products, prices, meters and their
-// rate cards. A buyer looks a merchant's products up by key, each with its
-// current prices; the host's backend reads what is on sale by entitlement
-// too; the merchant routes administer the catalog. A document applies as the
+// rate cards. The host's backend reads what is on sale and puts it in its own
+// pages (billing.BuyerPrices); the merchant routes administer the catalog. A document applies as the
 // apply manager and the edits as the edit manager: a document skips an
 // object whose field an edit set differently.
 var catalogRoutes = []Route{
-	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthPublic, Merchant: MerchantQuery,
-		Query: params(required(repeated("keys")), required(text("merchant"))), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_query", "resource_not_found"), Handler: h(handlers.ListPublicProducts)},
-
 	{Method: POST, Path: "/v1/catalog/apply", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate,
 		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 

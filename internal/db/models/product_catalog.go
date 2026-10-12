@@ -335,27 +335,6 @@ func (p *Product) View() billing.Product {
 	return v
 }
 
-// PublicView is the price as a buyer sees it: which PSPs sell it, without
-// their identifiers or the operator's pending work.
-func (p *Price) PublicView() *billing.Price {
-	if p == nil {
-		return nil
-	}
-	v := PublicPrice(p.View())
-	return &v
-}
-
-// PublicPrice strips a price to what a buyer sees.
-func PublicPrice(p billing.Price) billing.Price {
-	psps := make(map[string]billing.PSPLinkState, len(p.PSPs))
-	for key, state := range p.PSPs {
-		psps[key] = billing.PSPLinkState{Status: state.Status, SyncStatus: billing.SyncStatusUnknown}
-	}
-	p.PSPs = psps
-	p.PendingManualActions = []billing.PendingAction{}
-	return p
-}
-
 // View is the price as the API shows it, linked to every PSP in its links.
 // Sync status is unknown until a verifying read fills it.
 func (p *Price) View() billing.Price {

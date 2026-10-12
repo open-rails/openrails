@@ -14,8 +14,8 @@ import (
 )
 
 // A request's Host names no merchant: at a host spelled after merchant A,
-// B's API key reads B, the public catalog reads the merchant its query
-// names, no credential is refused, and the API host route is gone.
+// B's API key reads B, no credential is refused, and the API host and public
+// catalog routes are gone.
 func TestMerchantHostNamesNothing(t *testing.T) {
 	f := newFixture(t)
 	srv := f.newServer(t, nil)
@@ -49,7 +49,7 @@ func TestMerchantHostNamesNothing(t *testing.T) {
 	require.Equal(t, []string{"host-b"}, keys(get("/v1/catalog/products", key)), "the key's merchant, not the Host's")
 	require.Equal(t, http.StatusOK, get("/v1/admin/customers", key).Code)
 	public := "/v1/products?" + url.Values{"merchant": {b.String()}, "keys": {"host-a", "host-b"}}.Encode()
-	require.Equal(t, []string{"host-b"}, keys(get(public, "")), "the merchant the query names, not the Host's")
+	require.Equal(t, http.StatusNotFound, get(public, "").Code, "no public catalog")
 
 	w := get("/v1/admin/customers", "")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())

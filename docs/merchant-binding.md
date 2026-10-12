@@ -19,9 +19,8 @@ Right after `Authenticate`, OpenRails reads the first that applies:
 | Issuer | the merchant whose `MerchantDeclaration.Issuer` is the credential's issuer. An issuer belongs to one merchant of an engine | a single-merchant host's own sign-ins, its customers' and its staff's |
 | Object | the merchant of the row an OpenRails secret opens | a checkout URL's secret, a checkout session or attempt, a PSP's webhook signature, a provisioning token, the in-process handle |
 
-The public routes take no credential and name their merchant themselves:
-`GET /v1/products?merchant=<merchant id>&keys=…`, and an order's
-Solana Pay request by its order. `GET /v1/config` is the deployment's and
+The public routes take no credential and name their merchant themselves: an
+order's Solana Pay request by its order. `GET /v1/config` is the deployment's and
 names none; a merchant's own part is `GET /v1/me/config`, for a credential
 bound to it.
 

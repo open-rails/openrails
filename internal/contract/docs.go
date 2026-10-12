@@ -17,7 +17,7 @@ var groupTitles = []struct {
 	blurb string
 }{
 	{routes.Meta, "Process", "Health and capability discovery. Only the standalone server serves the root paths."},
-	{routes.Checkout, "Checkout (public)", "Public product lookup and an order's Solana Pay transaction requests."},
+	{routes.Checkout, "Checkout (public)", "An order's Solana Pay transaction requests."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
 	{routes.Admin, "Admin: customer support", "Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go client alike."},
 	{routes.CatalogAdmin, "Catalog", "The catalog, with `RouteGroups.Catalog`: its reads and edits and price migrations. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},

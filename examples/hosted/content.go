@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -76,34 +74,9 @@ func held(c *gin.Context, bill *openrails.Client, entitlements ...string) (map[s
 	return check.Entitlements, nil
 }
 
-// seller answers the id of the merchant bill acts on, which the browser's
-// public catalog reads name. A client in the app's own process knows it; a
-// remote one asks the server once: its access read answers the merchant's
-// own scope, whose id is the merchant's.
-func seller(bill *openrails.Client) func(*gin.Context) (string, error) {
-	var mu sync.Mutex
-	var id string
-	return func(c *gin.Context) (string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if id == "" && !bill.MerchantID().IsZero() {
-			id = bill.MerchantID().String()
-		}
-		if id == "" {
-			access, err := bill.GetAdminAccess(c)
-			if err != nil {
-				return "", err
-			}
-			id = access.ScopeID
-		}
-		return id, nil
-	}
-}
-
 // courseRoutes are the app's API: the course list, with prices and what the
 // user owns; each video, gated; and the media its signed URLs play.
 func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, media mediaKey) {
-	merchant := seller(bill)
 	// GET /api/courses?cursor=&limit= pages over the host's courses. Each page
 	// costs one product read and one entitlement read, never one per course.
 	r.GET("/api/courses", authkitgin.Optional(ak), func(c *gin.Context) {
@@ -131,16 +104,10 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		mid, err := merchant(c)
-		if err != nil {
-			c.AbortWithStatus(http.StatusServiceUnavailable)
-			return
-		}
-		prices := map[string][]gin.H{} // by product key
+		// Each product's prices as a buyer sees them, for the page's BuyButtons.
+		prices := map[string][]billing.Price{} // by product key
 		for _, product := range listed.Items {
-			for _, p := range product.Prices {
-				prices[product.Key] = append(prices[product.Key], gin.H{"key": p.Key, "amount": strconv.FormatInt(p.UnitAmount, 10), "currency": p.Currency, "terms": terms(p)})
-			}
+			prices[product.Key] = billing.BuyerPrices(product.Prices)
 		}
 		data := []gin.H{}
 		for _, course := range page {
@@ -151,8 +118,7 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		if from+limit < len(courses) {
 			next = strconv.Itoa(from + limit)
 		}
-		// merchant_id: who sells them, for the page's BuyButtons.
-		c.JSON(http.StatusOK, gin.H{"merchant_id": mid, "data": data, "next_cursor": next})
+		c.JSON(http.StatusOK, gin.H{"data": data, "next_cursor": next})
 	})
 
 	// A video: its signed URL to whoever holds any key that unlocks it, 402
@@ -175,23 +141,19 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			return
 		}
 		// Everything on sale granting a key that unlocks it: the course, the
-		// bundle, the membership. The buy page lists them by product key.
+		// bundle, the membership, with their prices as a buyer sees them. The
+		// buy page sells them.
 		listed, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: course.unlock(), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		mid, err := merchant(c)
-		if err != nil {
-			c.AbortWithStatus(http.StatusServiceUnavailable)
-			return
+		products := listed.Items
+		for i := range products {
+			products[i].Prices = billing.BuyerPrices(products[i].Prices)
 		}
-		products := []string{}
-		for _, product := range listed.Items {
-			products = append(products, product.Key)
-		}
-		slices.Sort(products)
-		c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "merchant_id": mid, "products": products, "buy": "/courses/" + course.Slug + "/buy"})
+		slices.SortFunc(products, func(a, b billing.Product) int { return strings.Compare(a.Key, b.Key) })
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "products": products, "buy": "/courses/" + course.Slug + "/buy"})
 	})
 
 	// GET /media/*path serves a file under media/ to a signed, unexpired URL;
@@ -237,18 +199,6 @@ func (k mediaKey) sign(path, expires string) string {
 // anyHeld reports whether owned holds any of keys.
 func anyHeld(owned map[string]bool, keys []string) bool {
 	return slices.ContainsFunc(keys, func(k string) bool { return owned[k] })
-}
-
-// terms says how a price renews, or how long it grants access.
-func terms(p billing.Price) string {
-	switch {
-	case p.BillingIntervalHours != nil:
-		return fmt.Sprintf("every %d days", *p.BillingIntervalHours/24)
-	case p.AccessDurationHours != nil:
-		return fmt.Sprintf("for %d days", *p.AccessDurationHours/24)
-	default:
-		return "to keep"
-	}
 }
 
 // serveApp serves the React app built into dir: its assets, and index.html

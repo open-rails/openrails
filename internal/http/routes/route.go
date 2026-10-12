@@ -34,7 +34,7 @@ type Group string
 const (
 	// Meta is the process surface: health, metrics, capability discovery.
 	Meta Group = "meta"
-	// Checkout is the buyer-facing surface: products, prices, checkout.
+	// Checkout is the public buyer-facing surface: a wallet paying an order.
 	Checkout Group = "checkout"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
@@ -144,12 +144,8 @@ const (
 // the merchant whose rows it reads.
 type MerchantSource string
 
-const (
-	// MerchantQuery: the merchant id its ?merchant= parameter names.
-	MerchantQuery MerchantSource = "query"
-	// MerchantOrder: the merchant of the order its {id} names.
-	MerchantOrder MerchantSource = "order"
-)
+// MerchantOrder: the merchant of the order its {id} names.
+const MerchantOrder MerchantSource = "order"
 
 // CheckoutAccess is how the hosted checkout host serves a route under a
 // checkout URL's secret, which acts as its order's customer.
@@ -433,10 +429,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			if r.Auth == AuthPublic && !r.NoConn {
 				panic("routes: " + r.Key() + ": a public route names its merchant in the request, or reads no merchant's rows (NoConn)")
 			}
-		case MerchantQuery, MerchantOrder:
-			named := slices.Contains(r.Query, required(text("merchant")))
-			if r.Auth != AuthPublic || r.NoConn || (r.Merchant == MerchantQuery) != named || r.Merchant == MerchantOrder && !strings.Contains(r.Path, "{id}") {
-				panic("routes: " + r.Key() + ": only a public route names its merchant, as ?merchant= or by the order its {id} names")
+		case MerchantOrder:
+			if r.Auth != AuthPublic || r.NoConn || !strings.Contains(r.Path, "{id}") {
+				panic("routes: " + r.Key() + ": only a public route names its merchant, by the order its {id} names")
 			}
 		default:
 			panic("routes: " + r.Key() + ": unknown merchant source " + string(r.Merchant))

@@ -35,7 +35,6 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.confirmPaymentMethod("pm_1"),
     () => client.getConfig(),
     () => client.getCustomerConfig(),
-    () => client.listProducts({ merchant: "m_1", keys: ["a"] }),
     () => client.createNetworkLinkChallenge(),
     () => client.createNetworkLink({ challengeId: "lnc_1", idToken: "t" }),
     () => client.confirmSubscriptionChange("sub_1"),

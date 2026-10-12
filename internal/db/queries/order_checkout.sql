@@ -63,3 +63,18 @@ INSERT INTO billing.idempotency_keys
 VALUES (sqlc.arg(merchant_id)::uuid, 'hosted_checkout_creation', sqlc.arg(order_id)::uuid::text,
     'succeeded', sqlc.arg(order_id)::uuid, jsonb_build_object('secret', sqlc.arg(secret)::text),
     sqlc.arg(now)::timestamptz, sqlc.arg(expires_at)::timestamptz);
+
+-- name: SetMyOrderCheckout :execrows
+-- A customer's own open order takes its embedded checkout, in place of the
+-- one it had: the last secret stops working.
+UPDATE billing.orders
+SET checkout_secret_hash = sqlc.arg(secret_hash)::bytea,
+    checkout_expires_at = sqlc.arg(expires_at)::timestamptz,
+    checkout_success_url = sqlc.arg(success_url)::text,
+    checkout_cancel_url = NULL,
+    checkout_saved_payment_methods = true,
+    checkout_ui_mode = 'embedded',
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND origin = 'customer' AND status = 'open' AND collection_owner = 'engine'
+  AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);

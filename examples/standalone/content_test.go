@@ -109,7 +109,11 @@ func TestMediaURLs(t *testing.T) {
 // membership.
 func TestCourseList(t *testing.T) {
 	app := startStack(t)
-	type price struct{ Key, Amount, Currency, Terms string }
+	type price struct {
+		Key        string
+		UnitAmount string `json:"unit_amount"`
+		Currency   string
+	}
 	type row struct {
 		Slug, Title string
 		MembersOnly bool `json:"members_only"`
@@ -126,8 +130,8 @@ func TestCourseList(t *testing.T) {
 		page.Data, page.NextCursor = nil, nil
 		app.call(t, token, http.MethodGet, app.URL+"/api/courses?"+query, nil, &page)
 	}
-	cssPrices := []price{{"rent", "1990000", "USD", "for 3 days"}, {"purchase", "4990000", "USD", "to keep"}}
-	membershipPrices := []price{{"monthly", "10000000", "USD", "every 30 days"}, {"yearly", "99000000", "USD", "every 365 days"}}
+	cssPrices := []price{{"rent", "1990000", "USD"}, {"purchase", "4990000", "USD"}}
+	membershipPrices := []price{{"monthly", "10000000", "USD"}, {"yearly", "99000000", "USD"}}
 
 	read("", "limit=1")
 	require.Equal(t, []row{{"css-101", "Intro to CSS", false, false, "course-101", cssPrices}}, page.Data)
@@ -517,26 +521,36 @@ func (a *stack) buy(t *testing.T, c *customer, product, price string) {
 }
 
 // priceOf is product's price as an order line, and its amount, read from the
-// public catalog.
+// app's own answers.
 func (a *stack) priceOf(t *testing.T, product, price string) (map[string]string, string) {
 	t.Helper()
-	var catalog struct {
+	// As the pages do: the app's own answers carry the products on sale, a
+	// course's 402 everything that unlocks it.
+	var list struct {
 		Data []struct {
-			Key    string `json:"key"`
-			Prices []struct {
-				ID         string `json:"id"`
-				Key        string `json:"key"`
-				UnitAmount string `json:"unit_amount"`
-			} `json:"prices"`
+			Slug string `json:"slug"`
 		} `json:"data"`
 	}
-	// As the page does: the app says which merchant sells its courses.
-	var store struct {
-		MerchantID string `json:"merchant_id"`
+	a.call(t, "", http.MethodGet, a.URL+"/api/courses?limit=50", nil, &list)
+	type offer struct {
+		Key    string `json:"key"`
+		Prices []struct {
+			ID         string `json:"id"`
+			Key        string `json:"key"`
+			UnitAmount string `json:"unit_amount"`
+		} `json:"prices"`
 	}
-	a.call(t, "", http.MethodGet, a.URL+"/api/courses?limit=1", nil, &store)
-	a.call(t, "", http.MethodGet, a.ServerURL+"/v1/products?"+url.Values{"merchant": {store.MerchantID}, "keys": {product}}.Encode(), nil, &catalog)
-	for _, p := range catalog.Data {
+	var offers []offer
+	for _, course := range list.Data {
+		res := a.get(t, "", "/api/courses/"+course.Slug)
+		var gate struct {
+			Products []offer `json:"products"`
+		}
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&gate))
+		require.NoError(t, res.Body.Close())
+		offers = append(offers, gate.Products...)
+	}
+	for _, p := range offers {
 		for _, priceRow := range p.Prices {
 			if p.Key == product && priceRow.Key == price {
 				return map[string]string{"price_id": priceRow.ID}, priceRow.UnitAmount
@@ -592,11 +606,15 @@ func (a *stack) requireBuy(t *testing.T, token, path string, products []string, 
 	require.Equal(t, http.StatusPaymentRequired, res.StatusCode, path)
 	var body struct {
 		Error, Buy string
-		Products   []string
+		Products   []struct{ Key string }
 	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	require.Equal(t, "access_required", body.Error)
-	require.Equal(t, products, body.Products)
+	var keys []string
+	for _, product := range body.Products {
+		keys = append(keys, product.Key)
+	}
+	require.Equal(t, products, keys)
 	require.Equal(t, buy, body.Buy)
 }
 

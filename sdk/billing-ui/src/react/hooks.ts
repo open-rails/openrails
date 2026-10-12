@@ -3,7 +3,6 @@ import { useCallback, useMemo, useState } from "react"
 import {
   isWalletAction,
   signWalletAction,
-  type ProductListOptions,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
 } from "../client/client"
@@ -13,7 +12,6 @@ import type {
   Order,
   Payment,
   PaymentMethod,
-  Product,
   Subscription,
   SubscriptionChange,
 } from "../client/types"
@@ -25,12 +23,7 @@ export type ActionResult = Promise<BillingError | null>
 
 /** `signing` and `confirming` are a wallet step's stages. */
 export type SubscriptionAction =
-  | "cancel"
-  | "resume"
-  | "payment_method"
-  | "change"
-  | "signing"
-  | "confirming"
+  "cancel" | "resume" | "payment_method" | "change" | "signing" | "confirming"
 
 export interface SubscriptionsOptions {
   /** Server filter; default `all`. */
@@ -234,36 +227,6 @@ export function useSubscriptions(
     resume,
     setPaymentMethod,
     changeSubscription,
-  }
-}
-
-export interface ProductsState {
-  products: Product[] | null
-  loading: boolean
-  error: BillingError | null
-  refetch: () => void
-}
-
-/** The merchant and its product keys to look up: `ProductListOptions`. */
-export type ProductsOptions = Pick<ProductListOptions, "merchant" | "keys">
-
-/**
- * The products `merchant` has on sale named by `keys`, each with its active
- * prices: a public catalog lookup.
- */
-export function useProducts({
-  merchant,
-  keys,
-}: ProductsOptions): ProductsState {
-  const { client } = useBillingContext()
-  const remote = useRemote(JSON.stringify([merchant, keys]), (signal) =>
-    client.listProducts({ merchant, keys, signal })
-  )
-  return {
-    products: remote.data?.data ?? null,
-    loading: remote.loading,
-    error: remote.error,
-    refetch: remote.refetch,
   }
 }
 

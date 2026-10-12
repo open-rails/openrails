@@ -152,8 +152,9 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 }
 
 // CreateOrder freezes lines into an order and, with a payment, pays it in the
-// same call. key is the request's Idempotency-Key: a later request with it
-// answers what the first did.
+// same call, or, with a checkout, answers the URL where the customer pays it.
+// key is the request's Idempotency-Key: a later request with it answers what
+// the first did, with a fresh checkout URL.
 func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateMyOrderParams, key string) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -164,6 +165,23 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if err != nil {
 		return OrderAnswer{}, err
 	}
+	if params.Checkout == nil {
+		return s.createOrder(ctx, rt, actor, params, key)
+	}
+	origin, successURL, err := s.orderCheckout(ctx, params)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	params.Checkout = nil // the checkout is not part of the order or its key
+	answer, err := s.createOrder(ctx, rt, actor, params, key)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	return s.attachCheckout(ctx, rt, actor, answer, origin, successURL)
+}
+
+// createOrder is CreateOrder's order, under its key.
+func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, key string) (OrderAnswer, error) {
 	if err := checkOrderLines(params.Lines, params.Cart); err != nil {
 		return OrderAnswer{}, err
 	}
@@ -838,7 +856,10 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			return nil, false, err
 		}
 		if plan.UIMode == billing.CheckoutEmbedded {
-			if err := s.embedOriginsDeclared(ctx); err != nil {
+			if _, err := s.embedOrigins(ctx); err != nil {
+				if errors.Is(err, errEmbedOriginsRequired) {
+					err = errEmbedOriginsRequired.WithParam("checkout.ui_mode")
+				}
 				return nil, false, err
 			}
 		}
@@ -885,28 +906,83 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	return view, false, err
 }
 
-// embedOriginsDeclared refuses an embedded checkout the merchant registered
-// no origin to frame.
-func (s *Service) embedOriginsDeclared(ctx context.Context) error {
+// embedOrigins are the origins the merchant registered to frame its
+// embedded checkouts: checkout_embed_origins_required without one.
+func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if s.rt.Merchants == nil {
-		return errEmbedOriginsRequired
+		return nil, errEmbedOriginsRequired
 	}
 	_, settings, err := s.rt.Merchants.MerchantSettings(ctx, mid)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(merchantconfig.EmbedOrigins(settings)) == 0 {
-		return errEmbedOriginsRequired
+	origins := merchantconfig.EmbedOrigins(settings)
+	if len(origins) == 0 {
+		return nil, errEmbedOriginsRequired
 	}
-	return nil
+	return origins, nil
 }
 
 var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "checkout_embed_origins_required",
-	"an embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins").WithParam("checkout.ui_mode")
+	"an embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins")
+
+// orderCheckout is what a customer's order checkout needs before the order
+// exists: the checkout host and the merchant's first registered origin, the
+// one it returns to. The request names no URL.
+func (s *Service) orderCheckout(ctx context.Context, params billing.CreateMyOrderParams) (origin, successURL string, err error) {
+	switch {
+	case params.Payment != nil:
+		return "", "", apperr.Invalidf("checkout and payment are exclusive: the checkout takes the payment").WithParam("checkout")
+	case params.Checkout.UIMode != "" && params.Checkout.UIMode != billing.CheckoutEmbedded:
+		return "", "", apperr.Invalidf("checkout.ui_mode is embedded: a customer's checkout is framed by the merchant's registered origins").WithParam("checkout.ui_mode")
+	}
+	origin = s.rt.HostedCheckoutOrigin()
+	if origin == "" {
+		return "", "", apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
+	}
+	origins, err := s.embedOrigins(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return origin, origins[0] + "/", nil
+}
+
+// attachCheckout gives the answer's order, read as it is now (a retry's
+// answer is the first's), its embedded checkout in place of the one it had:
+// a fresh URL on every answer. A paid or closed order takes none.
+func (s *Service) attachCheckout(ctx context.Context, rt *orderRuntime, actor OrderActor, answer OrderAnswer, origin, successURL string) (OrderAnswer, error) {
+	live, err := s.orderView(ctx, rt, actor, answer.Order.ID.UUID())
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	order := *live
+	answer.Order = &order
+	if order.Status != billing.OrderOpen || order.CollectionOwner != billing.OrderCollectionEngine {
+		return answer, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	c, ok, err := hostedcheckout.AttachMine(ctx, rt.DB.Gen(ctx), origin, mid, actor.Customer, order.ID, successURL, order.ExpiresAt, s.now())
+	switch {
+	case err != nil:
+		return OrderAnswer{}, err
+	case !ok:
+		return answer, nil
+	}
+	s.rt.Go("checkout domain registration", func(ctx context.Context) {
+		if err := s.rt.RegisterCheckoutDomain(ctx, mid); err != nil && ctx.Err() == nil {
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("checkout domain: cannot queue its registration")
+		}
+	})
+	order.Checkout = &c
+	return answer, nil
+}
 
 // CancelMerchantOrder withdraws an open order the merchant created.
 func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {

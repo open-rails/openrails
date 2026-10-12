@@ -107,7 +107,11 @@ func TestMediaURLs(t *testing.T) {
 // A members-only video is sold with the membership.
 func TestCourseList(t *testing.T) {
 	app := startApp(t)
-	type price struct{ Key, Amount, Currency, Terms string }
+	type price struct {
+		Key        string
+		UnitAmount string `json:"unit_amount"`
+		Currency   string
+	}
 	type row struct {
 		Slug, Title string
 		MembersOnly bool `json:"members_only"`
@@ -128,8 +132,8 @@ func TestCourseList(t *testing.T) {
 		require.Equal(t, productReads, app.queries.count("ListCurrentPricesByProducts"), "their prices with them")
 		require.Equal(t, entitlementReads, app.queries.count("ListValidEntitlementCaches"), "entitlement reads per page")
 	}
-	cssPrices := []price{{"rent", "1990000", "USD", "for 3 days"}, {"purchase", "4990000", "USD", "to keep"}}
-	membershipPrices := []price{{"monthly", "10000000", "USD", "every 30 days"}, {"yearly", "99000000", "USD", "every 365 days"}}
+	cssPrices := []price{{"rent", "1990000", "USD"}, {"purchase", "4990000", "USD"}}
+	membershipPrices := []price{{"monthly", "10000000", "USD"}, {"yearly", "99000000", "USD"}}
 
 	read("", "limit=1", 1, 0)
 	require.Equal(t, []row{{"css-101", "Intro to CSS", false, false, "course-101", cssPrices}}, page.Data)
@@ -325,30 +329,40 @@ func (a *app) signUp(t *testing.T, name string) string {
 
 const password = "correct horse battery staple"
 
-// buy pays for product's price as the buy page's BuyButton does: the
-// signed-in customer orders the catalog price and pays it with a new card in
-// the same call.
+// buy pays for product's price as the page's BuyButton does: the signed-in
+// customer orders the price the app's page carries and pays it with a new
+// card in the same call.
 func (a *app) buy(t *testing.T, token, product, price string) {
 	t.Helper()
-	var catalog struct {
+	// As the pages do: the app's own answers carry the products on sale, a
+	// course's 402 everything that unlocks it.
+	var list struct {
 		Data []struct {
-			Key    string `json:"key"`
-			Prices []struct {
-				ID         string `json:"id"`
-				Key        string `json:"key"`
-				UnitAmount string `json:"unit_amount"`
-			} `json:"prices"`
+			Slug string `json:"slug"`
 		} `json:"data"`
 	}
-	// As the page does: the app says which merchant sells its courses.
-	var store struct {
-		MerchantID string `json:"merchant_id"`
+	a.call(t, "", http.MethodGet, "/api/courses?limit=50", nil, &list)
+	type offer struct {
+		Key    string `json:"key"`
+		Prices []struct {
+			ID         string `json:"id"`
+			Key        string `json:"key"`
+			UnitAmount string `json:"unit_amount"`
+		} `json:"prices"`
 	}
-	a.call(t, "", http.MethodGet, "/api/courses?limit=1", nil, &store)
-	a.call(t, "", http.MethodGet, "/billing/v1/products?merchant="+store.MerchantID+"&keys="+product, nil, &catalog)
+	var offers []offer
+	for _, course := range list.Data {
+		res := a.get(t, "", "/api/courses/"+course.Slug)
+		var gate struct {
+			Products []offer `json:"products"`
+		}
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&gate))
+		require.NoError(t, res.Body.Close())
+		offers = append(offers, gate.Products...)
+	}
 	var line map[string]string
 	var total string
-	for _, p := range catalog.Data {
+	for _, p := range offers {
 		for _, priceRow := range p.Prices {
 			if p.Key == product && priceRow.Key == price {
 				line, total = map[string]string{"price_id": priceRow.ID}, priceRow.UnitAmount
@@ -377,11 +391,15 @@ func (a *app) requireBuy(t *testing.T, token, path string, products []string, bu
 	require.Equal(t, http.StatusPaymentRequired, res.StatusCode, path)
 	var body struct {
 		Error, Buy string
-		Products   []string
+		Products   []struct{ Key string }
 	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	require.Equal(t, "access_required", body.Error)
-	require.Equal(t, products, body.Products)
+	var keys []string
+	for _, product := range body.Products {
+		keys = append(keys, product.Key)
+	}
+	require.Equal(t, products, keys)
 	require.Equal(t, buy, body.Buy)
 }
 

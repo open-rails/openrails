@@ -233,7 +233,10 @@
           "already_owned",
           "card_attempts_blocked",
           "card_declined",
+          "checkout_embed_origins_required",
           "customer_action_required",
+          "customer_session_required",
+          "hosted_checkout_unavailable",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -1331,80 +1334,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/products": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "parameters": [
-          {
-            "name": "keys",
-            "in": "query",
-            "required": true,
-            "style": "form",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "merchant",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": [
-          "invalid_query",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:public",
           "request"
         ]
       }
@@ -14404,6 +14333,9 @@
           },
           "reusable": {
             "type": "boolean"
+          },
+          "checkout": {
+            "$ref": "#/components/schemas/MyOrderCheckoutParams"
           }
         }
       },
@@ -17803,6 +17735,18 @@
           "limits",
           "query_shape"
         ]
+      },
+      "MyOrderCheckoutParams": {
+        "type": "object",
+        "properties": {
+          "ui_mode": {
+            "type": "string",
+            "enum": [
+              "embedded",
+              "hosted"
+            ]
+          }
+        }
       },
       "NetworkLink": {
         "type": "object",

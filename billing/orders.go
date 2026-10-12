@@ -116,6 +116,11 @@ type CreateMyOrderParams struct {
 	ExpectedTotal *int64              `json:"expected_total,omitempty,string"`
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`
+	// Checkout asks, instead of Payment, for the order's embedded checkout:
+	// Order.Checkout.URL on the checkout host. It is not part of the order:
+	// a retry answers the same order with a fresh URL, replacing the
+	// customer's last.
+	Checkout *MyOrderCheckoutParams `json:"checkout,omitempty"`
 }
 
 // PreviewOrderParams prices lines for one customer, as a merchant order

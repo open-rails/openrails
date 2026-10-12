@@ -30,7 +30,10 @@ export function subscription(overrides: Partial<Row> = {}): Row {
     payments: undefined,
     cancel_portal_url: undefined,
     current_period_ends_at: "2036-09-16T12:00:00Z",
-    access: { starts_at: "2036-08-17T12:00:00Z", ends_at: "2036-09-16T12:00:00Z" },
+    access: {
+      starts_at: "2036-08-17T12:00:00Z",
+      ends_at: "2036-09-16T12:00:00Z",
+    },
     price: {
       ...subscriptionFixture.price,
       unit_amount: "9990000",
@@ -179,7 +182,9 @@ export function product(overrides: Partial<Row> = {}): Row {
         billing_interval_hours: 720,
         trial_unit_amount: null,
         trial_duration_hours: null,
-        psps: { mobius: { status: "linked", ids: null, sync_status: "unknown" } },
+        psps: {
+          mobius: { status: "linked", ids: null, sync_status: "unknown" },
+        },
         created_at: "2026-09-01T00:00:00Z",
         updated_at: "2026-09-01T00:00:00Z",
       },
@@ -197,16 +202,16 @@ const cursorPage = (rows: Row[], limit: number, cursor: string | null) => {
   }
 }
 
-/** The fake's one merchant: the id its public catalog answers to. */
-export const MERCHANT = "0190a000-0000-7000-8000-00000000000a"
-
 export interface FakeBilling {
   subscriptions: Row[]
   methods: Row[]
   payments: Row[]
   /** The bills `GET /me/orders?ids=` reads. */
   orders: Row[]
+  /** The catalog a plan change picks its price from. */
   products: Row[]
+  /** The merchant's registered origins in `GET /me/config`. */
+  embedOrigins: string[]
   /** The payment setup's PSPs in `GET /me/config`. */
   psps: Record<string, unknown>[]
   /** The registry in `GET /config`. */
@@ -228,6 +233,7 @@ export function fakeBilling(
       | "payments"
       | "orders"
       | "products"
+      | "embedOrigins"
       | "psps"
       | "currencies"
     >
@@ -239,6 +245,7 @@ export function fakeBilling(
     payments: seed.payments ?? [payment()],
     orders: seed.orders ?? [],
     products: seed.products ?? [product()],
+    embedOrigins: seed.embedOrigins ?? [],
     psps: seed.psps ?? [],
     currencies: seed.currencies ?? currenciesFixture,
     orderStatus: "open",
@@ -411,32 +418,19 @@ export function fakeBilling(
             display_name: "Test Shop",
             logo_url: null,
             support_url: null,
-            embed_origins: [],
+            embed_origins: state.embedOrigins,
           },
         })
-      if (key === "GET /products") {
-        // A lookup by product key: one merchant, and 1 to 100 keys.
-        const other = [...url.searchParams.keys()].find(
-          (n) => n !== "keys" && n !== "merchant"
-        )
-        if (other)
-          return apiError(400, "invalid_query", `the public catalog takes only merchant and keys, not ${other}`)
-        const merchants = url.searchParams.getAll("merchant")
-        if (merchants.length !== 1 || !merchants[0])
-          return apiError(400, "invalid_query", "merchant is one merchant id")
-        if (merchants[0] !== MERCHANT)
-          return apiError(404, "resource_not_found", "merchant not found")
-        const keys = url.searchParams.getAll("keys")
-        if (!keys.length || keys.length > 100 || keys.includes(""))
-          return apiError(400, "invalid_query", "keys names 1 to 100 products")
-        const data = state.products.filter((p) => keys.includes(String(p.key)))
-        return json(200, { data, next_cursor: null })
-      }
       if (key === "GET /me/orders") {
         // Like OpenRails: a set of ids takes no other parameter.
-        if (url.searchParams.has("ids") && [...url.searchParams.keys()].some((k) => k !== "ids"))
+        if (
+          url.searchParams.has("ids") &&
+          [...url.searchParams.keys()].some((k) => k !== "ids")
+        )
           return apiError(400, "invalid_query", "ids takes no other parameter")
-        const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)
+        const ids = (url.searchParams.get("ids") ?? "")
+          .split(",")
+          .filter(Boolean)
         const rows = ids.length
           ? state.orders.filter((o) => ids.includes(String(o.id)))
           : state.orders
@@ -444,7 +438,19 @@ export function fakeBilling(
       }
       if (key === "POST /me/orders") {
         const line = (body?.lines as Row[] | undefined)?.[0]
-        return json(201, order({ id: `ord_${line?.price_id ?? "cart"}` }))
+        const id = `ord_${line?.price_id ?? "cart"}`
+        // Like OpenRails: a checkout answers its URL on the checkout host.
+        const checkout = body?.checkout
+          ? {
+              url: `https://pay.test/c/${id}#cks_test`,
+              ui_mode: "embedded",
+              expires_at: "2036-09-01T00:15:00Z",
+              success_url: `${state.embedOrigins[0] ?? "https://shop.test"}/`,
+              cancel_url: null,
+              saved_payment_methods: true,
+            }
+          : null
+        return json(201, order({ id, checkout }))
       }
       if ((m = key.match(/^GET \/me\/orders\/([^/]+)$/))) {
         const paid = state.orderStatus === "complete"

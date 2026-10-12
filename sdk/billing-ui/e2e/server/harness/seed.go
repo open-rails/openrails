@@ -146,6 +146,19 @@ products:
 	return pass.ID.String(), monthly.ID.String(), nil
 }
 
+// Products is what the host's page carries: its products on sale named by
+// keys, their prices as a buyer sees them. The browser never reads the catalog.
+func (r *Runtime) Products(ctx context.Context, keys []string) ([]billing.Product, error) {
+	page, err := r.Client.ListProducts(ctx, billing.ProductListParams{Keys: keys, Archived: new(false), ForSale: new(true), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
+	if err != nil {
+		return nil, err
+	}
+	for i := range page.Items {
+		page.Items[i].Prices = billing.BuyerPrices(page.Items[i].Prices)
+	}
+	return page.Items, nil
+}
+
 func product(ctx context.Context, c *openrails.Client, key, name string, price billing.CreatePriceParams) (string, string, error) {
 	p, err := c.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: name, Entitlements: []string{key}})
 	if err != nil {

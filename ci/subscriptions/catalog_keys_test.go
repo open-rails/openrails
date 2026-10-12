@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -222,8 +221,8 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 
 	public := func() map[string]bool {
 		listed := map[string]bool{}
-		for _, item := range w.public(sold.Key, granted.Key)["data"].([]any) {
-			listed[item.(map[string]any)["key"].(string)] = true
+		for _, product := range w.onSale(sold.Key, granted.Key) {
+			listed[product.Key] = true
 		}
 		return listed
 	}
@@ -266,13 +265,11 @@ func TestProductKeyCap(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }
 
-// The public catalog is a lookup by product key: the products on sale of the
-// merchant ?merchant= names, named by ?keys=, at most billing.MaxBatchItems,
-// in one page. It refuses a missing or malformed merchant, a missing keys, an
-// entitlement filter and any other parameter, and answers 404 for a merchant
-// that does not exist. The Go client's ListProducts is the host backend's read:
-// by entitlement too, in process and remote.
-func TestPublicCatalogIsAKeyLookup(t *testing.T) {
+// No public route reads the catalog. The host's backend reads what is on sale
+// with the Go client's ListProducts, by product key (at most
+// billing.MaxBatchItems, in one page) or entitlement, in process and remote,
+// and puts it in its own pages.
+func TestHostReadsWhatIsOnSale(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.client[embedded]
@@ -296,59 +293,28 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	granted := product("granted", []string{"course:101"}, false, false)
 	retired := product("retired", []string{"course:101"}, true, true)
 
-	get := func(query string) (int, map[string]any) {
-		t.Helper()
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/products?"+query, nil)
-		require.NoError(t, err)
-		res, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer res.Body.Close()
-		var body map[string]any
-		require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
-		return res.StatusCode, body
-	}
-	mid := w.client[embedded].MerchantID().String()
 	sorted := func(keys ...string) []string { slices.Sort(keys); return keys }
-	public := func(keys ...string) []string {
+	onSale := func(keys ...string) []string {
 		t.Helper()
-		q := url.Values{"merchant": {mid}, "keys": keys}
-		status, body := get(q.Encode())
-		require.Equal(t, http.StatusOK, status, body)
-		require.Nil(t, body["next_cursor"], "one page")
-		var listed []string
-		for _, item := range body["data"].([]any) {
-			listed = append(listed, item.(map[string]any)["key"].(string))
-		}
-		return sorted(listed...)
+		page, err := c.ListProducts(t.Context(), billing.ProductListParams{Keys: keys, Archived: new(false), ForSale: new(true), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
+		require.NoError(t, err)
+		require.Empty(t, page.Next, "one page")
+		return productKeys(t, page)
 	}
-	require.Equal(t, sorted(course.Key, bundle.Key), public(course.Key, bundle.Key, granted.Key, retired.Key), "the named products on sale")
-	require.Equal(t, []string{member.Key}, public(member.Key))
+	require.Equal(t, sorted(course.Key, bundle.Key), onSale(course.Key, bundle.Key, granted.Key, retired.Key), "the named products on sale")
+	require.Equal(t, []string{member.Key}, onSale(member.Key))
 	atCap := []string{course.Key}
 	for i := 1; i < billing.MaxBatchItems; i++ {
 		atCap = append(atCap, fmt.Sprintf("absent-%d-%s", i, n))
 	}
-	require.Equal(t, []string{course.Key}, public(atCap...), "up to the cap")
+	require.Equal(t, []string{course.Key}, onSale(atCap...), "up to the cap")
 
-	named := "merchant=" + mid
-	for _, refused := range []struct{ query, param string }{
-		{named, "keys"},
-		{named + "&entitlement=course:101", "entitlement"},
-		{named + "&entitlement=course:102&keys=" + bundle.Key, "entitlement"},
-		{named + "&keys=", "keys"},
-		{named + "&keys=" + course.Key + "&limit=1", "limit"},
-		{url.Values{"merchant": {mid}, "keys": append(atCap, "one-more")}.Encode(), "keys"},
-		{"keys=" + course.Key, "merchant"},
-		{"merchant=" + w.slug + "&keys=" + course.Key, "merchant"},
-		{named + "&" + named + "&keys=" + course.Key, "merchant"},
-	} {
-		status, body := get(refused.query)
-		require.Equal(t, http.StatusBadRequest, status, refused.query)
-		require.Equal(t, billing.CodeInvalidQuery, errorCode(body), refused.query)
-		require.Equal(t, refused.param, body["error"].(map[string]any)["param"], refused.query)
-	}
-	status, body := get("merchant=" + uuid.NewString() + "&keys=" + course.Key)
-	require.Equal(t, http.StatusNotFound, status, body)
-	require.Equal(t, billing.CodeResourceNotFound, errorCode(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/products?"+url.Values{"merchant": {w.client[embedded].MerchantID().String()}, "keys": {course.Key}}.Encode(), nil)
+	require.NoError(t, err)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNotFound, res.StatusCode, "the browser never reads the catalog")
 
 	for _, top := range []topology{embedded, remote} {
 		page, err := w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: []string{"course:101"}})

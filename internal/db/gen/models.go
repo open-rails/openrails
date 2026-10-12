@@ -850,7 +850,7 @@ type BillingOrder struct {
 	UpdatedAt   time.Time
 	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
 	PaymentStatus string
-	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once, on a merchant order.
+	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once on a merchant order; on a customer's own order, again each time the customer asks for its checkout, which ends the last.
 	CheckoutSecretHash []byte
 	// When the checkout URL stops working; no later than the order's own expiry.
 	CheckoutExpiresAt           *time.Time

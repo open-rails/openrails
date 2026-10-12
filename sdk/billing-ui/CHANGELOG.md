@@ -1,5 +1,22 @@
 # Changelog
 
+## Hosts sell the products their pages carry
+
+- Breaking: the browser never reads the catalog. `listProducts`, `useProducts`,
+  `ProductListOptions` and `ProductsState` are removed with OpenRails' public
+  `GET /products`; your server reads the catalog with the Go client and puts the
+  products in its page (`billing.BuyerPrices`).
+- Breaking: `<ProductList products>` takes the host's products (no `merchant`
+  or `keys`); `<BuyButton price>` takes one of their prices (no `merchant`,
+  `product` or price key). `Purchase` is folded into `BuyButton`.
+- `createOrder({ checkout: { ui_mode: "embedded" } })` creates the order with
+  its embedded checkout in one call: `order.checkout.url` on the checkout host,
+  15 minutes, for the merchant's own signed-in person. A retry with the key
+  answers the same order with a fresh URL.
+- On a site the merchant registered to frame its checkout, `BuyButton` creates
+  the order that way and frames it (`<EmbeddedCheckout>`); elsewhere it pays on
+  the page as before. The client exports the `OrderCheckout` type.
+
 ## Entitlements read
 
 - `getEntitlements()` lists the entitlement keys the customer holds

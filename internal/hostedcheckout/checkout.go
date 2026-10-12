@@ -31,7 +31,8 @@ var (
 	ErrExpired = errors.New("hostedcheckout: checkout expired")
 )
 
-// Checkout is a hosted checkout as stored on its order.
+// Checkout is a hosted checkout as stored on its order: the merchant's, or
+// the customer's own.
 type Checkout struct {
 	MerchantID          billing.MerchantID
 	OrderID             billing.OrderID
@@ -45,6 +46,11 @@ type Checkout struct {
 
 // Expired reports whether the checkout's URL is past its expiry at now.
 func (c Checkout) Expired(now time.Time) bool { return !c.ExpiresAt.After(now) }
+
+// View is the checkout as an order shows it, without its URL.
+func (c Checkout) View() billing.OrderCheckout {
+	return billing.OrderCheckout{UIMode: c.UIMode, ExpiresAt: c.ExpiresAt, SuccessURL: c.SuccessURL, CancelURL: c.CancelURL, SavedPaymentMethods: c.SavedPaymentMethods}
+}
 
 // Plan resolves a merchant's checkout request for a new order: its expiry
 // (orderExpiry, when the order has its own, bounds it) and return URLs with

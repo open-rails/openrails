@@ -35,6 +35,16 @@ type OrderCheckoutParams struct {
 	SavedPaymentMethods bool `json:"saved_payment_methods,omitempty"`
 }
 
+// MyOrderCheckoutParams asks POST /v1/me/orders for the order's checkout:
+// embedded (the default, and the only mode a customer asks for), framed by
+// the merchant's registered origins and returning to the first of them. Its
+// URLs are the merchant's; the request names none. Only the merchant's own
+// person, signed in, asks for one: it offers their saved cards. It lasts 15
+// minutes, or until the order expires when sooner.
+type MyOrderCheckoutParams struct {
+	UIMode CheckoutUIMode `json:"ui_mode,omitempty"`
+}
+
 // OrderCheckout is an order's hosted checkout.
 type OrderCheckout struct {
 	// URL is the checkout URL. Creation and an authenticated retry while the

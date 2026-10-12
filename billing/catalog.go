@@ -126,9 +126,25 @@ type Price struct {
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
+// BuyerPrices are prices as a buyer sees them, for a host to put in its own
+// pages: which PSPs sell each, without their identifiers or the operator's
+// pending work.
+func BuyerPrices(prices []Price) []Price {
+	out := make([]Price, len(prices))
+	for i, p := range prices {
+		psps := make(map[string]PSPLinkState, len(p.PSPs))
+		for key, state := range p.PSPs {
+			psps[key] = PSPLinkState{Status: state.Status, SyncStatus: SyncStatusUnknown}
+		}
+		p.PSPs, p.PendingManualActions = psps, []PendingAction{}
+		out[i] = p
+	}
+	return out
+}
+
 // PSPLinkState is a price's state on one PSP: the PSP's own identifiers for
-// it and, after a verifying read, whether the PSP still matches. Public
-// catalog routes answer the status only.
+// it and, after a verifying read, whether the PSP still matches. A buyer's
+// view (BuyerPrices) keeps the status only.
 type PSPLinkState struct {
 	Status     PSPLinkStatus     `json:"status"`
 	IDs        map[string]string `json:"ids"`

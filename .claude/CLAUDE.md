@@ -56,7 +56,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   unless the host turns them on; `Programmatic` (`/v1/app`) admits applications.
   Customer support uses `/v1/admin`, Metrics uses `/v1/metrics`, Catalog uses `/v1/catalog`,
   MerchantConfig uses `/v1/merchant`, including findings and PSP refresh.
-  Public product lookup is `GET /v1/products`, separate from catalog management. Customer-support permissions
+  No public route reads the catalog: a host's server reads it with the Go client and puts products in its
+  own pages (`billing.BuyerPrices`). Customer-support permissions
   are `merchant:customer:read` and `merchant:customer:manage` (or their `root:` twins); catalog, config
   and metrics remain separate capabilities. There are no legacy-path aliases.
   No route registers a merchant or manages a

@@ -5,12 +5,10 @@ import { describe, expect, it, vi } from "vitest"
 import { createBillingClient } from "../client/client"
 import { isBillingError } from "../client/errors"
 import {
-  MERCHANT,
   apiError,
   fakeBilling,
   payment,
   paymentMethod,
-  product,
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
@@ -21,12 +19,7 @@ import {
   useCustomerConfig,
 } from "./config"
 import { useBillingRefresh } from "./context"
-import {
-  usePaymentMethods,
-  usePayments,
-  useProducts,
-  useSubscriptions,
-} from "./hooks"
+import { usePaymentMethods, usePayments, useSubscriptions } from "./hooks"
 import { BillingProvider, type BillingProviderProps } from "./provider"
 
 function setup<T>(
@@ -71,7 +64,18 @@ describe("useConfig", () => {
 
 describe("useCustomerConfig", () => {
   it("fetches GET /me/config once for every reader", async () => {
-    const server = fakeBilling({ psps: [{ psp_id: "psp_1", key: "nmi", rail: "nmi", custodian: "psp", display_name: "Card", flow: "tokenize" }] })
+    const server = fakeBilling({
+      psps: [
+        {
+          psp_id: "psp_1",
+          key: "nmi",
+          rail: "nmi",
+          custodian: "psp",
+          display_name: "Card",
+          flow: "tokenize",
+        },
+      ],
+    })
     const { result } = setup(
       () => ({ a: useCustomerConfig(), b: useCustomerConfig() }),
       server
@@ -95,7 +99,9 @@ describe("useCustomerConfig", () => {
     await waitFor(() => expect(store.snapshot().error).not.toBeNull())
     // Signed in since: the next component to mount reads it.
     store.ensure()
-    await waitFor(() => expect(store.snapshot().config).toEqual({ loaded: true }))
+    await waitFor(() =>
+      expect(store.snapshot().config).toEqual({ loaded: true })
+    )
     expect(store.snapshot().error).toBeNull()
     store.ensure()
     expect(read).toHaveBeenCalledTimes(2)
@@ -205,26 +211,6 @@ describe("useSubscriptions", () => {
 })
 
 describe("plan change", () => {
-  it("looks the products up by key", async () => {
-    const server = fakeBilling({
-      products: [
-        product(),
-        product({ id: "prod_pro", key: "pro", display_name: "Pro" }),
-        product({ id: "prod_other", key: "other" }),
-      ],
-    })
-    const { result } = setup(
-      () => useProducts({ merchant: MERCHANT, keys: ["plus", "pro"] }),
-      server
-    )
-    await waitFor(() => expect(result.current.products).toHaveLength(2))
-    expect(result.current.products![0].prices[0]).toMatchObject({
-      id: "price_plus",
-      unit_amount: "19990000",
-    })
-    expect(server.calls).toEqual(["GET /products"])
-  })
-
   it("changes the subscription, refetches the list and notifies the host", async () => {
     const server = fakeBilling()
     const onChange = vi.fn()

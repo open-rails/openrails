@@ -314,6 +314,21 @@ export type OrderLine = z.infer<typeof orderLineSchema>
  * its payment's (`requires_payment_method | requires_action | processing |
  * succeeded`).
  */
+/**
+ * An order's hosted checkout: the merchant's, or the customer's embedded one
+ * (`createOrder({ checkout })`). `url` only on the answer that made it.
+ */
+export const orderCheckoutSchema = z.object({
+  url: z.string().nullish(),
+  /** `hosted`, or `embedded` in the merchant's registered origins. */
+  ui_mode: z.enum(["hosted", "embedded"]).catch("hosted"),
+  expires_at: time,
+  success_url: z.string(),
+  cancel_url: z.string().nullish(),
+  saved_payment_methods: z.boolean(),
+})
+export type OrderCheckout = z.infer<typeof orderCheckoutSchema>
+
 export const orderSchema = z.object({
   id: z.string(),
   customer_id: z.string(),
@@ -321,14 +336,19 @@ export const orderSchema = z.object({
   /** Only `engine` orders accept generic payment commands. */
   collection_owner: z.string().nullish(),
   collection_psp_id: z.string().nullish(),
-  provider_bills: z.array(z.object({
-    psp_id: z.string(),
-    kind: z.string(),
-    reference: z.string(),
-    settlement_source: z.string().nullish(),
-    non_cash_amount: amount,
-    settled_at: time.nullish(),
-  })).nullish().transform((bills) => bills ?? []),
+  provider_bills: z
+    .array(
+      z.object({
+        psp_id: z.string(),
+        kind: z.string(),
+        reference: z.string(),
+        settlement_source: z.string().nullish(),
+        non_cash_amount: amount,
+        settled_at: time.nullish(),
+      })
+    )
+    .nullish()
+    .transform((bills) => bills ?? []),
   status: z.string(),
   number: z.string().nullish(),
   currency: z.string(),
@@ -352,17 +372,7 @@ export const orderSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   /** The order's hosted checkout; `url` only on the answer that made it. */
-  checkout: z
-    .object({
-      url: z.string().nullish(),
-      /** `hosted`, or `embedded` in the merchant's registered origins. */
-      ui_mode: z.enum(["hosted", "embedded"]).catch("hosted"),
-      expires_at: time,
-      success_url: z.string(),
-      cancel_url: z.string().nullish(),
-      saved_payment_methods: z.boolean(),
-    })
-    .nullish(),
+  checkout: orderCheckoutSchema.nullish(),
   renewal: z
     .object({
       subscription_id: z.string(),

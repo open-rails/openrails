@@ -977,6 +977,7 @@ pkg openrails/billing, const UsageByResource UsageGroupBy = "resource"
 pkg openrails/billing, const UsageEventIDPrefix untyped string = "uev_"
 pkg openrails/billing, const UsageFailed UsageOutcome = "failed"
 pkg openrails/billing, const UsageSucceeded UsageOutcome = "succeeded"
+pkg openrails/billing, func BuyerPrices([]Price) []Price
 pkg openrails/billing, func ChangeKinds() []ChangeKind
 pkg openrails/billing, func Currencies() []CurrencyUnits
 pkg openrails/billing, func CustomerNotificationActionRequested(string) bool
@@ -1596,6 +1597,7 @@ pkg openrails/billing, type CreateMerchantParams struct, DisplayName string `jso
 pkg openrails/billing, type CreateMerchantParams struct, Name string `json:"name"`
 pkg openrails/billing, type CreateMyOrderParams struct
 pkg openrails/billing, type CreateMyOrderParams struct, Cart bool `json:"cart,omitempty"`
+pkg openrails/billing, type CreateMyOrderParams struct, Checkout *MyOrderCheckoutParams `json:"checkout,omitempty"`
 pkg openrails/billing, type CreateMyOrderParams struct, ExpectedTotal *int64 `json:"expected_total,omitempty,string"`
 pkg openrails/billing, type CreateMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`
 pkg openrails/billing, type CreateMyOrderParams struct, Payment *OrderPaymentParams `json:"payment,omitempty"`
@@ -2327,6 +2329,8 @@ pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"li
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
 pkg openrails/billing, type MigrationFallback string
+pkg openrails/billing, type MyOrderCheckoutParams struct
+pkg openrails/billing, type MyOrderCheckoutParams struct, UIMode CheckoutUIMode `json:"ui_mode,omitempty"`
 pkg openrails/billing, type NetworkAccountID [16]byte
 pkg openrails/billing, type NetworkCustomerListParams struct
 pkg openrails/billing, type NetworkCustomerListParams struct, NetworkAccountID NetworkAccountID `form:"-"`

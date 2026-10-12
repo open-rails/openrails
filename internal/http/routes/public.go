@@ -1,33 +1,26 @@
 package routes
 
 import (
-	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 )
 
 // A public route takes no credential, so the request itself names the
-// merchant whose rows it reads: the public catalog by ?merchant=, a wallet's
-// Solana Pay request by its order. That merchant replaces any pinned before
-// the route, and opens nothing but the route's own answer.
+// merchant whose rows it reads: a wallet's Solana Pay request by its order.
+// That merchant replaces any pinned before the route, and opens nothing but
+// the route's own answer.
 
 // publicMerchant finds a public route's merchant, ahead of its connection.
 func (e *Env) publicMerchant(route Route) []router.Middleware {
-	switch route.Merchant {
-	case MerchantQuery:
-		return []router.Middleware{e.merchantByQuery(route)}
-	case MerchantOrder:
+	if route.Merchant == MerchantOrder {
 		return []router.Middleware{e.merchantByOrder(route)}
 	}
 	return nil
@@ -40,36 +33,6 @@ func (e *Env) directory() *gen.Queries {
 		d = e.Runtime.DB
 	}
 	return d.GenDirectory()
-}
-
-// merchantByQuery pins the live merchant ?merchant= names by id: 400
-// invalid_query unless it is one canonical id, 404 when no live merchant has
-// it.
-func (e *Env) merchantByQuery(route Route) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			values := r.Request.URL.Query()["merchant"]
-			var id billing.MerchantID
-			if len(values) == 1 {
-				id, _ = billing.ParseMerchantID(values[0])
-			}
-			if id.IsZero() || id.String() != values[0] {
-				r.AbortAPIError(api.Coded(billing.CodeInvalidQuery, "merchant is one merchant id").WithParam("merchant"))
-				return
-			}
-			row, err := e.directory().GetMerchantDirectoryByID(r.Request.Context(), id.UUID())
-			switch {
-			case errors.Is(err, pgx.ErrNoRows), err == nil && row.Status != string(merchants.StatusActive):
-				r.AbortCode(billing.CodeResourceNotFound, "merchant not found")
-			case err != nil:
-				log.WithError(err).WithField("route", route.Key()).Error("openrails: merchant lookup failed")
-				r.AbortCode(billing.CodeInternalError, "")
-			default:
-				pinPublic(r, id)
-				next(r)
-			}
-		}
-	}
 }
 
 // merchantByOrder pins the live merchant of the order {id} names: 404 for an

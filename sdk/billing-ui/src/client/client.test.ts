@@ -8,7 +8,6 @@ import {
   apiError,
   fakeBilling,
   json,
-  MERCHANT,
   price,
   product,
   subscription,
@@ -332,49 +331,6 @@ describe("server errors", () => {
   })
 })
 
-describe("listProducts", () => {
-  it("looks products up by key, a parameter per key", async () => {
-    const server = fakeBilling({
-      products: [
-        product({ id: "prod_a", key: "a", entitlements: ["course:101"] }),
-        product({ id: "prod_b", key: "b", entitlements: ["course:102"] }),
-      ],
-    })
-    const client = createBillingClient({ fetch: server.fetch })
-    const page = await client.listProducts({
-      merchant: MERCHANT,
-      keys: ["a", "c"],
-    })
-    expect(page.data.map((p) => p.key)).toEqual(["a"])
-    const [url] = server.fetch.mock.calls[0]!
-    expect(String(url)).toBe(
-      `/billing/v1/products?merchant=${MERCHANT}&keys=a&keys=c`
-    )
-  })
-
-  it("answers another merchant's catalog as the server does", async () => {
-    const server = fakeBilling({
-      products: [product({ id: "prod_a", key: "a" })],
-    })
-    const client = createBillingClient({ fetch: server.fetch })
-    await expect(
-      client.listProducts({
-        merchant: "0190a000-0000-7000-8000-00000000000b",
-        keys: ["a"],
-      })
-    ).rejects.toMatchObject({ status: 404, code: "resource_not_found" })
-  })
-
-  it("asks nothing for no keys", async () => {
-    const server = fakeBilling()
-    const client = createBillingClient({ fetch: server.fetch })
-    expect(await client.listProducts({ merchant: MERCHANT, keys: [] })).toEqual(
-      { data: [], next_cursor: null }
-    )
-    expect(server.fetch).not.toHaveBeenCalled()
-  })
-})
-
 describe("an expired token", () => {
   const expired = () => apiError(401, "credential_expired")
   // tokens hands out t1, t2, ... and counts what the host was asked for.
@@ -449,20 +405,17 @@ describe("an expired token", () => {
     expect(fetchToken).toHaveBeenCalledTimes(1)
   })
 
-  it("is never asked for by the public reads", async () => {
+  it("is never asked for by the public read", async () => {
     const { fetchToken, getToken } = tokens()
-    const server = fakeBilling({
-      products: [product({ id: "prod_a", key: "a" })],
-    })
+    const server = fakeBilling()
     const client = createBillingClient({ fetch: server.fetch, getToken })
     await client.getConfig()
-    await client.listProducts({ merchant: MERCHANT, keys: ["a"] })
     expect(fetchToken).not.toHaveBeenCalled()
     expect(
       server.fetch.mock.calls.map(([, init]) =>
         new Headers(init?.headers).get("Authorization")
       )
-    ).toEqual([null, null])
+    ).toEqual([null])
   })
 })
 

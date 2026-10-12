@@ -235,13 +235,12 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 #### Routes
 
-These are OpenRails' routes that you just mounted. In this example, the full routes will look like `mydomain.com/billing/v1/products`:
+These are OpenRails' routes that you just mounted. In this example, the full routes will look like `mydomain.com/billing/v1/config`:
 
 **Public** (always mounted; requires no user auth)
 
 | Route | What it does |
 |---|---|
-| `GET /v1/products` | the products on sale that you name, each with its current prices: `?keys=` (1 to 100 product keys) is required, one page; any other parameter is refused; the catalog is never listed whole (Stripe's lookup keys) |
 | `GET /v1/config` | how this deployment is set up: which route groups and features are on, the currency and rail registries, each PSP's public browser config, Solana tokens, and the captcha to solve when asked (billing-ui reads it once) |
 | `GET /v1/orders/{id}/solana-pay` | Called by the customer's wallet app (from the QR code), not the browser; no sign-in. Returns the merchant's name and icon. Not mounted if Solana is not configured. |
 | `POST /v1/orders/{id}/solana-pay` | The wallet sends its address and gets back the transaction to sign; it signs and submits it to Solana itself, and OpenRails watches the chain for the payment, then completes the order. No sign-in; not mounted if Solana is not configured. |
@@ -254,7 +253,7 @@ These are OpenRails' routes that you just mounted. In this example, the full rou
 | `DELETE /v1/me/cart` | empty their cart |
 | `PUT /v1/me/cart/lines/{price_id}` | set a line's quantity (0 removes it) |
 | `POST /v1/me/orders/preview` | the total and the ways it can be paid; changes nothing |
-| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next |
+| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or creating the order to pay next, with its embedded checkout on the checkout host when asked (`checkout`: 15 minutes, framed by the merchant's registered origins) |
 | `GET /v1/me/orders` | their orders: purchases, subscription renewals and usage periods |
 | `GET /v1/me/orders/{id}` | one order |
 | `POST /v1/me/orders/{id}/pay` | pay an open order (a failed renewal or a usage period included), with a saved or new card |
@@ -451,8 +450,8 @@ API asks OpenRails two things: what each course costs, and what the user holds.
 AuthKit's token rides `fetch`, not page loads or `<video src>`, so your pages
 fetch this API with `authFetch` and play a short-lived signed URL. (In a real
 app, content and previews come from ContentKit, whose paywall names the
-entitlement to sell; your server finds the products with `ListProducts` and
-`<Offers keys>` sells them.)
+entitlement to sell; your server finds the products with `ListProducts`, puts
+them in its answer, and `<ProductList products>` sells them.)
 
 **Your courses**, each with the keys that unlock it (its own, or the channel
 membership; a members-only video only the membership), and the one question
@@ -519,7 +518,9 @@ func anyHeld(owned map[string]bool, keys []string) bool {
 
 **List courses**, with prices and what the user owns. A page costs one product
 read (`ListProducts`, none while the client holds those products in memory) and
-one entitlement read, never one per course:
+one entitlement read, never one per course. The browser never reads the
+catalog: the page carries each price as a buyer sees it (`billing.BuyerPrices`),
+and billing-ui sells it:
 
 ```go
 // GET /api/courses?cursor=&limit= pages over the host's courses. Each page
@@ -549,11 +550,10 @@ r.GET("/api/courses", authkitgin.Optional(ak), func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	prices := map[string][]gin.H{} // by product key
+	// Each product's prices as a buyer sees them, for the page's BuyButtons.
+	prices := map[string][]billing.Price{} // by product key
 	for _, product := range offers.Items {
-		for _, p := range product.Prices {
-			prices[product.Key] = append(prices[product.Key], gin.H{"key": p.Key, "amount": strconv.FormatInt(p.UnitAmount, 10), "currency": p.Currency, "terms": terms(p)})
-		}
+		prices[product.Key] = billing.BuyerPrices(product.Prices)
 	}
 	data := []gin.H{}
 	for _, course := range page {
@@ -594,17 +594,18 @@ r.GET("/api/courses/:course", authkitgin.Optional(ak), func(c *gin.Context) {
 		return
 	}
 	// Everything on sale granting a key that unlocks it: the course, the
-	// bundle, the membership. The buy page offers them by product key.
+	// bundle, the membership, with their prices as a buyer sees them. The
+	// buy page sells them.
 	offers, err := bill.ListProducts(c, billing.ProductListParams{Entitlements: course.unlock(), Archived: new(false), ForSale: new(true), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
 	if err != nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	products := []string{}
-	for _, product := range offers.Items {
-		products = append(products, product.Key)
+	products := offers.Items
+	for i := range products {
+		products[i].Prices = billing.BuyerPrices(products[i].Prices)
 	}
-	slices.Sort(products)
+	slices.SortFunc(products, func(a, b billing.Product) int { return strings.Compare(a.Key, b.Key) })
 	c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "products": products, "buy": "/courses/" + course.Slug + "/buy"})
 })
 ```
@@ -650,18 +651,6 @@ func (k mediaKey) sign(path, expires string) string {
 	mac.Write([]byte(path + "\n" + expires))
 	return hex.EncodeToString(mac.Sum(nil))
 }
-
-// terms says how a price renews, or how long it grants access.
-func terms(p billing.Price) string {
-	switch {
-	case p.BillingIntervalHours != nil:
-		return fmt.Sprintf("every %d days", *p.BillingIntervalHours/24)
-	case p.AccessDurationHours != nil:
-		return fmt.Sprintf("for %d days", *p.AccessDurationHours/24)
-	default:
-		return "to keep"
-	}
-}
 ```
 
 **The pages.** Install the browser packages:
@@ -674,14 +663,16 @@ Wrap your app once in `<BillingProvider client={billing} appearance={{ theme: "a
 this example also uses auth-ui's `<AuthProvider client={auth}>` and `<AuthUiProvider>`.
 billing-ui doesn't depend on auth-ui: the billing client's only link to your auth is
 the `fetch` you give it (here `auth.authFetch`, which attaches the AuthKit token; with
-other auth, any `fetch` that sends your credentials), and `<BuyButton>`/`<Offers>`
+other auth, any `fetch` that sends your credentials), and `<BuyButton>`/`<ProductList>`
 ask your app to sign someone in through `signedIn` and `onSignInRequired`. The store
 lists the courses a page at a time: Watch for those the user owns, a
-`<BuyButton>` per price for the rest. A course page plays the signed URL or goes
-to its buy page. A buy page offers the products the gate named (the course,
-the bundle, the membership) with `<Offers keys>`; once paid, the gate lets the buyer in. The pages never handle a
-checkout themselves: `<BuyButton>` and `<Offers>` start the purchase, take the
-card and report `onPaid`:
+`<BuyButton price>` per price the server answered for the rest. A course page plays
+the signed URL or goes to its buy page. A buy page sells the products the gate's
+`402` carried (the course, the bundle, the membership) with `<ProductList products>`;
+once paid, the gate lets the buyer in. The pages never handle a checkout themselves:
+`<BuyButton>` and `<ProductList>` create the order, take the card (on the page, or in
+the embedded checkout on a site the merchant registered to frame it) and report
+`onPaid`:
 
 ```tsx
 // pages.tsx
@@ -690,21 +681,22 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { SignInDialog } from "@openrails/auth-ui"
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { useAuth } from "@openrails/auth-ui/react"
-import { BuyButton, createBillingClient, formatAmount, Offers } from "@openrails/billing-ui"
+import { BuyButton, createBillingClient, ProductList } from "@openrails/billing-ui"
+import type { Price, Product } from "@openrails/billing-ui/client"
 
 export const auth = createAuthClient() // AuthKit's browser client, at /api/v1: authFetch attaches the signed-in user's token
 export const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
-const { currencies } = billing
 
-// A course as the app's API lists it: the host's own, priced by OpenRails. A
-// members-only one is sold with the membership's prices.
+// A course as the app's API lists it: the host's own, priced by OpenRails
+// (the server reads the catalog; the browser never does). A members-only one
+// is sold with the membership's prices.
 type Course = {
   slug: string
   title: string
   members_only: boolean
   owned: boolean
   product_key: string
-  prices: { key: string; amount: string; currency: string; terms: string }[]
+  prices: Price[]
 }
 
 // StorePage lists the courses a page at a time: Watch for those the user
@@ -738,10 +730,8 @@ export function StorePage() {
           ) : (
             course.prices.map((price) => (
               <BuyButton
-                key={price.key}
-                product={course.product_key}
-                price={price.key}
-                label={`${formatAmount(price.amount, price.currency, currencies[price.currency])} ${price.terms}`}
+                key={price.id}
+                price={price}
                 signedIn={signedIn}
                 onSignInRequired={() => setSigningIn(true)}
                 onPaid={() => navigate(`/courses/${course.slug}`)}
@@ -782,14 +772,14 @@ export function CoursePage() {
 }
 
 // CourseBuyPage asks the server which products on sale unlock the course (the
-// course, the bundle, the membership) and offers them. Paid, the buyer goes
-// back to the course, which now lets them in.
+// course, the bundle, the membership); the answer carries them, and the page
+// offers them. Paid, the buyer goes back to the course, which now lets them in.
 export function CourseBuyPage() {
   const { course = "" } = useParams()
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [products, setProducts] = useState<string[]>()
+  const [products, setProducts] = useState<Product[]>()
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
@@ -797,7 +787,7 @@ export function CourseBuyPage() {
         case 200: // already theirs: back to it
           navigate(`/courses/${course}`, { replace: true })
           break
-        case 402: // not theirs yet: the server names the products that unlock it
+        case 402: // not theirs yet: the server answers the products that unlock it
           setProducts((await res.json()).products)
           break
         default: // unknown course, or the server is unavailable
@@ -809,8 +799,8 @@ export function CourseBuyPage() {
   if (!products) return <p>Loading…</p>
   return (
     <>
-      <Offers
-        keys={products}
+      <ProductList
+        products={products}
         signedIn={signedIn}
         onSignInRequired={() => setSigningIn(true)}
         onPaid={() => navigate(`/courses/${course}`)}

@@ -231,8 +231,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	seen = map[string]int{}
 	none := routesurface.ProviderRoutes{}
 	RegisterUserRoutes(recorder{base: "/v1", seen: seen}, nil, Options{ProviderRoutes: &none})
-	require.NotContains(t, seen, "GET /v1/checkout-attempts/{id}/solana-pay")
-	require.Contains(t, seen, "GET /v1/products")
+	require.Empty(t, seen, "no public route without Solana")
 
 	staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}
 	mount := func(seen map[string]int, groups config.RouteGroups) {

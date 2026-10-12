@@ -7,7 +7,6 @@ import type { Product } from "./client/types"
 import { ProductList } from "./product-list"
 import { BillingProvider } from "./react/provider"
 import {
-  MERCHANT,
   apiError,
   fakeBilling,
   price,
@@ -15,58 +14,60 @@ import {
   type FakeBilling,
 } from "./test/billing-server"
 
-// The README's catalog: a course to buy or rent, a bundle, a membership.
-const catalog = () => [
-  product({
-    id: "prod_101",
-    key: "course-101",
-    display_name: "Course 101",
-    description: "Intro to CSS",
-    entitlements: ["course:101"],
-    prices: [
-      price(null, null, {
-        id: "price_buy",
-        key: "purchase",
-        product_id: "prod_101",
-        unit_amount: "4990000",
-      }),
-      price(72, null, {
-        id: "price_rent",
-        key: "rent",
-        product_id: "prod_101",
-        unit_amount: "1990000",
-      }),
-    ],
-  }),
-  product({
-    id: "prod_bundle",
-    key: "course-bundle",
-    display_name: "Both courses",
-    entitlements: ["course:101", "course:102"],
-    prices: [
-      price(null, null, {
-        id: "price_bundle",
-        key: "purchase",
-        product_id: "prod_bundle",
-        unit_amount: "8990000",
-      }),
-    ],
-  }),
-  product({
-    id: "prod_member",
-    key: "channel-membership",
-    display_name: "Membership",
-    entitlements: ["channel:membership"],
-    prices: [
-      price(720, 720, {
-        id: "price_monthly",
-        key: "monthly",
-        product_id: "prod_member",
-        unit_amount: "10000000",
-      }),
-    ],
-  }),
-]
+// The README's catalog, as the host's server puts it in its page: a course to
+// buy or rent, a bundle, a membership.
+const catalog = (): Product[] =>
+  [
+    product({
+      id: "prod_101",
+      key: "course-101",
+      display_name: "Course 101",
+      description: "Intro to CSS",
+      entitlements: ["course:101"],
+      prices: [
+        price(null, null, {
+          id: "price_buy",
+          key: "purchase",
+          product_id: "prod_101",
+          unit_amount: "4990000",
+        }),
+        price(72, null, {
+          id: "price_rent",
+          key: "rent",
+          product_id: "prod_101",
+          unit_amount: "1990000",
+        }),
+      ],
+    }),
+    product({
+      id: "prod_bundle",
+      key: "course-bundle",
+      display_name: "Both courses",
+      entitlements: ["course:101", "course:102"],
+      prices: [
+        price(null, null, {
+          id: "price_bundle",
+          key: "purchase",
+          product_id: "prod_bundle",
+          unit_amount: "8990000",
+        }),
+      ],
+    }),
+    product({
+      id: "prod_member",
+      key: "channel-membership",
+      display_name: "Membership",
+      entitlements: ["channel:membership"],
+      prices: [
+        price(720, 720, {
+          id: "price_monthly",
+          key: "monthly",
+          product_id: "prod_member",
+          unit_amount: "10000000",
+        }),
+      ],
+    }),
+  ] as unknown as Product[]
 
 function mount(ui: ReactNode, server: FakeBilling) {
   return render(
@@ -80,12 +81,11 @@ function mount(ui: ReactNode, server: FakeBilling) {
 }
 
 describe("ProductList", () => {
-  it("displays each product it names, a button per price", async () => {
-    const server = fakeBilling({ products: catalog() })
+  it("displays each product the host names, a button per price, and reads no catalog", async () => {
+    const server = fakeBilling()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["course-101", "course-bundle"]}
+        products={catalog().slice(0, 2)}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -103,41 +103,14 @@ describe("ProductList", () => {
     for (const label of ["$4.99", "Rent for 3 days, $1.99", "$8.99"])
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
     expect(screen.queryByText("Membership")).toBeNull()
-    const urls = server.fetch.mock.calls.map(([url]) => String(url))
-    expect(urls).toContain(
-      `/billing/v1/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle`
-    )
-  })
-
-  it("looks every key up in one read", async () => {
-    const server = fakeBilling({ products: catalog() })
-    mount(
-      <ProductList
-        merchant={MERCHANT}
-        keys={["course-101", "course-bundle", "channel-membership"]}
-        onPaid={vi.fn()}
-        onSignInRequired={vi.fn()}
-      />,
-      server
-    )
-    expect(await screen.findAllByTestId("product")).toHaveLength(3)
-    expect(
-      screen.getByRole("heading", { name: "Membership" })
-    ).toBeInTheDocument()
-    const reads = server.fetch.mock.calls
-      .map(([url]) => String(url))
-      .filter((url) => url.includes("/products"))
-    expect(reads).toEqual([
-      `/billing/v1/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle&keys=channel-membership`,
-    ])
+    expect(server.calls.filter((c) => c.includes("product"))).toEqual([])
   })
 
   it("labels a recurring price with its cadence", async () => {
-    const server = fakeBilling({ products: catalog() })
+    const server = fakeBilling()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["channel-membership"]}
+        products={catalog().slice(2)}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -149,13 +122,12 @@ describe("ProductList", () => {
   })
 
   it("orders a price and calls onPaid once the order is complete", async () => {
-    const server = fakeBilling({ products: catalog() })
+    const server = fakeBilling()
     server.orderStatus = "complete"
     const onPaid = vi.fn()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["course-101"]}
+        products={catalog()}
         onPaid={onPaid}
         onSignInRequired={vi.fn()}
       />,
@@ -181,12 +153,11 @@ describe("ProductList", () => {
   })
 
   it("asks the host to sign the visitor in when it says they are signed out", async () => {
-    const server = fakeBilling({ products: catalog() })
+    const server = fakeBilling()
     const onSignInRequired = vi.fn()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["course-101"]}
+        products={catalog()}
         signedIn={false}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
@@ -200,13 +171,12 @@ describe("ProductList", () => {
   })
 
   it("asks the host to sign the visitor in on a 401", async () => {
-    const server = fakeBilling({ products: catalog() })
+    const server = fakeBilling()
     server.fail["POST /me/orders"] = apiError(401, "authentication_required")
     const onSignInRequired = vi.fn()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["course-101"]}
+        products={catalog()}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -219,7 +189,7 @@ describe("ProductList", () => {
   })
 
   it("shows any other refusal", async () => {
-    const server = fakeBilling({ products: catalog() })
+    const server = fakeBilling()
     server.fail["POST /me/orders"] = apiError(
       404,
       "price_not_found",
@@ -228,8 +198,7 @@ describe("ProductList", () => {
     const onSignInRequired = vi.fn()
     mount(
       <ProductList
-        merchant={MERCHANT}
-        keys={["course-101"]}
+        products={catalog()}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -241,27 +210,9 @@ describe("ProductList", () => {
     expect(onSignInRequired).not.toHaveBeenCalled()
   })
 
-  it("displays the host's products without asking OpenRails", async () => {
-    const server = fakeBilling({ products: [] })
-    const products = catalog().slice(2) as unknown as Product[]
-    mount(
-      <ProductList
-        products={products}
-        onPaid={vi.fn()}
-        onSignInRequired={vi.fn()}
-      />,
-      server
-    )
-
-    expect(
-      await screen.findByRole("button", { name: "$10.00 every 30 days" })
-    ).toBeInTheDocument()
-    expect(server.calls).not.toContain("GET /products")
-  })
-
-  it("hides an archived product even when its prices remain current", async () => {
-    const server = fakeBilling({ products: [] })
-    const products = catalog().slice(0, 1) as unknown as Product[]
+  it("hides an archived product even when its prices remain current", () => {
+    const server = fakeBilling()
+    const products = catalog().slice(0, 1)
     products[0].archived = true
     mount(
       <ProductList
@@ -273,39 +224,15 @@ describe("ProductList", () => {
     )
     expect(screen.queryByRole("button", { name: "$4.99" })).toBeNull()
     expect(screen.queryByTestId("product")).toBeNull()
-    expect(server.calls).not.toContain("GET /catalog/products")
   })
 
   it("says when none of its products is on sale", async () => {
-    const server = fakeBilling({ products: catalog() })
     mount(
-      <ProductList
-        merchant={MERCHANT}
-        keys={["course-999"]}
-        onPaid={vi.fn()}
-        onSignInRequired={vi.fn()}
-      />,
-      server
+      <ProductList products={[]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />,
+      fakeBilling()
     )
     expect(
       await screen.findByText("Nothing on sale unlocks this")
     ).toBeInTheDocument()
-  })
-
-  it("asks nothing for no keys", async () => {
-    const server = fakeBilling({ products: catalog() })
-    mount(
-      <ProductList
-        merchant={MERCHANT}
-        keys={[]}
-        onPaid={vi.fn()}
-        onSignInRequired={vi.fn()}
-      />,
-      server
-    )
-    expect(
-      await screen.findByText("Nothing on sale unlocks this")
-    ).toBeInTheDocument()
-    expect(server.calls).not.toContain("GET /products")
   })
 })

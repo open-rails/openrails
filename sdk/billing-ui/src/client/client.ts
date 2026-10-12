@@ -20,10 +20,8 @@ import {
   listPageSchema,
   orderSchema,
   cartSchema,
-  pageSchema,
   paymentMethodSchema,
   paymentSchema,
-  productSchema,
   subscriptionSchema,
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
@@ -43,10 +41,8 @@ import {
   type Cart,
   type Order,
   type OrderPaymentInput,
-  type Page,
   type Payment,
   type PaymentMethod,
-  type Product,
   type Subscription,
   type SubscriptionChange,
   type SubscriptionChangePreview,
@@ -63,8 +59,7 @@ export interface BillingClientOptions {
   fetch?: (input: string, init: RequestInit) => Promise<Response>
   /**
    * The customer's access token, sent as the bearer of every request but
-   * the two public reads (`getConfig`, `listProducts`); omit when `fetch`
-   * authenticates. A `tokenSource` keeps it fresh: a call answered 401
+   * the public read (`getConfig`); omit when `fetch` authenticates. A `tokenSource` keeps it fresh: a call answered 401
    * `credential_expired` is then retried once with a new token.
    */
   getToken?: () =>
@@ -76,16 +71,6 @@ export interface BillingClientOptions {
    * pinned OpenRails registry is built in; `/me` amounts carry no scale.
    */
   currencies?: CurrencyScales
-}
-
-/**
- * A public catalog lookup: the products of `merchant` (its id) named by
- * `keys` (at most 100 product keys), in one page.
- */
-export interface ProductListOptions {
-  merchant: string
-  keys: string[]
-  signal?: AbortSignal
 }
 
 export interface ListOptions {
@@ -356,7 +341,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     limit: opts.limit ?? limit,
     cursor: opts.cursor ?? undefined,
   })
-  const productPage = pageSchema(productSchema)
 
   // An order answer: the order, or a failed payment's 402 with it.
   async function orderResult(
@@ -573,7 +557,11 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     /**
      * Creates an order from `lines` or the cart (`cart: true`), and with
      * `payment` pays it in the same call; `expectedTotal` is the total the
-     * customer saw. A failed payment resolves as payOrder's does.
+     * customer saw. A failed payment resolves as payOrder's does. With
+     * `checkout` instead the order answers its embedded checkout,
+     * `order.checkout.url` on the checkout host, for `<EmbeddedCheckout>`: the
+     * merchant's own signed-in person only. A retry with the key answers the
+     * same order with a fresh URL, replacing the last.
      */
     createOrder(input: {
       lines?: { price_id: string; quantity?: number; amount?: string }[]
@@ -581,6 +569,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       expectedTotal?: string
       payment?: OrderPaymentInput
       reusable?: boolean
+      checkout?: wire.MyOrderCheckoutParams
       idempotencyKey: string
     }): Promise<OrderResult> {
       return orderResult("/me/orders", {
@@ -592,6 +581,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
             : { expected_total: input.expectedTotal }),
           ...(input.payment === undefined ? {} : { payment: input.payment }),
           ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
+          ...(input.checkout === undefined ? {} : { checkout: input.checkout }),
         },
         headers: { "Idempotency-Key": input.idempotencyKey },
       })
@@ -789,20 +779,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           cursor: opts.cursor ?? undefined,
         },
         signal: opts.signal,
-      })
-    },
-
-    /**
-     * The products `merchant` has on sale named by `keys`, each with its
-     * current prices: a public read, the same signed in or out. No keys
-     * name no products: nothing is fetched.
-     */
-    async listProducts(opts: ProductListOptions): Promise<Page<Product>> {
-      if (opts.keys.length === 0) return { data: [], next_cursor: null }
-      return json(productPage, "/products", {
-        query: { merchant: opts.merchant, keys: opts.keys },
-        signal: opts.signal,
-        public: true,
       })
     },
 

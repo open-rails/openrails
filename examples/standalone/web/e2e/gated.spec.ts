@@ -72,8 +72,8 @@ test("the store lists courses with their prices and what the user owns", async (
   await page.goto("/")
   const css = page.locator("section").filter({ has: page.getByRole("heading", { name: "Intro to CSS" }) })
   await expect(page.getByRole("heading", { name: "Intro to Tailwind" })).toBeVisible()
-  await expect(css.getByRole("button", { name: "$4.99 to keep", exact: true })).toBeVisible()
-  const rent = css.getByRole("button", { name: "$1.99 for 3 days", exact: true })
+  await expect(css.getByRole("button", { name: "$4.99", exact: true })).toBeVisible()
+  const rent = css.getByRole("button", { name: "Rent for 3 days, $1.99", exact: true })
 
   await signIn(page, rent, dana)
   await pay(page, rent, /^Pay \$1\.99/)
@@ -84,7 +84,7 @@ test("the store lists courses with their prices and what the user owns", async (
   await expect(css.getByRole("link", { name: "Watch" })).toBeVisible()
   await expect(css.getByRole("button")).toHaveCount(0)
   const tailwind = page.locator("section").filter({ has: page.getByRole("heading", { name: "Intro to Tailwind" }) })
-  await expect(tailwind.getByRole("button", { name: "$4.99 to keep", exact: true })).toBeVisible()
+  await expect(tailwind.getByRole("button", { name: "$4.99", exact: true })).toBeVisible()
   // A members-only video is sold with the membership.
   const qa = page.locator("section").filter({ has: page.getByRole("heading", { name: "Live Q&A" }) })
   await expect(qa.getByText("Members only")).toBeVisible()

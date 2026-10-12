@@ -10,7 +10,6 @@ export {
   createBillingClient,
   type BillingClient,
   type BillingClientOptions,
-  type ProductListOptions,
 } from "./client/client"
 export {
   redeemAssertion,

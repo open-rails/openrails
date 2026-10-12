@@ -33,7 +33,7 @@ that went, and what replaced it; the sections below give the details.
 | `WithMerchant`, `ForMerchantID`, `WithDefaultMerchant`, `WithMerchantID`, `CredentialTarget`, `openrails.RequestMerchant` | The merchant's handle: `Merchant(id)` on the engine or the remote, or `openrails.NewRemoteMerchant` |
 | `Routes.Scope`, `Routes.Permissions` and the host's own permission names | Each route checks its `billing.Permission` pair: the `merchant:` name in the merchant's scope, the `root:` name in the Authenticator's `RootScope` |
 | Codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | `403 merchant_unresolved` (bound to no live merchant), `403 customer_issuer_mismatch` (another issuer's customer) |
-| Public reads finding their merchant by Host or the configured merchant | `GET /v1/products` takes `merchant=<merchant id>`; `GET /v1/config` is the deployment's, `GET /v1/me/config` the merchant's for a bound credential |
+| Public reads finding their merchant by Host or the configured merchant | No public route reads the catalog; `GET /v1/config` is the deployment's, `GET /v1/me/config` the merchant's for a bound credential |
 | billing-ui's `anonymous` call option | Public reads send no token; customer calls send a merchant-bound one (`tokenSource`) |
 | The console's merchant in `sessionStorage`, sent as the header | A token exchanged for the chosen merchant, held in memory |
 | The client merchant-selection guide | [Merchant binding](merchant-binding.md) |
@@ -444,7 +444,7 @@ fields (`400 unknown_field`), and every error code is in
 | `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/merchant/alert-webhooks` |
-| `GET /v1/catalog/products` found its merchant by the request's Host or the configured merchant | `GET /v1/products` takes `merchant=<merchant id>` beside `keys`, signed in or out: `400 invalid_query` without one id, `404 resource_not_found` for no live merchant |
+| `GET /v1/catalog/products` found its merchant by the request's Host or the configured merchant; the public catalog `GET /v1/products` | Removed: your server reads its products with the Go `Client.ListProducts` and puts them in its own pages (`billing.BuyerPrices`); `/v1/catalog/products` is catalog administration |
 | `GET /v1/config` carried the merchant's `payment` and `merchant` | It is the deployment's part alone (`capabilities`, `currencies`, `rails`, `captcha`, `network`). `GET /v1/me/config` answers `{payment, merchant}` to a credential bound to the merchant: a customer's token, or a checkout URL's secret on the checkout host |
 | `GET` and `POST /v1/orders/{id}/solana-pay` needed a Host or header naming the merchant on a server of many | The order names its merchant; a public route no longer answers `merchant_not_found` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/catalog/price-migrations`, `/v1/catalog/price-migrations/{id}` |
@@ -564,7 +564,8 @@ calendar ([data retention](operations.md#data-retention)):
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
 | `getSolanaConfig()` | `getCustomerConfig()`; the network is `payment.solana.network` |
 | `getConfig()` and `useConfig()` with `payment` and `merchant` | `getConfig()` and `useConfig()` are the deployment's part; `getCustomerConfig()` and `useCustomerConfig()` read the merchant's `payment` and `merchant` (`GET /v1/me/config`) |
-| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<ProductList keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<ProductList merchant keys>` |
+| `listProducts`, `useProducts`, `<BuyButton merchant product price>`, `<ProductList merchant keys>` | The browser never reads the catalog: your server puts the products in its page, `<ProductList products>` and `<BuyButton price>` sell them |
+| A host route creating an order with an embedded checkout for the signed-in customer | `<BuyButton>` creates the order with its checkout in one call (`POST /v1/me/orders` with `checkout`) on a registered embed origin |
 | A `getToken` you refresh yourself | `tokenSource({ fetchToken })` keeps the token in memory and replaces it before it expires; `redeemAssertion` redeems a backend's customer assertion |
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/me/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
@@ -669,9 +670,9 @@ uses `/v1/merchant/`, including `/psps`, `/configuration`, `/findings`,
 AI metrics questions and dashboard generation are removed.
 The former configuration paths under `/v1/admin/` are not mounted.
 
-Public product lookup is `GET /v1/products?merchant=<merchant id>`. Update
-storefront callers: `/v1/catalog/products` now requires catalog read
-permission and never serves as an alias for the public product list.
+There is no public product lookup: storefronts get their products from their
+own server, which reads them with the Go `Client.ListProducts`.
+`/v1/catalog/products` requires catalog read permission.
 
 Support staff use `merchant:customer:read` and `merchant:customer:manage`,
 with matching `root:` permissions. Update custom roles, API-key roles and

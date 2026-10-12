@@ -1,7 +1,8 @@
-// Package hostedcheckout is the hosted checkout: a merchant order's checkout
-// URL on the checkout host, the secret it carries, the page served there and
-// what the secret opens. The secret acts as the order's customer, for that
-// order alone, and only on the checkout host (Stripe's client secret).
+// Package hostedcheckout is the hosted checkout: an order's checkout URL on
+// the checkout host (a merchant order's, or a customer's own order's), the
+// secret it carries, the page served there and what the secret opens. The secret
+// acts as the order's customer, for that order alone, and only on the
+// checkout host (Stripe's client secret).
 package hostedcheckout
 
 import (

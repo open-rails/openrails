@@ -64,33 +64,38 @@ const billing = createBillingClient({
 })
 ```
 
-`<BuyButton>` buys one price, `<ProductList>` the products your server names by
-key (a course, its bundle and the membership that also unlocks it; the Go
-`Client.ListProducts` finds the products granting an entitlement): a
-`BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
-"$10.00 every 30 days"). Both look prices up in the public catalog of the
-merchant whose id you pass as `merchant`, signed in or out. The purchase is
-theirs from start to payment: a
-button creates the customer's order and pays it in a dialog
-(`<OrderCheckout>`); a second click before it is paid opens the same order.
-Signing in is the host's: with `signedIn={false}`, or when OpenRails answers
-401, they call `onSignInRequired` instead. `onPaid` receives the completed
-order; it is a hint, so confirm access from your own API (your gate) before
-granting anything.
+The browser never reads the catalog (Stripe's and Paddle's model): your
+server reads the products it sells with the Go `Client.ListProducts` (by key,
+or those granting an entitlement) and puts them in its own page's response,
+their prices as a buyer sees them (`billing.BuyerPrices`). `<BuyButton price>`
+buys one of those prices, `<ProductList products>` sells those products (a
+course, its bundle and the membership that also unlocks it): a `BuyButton` per
+price ("$4.99", "Rent for 3 days, $1.99", "$10.00 every 30 days").
+
+The purchase is theirs from start to payment: a button creates the customer's
+order (`POST /me/orders`) and pays it in a dialog. On a page of a site the
+merchant registered to frame its checkout (`merchant.embed_origins` in
+`GET /me/config`), it creates the order with its embedded checkout in the same
+call (`createOrder({ lines, checkout: { ui_mode: "embedded" } })`) and frames
+`order.checkout.url` from the checkout host (`<EmbeddedCheckout>`); anywhere
+else it pays on the page (`<OrderCheckout>`). A retry with the purchase's key
+answers the same order with a fresh URL.
+A second click before it is paid opens the same order. Signing in is the
+host's: with `signedIn={false}`, or when OpenRails answers 401, they call
+`onSignInRequired` instead. `onPaid` receives the completed order; it is a
+hint, so confirm access from your own API (your gate) before granting
+anything.
 
 ```tsx
 <BuyButton
-  merchant={merchantId} // your merchant's id, from your server
-  product="course-101"
-  price="rent" // labelled from the catalog unless you pass label
+  price={course.prices[0]} // from your server's page response
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
   onPaid={() => navigate("/courses/css-101")} // your gate now admits them
 />
 
 <ProductList
-  merchant={merchantId}
-  keys={["course-101", "course-bundle", "channel-membership"]} // from your server, or products={...} from its Client.ListProducts
+  products={products} // from your server's page response
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
   onPaid={() => navigate("/courses/css-101")}
@@ -107,13 +112,13 @@ page, and the checkout charges exactly that:
 ```tsx
 import { decimalToAmount } from "@openrails/billing-ui/client"
 
-// `depositPrice` is in a product from listProducts; `currency` from getConfig().currencies.
+// `depositPrice` is in a product your server sent; `currency` from getConfig().currencies.
 // `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
 const amount = decimalToAmount(enteredAmount, currency.decimals)
 const bounds = depositPrice.customer_amount
 const valid = amount && bounds && BigInt(amount) >= BigInt(bounds.min_amount) && BigInt(amount) <= BigInt(bounds.max_amount)
 
-<BuyButton merchant={merchantId} product="api-credits" price="deposit" amount={valid ? amount : undefined} label="Add credits" {...handlers} />
+<BuyButton price={depositPrice} amount={valid ? amount : undefined} label="Add credits" {...handlers} />
 ```
 
 OpenRails validates the bounds and whole currency minor units before accepting
@@ -205,15 +210,13 @@ host content and links. The customer imports above do not load admin code or
 styles. See the [BillingAdmin integration guide](https://github.com/open-rails/openrails/blob/master/docs/billing-admin.md)
 for merchant selection, permissions, localization, and standalone console setup.
 
-## Catalog and plan changes
+## Configuration and plan changes
 
-The client also reads the public catalog and changes a subscription's plan.
-The catalog read and `GET /config` are public routes: the client sends them
-no bearer.
+The client also reads the configuration and changes a subscription's plan.
+`GET /config` is a public route: the client sends it no bearer.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts({ merchant, keys })`: the products `merchant` (its id) has on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /products` |
 | `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry) | `GET /config` |
 | `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
@@ -278,8 +281,7 @@ provider:
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
   `changeSubscription`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
-  `remove`, `setDefault`), `usePayments` (cursor pages), `useProducts` (a
-  catalog lookup by product key).
+  `remove`, `setDefault`), `usePayments` (cursor pages).
   Actions resolve to `null` or a `BillingError`; they never throw.
   `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume
   and the card change answer the subscription, which replaces the row.

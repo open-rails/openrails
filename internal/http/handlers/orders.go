@@ -11,8 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/hostedcheckout"
@@ -47,6 +49,29 @@ func orderActor(r *httprequest.Request, present bool) *billingservice.OrderActor
 		ip = addr.Unmap().String()
 	}
 	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: checkoutVerifiedPrincipal(r), ClientIP: ip}
+}
+
+// signedInPerson refuses, 403 customer_session_required, anyone but the
+// merchant's own person signed in: a user of the issuer the merchant
+// declares, acting itself in a session or with a device key, its credential
+// bound to no scope. No application, invoker, API key or signed token.
+func signedInPerson(r *httprequest.Request) bool {
+	ctx := r.Request.Context()
+	scope, scoped := r.CustomerScope()
+	c, identified := billingauth.IdentityFromContext(ctx)
+	v, verified := billingauth.VerifiedFrom(ctx)
+	if !scoped || !identified || !verified {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
+		return false
+	}
+	own, declared := r.State.IssuerMerchant(c.Issuer)
+	bound, isBound := v.(auth.Bound)
+	if !scope.Present() || c.Credential.Kind != billingauth.CredentialSession && c.Credential.Kind != billingauth.CredentialDeviceKey ||
+		isBound && bound.BoundScope() != (billingauth.Scope{}) || !declared || own != scope.Merchant() {
+		r.ErrorCode("customer_session_required", "")
+		return false
+	}
+	return true
 }
 
 // orderKey is the request's Idempotency-Key, "" after answering a refusal.
@@ -130,10 +155,15 @@ func PreviewMyOrder(r *httprequest.Request) {
 }
 
 // CreateMyOrder handles POST /v1/me/orders: the one-call buy when a payment
-// is named, an open order to pay later otherwise.
+// is named, the order and its embedded checkout when a checkout is, an open
+// order to pay later otherwise. A checkout offers the customer's saved cards,
+// so only the merchant's own signed-in person asks for one.
 func CreateMyOrder(r *httprequest.Request) {
 	var body billing.CreateMyOrderParams
 	if !r.BindJSON(&body) {
+		return
+	}
+	if body.Checkout != nil && !signedInPerson(r) {
 		return
 	}
 	actor := orderActor(r, body.Payment != nil)

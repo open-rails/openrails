@@ -1,13 +1,14 @@
-// ProductList sells products by key: each one on sale, one buy button per price.
-// The host decides what to sell (its server names the products, say from its
-// gate's 402) and what happens once it's paid.
+// ProductList sells the products the host's page carries: each one on sale,
+// one buy button per price. The host's server decides what to sell (say from
+// its gate's 402) and puts the products in its page; the browser never reads
+// the catalog. The host decides what happens once it's paid.
 import * as React from "react"
 import { cn } from "cn"
 
 import { RESET } from "#orck/account/format"
-import { EmptyState, ErrorState, ListSkeleton } from "#orck/account/section"
+import { EmptyState } from "#orck/account/section"
 import type { CheckoutAppearance } from "#orck/appearance"
-import { Purchase } from "#orck/buy-button"
+import { BuyButton } from "#orck/buy-button"
 import type { Order, Product } from "#orck/client/types"
 import {
   Card,
@@ -17,26 +18,15 @@ import {
   CardTitle,
 } from "#orck/components/ui/card"
 import { useMessages } from "#orck/i18n/context"
-import { priceLabel } from "#orck/lib/price-label"
-import { useCurrencyScales } from "#orck/react/config"
-import { useProducts, type ProductsState } from "#orck/react/hooks"
-import { useScopeProps, useUiSettings } from "#orck/scope-context"
+import { useScopeProps } from "#orck/scope-context"
 
 export interface ProductListProps {
-  /** The id of the merchant whose catalog `keys` are looked up in. */
-  merchant?: string
   /**
-   * What to sell: these product keys of `merchant`, such as a course, its
-   * bundle and the membership that also unlocks it, looked up in OpenRails'
-   * public catalog. The host's server names them (the Go Client's
-   * ListProducts finds the products granting an entitlement).
+   * What to sell, from the host's own server: the Go Client's ListProducts
+   * (by product key or entitlement), their prices as a buyer sees them
+   * (`billing.BuyerPrices`).
    */
-  keys?: string[]
-  /**
-   * The products to display instead, from the host's own server (the Go
-   * Client's ListProducts): nothing is fetched.
-   */
-  products?: Product[]
+  products: Product[]
   /**
    * The order is paid. A hint: the host's own gate decides access, so send
    * the buyer back to the content it guards.
@@ -49,46 +39,26 @@ export interface ProductListProps {
   onSignInRequired: () => void
   /** false when the host knows the visitor is signed out. */
   signedIn?: boolean
+  /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
+  returnUrl?: string
   appearance?: CheckoutAppearance
   className?: string
 }
 
-export function ProductList({ products, ...props }: ProductListProps) {
-  return products ? (
-    <ProductCards
-      {...props}
-      state={{ products, error: null, refetch: () => {} }}
-    />
-  ) : (
-    <FetchedProducts {...props} />
-  )
-}
-
-function FetchedProducts(props: ProductListProps) {
-  const state = useProducts({
-    merchant: props.merchant ?? "",
-    keys: props.keys ?? [],
-  })
-  return <ProductCards {...props} state={state} />
-}
-
-function ProductCards({
+export function ProductList({
+  products: given,
   onPaid,
   onSignInRequired,
   signedIn,
+  returnUrl,
   appearance,
   className,
-  state,
-}: ProductListProps & {
-  state: Pick<ProductsState, "products" | "error" | "refetch">
-}) {
+}: ProductListProps) {
   const m = useMessages()
-  const { locale } = useUiSettings()
   const scope = useScopeProps(appearance)
-  const scales = useCurrencyScales()
 
   // A deposit's amount is chosen before checkout; ProductList sells fixed prices.
-  const products = (state.products ?? [])
+  const products = given
     .filter((product) => !product.archived)
     .map((product) => ({
       product,
@@ -97,11 +67,7 @@ function ProductCards({
     .filter((entry) => entry.prices.length > 0)
 
   let body: React.ReactNode
-  if (state.products === null && state.error) {
-    body = <ErrorState error={state.error} onRetry={state.refetch} />
-  } else if (state.products === null) {
-    body = <ListSkeleton />
-  } else if (products.length === 0) {
+  if (products.length === 0) {
     body = <EmptyState title={m.t("products.empty")} />
   } else {
     body = products.map(({ product, prices }) => (
@@ -116,13 +82,13 @@ function ProductCards({
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {prices.map((price) => (
-            <Purchase
+            <BuyButton
               key={price.id}
-              priceId={price.id}
-              label={priceLabel(price, scales, m, locale)}
+              price={price}
               onPaid={onPaid}
               onSignInRequired={onSignInRequired}
               signedIn={signedIn}
+              returnUrl={returnUrl}
               appearance={appearance}
             />
           ))}

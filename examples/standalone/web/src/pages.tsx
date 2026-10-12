@@ -2,19 +2,21 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { SignInDialog } from "@openrails/auth-ui"
 import { useAuth } from "@openrails/auth-ui/react"
-import { BuyButton, formatAmount, ProductList } from "@openrails/billing-ui"
+import { BuyButton, ProductList } from "@openrails/billing-ui"
+import type { Price, Product } from "@openrails/billing-ui/client"
 
-import { auth, billing } from "./clients"
+import { auth } from "./clients"
 
-// A course as the app's API lists it: the host's own, priced by OpenRails. A
-// members-only one is sold with the membership's prices.
+// A course as the app's API lists it: the host's own, priced by OpenRails
+// (the server reads the catalog; the browser never does). A members-only one
+// is sold with the membership's prices.
 type Course = {
   slug: string
   title: string
   members_only: boolean
   owned: boolean
   product_key: string
-  prices: { key: string; amount: string; currency: string; terms: string }[]
+  prices: Price[]
 }
 
 // StorePage lists the courses a page at a time: Watch for those the user
@@ -25,8 +27,7 @@ export function StorePage() {
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
   const [cursor, setCursor] = useState("0")
-  // A page of courses, and the merchant that sells them: BuyButton names it.
-  const [pages, setPages] = useState<{ merchant_id: string; data: Course[]; next_cursor: string | null }[]>([])
+  const [pages, setPages] = useState<{ data: Course[]; next_cursor: string | null }[]>([])
   useEffect(() => {
     let current = true
     auth
@@ -40,7 +41,7 @@ export function StorePage() {
   const next = pages.at(-1)?.next_cursor
   return (
     <>
-      {pages.flatMap((page) => page.data.map((course) => ({ course, merchant: page.merchant_id }))).map(({ course, merchant }) => (
+      {pages.flatMap((page) => page.data).map((course) => (
         <section key={course.slug}>
           <h2>{course.title}</h2>
           {course.members_only && <p>Members only</p>}
@@ -49,11 +50,8 @@ export function StorePage() {
           ) : (
             course.prices.map((price) => (
               <BuyButton
-                key={price.key}
-                merchant={merchant}
-                product={course.product_key}
-                price={price.key}
-                label={`${formatAmount(price.amount, price.currency, billing.currencies[price.currency])} ${price.terms}`}
+                key={price.id}
+                price={price}
                 signedIn={signedIn}
                 onSignInRequired={() => setSigningIn(true)}
                 onPaid={() => navigate(`/courses/${course.slug}`)}
@@ -94,14 +92,15 @@ export function CoursePage() {
 }
 
 // CourseBuyPage asks the server which of its merchant's products on sale
-// unlock the course (the course, the bundle, the membership) and offers them.
-// Paid, the buyer goes back to the course, which now lets them in.
+// unlock the course (the course, the bundle, the membership); the answer
+// carries them, and the page offers them. Paid, the buyer goes back to the
+// course, which now lets them in.
 export function CourseBuyPage() {
   const { course = "" } = useParams()
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [catalog, setCatalog] = useState<{ merchant_id: string; products: string[] }>()
+  const [products, setProducts] = useState<Product[]>()
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
@@ -109,8 +108,8 @@ export function CourseBuyPage() {
         case 200: // already theirs: back to it
           navigate(`/courses/${course}`, { replace: true })
           break
-        case 402: // not theirs yet: the server names the products that unlock it
-          setCatalog(await res.json())
+        case 402: // not theirs yet: the server answers the products that unlock it
+          setProducts((await res.json()).products)
           break
         default: // unknown course, or the server is unavailable
           setFailed(true)
@@ -118,12 +117,11 @@ export function CourseBuyPage() {
     })
   }, [course, navigate])
   if (failed) return <p>Couldn't load this course.</p>
-  if (!catalog) return <p>Loading…</p>
+  if (!products) return <p>Loading…</p>
   return (
     <>
       <ProductList
-        merchant={catalog.merchant_id}
-        keys={catalog.products}
+        products={products}
         signedIn={signedIn}
         onSignInRequired={() => setSigningIn(true)}
         onPaid={() => navigate(`/courses/${course}`)}

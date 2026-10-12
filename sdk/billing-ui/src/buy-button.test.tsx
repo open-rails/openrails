@@ -4,11 +4,10 @@ import { describe, expect, it, vi } from "vitest"
 
 import { BuyButton } from "./buy-button"
 import { createBillingClient } from "./client/client"
-import type { Order } from "./client/types"
-import type { OrderModalProps } from "./modal"
+import type { Order, Price } from "./client/types"
+import type { EmbeddedCheckoutModalProps, OrderModalProps } from "./modal"
 import { BillingProvider } from "./react/provider"
 import {
-  MERCHANT,
   apiError,
   fakeBilling,
   json,
@@ -18,12 +17,17 @@ import {
   type FakeBilling,
 } from "./test/billing-server"
 
-// Paying is OrderCheckout's (order-checkout.test.tsx); here the modal records
-// what BuyButton hands it.
+// Paying is OrderCheckout's (order-checkout.test.tsx) and the checkout host's
+// (EmbeddedCheckout); here the dialogs record what BuyButton hands them.
 const modals = vi.hoisted(() => [] as OrderModalProps[])
+const frames = vi.hoisted(() => [] as EmbeddedCheckoutModalProps[])
 vi.mock("./modal", () => ({
   OrderModal: (props: OrderModalProps) => {
     modals.push(props)
+    return <div role="dialog" />
+  },
+  EmbeddedCheckoutModal: (props: EmbeddedCheckoutModalProps) => {
+    frames.push(props)
     return <div role="dialog" />
   },
 }))
@@ -47,7 +51,11 @@ const course = () =>
         unit_amount: "1990000",
       }),
     ],
-  })
+  }) as unknown as { prices: Price[] }
+
+// The host page's prices of the course: buy and rent.
+const purchase = () => course().prices[0]!
+const rent = () => course().prices[1]!
 
 function mount(server: FakeBilling) {
   const client = createBillingClient({ fetch: server.fetch })
@@ -60,36 +68,28 @@ function mount(server: FakeBilling) {
 }
 
 describe("BuyButton", () => {
-  it("labels itself from the catalog", async () => {
-    const server = fakeBilling({ products: [course()] })
+  it("labels itself from the host's price, reading no catalog", async () => {
+    const server = fakeBilling()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
-        <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="rent"
-          onPaid={vi.fn()}
-          onSignInRequired={vi.fn()}
-        />
+        <BuyButton price={rent()} onPaid={vi.fn()} onSignInRequired={vi.fn()} />
       )
     )
     expect(
       await screen.findByRole("button", { name: "Rent for 3 days, $1.99" })
     ).toBeEnabled()
-    expect(server.calls).toContain("GET /products")
+    expect(server.calls.filter((c) => c.includes("product"))).toEqual([])
   })
 
   it("asks the host to sign in, without an order, when it says the visitor is signed out", async () => {
-    const server = fakeBilling({ products: [] })
+    const server = fakeBilling()
     const onSignInRequired = vi.fn()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="rent"
+          price={rent()}
           label="Rent"
           signedIn={false}
           onPaid={vi.fn()}
@@ -103,16 +103,14 @@ describe("BuyButton", () => {
   })
 
   it("asks the host to sign in on a 401", async () => {
-    const server = fakeBilling({ products: [course()] })
+    const server = fakeBilling()
     server.fail["POST /me/orders"] = apiError(401, "authentication_required")
     const onSignInRequired = vi.fn()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="rent"
+          price={rent()}
           label="Rent"
           onPaid={vi.fn()}
           onSignInRequired={onSignInRequired}
@@ -126,15 +124,13 @@ describe("BuyButton", () => {
 
   it("creates the customer's order and calls onPaid once it is complete", async () => {
     modals.length = 0
-    const server = fakeBilling({ products: [course()] })
+    const server = fakeBilling()
     const onPaid = vi.fn()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="rent"
+          price={rent()}
           label="Rent"
           returnUrl="https://app.test/back"
           onPaid={onPaid}
@@ -174,15 +170,13 @@ describe("BuyButton", () => {
           unit_amount: "0",
         }),
       ],
-    })
-    const server = fakeBilling({ products: [deposit] })
+    }) as unknown as { prices: Price[] }
+    const server = fakeBilling()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="api-credits"
-          price="deposit"
+          price={deposit.prices[0]!}
           amount="100000000"
           label="Add credits"
           onPaid={vi.fn()}
@@ -202,7 +196,7 @@ describe("BuyButton", () => {
 
   it("resumes the unpaid order that already holds the purchase", async () => {
     modals.length = 0
-    const server = fakeBilling({ products: [course()] })
+    const server = fakeBilling()
     server.fail["POST /me/orders"] = json(409, {
       error: {
         type: "invalid_request_error",
@@ -215,9 +209,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="purchase"
+          price={purchase()}
           label="Buy"
           onPaid={vi.fn()}
           onSignInRequired={vi.fn()}
@@ -230,14 +222,12 @@ describe("BuyButton", () => {
   })
 
   it("answers a second click with the same order", async () => {
-    const server = fakeBilling({ products: [course()] })
+    const server = fakeBilling()
     const { tree, rerender } = mount(server)
     rerender(
       tree(
         <BuyButton
-          merchant={MERCHANT}
-          product="course-101"
-          price="rent"
+          price={rent()}
           label="Rent"
           onPaid={vi.fn()}
           onSignInRequired={vi.fn()}
@@ -256,9 +246,80 @@ describe("BuyButton", () => {
     expect(keys).toHaveLength(2)
     expect(keys[0]).toBe(keys[1])
   })
+
+  it("frames the checkout host on a site the merchant registered to frame it", async () => {
+    frames.length = 0
+    const server = fakeBilling({ embedOrigins: [window.location.origin] })
+    const onPaid = vi.fn()
+    const { tree, rerender } = mount(server)
+    rerender(
+      tree(
+        <BuyButton
+          price={rent()}
+          label="Rent"
+          onPaid={onPaid}
+          onSignInRequired={vi.fn()}
+        />
+      )
+    )
+    fireEvent.click(await enabled("Rent"))
+    await screen.findByRole("dialog")
+    // The merchant's origins decide, before the order: one call makes both.
+    expect(server.calls.indexOf("GET /me/config")).toBeGreaterThanOrEqual(0)
+    expect(server.calls.indexOf("GET /me/config")).toBeLessThan(
+      server.calls.indexOf("POST /me/orders")
+    )
+    expect(server.calls.filter((c) => c.startsWith("POST"))).toEqual([
+      "POST /me/orders",
+    ])
+    const create = server.fetch.mock.calls.find(
+      ([, init]) => init?.method === "POST"
+    )!
+    expect(JSON.parse(String(create[1]!.body))).toEqual({
+      lines: [{ price_id: "price_rent" }],
+      checkout: { ui_mode: "embedded" },
+    })
+    const frame = frames.at(-1)!
+    expect(frame.url).toBe("https://pay.test/c/ord_price_rent#cks_test")
+
+    // The frame's word is a hint: the order says whether it is paid.
+    frame.onComplete!({ orderId: "ord_price_rent", successUrl: "" })
+    await waitFor(() =>
+      expect(server.calls).toContain("GET /me/orders/ord_price_rent")
+    )
+    expect(onPaid).not.toHaveBeenCalled()
+    server.orderStatus = "complete"
+    frame.onComplete!({ orderId: "ord_price_rent", successUrl: "" })
+    await waitFor(() => expect(onPaid).toHaveBeenCalledOnce())
+  })
+
+  it("pays on the page anywhere else", async () => {
+    modals.length = 0
+    frames.length = 0
+    const server = fakeBilling({ embedOrigins: ["https://elsewhere.test"] })
+    const { tree, rerender } = mount(server)
+    rerender(
+      tree(
+        <BuyButton
+          price={rent()}
+          label="Rent"
+          onPaid={vi.fn()}
+          onSignInRequired={vi.fn()}
+        />
+      )
+    )
+    fireEvent.click(await enabled("Rent"))
+    await screen.findByRole("dialog")
+    expect(modals.at(-1)!.orderId).toBe("ord_price_rent")
+    expect(frames).toHaveLength(0)
+    const create = server.fetch.mock.calls.find(
+      ([, init]) => init?.method === "POST"
+    )!
+    expect(JSON.parse(String(create[1]!.body))).not.toHaveProperty("checkout")
+  })
 })
 
-// The button, once its price is read from the catalog.
+// The button, once enabled.
 async function enabled(name: string) {
   const button = await screen.findByRole("button", { name })
   await waitFor(() => expect(button).toBeEnabled())

@@ -7,8 +7,9 @@ import (
 )
 
 // ordersRoutes are purchases (#1168). The customer previews, buys in one
-// call (create with a payment), pays, confirms after next_action, cancels
-// and reads; paying needs the customer in person and an Idempotency-Key, and
+// call (create with a payment), or creates it with its embedded checkout on
+// the checkout host (create with a checkout), pays, confirms after
+// next_action, cancels and reads; paying needs the customer in person and an Idempotency-Key, and
 // a failed payment answers 402 card_error with the order. The merchant's
 // backend creates unpaid orders for a customer to pay (/v1/app/orders);
 // staff inspect them, record external payments, waive usage debt or mark it
@@ -17,7 +18,7 @@ var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
 	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
-	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "order_line_unavailable", "quantity_not_allowed")...)
+	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "checkout_embed_origins_required", "customer_session_required", "hosted_checkout_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
 )
 

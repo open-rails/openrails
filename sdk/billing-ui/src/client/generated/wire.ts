@@ -528,6 +528,7 @@ export type CreateMyOrderParams = {
   expected_total?: string
   payment?: OrderPaymentParams
   reusable?: boolean
+  checkout?: MyOrderCheckoutParams
 }
 
 export type CreateNetworkLinkParams = {
@@ -1295,6 +1296,10 @@ export type MetricsSchema = {
   examples: MetricsExample[]
   limits: MetricsLimits
   query_shape: string
+}
+
+export type MyOrderCheckoutParams = {
+  ui_mode?: "embedded" | "hosted"
 }
 
 export type NetworkLink = {
