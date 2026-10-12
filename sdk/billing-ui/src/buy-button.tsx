@@ -11,6 +11,11 @@ import type { Order, Price } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
 import { priceLabel } from "#orck/lib/price-label"
+import {
+  purchaseKey,
+  releasePurchaseKey,
+  type PurchaseSlot,
+} from "#orck/lib/purchase-key"
 import { EmbeddedModal, OrderModal } from "#orck/modal"
 import { useCurrencyScales } from "#orck/react/config"
 import { useBillingContext } from "#orck/react/context"
@@ -68,6 +73,10 @@ type Paying =
 const framesPayment = (origins: string[]) =>
   typeof window !== "undefined" && origins.includes(window.location.origin)
 
+// An order that takes no payment any more: its purchase starts again.
+const closed = (order: Order) =>
+  ["canceled", "expired", "void", "uncollectible"].includes(order.status)
+
 /** One price's button and its order. Requires `BillingProvider`. */
 export function BuyButton({
   price,
@@ -88,14 +97,14 @@ export function BuyButton({
   const [paying, setPaying] = React.useState<Paying>()
   const [starting, setStarting] = React.useState(false)
   const [failure, setFailure] = React.useState<string>()
-  // One key per purchase: a second click before it is paid answers the same
-  // order instead of creating another.
-  const [key, setKey] = React.useState(() => crypto.randomUUID())
+  // The purchase whose key is kept until it is paid: a second click, a
+  // reopened dialog or a reload answers the same order.
+  const purchase = React.useRef<PurchaseSlot>(undefined)
 
   const paid = (order: Order) => {
     if (order.status !== "complete") return
+    if (purchase.current) releasePurchaseKey(purchase.current)
     setPaying(undefined)
-    setKey(crypto.randomUUID())
     onPaid(order)
   }
 
@@ -104,15 +113,30 @@ export function BuyButton({
     setFailure(undefined)
     setStarting(true)
     try {
-      const { merchant } = await client.getCustomerConfig()
+      const [account, { merchant }] = await Promise.all([
+        client.getAccount(),
+        client.getCustomerConfig(),
+      ])
+      const slot = { customer: account.id, price: price.id, amount }
+      purchase.current = slot
       const embedded = framesPayment(merchant.embed_origins)
-      let order: Order
-      try {
-        ;({ order } = await client.createOrder({
+      const place = async () => {
+        const { key, resumed } = purchaseKey(slot)
+        const { order } = await client.createOrder({
           lines: [{ price_id: price.id, ...(amount ? { amount } : {}) }],
           ...(embedded ? { checkout: { ui_mode: "embedded" } } : {}),
           idempotencyKey: key,
-        }))
+        })
+        // A retry answers the order as it was made; read it as it is now.
+        return resumed && !embedded ? client.getOrder(order.id) : order
+      }
+      let order: Order
+      try {
+        order = await place()
+        if (closed(order)) {
+          releasePurchaseKey(slot)
+          order = await place()
+        }
       } catch (err) {
         const held = heldBy(err)
         // Only an order made with a checkout answers its URL.

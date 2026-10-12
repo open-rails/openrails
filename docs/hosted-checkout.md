@@ -184,8 +184,10 @@ POST /v1/me/orders  {"lines": [{"price_id": "…"}], "checkout": {"ui_mode": "em
   credential bound to no scope. Anyone else is `403 customer_session_required`.
 - The checkout is the order's own, as on a merchant order. It lasts 15 minutes
   (less when the order expires sooner), offers the customer's saved cards and
-  returns to the merchant's first registered origin; the request names no URL
-  and takes no payment beside it.
+  takes no payment beside it.
+- It returns to the page's site: the request's `Origin`, which must be one of
+  the merchant's registered origins (each site of one merchant gets its own),
+  else `400 embed_origin_not_registered`. The request names no URL.
 - The order is idempotent; its URL is a fresh credential on every answer: a
   retry with the key answers the same order with a new URL, and the last one
   stops working. A paid or closed order answers without one.

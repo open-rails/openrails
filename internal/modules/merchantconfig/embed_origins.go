@@ -49,6 +49,21 @@ func EmbedOrigins(settings billing.MerchantSettings) []string {
 	return out
 }
 
+// RegisteredEmbedOrigin is the origin of settings' checkout.embed_origins
+// that raw (a request's Origin header) names; false for none.
+func RegisteredEmbedOrigin(settings billing.MerchantSettings, raw string) (string, bool) {
+	origin, ok := embedOrigin(raw)
+	if !ok {
+		return "", false
+	}
+	for _, registered := range EmbedOrigins(settings) {
+		if registered == origin {
+			return origin, true
+		}
+	}
+	return "", false
+}
+
 func embedOrigin(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)

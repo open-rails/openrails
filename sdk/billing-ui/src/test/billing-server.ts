@@ -218,6 +218,10 @@ export interface FakeBilling {
   currencies: Record<string, unknown>[]
   /** The status `GET /me/orders/{id}` answers; "complete" pays it. */
   orderStatus: string
+  /** The signed-in customer `GET /me` answers. */
+  customer: string
+  /** The orders `POST /me/orders` made, one per customer and key. */
+  created: Map<string, Row>
   /** Next response override per "METHOD /path". */
   fail: Record<string, Response>
   calls: string[]
@@ -249,6 +253,8 @@ export function fakeBilling(
     psps: seed.psps ?? [],
     currencies: seed.currencies ?? currenciesFixture,
     orderStatus: "open",
+    customer: "cus_a",
+    created: new Map(),
     fail: {},
     calls: [],
     fetch: vi.fn<typeof fetch>(),
@@ -436,13 +442,31 @@ export function fakeBilling(
           : state.orders
         return json(200, cursorPage(rows, limit, cursor))
       }
+      if (key === "GET /me")
+        return json(200, {
+          id: state.customer,
+          balances: [],
+          default_payment_methods: [],
+          low_balance_lines: [],
+        })
       if (key === "POST /me/orders") {
+        // Like OpenRails: one order per customer and key; a retry answers it,
+        // with a fresh checkout URL when it asks for one.
+        const slot = `${state.customer}:${new Headers(init.headers).get("Idempotency-Key")}`
         const line = (body?.lines as Row[] | undefined)?.[0]
-        const id = `ord_${line?.price_id ?? "cart"}`
-        // Like OpenRails: a checkout answers its URL on the checkout host.
+        const base = `ord_${line?.price_id ?? "cart"}`
+        const made = state.created.get(slot) ?? {
+          id: [...state.created.values()].some((o) =>
+            String(o.id).startsWith(base)
+          )
+            ? `${base}_${state.created.size + 1}`
+            : base,
+        }
+        state.created.set(slot, made)
+        const id = String(made.id)
         const checkout = body?.checkout
           ? {
-              url: `https://pay.test/c/${id}#cks_test`,
+              url: `https://pay.test/c/${id}#cks_${crypto.randomUUID()}`,
               ui_mode: "embedded",
               expires_at: "2036-09-01T00:15:00Z",
               success_url: `${state.embedOrigins[0] ?? "https://shop.test"}/`,

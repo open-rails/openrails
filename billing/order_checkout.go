@@ -37,7 +37,8 @@ type OrderCheckoutParams struct {
 
 // MyOrderCheckoutParams asks POST /v1/me/orders for the order's checkout:
 // embedded (the default, and the only mode a customer asks for), framed by
-// the merchant's registered origins and returning to the first of them. Its
+// the merchant's registered origins and returning to the one the request
+// came from (its Origin header; another is embed_origin_not_registered). Its
 // URLs are the merchant's; the request names none. Only the merchant's own
 // person, signed in, asks for one: it offers their saved cards. It lasts 15
 // minutes, or until the order expires when sooner.

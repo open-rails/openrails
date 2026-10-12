@@ -15,7 +15,9 @@
   answers the same order with a fresh URL.
 - On a site the merchant registered to frame its checkout, `BuyButton` creates
   the order that way and frames it (`<EmbeddedCheckout>`); elsewhere it pays on
-  the page as before.
+  the page as before. Its purchase key is kept in `sessionStorage` per customer
+  (`GET /me`) and price until the order is paid or closed: a reload answers
+  the same unpaid order.
 
 ## Entitlements read
 

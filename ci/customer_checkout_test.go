@@ -114,9 +114,13 @@ func TestCustomerOrderWithEmbeddedCheckout(t *testing.T) {
 		if checkout != nil {
 			body["checkout"] = checkout
 		}
-		h := map[string]string{"Idempotency-Key": key}
+		// A browser sends its page's Origin; "" sends none.
+		h := map[string]string{"Idempotency-Key": key, "Origin": origins[0]}
 		for k, v := range header {
 			h[k] = v
+		}
+		if h["Origin"] == "" {
+			delete(h, "Origin")
 		}
 		return call(app, http.MethodPost, "/v1/me/orders", token, body, h)
 	}
@@ -185,17 +189,21 @@ func TestCustomerOrderWithEmbeddedCheckout(t *testing.T) {
 	refusedWith(create(aliceToken, uuid.NewString(), course, map[string]any{"ui_mode": "embedded", "success_url": "https://evil.e2e.test/"}, nil), http.StatusBadRequest, "unknown_field")
 	refusedWith(create(aliceToken, uuid.NewString(), course, map[string]any{"ui_mode": "hosted"}, nil), http.StatusBadRequest, billing.CodeInvalidParam)
 	res = call(app, http.MethodPost, "/v1/me/orders", aliceToken, map[string]any{"lines": []map[string]any{{"price_id": course}}, "checkout": embedded,
-		"expected_total": "5000000", "payment": map[string]any{"token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": uuid.NewString()})
+		"expected_total": "5000000", "payment": map[string]any{"token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": uuid.NewString(), "Origin": origins[0]})
 	refusedWith(res, http.StatusBadRequest, billing.CodeInvalidParam)
+	// It returns to the registered origin the request came from, and to no other.
+	for _, page := range []string{"", "https://evil.e2e.test", "https://shop.e2e.test.evil.test", "http://shop.e2e.test"} {
+		refusedWith(create(aliceToken, uuid.NewString(), course, embedded, map[string]string{"Origin": page}), http.StatusBadRequest, "embed_origin_not_registered")
+	}
 	list := decode[billing.ListPage[billing.Order]](t, call(app, http.MethodGet, "/v1/me/orders", aliceToken, nil, nil))
 	require.Empty(t, list.Items, "a refused checkout makes no order")
 
 	// One call: the customer's order and its checkout, returning to the
-	// merchant's first registered origin whatever the browser sends.
+	// registered origin it came from: each site of one merchant its own.
 	key := uuid.NewString()
 	order, firstSecret := withCheckout(create(aliceToken, key, course, map[string]any{}, map[string]string{"Origin": origins[1]}), http.StatusCreated)
 	require.Equal(t, billing.CheckoutEmbedded, order.Checkout.UIMode)
-	require.Equal(t, origins[0]+"/", order.Checkout.SuccessURL)
+	require.Equal(t, origins[1]+"/", order.Checkout.SuccessURL)
 	require.True(t, order.Checkout.SavedPaymentMethods)
 	require.Nil(t, order.Checkout.CancelURL)
 	require.Equal(t, clock.Now().Add(hostedcheckout.MyOrderLifetime), order.Checkout.ExpiresAt)
@@ -206,7 +214,7 @@ func TestCustomerOrderWithEmbeddedCheckout(t *testing.T) {
 	require.NotNil(t, shown.Checkout)
 	require.Nil(t, shown.Checkout.URL)
 	require.Equal(t, billing.CheckoutEmbedded, shown.Checkout.UIMode)
-	require.Equal(t, origins[0]+"/", shown.Checkout.SuccessURL)
+	require.Equal(t, origins[1]+"/", shown.Checkout.SuccessURL)
 	require.True(t, shown.Checkout.SavedPaymentMethods)
 	require.Equal(t, http.StatusOK, onHost(http.MethodGet, "/v1/me/payment-methods", firstSecret, nil, nil).Code)
 	cfgRead := decode[billing.CustomerConfig](t, onHost(http.MethodGet, "/v1/me/config", firstSecret, nil, nil))
@@ -241,6 +249,7 @@ func TestCustomerOrderWithEmbeddedCheckout(t *testing.T) {
 	// Another customer's request under the same key is their own order.
 	bobs, _ := withCheckout(create(bobToken, key, course, embedded, nil), http.StatusCreated)
 	require.NotEqual(t, order.ID, bobs.ID)
+	require.Equal(t, origins[0]+"/", bobs.Checkout.SuccessURL)
 	opens(secondSecret, order.ID)
 
 	// A merchant's own checkout on an order of hers is never touched by hers.

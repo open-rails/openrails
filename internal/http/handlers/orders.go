@@ -170,6 +170,7 @@ func CreateMyOrder(r *httprequest.Request) {
 	if actor == nil {
 		return
 	}
+	actor.Origin = r.Request.Header.Get("Origin")
 	key := orderKey(r)
 	svc := orderService(r)
 	if key == "" || svc == nil {

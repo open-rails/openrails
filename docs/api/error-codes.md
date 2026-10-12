@@ -56,6 +56,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `destructive_actions_held` | 409 | `invalid_request_error` | The kill switch holds changes that end access or write to a provider; the proposal stays open. |
+| `embed_origin_not_registered` | 400 | `invalid_request_error` | The request's Origin is not one of the merchant's registered embed origins (settings checkout.embed_origins), which a customer's checkout returns to. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
