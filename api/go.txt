@@ -125,6 +125,7 @@ pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, bi
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Engine) Close(context.Context) error
+pkg openrails, method (*Engine) HostedCheckout(string, fs.FS) (string, http.Handler, error)
 pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient, error)
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)

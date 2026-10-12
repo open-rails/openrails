@@ -40,6 +40,7 @@ var handleMethods = map[string]string{
 // it hands its host, and its merchants' handles. No merchant's operation is
 // on it.
 var engineMethods = map[string]string{
+	"HostedCheckout":     "configures the isolated hosted-order surface before startup",
 	"NotificationEvents": "a trusted global consumer across every merchant",
 	"Start":              "starts the workers",
 	"Close":              "stops the engine",

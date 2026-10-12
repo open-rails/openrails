@@ -1,11 +1,11 @@
 # Hosted checkout
 
-A page the standalone server serves where a customer pays one order, on an
+A page where a customer pays one order, on an
 origin of its own. The merchant's backend creates the order with `checkout`,
 sends the customer to its checkout URL, and learns of payment from the
 `order.completed` host event. It works like Stripe Checkout: a short-lived
 URL, the provider's own card fields, 3-D Secure in the page, then back to the
-merchant. Embedded hosts sell on their own pages with billing-ui instead.
+merchant. Standalone and embedded hosts use the same checkout surface.
 
 ## Turning it on
 
@@ -29,6 +29,31 @@ The page is `web/checkout`, built from billing-ui and embedded in the binary
 binary on `server` builds it with `scripts/build-checkout-page.sh <dir>` and
 passes it as `server.Deps.CheckoutAssets`. A host that mounts `Routes()` on its
 own router sends the checkout host's requests to `HostedCheckout()`.
+
+## Embedded applications
+
+Before starting an embedded engine or serving HTTP, configure its checkout:
+
+```go
+host, checkout, err := engine.HostedCheckout("https://pay.example.com", assets)
+if err != nil { return err }
+// Dispatch only requests for host to checkout; keep the application's router
+// on its own origin. Then start the engine and host workers normally.
+```
+
+`assets` is an `fs.FS` rooted at the built `web/checkout` page; build it from the
+pinned module with `scripts/build-checkout-page.sh`. The handler owns checkout
+security headers, credential resolution, framing and rate limits. It mounts no
+host AuthKit or admin routes. The origin must differ from the engine's API,
+dashboard and declared merchant issuers, including equivalent port/host spellings.
+
+When two applications share a merchant's billing database and one serves the
+payment domain, the other calls `engine.HostedCheckout(origin, nil)` only to
+configure URL issuance; its returned handler is nil. Each application still
+owns its authentication. Its purchase endpoint authorizes the signed-in user,
+creates an unpaid order for that customer, and supplies `Checkout`. Retain the
+idempotency key across retries and dialog reloads. A publisher's inbox and
+notification receipt state remain independent of checkout.
 
 ## Creating one
 

@@ -23,10 +23,10 @@ import (
 
 // checkoutDomain is the hosted checkout's host name; "" without one.
 func (r *Runtime) checkoutDomain() string {
-	if r == nil || r.HostedCheckoutOrigin == "" {
+	if r == nil || r.HostedCheckoutOrigin() == "" {
 		return ""
 	}
-	u, err := url.Parse(r.HostedCheckoutOrigin)
+	u, err := url.Parse(r.HostedCheckoutOrigin())
 	if err != nil {
 		return ""
 	}

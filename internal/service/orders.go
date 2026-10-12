@@ -805,7 +805,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			return nil, true, err
 		}
 		if view.Checkout != nil {
-			recovered, err := hostedcheckout.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.HostedCheckoutOrigin, existing.BillingOrder, s.now())
+			recovered, err := hostedcheckout.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.HostedCheckoutOrigin(), existing.BillingOrder, s.now())
 			if err != nil {
 				return nil, true, err
 			}
@@ -828,7 +828,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	var attach func(context.Context, *gen.Queries, uuid.UUID) error
 	var checkoutURL string
 	if params.Checkout != nil {
-		origin := s.rt.HostedCheckoutOrigin
+		origin := s.rt.HostedCheckoutOrigin()
 		if origin == "" {
 			return nil, false, apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
 		}

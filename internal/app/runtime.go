@@ -154,7 +154,7 @@ type Runtime struct {
 	CopilotService *copilot.Service
 	// HostedCheckoutOrigin is where a server serving the hosted checkout
 	// serves it; merchant orders take a checkout only when it is set.
-	HostedCheckoutOrigin string
+	hostedCheckoutOrigin atomic.Pointer[string]
 	// checkoutDomains are the (PSP, host) registrations known queued.
 	checkoutDomains sync.Map
 	// CheckoutNetwork is the checkout page's sign-in to the customer
@@ -628,3 +628,13 @@ func (r *Runtime) SetSolanaPrepareCancelService(svc *recurring.PrepareCancelServ
 func (r *Runtime) SetSolanaPrepareTierChangeService(svc *recurring.PrepareTierChangeService) {
 	r.SolanaPrepareTierChangeService = svc
 }
+
+// HostedCheckoutOrigin is safe to read from provider posture hooks started
+// during New, while the host composes its checkout surface before Start.
+func (r *Runtime) HostedCheckoutOrigin() string {
+	if value := r.hostedCheckoutOrigin.Load(); value != nil {
+		return *value
+	}
+	return ""
+}
+func (r *Runtime) SetHostedCheckoutOrigin(origin string) { r.hostedCheckoutOrigin.Store(&origin) }
