@@ -971,7 +971,11 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			}).Error("Failed to record Stripe dispute reversal; continuing entitlement revocation")
 		}
 	}
-	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil && s.DB != nil {
+	if s.SubscriptionLifecycleService != nil && s.DB != nil {
+		subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
+		if err != nil {
+			return err
+		}
 		feedback := func(sub *models.Subscription) string {
 			// A membership already canceled is not this dispute's cancellation to undo.
 			if sub.Status == models.StatusCanceled {
@@ -979,10 +983,13 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			}
 			return fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 		}
-		if err := revokeStripeMembership(ctx, s.DB, s.SubscriptionLifecycleService, *original.SubscriptionID, models.CancelTypeChargeback, feedback, nil); err != nil {
-			return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
+		for _, subscriptionID := range subscriptionIDs {
+			if err := revokeStripeMembership(ctx, s.DB, s.SubscriptionLifecycleService, subscriptionID, models.CancelTypeChargeback, feedback, nil); err != nil {
+				return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
+			}
 		}
-	} else if original.SubscriptionID == nil && s.DB != nil {
+	}
+	if original.SubscriptionID == nil && s.DB != nil {
 		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
 		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.AccessRevokeChargeback); err != nil {
 			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
@@ -1073,15 +1080,20 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 		}
 	}
 
-	if original.SubscriptionID != nil {
-		if err := s.reactivateStripeSubscriptionAfterWonDispute(ctx, *original.SubscriptionID, original, disputeID); err != nil {
+	subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
+	if err != nil {
+		return err
+	}
+	for _, subscriptionID := range subscriptionIDs {
+		if err := s.reactivateStripeSubscriptionAfterWonDispute(ctx, subscriptionID, original, disputeID); err != nil {
 			return err
 		}
-	} else if s.DB != nil {
+	}
+	if original.SubscriptionID == nil && s.DB != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"dispute_id":          disputeID,
 			"original_payment_id": original.ID,
-		}).Warn("Stripe dispute was won for a one-off payment; entitlement restoration requires manual review")
+		}).Warn("Stripe dispute was won; nonrecurring access restoration requires manual review")
 	}
 	return nil
 }

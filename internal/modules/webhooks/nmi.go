@@ -744,10 +744,20 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				} else {
 					cbMetadata["termination_status"] = "access_revoked"
 				}
-			} else if _, seen := processedSubs[match.SubscriptionID]; seen {
-				cbMetadata["termination_status"] = "already_processed_in_batch"
-			} else {
-				processedSubs[match.SubscriptionID] = struct{}{}
+			}
+			subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, match.PaymentID)
+			if err != nil {
+				reconcileErrors++
+				cbMetadata["termination_status"] = "failed"
+				cbMetadata["termination_error"] = err.Error()
+				rememberTerminationError(err)
+			}
+			for _, subscriptionID := range subscriptionIDs {
+				if _, seen := processedSubs[subscriptionID]; seen {
+					cbMetadata["termination_status"] = "already_processed_in_batch"
+					continue
+				}
+				processedSubs[subscriptionID] = struct{}{}
 				if s.SubscriptionLifecycleService == nil {
 					reconcileErrors++
 					cbMetadata["termination_status"] = "failed"
@@ -760,12 +770,12 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					rememberTerminationError(errors.New("subscription service unavailable"))
 				} else {
 
-					subscription, subErr := s.SubscriptionService.GetByID(ctx, match.SubscriptionID)
+					subscription, subErr := s.SubscriptionService.GetByID(ctx, subscriptionID)
 					if subErr != nil {
 						reconcileErrors++
 						cbMetadata["termination_status"] = "failed"
 						cbMetadata["termination_error"] = fmt.Sprintf("failed to load subscription: %v", subErr)
-						rememberTerminationError(fmt.Errorf("load subscription %s: %w", match.SubscriptionID, subErr))
+						rememberTerminationError(fmt.Errorf("load subscription %s: %w", subscriptionID, subErr))
 					} else {
 						reasonCodeDisplay := reasonCode
 						if reasonCodeDisplay == "" {
@@ -782,11 +792,11 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							strings.TrimSpace(cb.ID.Trimmed()),
 						)
 						proc := models.Rail(rail)
-						subProcID := strings.TrimSpace(match.RailSubscriptionID)
+						subProcID := strings.TrimSpace(subscription.RailSubscriptionID)
 						params := &subscriptions.CancelMembershipParams{
 							RevokeAccess:   true,
 							Rail:           &proc,
-							SubscriptionID: &match.SubscriptionID,
+							SubscriptionID: &subscriptionID,
 							CancelType:     models.CancelTypeChargeback,
 							CancelFeedback: &feedback,
 						}
@@ -797,7 +807,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							reconcileErrors++
 							cbMetadata["termination_status"] = "failed"
 							cbMetadata["termination_error"] = err.Error()
-							rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", match.SubscriptionID, err))
+							rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", subscriptionID, err))
 						} else {
 							if subscription.Status == models.StatusCanceled {
 								alreadyCanceled++
