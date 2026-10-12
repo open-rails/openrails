@@ -138,3 +138,47 @@ func startLocalCompletion(ctx context.Context, in gen.BillingProviderIntent) (co
 	}
 	return destructive.BindAction(ctx, action), nil
 }
+
+// CompleteTerminalAction reconciles a receipt before a dispatcher retires an
+// already-terminal provider job. In particular a resumed subscription can
+// supersede its pending stop without taking admission locks inside resume.
+func (r *Runner) CompleteTerminalAction(ctx context.Context, in gen.BillingProviderIntent) error {
+	if in.DestructiveActionID == nil {
+		return nil
+	}
+	if !OperationTerminal(in.Status) {
+		return errors.New("destructive operation is not terminal")
+	}
+	if r.Admissions == nil {
+		return errors.New("destructive terminal recovery is not wired")
+	}
+	action, err := r.Admissions.GetAction(ctx, in.MerchantID, *in.DestructiveActionID)
+	if err != nil {
+		return err
+	}
+	if action.State == destructive.StateSucceeded || action.State == destructive.StateNoEffect {
+		return nil
+	}
+	outcome := destructive.OutcomeUncertain
+	switch in.Status {
+	case StatusSucceeded:
+		outcome = destructive.OutcomeSucceeded
+	case StatusSuperseded, StatusExpired:
+		if action.State == destructive.StateReserved {
+			outcome = destructive.OutcomeNoEffect
+		} else if cancelIntent(in.IntentType) {
+			outcome = destructive.OutcomeSucceeded
+		}
+	case StatusFailedTerminal:
+		var evidence struct {
+			NoEffect bool `json:"destructive_no_effect"`
+		}
+		if len(in.ResultEvidence) > 0 && json.Unmarshal(in.ResultEvidence, &evidence) != nil {
+			return errors.New("destructive terminal evidence is malformed")
+		}
+		if evidence.NoEffect {
+			outcome = destructive.OutcomeNoEffect
+		}
+	}
+	return r.Admissions.Finish(ctx, in.MerchantID, action.ID, outcome, in.ID.String())
+}

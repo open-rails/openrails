@@ -197,7 +197,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return err
 	}
 
-	if subscription.Status == models.StatusCanceled && !revokeAccess {
+	if subscription.Status == models.StatusCanceled && (!revokeAccess || subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.After(s.now())) {
 		return nil
 	}
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Status == models.StatusCanceled && revokeAccess {
