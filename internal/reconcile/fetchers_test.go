@@ -334,6 +334,11 @@ func TestStripeFetcher(t *testing.T) {
 
 		for _, u := range requests {
 			q := u.Query()
+			if u.Path == "/v1/invoices" {
+				require.NotEmpty(t, q.Get("subscription"), "invoice history is scoped to the verified subscription")
+				require.Empty(t, q.Get("created[gte]"), "late bills must not disappear outside the transaction window")
+				continue
+			}
 			if u.Path == "/v1/subscriptions" {
 				require.Equal(t, "all", q.Get("status"), "the roster includes terminal subscriptions")
 				require.Empty(t, q.Get("created[gte]"), "the roster is never date-windowed")
