@@ -27,7 +27,8 @@ const (
 // released or reaches ExpiresAt.
 type AdmitParams struct {
 	// RequestID identifies the admission: a retry with the same terms answers
-	// the same verdict, one with changed terms is ErrIdempotencyKeyReused.
+	// original decision plus current hold state; changed terms are
+	// ErrIdempotencyKeyReused.
 	RequestID   string      `json:"request_id"`
 	CustomerID  CustomerID  `json:"customer_id"`
 	Invoker     string      `json:"invoker"`
@@ -102,7 +103,9 @@ type Admission struct {
 	Replayed bool `json:"replayed"`
 }
 
-// Active reports an allowed admission whose hold is still open.
+// Active reports an allowed admission whose hold was open when read. A
+// snapshot does not observe later release, capture or expiry; replay Admit
+// with the same request terms to read its current state.
 func (a *Admission) Active() bool {
 	return a != nil && a.Allowed && a.State != nil && *a.State == AdmissionOpen
 }

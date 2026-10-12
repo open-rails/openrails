@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // obj is a JSON object whose keys keep their insertion order, so the
@@ -201,6 +202,11 @@ func (m *model) operation(r routes.Route) *obj {
 		}
 		param.set("schema", schema)
 		params = append(params, param)
+	}
+	if r.ClientMethod() && r.Auth != routes.AuthPublic {
+		params = append(params, newObj("name", merchant.ExpectedHeader, "in", "header",
+			"description", "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+			"schema", newObj("type", "string", "format", "uuid")))
 	}
 	if r.IdempotencyKey {
 		params = append(params, newObj("name", "Idempotency-Key", "in", "header", "schema", newObj("type", "string")))

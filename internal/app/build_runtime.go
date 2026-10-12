@@ -63,10 +63,6 @@ const (
 	// the simple, honest per-provider rate limit (thousands of merchants share
 	// each provider's API budget; a small worker cap is the brake).
 	standaloneRiverProviderRefreshQueueMaxWorkers = 4
-	// appRequestTTL is how long a programmatic write replays its response,
-	// appRequestLease how long a silent one keeps its claim.
-	appRequestTTL   = 24 * time.Hour
-	appRequestLease = 30 * time.Second
 	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
 	// held claim every quarter lease.
 	idempotencyLeaseConns = 4
@@ -251,10 +247,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			_ = leaseDB.Close()
 		}
 	}()
-	appRequests, err := idempotency.NewStore(database, leaseDB, appRequestTTL, appRequestLease)
-	if err != nil {
-		return nil, err
-	}
 	var fxTransport http.RoundTripper
 	if overrides != nil {
 		fxTransport = overrides.FXTransport
@@ -368,7 +360,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		MetricsService:         serviceInstances.MetricsService,
 		DashboardService:       serviceInstances.DashboardService,
 		CopilotService:         serviceInstances.CopilotService,
-		AppRequests:            appRequests,
 		AlertService:           alertService,
 		WebhookHealth:          &webhookhealth.Recorder{DB: database, Clock: clock},
 		MoneyCharger:           moneyCharger,

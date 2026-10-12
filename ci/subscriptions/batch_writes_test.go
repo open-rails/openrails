@@ -149,19 +149,26 @@ func TestHostEventsAcknowledgeInBatches(t *testing.T) {
 	require.Empty(t, pending.Items)
 }
 
-// A programmatic write runs once per Idempotency-Key: a retry answers the
-// recorded response, the key sent with another body is refused, a write
-// without one is refused, and a person never reaches the route.
-func TestAppWritesReplayByIdempotencyKey(t *testing.T) {
+// A usage source identity owns its receipt. Equivalent JSON retries and a
+// missing HTTP key both recover it; changed monetary terms fail per item.
+func TestUsageRetriesUseSourceIdentity(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
-	send := func(token, key string, amount int64) (int, http.Header, map[string]any) {
+	_, err := createCreditGrant(t.Context(), w.client[embedded], c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
+	require.NoError(t, err)
+	send := func(token, key string, amount int64, formatted bool) (int, billing.RecordUsageBatchResult) {
 		t.Helper()
-		raw, err := json.Marshal(map[string]any{"items": []any{map[string]any{
+		input := map[string]any{"items": []any{map[string]any{
 			"customer_id": c.id, "invoker": c.id, "currency": "USD", "event_type": "replay",
 			"amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
-		}}})
+		}}}
+		raw, err := json.Marshal(input)
 		require.NoError(t, err)
+		if formatted {
+			var indented bytes.Buffer
+			require.NoError(t, json.Indent(&indented, raw, "", "  "))
+			raw = indented.Bytes()
+		}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/app/usage-events", bytes.NewReader(raw))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -172,27 +179,24 @@ func TestAppWritesReplayByIdempotencyKey(t *testing.T) {
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer res.Body.Close()
-		var body map[string]any
+		var body billing.RecordUsageBatchResult
 		require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
-		return res.StatusCode, res.Header, body
+		return res.StatusCode, body
 	}
 	host, key := w.auth.hostToken(t), uuid.NewString()
-
-	status, header, first := send(host, key, 1_000)
-	require.Equal(t, http.StatusOK, status, "%v", first)
-	require.Empty(t, header.Get("Idempotent-Replayed"))
-	status, header, again := send(host, key, 1_000)
-	require.Equal(t, http.StatusOK, status, "%v", again)
-	require.Equal(t, "true", header.Get("Idempotent-Replayed"))
-	require.Equal(t, first, again, "a retry answers the recorded response")
-
-	status, _, body := send(host, key, 2_000)
-	require.Equal(t, http.StatusUnprocessableEntity, status, "%v", body)
-	require.Equal(t, billing.CodeIdempotencyKeyReused, body["error"].(map[string]any)["code"])
-	status, _, body = send(host, "", 1_000)
-	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	require.Equal(t, "idempotency_key_required", body["error"].(map[string]any)["code"])
-	status, _, body = send(w.auth.token(t, "staff"), uuid.NewString(), 1_000)
-	require.Equal(t, http.StatusForbidden, status, "%v", body)
-	require.Equal(t, billing.CodeApplicationRequired, body["error"].(map[string]any)["code"])
+	status, first := send(host, key, 1_000, false)
+	require.Equal(t, http.StatusOK, status)
+	require.NoError(t, first.Items[0].Err())
+	require.False(t, first.Items[0].Event.Replayed)
+	for _, retryKey := range []string{key, "", uuid.NewString()} {
+		status, again := send(host, retryKey, 1_000, true)
+		require.Equal(t, http.StatusOK, status)
+		require.NoError(t, again.Items[0].Err())
+		require.True(t, again.Items[0].Event.Replayed)
+		require.Equal(t, first.Items[0].Event.ID, again.Items[0].Event.ID)
+	}
+	status, changed := send(host, key, 2_000, false)
+	require.Equal(t, http.StatusOK, status)
+	require.ErrorIs(t, changed.Items[0].Err(), billing.ErrIdempotencyKeyReused)
+	require.Equal(t, http.StatusUnprocessableEntity, changed.Items[0].Status)
 }

@@ -64,7 +64,8 @@ func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string, req
 
 // ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds'
 // deadlines later, one result per item in order. An item refused with
-// hold_not_found was captured, released or lapsed; admit it again instead.
+// hold_not_found was captured, released or lapsed. New work needs a new
+// request ID; replaying the old request never reopens its hold.
 func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error) {
 	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
 		return nil, err

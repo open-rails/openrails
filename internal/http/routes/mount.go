@@ -218,9 +218,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		}
 	case AuthApplication:
 		mw = append(e.appGates(route), conn...)
-		if route.AppWrite() {
-			mw = append(mw, e.appRequestReplay(route))
-		}
 	case AuthCustomer:
 		mw = e.customerGates(route)
 		if e.checkout {

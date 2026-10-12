@@ -44,8 +44,12 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Idempotency.** Send `Idempotency-Key` only on the routes that read it
   (marked in [routes.md](routes.md)): checkout, orders, refunds, tier changes,
   usage order collection. Each such operation keeps its own durable receipt: the same key
-  with the same terms answers the original result, and with other terms
-  `422 idempotency_key_reused`. There is no generic response cache; every
+  with the same terms recovers the operation, and with other terms
+  `422 idempotency_key_reused`. Admissions instead use `request_id`, usage
+  events use `(source, source_id)`, and running charges use `reference`;
+  those routes need no HTTP key. Admissions return the current hold state,
+  while capture and usage retries recover their original financial receipts.
+  There is no generic response cache; every
   request authenticates and authorizes again. One key names one purchase:
   generate it when the buyer decides to buy, store it with the order, and send
   the same key on every retry of that request (timeouts, network errors,
@@ -84,7 +88,7 @@ read or manage permissions do not grant access to this operator inbox.
 | Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link, and the order names its merchant |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
 | Customer support: `/v1/admin/*`; metrics: `/v1/metrics/*`; catalog: `/v1/catalog/*`; merchant configuration: `/v1/merchant/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
-| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
+| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; replay identity belongs to each operation. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
 Every staff and programmatic route is gated by its permission (each route's
@@ -97,14 +101,17 @@ role in the merchant's group. A person also needs a recent sign-in on a
 Bearer error="insufficient_user_authentication", max_age="900"`), with the
 step-up methods in `metadata`, or `403 step_up_unavailable` for a credential
 with no sign-in of its own; an application never steps up. A `/v1/app` route refuses a person
-(`403 application_required`), and answers a retried write's `Idempotency-Key`
-with the first response; the key sent with another request is
-`422 idempotency_key_reused`.
+(`403 application_required`). Programmatic writes use their documented durable
+identity, with the same replay behavior as embedded calls.
 
 A `/v1/me` route acts on the credential's own customer; no path names a user.
 The merchant a request acts on is the one its credential is bound to; nothing
-in the request names it ([auth](../auth.md)). Every merchant-bound answer names
-it in the `OpenRails-Bound-Merchant` header.
+in the request selects it ([auth](../auth.md)). Every merchant-bound answer names
+it in the `OpenRails-Bound-Merchant` header. Merchant client routes also accept
+`OpenRails-Expected-Merchant: <uuid>` as an optional precondition: after
+credential binding, a mismatch returns `412 merchant_mismatch` before the
+operation runs. It never selects or grants access to a merchant. The Go
+client sends it whenever its handle knows its merchant.
 
 Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route

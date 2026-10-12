@@ -10,7 +10,7 @@ import (
 var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/app/host-events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListHostEvents",
 		Query: params(queryOf(handlers.HostEventsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
-	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "AcknowledgeHostEvents", IdempotencyKey: true,
+	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "AcknowledgeHostEvents",
 		Request: billing.AcknowledgeHostEventsParams{}, Responses: []Reply{{200, billing.HostEventLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceAcknowledgeHostEvents)},
 	{Method: GET, Path: "/v1/admin/access", Group: Access, Auth: AuthSignedIn, Name: "GetAdminAccess",
 		Responses: []Reply{{200, billing.AdminAccess{}}}, Bind: adminAccess},

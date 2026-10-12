@@ -62,11 +62,12 @@ func (c *Client) CreateOrder(ctx context.Context, params billing.CreateOrderPara
 	if params.CustomerID.IsZero() {
 		return nil, invalidErr("customer_id is required")
 	}
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
+	key, err := requiredIdempotencyKey(params.IdempotencyKey, requestOptions)
+	if err != nil {
+		return nil, err
 	}
 	var out billing.Order
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/app/orders", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/app/orders", params, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

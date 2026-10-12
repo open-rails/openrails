@@ -355,13 +355,6 @@ func (r Route) ClientMethod() bool {
 // CatalogUpdate reports a catalog edit or document application.
 func (r Route) CatalogUpdate() bool { return r.Group == CatalogAdmin && r.Level == LevelUpdate }
 
-// AppWrite reports a programmatic write: it replays by Idempotency-Key. A
-// check sent as POST is a read (LevelRead), and a SCIM write is idempotent by
-// its own protocol.
-func (r Route) AppWrite() bool {
-	return r.Auth == AuthApplication && r.Method != GET && r.Level != LevelRead
-}
-
 // h adapts a handler func to the neutral router.Handler type.
 func h(fn func(r *httprequest.Request)) router.Handler { return router.Handler(fn) }
 
@@ -406,8 +399,8 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if (r.Group == App) != (r.Auth == AuthApplication || r.Auth == AuthProvisioning) {
 			panic("routes: " + r.Key() + ": a programmatic route, and only one, takes an application or a provisioning token")
 		}
-		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
-			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
+		if r.Group == App && (r.Sensitive || !strings.HasPrefix(r.Path, "/v1/app/")) {
+			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and replay belongs to each operation")
 		}
 		if (r.Auth == AuthApplication) != (r.Permission != Pair{}) {
 			panic("routes: " + r.Key() + ": a programmatic route, and only one, names its permission")
@@ -461,7 +454,7 @@ func TierErrors(tier Tier) []string {
 	authenticated := []string{
 		billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
 		billing.CodePermissionRequired, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
-		billing.CodeMerchantUnresolved,
+		billing.CodeMerchantUnresolved, billing.CodeMerchantMismatch, billing.CodeInvalidParam,
 	}
 	staff := []string{billing.CodeHostPrincipalInvalid}
 	var own []string
@@ -493,15 +486,12 @@ func sortedCodes(codes []string) []string {
 }
 
 // ErrorSets names the shared code sets a route answers besides its own
-// Errors: its tier's, and the request-shape and programmatic-write codes
+// Errors: its tier's and request-shape codes
 // where they apply. ErrorSet lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
 	if r.Request != nil || len(r.Query) > 0 {
 		sets = append(sets, "request")
-	}
-	if r.AppWrite() {
-		sets = append(sets, "app_write")
 	}
 	return sets
 }
@@ -511,8 +501,6 @@ func ErrorSet(name string) []string {
 	switch name {
 	case "request":
 		return requestShapeErrors
-	case "app_write":
-		return []string{"idempotency_key_in_progress", "idempotency_key_required", billing.CodeIdempotencyKeyReused}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))

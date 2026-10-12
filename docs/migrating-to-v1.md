@@ -38,6 +38,24 @@ that went, and what replaced it; the sections below give the details.
 | The console's merchant in `sessionStorage`, sent as the header | A token exchanged for the chosen merchant, held in memory |
 | The client merchant-selection guide | [Merchant binding](merchant-binding.md) |
 
+## Programmatic retries and merchant expectations
+
+Programmatic writes no longer use a generic HTTP response cache. Preserve the
+operation's `request_id`, `(source, source_id)`, or running-charge `reference`
+when retrying, including after a lost response. New domain IDs mean new work,
+even when an old `Idempotency-Key` is reused. Orders, refunds and subscription
+changes still use their documented `Idempotency-Key` operation receipts.
+Admission replay returns the current hold state; immutable capture and usage
+receipts remain unchanged. JSON whitespace, object-key ordering and supported
+normalization no longer turn an equivalent retry into a transport conflict.
+Update the server before using an SDK that omits redundant HTTP keys.
+
+A Go remote handle with a known merchant sends `OpenRails-Expected-Merchant`
+on every request. Current servers refuse a credential bound elsewhere before
+executing the operation (`412 merchant_mismatch`). The optional expectation
+never selects a merchant, and older servers may ignore it; response-header
+checking alone cannot prevent an already-executed write on those servers.
+
 ## 1. Configuration
 
 ### `openrails.Config` and `Deps`
