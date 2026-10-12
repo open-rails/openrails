@@ -336,7 +336,7 @@ var jsonRules = map[string]jsonRule{
 	"checkout_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.
-		"status": textValue, "payment_status": textValue, "number": textValue, "payment_id": uuidValue, "reason": textValue,
+		"status": textValue, "payment_status": textValue, "number": textValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": textValue}),
 	"provider_intents.payload":            nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
