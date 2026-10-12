@@ -128,6 +128,15 @@ func RenewalPaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attem
 	if err != nil {
 		return err
 	}
+	if payment != nil {
+		n, err := q.LinkAcceptedRenewalPaymentOrder(ctx, gen.LinkAcceptedRenewalPaymentOrderParams{MerchantID: merchantID, OrderID: orderID, PaymentID: *payment})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("renewal payment does not belong to this order")
+		}
+	}
 	if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: merchantID, ID: attemptID, Status: "succeeded", PaymentID: payment, TransactionID: &transactionID, Now: now}); err != nil {
 		return err
 	}
