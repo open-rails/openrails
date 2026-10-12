@@ -25,7 +25,9 @@ var providerBillReferenceChecks = []rowCheck{
  AND o.customer_id::text=snapshot->>'CustomerID' AND o.psp_id::text=snapshot->>'PSPID'
  AND o.collection_owner=snapshot->>'Owner' AND o.currency=snapshot->>'Currency' AND o.total::text=snapshot->>'Total'
  AND ((o.origin IN ('customer','merchant') AND snapshot->>'Kind' IN ('purchase','initial'))
-   OR (o.origin='subscription' AND o.subscription_id::text=snapshot->>'SubscriptionID' AND o.subscription_bill_kind=snapshot->>'Kind')))
+   OR (o.origin='subscription' AND o.subscription_id::text=snapshot->>'SubscriptionID' AND o.subscription_bill_kind=snapshot->>'Kind'
+     AND o.period_starts_at=(snapshot->>'PeriodStart')::timestamptz AND o.period_ends_at=(snapshot->>'PeriodEnd')::timestamptz
+     AND o.due_at=COALESCE(NULLIF(snapshot->>'DueAt','0001-01-01T00:00:00Z'),snapshot->>'PeriodStart')::timestamptz)))
  OR source_kind IS DISTINCT FROM snapshot->>'SourceKind' OR source_key IS DISTINCT FROM snapshot->>'SourceKey'
  OR provider_reference IS DISTINCT FROM snapshot->>'ProviderReference'
  OR (snapshot->>'SubscriptionID' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.subscriptions s
@@ -37,7 +39,12 @@ var providerBillReferenceChecks = []rowCheck{
  AND l.customer_id=provider_bills.customer_id AND l.position=x.position-1
  AND l.price_id::text IS NOT DISTINCT FROM x.line->>'PriceID' AND l.product_id::text IS NOT DISTINCT FROM x.line->>'ProductID'
  AND l.quantity::text IS NOT DISTINCT FROM x.line->>'Quantity' AND l.unit_amount::text=x.line->>'UnitAmount' AND l.amount::text=x.line->>'Amount'
- AND COALESCE(l.source,'')=x.line->>'Source'))`},
+ AND COALESCE(l.source,'')=x.line->>'Source'
+ AND l.description=x.line->>'Description'
+ AND l.billing_interval_hours::text IS NOT DISTINCT FROM x.line->>'BillingIntervalHours'
+ AND l.access_duration_hours::text IS NOT DISTINCT FROM x.line->>'AccessDurationHours'
+ AND (COALESCE(x.line->>'Ownership','')='' OR l.ownership=x.line->>'Ownership')
+ AND (COALESCE(x.line->>'ClaimKey','')='' OR l.claim_key=x.line->>'ClaimKey')))`},
 	{"provider_schedules", `NOT EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1
  AND s.id=provider_schedules.subscription_id AND s.customer_id=provider_schedules.customer_id AND s.psp_id=provider_schedules.psp_id)
  OR (initial_order_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=provider_schedules.initial_order_id
