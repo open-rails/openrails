@@ -80,6 +80,7 @@ migration 0076_dynamic_pricing.up.sql sha256:67d784d49e2ec82b305b55b9c903cd9de84
 migration 0077_retire_checkout_creation.up.sql sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
 migration 0078_proposals.up.sql sha256:9dec89446fbca70a67abd7b6cbb8c95fc8ef607fa5ad20f0d86ebcc3c3986a7f
 migration 0079_balance_notices.up.sql sha256:ae42157271f86f0f3ed4f3a3925351155dfdff27bb6cd02e3b12e25799a9f700
+migration 0080_destructive_admissions.up.sql sha256:bdbc16c09250b9feaabfa55fc72ef43c39c3fbf17a8628db10bcc5a46d1ca060
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -598,6 +599,97 @@ table billing.destructive_action_switch
   constraint destructive_action_switch_singleton_check CHECK ((singleton = true))
   index CREATE UNIQUE INDEX destructive_action_switch_pkey ON billing.destructive_action_switch USING btree (singleton)
 
+table billing.destructive_actions
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column admission_sequence bigint NOT NULL GENERATED ALWAYS AS IDENTITY
+  column kind text NOT NULL
+  column target text NOT NULL
+  column action_key text NOT NULL
+  column request_digest text NOT NULL
+  column origin text NOT NULL
+  column actor_issuer text NOT NULL
+  column actor_id text NOT NULL
+  column actor_key text NOT NULL
+  column credential text
+  column units bigint NOT NULL
+  column admitted_at timestamp with time zone NOT NULL
+  column state text NOT NULL
+  column started_at timestamp with time zone
+  column finished_at timestamp with time zone
+  column completion_sequence bigint
+  column result text
+  constraint destructive_actions_action_key_check CHECK (((btrim(action_key) <> ''::text) AND (octet_length(action_key) <= 2048)))
+  constraint destructive_actions_actor_id_check CHECK ((btrim(actor_id) <> ''::text))
+  constraint destructive_actions_actor_issuer_check CHECK ((btrim(actor_issuer) <> ''::text))
+  constraint destructive_actions_actor_key_check CHECK ((actor_key ~ '^[0-9a-f]{64}$'::text))
+  constraint destructive_actions_admission_sequence_key UNIQUE (admission_sequence)
+  constraint destructive_actions_credential_check CHECK ((credential <> ''::text))
+  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'account_deletion'::text])))
+  constraint destructive_actions_lifecycle_check CHECK ((((state = 'reserved'::text) AND (started_at IS NULL) AND (finished_at IS NULL)) OR ((state = ANY (ARRAY['started'::text, 'uncertain'::text])) AND (started_at IS NOT NULL) AND (finished_at IS NULL)) OR ((state = 'succeeded'::text) AND (started_at IS NOT NULL) AND (finished_at IS NOT NULL) AND (completion_sequence IS NOT NULL)) OR ((state = 'no_effect'::text) AND (finished_at IS NOT NULL))))
+  constraint destructive_actions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint destructive_actions_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'host'::text, 'automation'::text])))
+  constraint destructive_actions_pkey PRIMARY KEY (merchant_id, id)
+  constraint destructive_actions_request_digest_check CHECK ((request_digest ~ '^[0-9a-f]{64}$'::text))
+  constraint destructive_actions_result_check CHECK (((result <> ''::text) AND (octet_length(result) <= 2048)))
+  constraint destructive_actions_state_check CHECK ((state = ANY (ARRAY['reserved'::text, 'started'::text, 'succeeded'::text, 'no_effect'::text, 'uncertain'::text])))
+  constraint destructive_actions_target_check CHECK (((btrim(target) <> ''::text) AND (octet_length(target) <= 2048)))
+  constraint destructive_actions_units_check CHECK (((units > 0) AND (units <= 1000000000)))
+  index CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions USING btree (actor_key, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  index CREATE UNIQUE INDEX destructive_actions_admission_sequence_key ON billing.destructive_actions USING btree (admission_sequence)
+  index CREATE INDEX destructive_actions_completion_sequence_idx ON billing.destructive_actions USING btree (completion_sequence) WHERE (completion_sequence IS NOT NULL)
+  index CREATE INDEX destructive_actions_key_history_idx ON billing.destructive_actions USING btree (merchant_id, action_key, admitted_at DESC, id DESC)
+  index CREATE UNIQUE INDEX destructive_actions_live_key ON billing.destructive_actions USING btree (merchant_id, action_key) WHERE (state <> 'no_effect'::text)
+  index CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions USING btree (merchant_id, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  index CREATE INDEX destructive_actions_pending_idx ON billing.destructive_actions USING btree (merchant_id, actor_key) INCLUDE (units) WHERE (state = ANY (ARRAY['reserved'::text, 'started'::text, 'uncertain'::text]))
+  index CREATE INDEX destructive_actions_pending_target_idx ON billing.destructive_actions USING btree (merchant_id, target, actor_issuer, actor_id, request_digest) WHERE (state = ANY (ARRAY['reserved'::text, 'started'::text, 'uncertain'::text]))
+  index CREATE UNIQUE INDEX destructive_actions_pkey ON billing.destructive_actions USING btree (merchant_id, id)
+  index CREATE INDEX destructive_actions_recent_idx ON billing.destructive_actions USING btree (GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
+  trigger CREATE TRIGGER destructive_actions_immutable BEFORE UPDATE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'started_at', 'finished_at', 'completion_sequence', 'result')
+  trigger CREATE TRIGGER destructive_actions_no_delete BEFORE DELETE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER destructive_actions_state BEFORE UPDATE ON billing.destructive_actions FOR EACH ROW EXECUTE FUNCTION billing.guard_destructive_action_state()
+
+table billing.destructive_holds
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column scope text NOT NULL
+  column scope_key text NOT NULL
+  column actor_issuer text NOT NULL
+  column actor_id text NOT NULL
+  column credential text
+  column action_kind text NOT NULL
+  column target text NOT NULL
+  column window_name text NOT NULL
+  column observed bigint NOT NULL
+  column requested bigint NOT NULL
+  column ceiling bigint NOT NULL
+  column opened_at timestamp with time zone NOT NULL
+  column cleared_at timestamp with time zone
+  column clear_through_sequence bigint
+  column cleared_by_issuer text
+  column cleared_by_id text
+  column clear_reason text
+  constraint destructive_holds_actor_id_check CHECK ((btrim(actor_id) <> ''::text))
+  constraint destructive_holds_actor_issuer_check CHECK ((btrim(actor_issuer) <> ''::text))
+  constraint destructive_holds_ceiling_check CHECK ((ceiling > 0))
+  constraint destructive_holds_clear_check CHECK ((((cleared_at IS NULL) AND (clear_through_sequence IS NULL) AND (cleared_by_issuer IS NULL) AND (cleared_by_id IS NULL) AND (clear_reason IS NULL)) OR ((cleared_at IS NOT NULL) AND (clear_through_sequence IS NOT NULL) AND (clear_through_sequence >= 0) AND (cleared_by_issuer IS NOT NULL) AND (btrim(cleared_by_issuer) <> ''::text) AND (cleared_by_id IS NOT NULL) AND (btrim(cleared_by_id) <> ''::text) AND (clear_reason IS NOT NULL) AND (btrim(clear_reason) <> ''::text) AND ((cleared_by_issuer IS DISTINCT FROM actor_issuer) OR (cleared_by_id IS DISTINCT FROM actor_id)))))
+  constraint destructive_holds_credential_check CHECK ((credential <> ''::text))
+  constraint destructive_holds_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint destructive_holds_observed_check CHECK ((observed >= 0))
+  constraint destructive_holds_pkey PRIMARY KEY (merchant_id, id)
+  constraint destructive_holds_requested_check CHECK ((requested > 0))
+  constraint destructive_holds_scope_check CHECK ((scope = ANY (ARRAY['actor'::text, 'merchant'::text, 'deployment'::text])))
+  constraint destructive_holds_scope_key_check CHECK ((btrim(scope_key) <> ''::text))
+  constraint destructive_holds_target_check CHECK ((btrim(target) <> ''::text))
+  constraint destructive_holds_window_name_check CHECK ((window_name = ANY (ARRAY['hour'::text, 'day'::text])))
+  index CREATE INDEX destructive_holds_epoch_idx ON billing.destructive_holds USING btree (scope_key, cleared_at DESC) WHERE (cleared_at IS NOT NULL)
+  index CREATE INDEX destructive_holds_merchant_idx ON billing.destructive_holds USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX destructive_holds_open_scope_key ON billing.destructive_holds USING btree (scope_key) WHERE (cleared_at IS NULL)
+  index CREATE UNIQUE INDEX destructive_holds_pkey ON billing.destructive_holds USING btree (merchant_id, id)
+  trigger CREATE TRIGGER destructive_holds_clear BEFORE UPDATE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.guard_destructive_hold_clear()
+  trigger CREATE TRIGGER destructive_holds_immutable BEFORE UPDATE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('cleared_at', 'clear_through_sequence', 'cleared_by_issuer', 'cleared_by_id', 'clear_reason')
+  trigger CREATE TRIGGER destructive_holds_no_delete BEFORE DELETE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.destructive_run_before_images
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -722,9 +814,9 @@ table billing.host_outbox
   column data jsonb NOT NULL DEFAULT '{}'::jsonb
   column delivered_at timestamp with time zone
   column dedupe_key text NOT NULL
-  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
+  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text, 'destructive.hold_opened'::text, 'destructive.hold_cleared'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['destructive.hold_opened'::text, 'destructive.hold_cleared'::text])) AND (subject_type = 'destructive_hold'::text) AND (payment_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (jsonb_typeof(data) = 'object'::text))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -1586,6 +1678,7 @@ table billing.payments
   index CREATE UNIQUE INDEX payments_customer_id_currency_id_key ON billing.payments USING btree (merchant_id, customer_id, currency, id)
   index CREATE UNIQUE INDEX payments_customer_id_id_key ON billing.payments USING btree (merchant_id, customer_id, id)
   index CREATE INDEX payments_destructive_run_id_idx ON billing.payments USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
+  index CREATE INDEX payments_destructive_scale_idx ON billing.payments USING btree (merchant_id, customer_id, purchased_at) WHERE ((status = 'succeeded'::text) AND (amount > 0) AND (refunded_payment_id IS NULL) AND (deleted_at IS NULL))
   index CREATE UNIQUE INDEX payments_ledger_transfer_id_key ON billing.payments USING btree (merchant_id, ledger_transfer_id) WHERE ((ledger_transfer_id IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE INDEX payments_metadata_nmi_order_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'nmi_subscription_order_id'::text))) WHERE ((metadata ->> 'nmi_subscription_order_id'::text) IS NOT NULL)
   index CREATE INDEX payments_metadata_stripe_invoice_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'stripe_invoice_id'::text))) WHERE ((metadata ->> 'stripe_invoice_id'::text) IS NOT NULL)
@@ -1643,7 +1736,9 @@ table billing.price_migrations
   column subscriptions_skipped integer NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column canceled_at timestamp with time zone
+  column destructive_action_id uuid
   constraint price_migrations_counts_check CHECK (((subscriptions_matched >= 0) AND ((subscriptions_skipped >= 0) AND (subscriptions_skipped <= subscriptions_matched))))
+  constraint price_migrations_destructive_action_fkey FOREIGN KEY (merchant_id, destructive_action_id) REFERENCES billing.destructive_actions(merchant_id, id) ON DELETE RESTRICT
   constraint price_migrations_fallback_policy_check CHECK ((fallback_policy = ANY (ARRAY['keep_grandfathered'::text, 'cancel_at_period_end'::text])))
   constraint price_migrations_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   constraint price_migrations_from_price_key_check CHECK ((from_price_key <> ''::text))
@@ -1653,6 +1748,7 @@ table billing.price_migrations
   constraint price_migrations_source_check CHECK ((((from_price_id IS NULL) = (from_price_key IS NOT NULL)) AND ((from_product_id IS NULL) = (from_price_key IS NULL))))
   constraint price_migrations_to_price_id_fkey FOREIGN KEY (merchant_id, to_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   index CREATE INDEX price_migrations_created_at_id_idx ON billing.price_migrations USING btree (merchant_id, created_at DESC, id DESC)
+  index CREATE UNIQUE INDEX price_migrations_destructive_action_key ON billing.price_migrations USING btree (merchant_id, destructive_action_id) WHERE (destructive_action_id IS NOT NULL)
   index CREATE INDEX price_migrations_from_key_created_at_id_idx ON billing.price_migrations USING btree (merchant_id, from_product_id, from_price_key, created_at DESC, id DESC) WHERE (from_price_key IS NOT NULL)
   index CREATE INDEX price_migrations_from_price_id_idx ON billing.price_migrations USING btree (merchant_id, from_price_id) WHERE (from_price_id IS NOT NULL)
   index CREATE UNIQUE INDEX price_migrations_pkey ON billing.price_migrations USING btree (merchant_id, id)
@@ -1878,14 +1974,16 @@ table billing.provider_intents
   column custodian_id uuid
   column subject text
   column credential text
+  column destructive_action_id uuid
   constraint provider_intents_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
   constraint provider_intents_credential_check CHECK ((credential <> ''::text))
   constraint provider_intents_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
+  constraint provider_intents_destructive_action_fkey FOREIGN KEY (merchant_id, destructive_action_id) REFERENCES billing.destructive_actions(merchant_id, id) ON DELETE RESTRICT
   constraint provider_intents_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint provider_intents_executed_check CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL)))
   constraint provider_intents_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
   constraint provider_intents_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint provider_intents_origin_check CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text])))
+  constraint provider_intents_origin_check CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text, 'provider'::text])))
   constraint provider_intents_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE SET NULL (payment_id)
   constraint provider_intents_pkey PRIMARY KEY (merchant_id, id)
   constraint provider_intents_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE SET NULL (price_id)
@@ -1896,6 +1994,7 @@ table billing.provider_intents
   index CREATE INDEX provider_intents_actor_created_at_intent_type_idx ON billing.provider_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]))
   index CREATE INDEX provider_intents_checkout_attempt_idx ON billing.provider_intents USING btree (merchant_id, ((payload ->> 'checkout_attempt_id'::text))) WHERE (payload ? 'checkout_attempt_id'::text)
   index CREATE INDEX provider_intents_custodian_method_delete_idx ON billing.provider_intents USING btree (merchant_id, custodian_id, (((payload -> 'instrument'::text) ->> 'rail_method_ref'::text))) WHERE (intent_type = 'hyperswitch_method_delete'::text)
+  index CREATE INDEX provider_intents_destructive_action_idx ON billing.provider_intents USING btree (merchant_id, destructive_action_id) WHERE (destructive_action_id IS NOT NULL)
   index CREATE INDEX provider_intents_destructive_run_id_idx ON billing.provider_intents USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
   index CREATE UNIQUE INDEX provider_intents_idempotency_key_key ON billing.provider_intents USING btree (merchant_id, idempotency_key)
   index CREATE INDEX provider_intents_initial_membership_history_idx ON billing.provider_intents USING btree (merchant_id, (((payload -> 'terms'::text) ->> 'subscription_id'::text))) WHERE ((intent_type = 'initial_membership'::text) AND (status = 'succeeded'::text))
@@ -2390,6 +2489,7 @@ table billing.subscriptions
   index CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))
   index CREATE UNIQUE INDEX subscriptions_customer_id_tier_group_key ON billing.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((tier_group IS NOT NULL) AND (deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))
   index CREATE INDEX subscriptions_destructive_run_id_idx ON billing.subscriptions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
+  index CREATE INDEX subscriptions_destructive_scale_idx ON billing.subscriptions USING btree (merchant_id, customer_id, price_id) WHERE ((status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_ended_at_idx ON billing.subscriptions USING btree (merchant_id, ended_at) WHERE (ended_at IS NOT NULL)
   index CREATE INDEX subscriptions_gateway_order_id_idx ON billing.subscriptions USING btree (merchant_id, rail, ((gateway_response ->> 'order_id'::text))) WHERE ((gateway_response ->> 'order_id'::text) IS NOT NULL)
   index CREATE INDEX subscriptions_grace_ends_at_idx ON billing.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL)
@@ -3096,6 +3196,8 @@ function billing.guard_billing_restore_receipt()
                     'customer_links',
                     'customers',
                     'dashboard_configs',
+                    'destructive_actions',
+                    'destructive_holds',
                     'destructive_run_before_images',
                     'document_sequences',
                     'failed_usage_windows',
@@ -3185,6 +3287,42 @@ function billing.guard_catalog_application_receipt()
   BEGIN
    RAISE EXCEPTION 'catalog application receipts are immutable' USING ERRCODE='23514';
   END $function$
+
+function billing.guard_destructive_action_state()
+  CREATE OR REPLACE FUNCTION billing.guard_destructive_action_state()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+   IF OLD.state IN ('succeeded','no_effect') AND NEW IS DISTINCT FROM OLD THEN
+     RAISE EXCEPTION 'destructive action is final' USING ERRCODE='23514';
+   END IF;
+   IF OLD.started_at IS NOT NULL AND NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+     RAISE EXCEPTION 'destructive action start is immutable' USING ERRCODE='23514';
+   END IF;
+   IF OLD.completion_sequence IS NOT NULL AND NEW.completion_sequence IS DISTINCT FROM OLD.completion_sequence THEN
+     RAISE EXCEPTION 'destructive action outcome order is immutable' USING ERRCODE='23514';
+   END IF;
+   IF NEW.state<>'succeeded' AND NEW.completion_sequence IS NOT NULL THEN
+     RAISE EXCEPTION 'only successful actions have a completion sequence' USING ERRCODE='23514';
+   END IF;
+   IF OLD.state <> 'reserved' AND NEW.state='reserved' THEN
+     RAISE EXCEPTION 'destructive action cannot be unstarted' USING ERRCODE='23514';
+   END IF;
+   RETURN NEW;
+  END; $function$
+
+function billing.guard_destructive_hold_clear()
+  CREATE OR REPLACE FUNCTION billing.guard_destructive_hold_clear()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+   IF OLD.cleared_at IS NOT NULL AND NEW IS DISTINCT FROM OLD THEN
+     RAISE EXCEPTION 'destructive hold clear is final' USING ERRCODE='23514';
+   END IF;
+   RETURN NEW;
+  END; $function$
 
 function billing.guard_ledger_account_facts()
   CREATE OR REPLACE FUNCTION billing.guard_ledger_account_facts()
@@ -3870,3 +4008,6 @@ function billing.void_ended_renewal_orders()
       RETURN NEW;
   END;
   $function$
+
+sequence billing.destructive_actions_admission_sequence_seq
+  bigint START 1 INCREMENT 1 MINVALUE 1 MAXVALUE 9223372036854775807

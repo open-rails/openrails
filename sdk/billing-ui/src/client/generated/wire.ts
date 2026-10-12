@@ -484,6 +484,10 @@ export type CheckoutRoutingRule = {
   prefer: string[]
 }
 
+export type ClearDestructiveHoldParams = {
+  reason?: string
+}
+
 export type ConfirmOrderParams = {
   signature?: string
 }
@@ -862,6 +866,24 @@ export type DelinquencyHostEvent = {
   amount_floor: string
 }
 
+export type DestructiveHold = {
+  id: string
+  merchant_id: string
+  scope: string
+  action: string
+  window: string
+  observed: number
+  requested: number
+  ceiling: number
+  opened_at: string
+  cleared_at: string | null
+}
+
+export type DestructiveHoldEvent = {
+  hold_id: string
+  scope: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -998,9 +1020,10 @@ export type HeldEntitlements = {
 }
 
 export type HostEvent = {
+  destructive_hold: DestructiveHoldEvent | null
   id: string
   merchant_id: string
-  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "destructive.hold_cleared" | "destructive.hold_opened" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null

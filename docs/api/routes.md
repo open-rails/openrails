@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (175), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (177), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -162,6 +162,8 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | GET | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `application/x-ndjson` |  |
 | POST | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` |  |
 | POST | `/v1/merchant/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` |  |
+| GET | `/v1/merchant/destructive-holds` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<DestructiveHold>` |  |
+| POST | `/v1/merchant/destructive-holds/{id}/clear` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ClearDestructiveHoldParams` | 200 `DestructiveHold` |  |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
 | GET | `/v1/merchant/findings` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `Finding` |  |

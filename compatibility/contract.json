@@ -14,6 +14,7 @@
       "func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams, requestOptions ...RequestOption) ([]billing.CaptureResult, error)",
       "func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error)",
+      "func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, req billing.ClearDestructiveHoldParams, options ...RequestOption) (*billing.DestructiveHold, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams, requestOptions ...RequestOption) ([]billing.CreditGrant, error)",
       "func (c *Client) CreateOrder(ctx context.Context, params billing.CreateOrderParams, requestOptions ...RequestOption) (*billing.Order, error)",
@@ -59,6 +60,7 @@
       "func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)",
       "func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)",
       "func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error)",
+      "func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams, options ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)",
       "func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)",
       "func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error)",
       "func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListParams, options ...RequestOption) (*billing.ListPage[billing.HostEvent], error)",
@@ -120,8 +122,10 @@
       "func (c *NotificationConsumer) Register(ctx context.Context) error",
       "func (c *NotificationConsumer) Retire(ctx context.Context) error",
       "func (e *BoundMerchantError) Error() string",
+      "func (e *Engine) ClearDestructiveHold(ctx context.Context, merchant billing.MerchantID, id billing.DestructiveHoldID, operator billing.DestructiveOperator, reason string) (*billing.DestructiveHold, error)",
       "func (e *Engine) Close(ctx context.Context) error",
       "func (e *Engine) HostedCheckout(origin string, assets fs.FS) (string, http.Handler, error)",
+      "func (e *Engine) ListOpenDestructiveHolds(ctx context.Context, limit int, after billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)",
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
       "func (e *Engine) MerchantBySlug(slug string) (*Client, error)",
@@ -259,6 +263,7 @@
       "const (\n\tErrorTypeInvalidRequest = \"invalid_request_error\"\n\tErrorTypeAuthentication = \"authentication_error\"\n\tErrorTypeAuthorization  = \"authorization_error\"\n\tErrorTypeCard           = \"card_error\"\n\tErrorTypeRateLimit      = \"rate_limit_error\"\n\tErrorTypeAPI            = \"api_error\"\n)",
       "const (\n\tFindingApprove FindingOutcome = \"approve\"\n\n\tFindingIgnore FindingOutcome = \"ignore\"\n)",
       "const (\n\tGrantReasonComp   GrantReason = \"comp\"\n\tGrantReasonStaff  GrantReason = \"staff\"\n\tGrantReasonImport GrantReason = \"import\"\n\n\tGrantReasonMigration GrantReason = \"migration\"\n)",
+      "const (\n\tHostEventDestructiveHoldOpened  HostEventType = \"destructive.hold_opened\"\n\tHostEventDestructiveHoldCleared HostEventType = \"destructive.hold_cleared\"\n)",
       "const (\n\tHostEventPaymentSettled     HostEventType = \"payment.settled\"\n\tHostEventDelinquencyGrace   HostEventType = \"delinquency.grace\"\n\tHostEventDelinquencyEntered HostEventType = \"delinquency.entered\"\n\tHostEventDelinquencyCleared HostEventType = \"delinquency.cleared\"\n\n\tHostEventProductEntitlementsChanged HostEventType = \"product.entitlements_changed\"\n\n\tHostEventOrderCompleted      HostEventType = \"order.completed\"\n\tHostEventOrderRequiresAction HostEventType = \"order.requires_action\"\n\tHostEventOrderPaymentFailed  HostEventType = \"order.payment_failed\"\n\tHostEventOrderCanceled       HostEventType = \"order.canceled\"\n\tHostEventOrderExpired        HostEventType = \"order.expired\"\n\n\tHostEventOrderVoided HostEventType = \"order.voided\"\n\n\tHostEventCustomerNetworkLinked   HostEventType = \"customer.network_linked\"\n\tHostEventCustomerNetworkUnlinked HostEventType = \"customer.network_unlinked\"\n\n\tHostEventMandateRevoked HostEventType = \"mandate.revoked\"\n\n\tHostEventBalanceLow      HostEventType = \"balance.low\"\n\tHostEventBalanceDepleted HostEventType = \"balance.depleted\"\n)",
       "const (\n\tInvokerTypeCustomer InvokerType = \"customer\"\n\n\tInvokerTypeDelegated InvokerType = \"delegated\"\n)",
       "const (\n\tLowBalanceLineCustomer LowBalanceLineSource = \"customer\"\n\n\tLowBalanceLineMerchant LowBalanceLineSource = \"merchant\"\n\n\tLowBalanceLineDefault LowBalanceLineSource = \"default\"\n)",
@@ -300,6 +305,7 @@
       "const CodeProductInUse = \"product_in_use\"",
       "const CodeRevisionMismatch = \"revision_mismatch\"",
       "const CustomerLinkIDPrefix = \"lnk_\"",
+      "const DestructiveHoldIDPrefix = \"dsh_\"",
       "const FindingIDPrefix = \"fnd_\"",
       "const HostEventIDPrefix = \"hev_\"",
       "const MaxAdmissionBatchItems = 1000",
@@ -331,6 +337,7 @@
       "func (id *CreditGrantID) UnmarshalText(text []byte) error",
       "func (id *CustomerID) UnmarshalText(text []byte) error",
       "func (id *CustomerLinkID) UnmarshalText(b []byte) error",
+      "func (id *DestructiveHoldID) UnmarshalText(b []byte) error",
       "func (id *FindingID) UnmarshalText(b []byte) error",
       "func (id *HostEventID) UnmarshalText(b []byte) error",
       "func (id *MandateID) UnmarshalText(text []byte) error",
@@ -377,6 +384,10 @@
       "func (id CustomerLinkID) MarshalText() ([]byte, error)",
       "func (id CustomerLinkID) String() string",
       "func (id CustomerLinkID) UUID() uuid.UUID",
+      "func (id DestructiveHoldID) IsZero() bool",
+      "func (id DestructiveHoldID) MarshalText() ([]byte, error)",
+      "func (id DestructiveHoldID) String() string",
+      "func (id DestructiveHoldID) UUID() uuid.UUID",
       "func (id FindingID) IsZero() bool",
       "func (id FindingID) MarshalText() ([]byte, error)",
       "func (id FindingID) String() string",
@@ -499,6 +510,7 @@
       "func ParseCreditGrantID(s string) (CreditGrantID, error)",
       "func ParseCustomerID(s string) (CustomerID, error)",
       "func ParseCustomerLinkID(s string) (CustomerLinkID, error)",
+      "func ParseDestructiveHoldID(s string) (DestructiveHoldID, error)",
       "func ParseFindingID(s string) (FindingID, error)",
       "func ParseHostEventID(s string) (HostEventID, error)",
       "func ParseMandateID(s string) (MandateID, error)",
@@ -610,6 +622,7 @@
       "type CheckoutRoutingMatch struct {\n\tCurrency string `json:\"currency,omitempty\"`\n\tProduct  string `json:\"product,omitempty\"`\n\tPrice    string `json:\"price,omitempty\"`\n\tMode     string `json:\"mode,omitempty\"`\n\tCountry  string `json:\"country,omitempty\"`\n}",
       "type CheckoutRoutingRule struct {\n\tMatch CheckoutRoutingMatch `json:\"match,omitempty\"`\n\n\tPrefer []string `json:\"prefer\"`\n}",
       "type CheckoutUIMode string",
+      "type ClearDestructiveHoldParams struct {\n\tReason string `json:\"reason\"`\n}",
       "type ConfirmOrderParams struct {\n\tSignature *string `json:\"signature,omitempty\"`\n}",
       "type ConfirmPaymentMethodParams struct {\n\tCapture *CustodianCaptureReference `json:\"capture,omitempty\"`\n}",
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
@@ -667,6 +680,12 @@
       "type DeclineReason string",
       "type DefaultPaymentMethod struct {\n\tCurrency        string          `json:\"currency\"`\n\tPaymentMethodID PaymentMethodID `json:\"payment_method_id\"`\n}",
       "type DelinquencyHostEvent struct {\n\tCustomerID       CustomerID `json:\"customer_id\"`\n\tCurrency         string     `json:\"currency\"`\n\tFromState        string     `json:\"from_state\"`\n\tToState          string     `json:\"to_state\"`\n\tOverdueStartedAt *time.Time `json:\"overdue_started_at,omitempty\"`\n\tOverdueAmount    int64      `json:\"overdue_amount,string\"`\n\tOverdueOrders    int64      `json:\"overdue_orders\"`\n\tGraceDays        int64      `json:\"grace_days\"`\n\tAmountFloor      int64      `json:\"amount_floor,string\"`\n}",
+      "type DestructiveHold struct {\n\tID         DestructiveHoldID `json:\"id\"`\n\tMerchantID MerchantID        `json:\"merchant_id\"`\n\tScope      string            `json:\"scope\"`\n\tAction     string            `json:\"action\"`\n\tWindow     string            `json:\"window\"`\n\tObserved   int64             `json:\"observed\"`\n\tRequested  int64             `json:\"requested\"`\n\tCeiling    int64             `json:\"ceiling\"`\n\tOpenedAt   time.Time         `json:\"opened_at\"`\n\tClearedAt  *time.Time        `json:\"cleared_at\"`\n}",
+      "type DestructiveHoldEvent struct {\n\tHoldID DestructiveHoldID `json:\"hold_id\"`\n\tScope  string            `json:\"scope\"`\n}",
+      "type DestructiveHoldID uuid.UUID",
+      "type DestructiveHoldListParams struct {\n\tPageRequest\n\tIDs []DestructiveHoldID\n}",
+      "type DestructiveHoldReview struct {\n\tHold         DestructiveHold      `json:\"hold\"`\n\tTriggerActor DestructiveOperator  `json:\"trigger_actor\"`\n\tTarget       string               `json:\"target\"`\n\tClearedBy    *DestructiveOperator `json:\"cleared_by\"`\n\tClearReason  string               `json:\"clear_reason,omitempty\"`\n}",
+      "type DestructiveOperator struct {\n\tIssuer string `json:\"issuer\"`\n\tID     string `json:\"id\"`\n}",
       "type DismissProposalsParams struct {\n\tIDs   []FindingID `json:\"ids\"`\n\tNotes string      `json:\"notes\"`\n}",
       "type DriftField struct {\n\tField          string `json:\"field\"`\n\tOpenRailsValue string `json:\"openrails_value\"`\n\tRemoteValue    string `json:\"remote_value\"`\n}",
       "type DunningEvidence struct {\n\tRetries      int        `json:\"retries\"`\n\tLastRetryAt  *time.Time `json:\"last_retry_at,omitempty\"`\n\tNextRetryAt  *time.Time `json:\"next_retry_at,omitempty\"`\n\tScheduleLive bool       `json:\"schedule_live\"`\n}",
@@ -700,7 +719,7 @@
       "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n\tPageRequest\n}",
       "type GrantReason string",
       "type HeldEntitlements struct {\n\tKeys      []string `json:\"keys\"`\n\tTruncated bool     `json:\"truncated\"`\n}",
-      "type HostEvent struct {\n\tID             HostEventID           `json:\"id\"`\n\tMerchantID     MerchantID            `json:\"merchant_id\"`\n\tType           HostEventType         `json:\"type\"`\n\tOccurredAt     time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt *time.Time            `json:\"acknowledged_at\"`\n\tPayment        *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency    *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tMandate *MandateHostEvent `json:\"mandate\"`\n\n\tBalance *BalanceHostEvent `json:\"balance\"`\n}",
+      "type HostEvent struct {\n\tDestructiveHold *DestructiveHoldEvent `json:\"destructive_hold\"`\n\tID              HostEventID           `json:\"id\"`\n\tMerchantID      MerchantID            `json:\"merchant_id\"`\n\tType            HostEventType         `json:\"type\"`\n\tOccurredAt      time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt  *time.Time            `json:\"acknowledged_at\"`\n\tPayment         *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency     *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tMandate *MandateHostEvent `json:\"mandate\"`\n\n\tBalance *BalanceHostEvent `json:\"balance\"`\n}",
       "type HostEventID uuid.UUID",
       "type HostEventListParams struct {\n\tPageRequest\n\tIDs                 []HostEventID\n\tType                HostEventType\n\tIncludeAcknowledged bool\n\tPaymentID           PaymentID\n}",
       "type HostEventLookup struct {\n\tHostEvents map[HostEventID]*HostEvent `json:\"host_events\"`\n}",
@@ -1136,6 +1155,7 @@
       "const (\n\tMerchantRolesRead   = \"merchant:roles:read\"\n\tMerchantRolesManage = \"merchant:roles:manage\"\n)",
       "const ConsoleClientID = controlplane.ConsoleClientID",
       "func (s *Server) AuthKit() *authkit.Client",
+      "func (s *Server) ClearDestructiveHold(ctx context.Context, merchant billing.MerchantID, id billing.DestructiveHoldID, operator billing.DestructiveOperator, reason string) (*billing.DestructiveHold, error)",
       "func (s *Server) Close(ctx context.Context) error",
       "func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error)",
       "func (s *Server) CustomerLinks(ctx context.Context, account billing.NetworkAccountID) ([]billing.CustomerLink, error)",
@@ -1151,6 +1171,7 @@
       "func (s *Server) ListMerchantRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)",
       "func (s *Server) ListMerchants(ctx context.Context, params billing.MerchantListParams) (*billing.ListPage[billing.Merchant], error)",
       "func (s *Server) ListMerchantsForSubject(ctx context.Context, subject string) ([]billing.MerchantRef, error)",
+      "func (s *Server) ListOpenDestructiveHolds(ctx context.Context, limit int, after billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)",
       "func (s *Server) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error)",
       "func (s *Server) ListWorkerHealth(ctx context.Context) ([]billing.WorkerHealth, error)",
       "func (s *Server) MerchantByName(ctx context.Context, name string) (billing.MerchantID, string, error)",
@@ -1207,6 +1228,7 @@
       "func (id *CreditGrantID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseCreditGrantID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *CustomerID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseCustomerID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *CustomerLinkID) UnmarshalText(b []byte) error {\n\tv, err := ParseCustomerLinkID(string(b))\n\t*id = v\n\treturn err\n}",
+      "func (id *DestructiveHoldID) UnmarshalText(b []byte) error {\n\tv, err := ParseDestructiveHoldID(string(b))\n\tif err == nil {\n\t\t*id = v\n\t}\n\treturn err\n}",
       "func (id *FindingID) UnmarshalText(b []byte) error {\n\tv, err := ParseFindingID(string(b))\n\t*id = v\n\treturn err\n}",
       "func (id *HostEventID) UnmarshalText(b []byte) error {\n\tv, err := ParseHostEventID(string(b))\n\t*id = v\n\treturn err\n}",
       "func (id *MandateID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseMandateID(string(text))\n\t*id = parsed\n\treturn err\n}",
@@ -1235,6 +1257,7 @@
       "func (id CreditGrantID) MarshalText() ([]byte, error) {\n\treturn []byte(id.String()), nil\n}",
       "func (id CustomerID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id CustomerLinkID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
+      "func (id DestructiveHoldID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id FindingID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id HostEventID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id MandateID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
@@ -1448,7 +1471,8 @@
       "type Merchant struct {\n\tDisplayName   string                   `json:\"display_name,omitempty\"`\n\tSettings      billing.MerchantSettings `json:\"settings\"`\n\tAlertWebhooks []AlertWebhook           `json:\"alert_webhooks,omitempty\"`\n\tSecrets       MerchantSecrets          `json:\"secrets,omitzero\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `json:\"scim_token,omitempty\"`\n}",
       "type PSP struct {\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\tAccountID   string `json:\"account_id\"`\n\tArchived    bool   `json:\"archived,omitempty\"`\n\n\tCustodian string            `json:\"custodian,omitempty\"`\n\tSigner    *Signer           `json:\"signer,omitempty\"`\n\tSettings  map[string]any    `json:\"settings,omitempty\"`\n\tSecrets   map[string]string `json:\"secrets,omitempty\"`\n}",
-      "type Signer struct {\n\tMode string `json:\"mode,omitempty\"`\n\tKey  string `json:\"key,omitempty\"`\n}"
+      "type Signer struct {\n\tMode string `json:\"mode,omitempty\"`\n\tKey  string `json:\"key,omitempty\"`\n}",
+      "type configurationChange struct {\n\tTarget string `json:\"target\"`\n\tBefore string `json:\"before\"`\n\tAfter  string `json:\"after\"`\n}"
     ],
     "internal/merchants": [
       "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}"
@@ -1676,6 +1700,7 @@
     ],
     "internal/river": [
       "type CatalogReconciliationPullArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\" river:\"unique\"`\n}",
+      "type DestructiveAlertArgs struct {\n\tMerchantID uuid.UUID            `json:\"merchant_id\"`\n\tHoldID     uuid.UUID            `json:\"hold_id\"`\n\tScope      string               `json:\"scope\"`\n\tOpenedAt   time.Time            `json:\"opened_at\"`\n\tChannel    *alerting.ChannelRef `json:\"channel,omitempty\"`\n}",
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullPayload struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}",
@@ -1830,6 +1855,10 @@
     "billing/decline_reasons.go": {
       "errors": "errors",
       "slices": "slices"
+    },
+    "billing/destructive_holds.go": {
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "billing/entitlements.go": {
       "time": "time",
@@ -2069,6 +2098,13 @@
       "context": "context",
       "http": "net/http",
       "url": "net/url"
+    },
+    "destructive_holds.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
+      "http": "net/http",
+      "uuid": "github.com/google/uuid"
     },
     "embedded.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -2731,6 +2767,7 @@
       "context": "context",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hyperswitch": "github.com/open-rails/openrails/internal/integrations/hyperswitch",
@@ -2828,10 +2865,12 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/intents/nmi_payment_method_delete.go": {
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -2993,6 +3032,16 @@
       "sha256": "crypto/sha256",
       "slices": "slices",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/merchantdocs/destructive.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "errors": "errors",
+      "fmt": "fmt",
+      "hex": "encoding/hex",
+      "hmac": "crypto/hmac",
+      "json": "encoding/json",
+      "sha256": "crypto/sha256",
+      "slices": "slices"
     },
     "internal/merchantdocs/docs.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3526,11 +3575,13 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "lifecycle": "github.com/open-rails/openrails/internal/lifecycle",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "payments": "github.com/open-rails/openrails/internal/modules/payments",
@@ -4089,6 +4140,19 @@
       "river": "github.com/riverqueue/river",
       "time": "time"
     },
+    "internal/river/jobs_destructive_alert.go": {
+      "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "fmt": "fmt",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/river/jobs_dunning.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cadence": "github.com/open-rails/openrails/internal/shared/cadence",
@@ -4587,6 +4651,10 @@
       "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
       "iam": "github.com/open-rails/authkit/iam",
       "operator": "github.com/open-rails/openrails/server/internal/operator"
+    },
+    "server/destructive_holds.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context"
     },
     "server/errors.go": {
       "merchants": "github.com/open-rails/openrails/internal/merchants"

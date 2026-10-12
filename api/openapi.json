@@ -9314,6 +9314,174 @@
         ]
       }
     },
+    "/v1/merchant/destructive-holds": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DestructiveHold"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/destructive-holds/{id}/clear": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearDestructiveHoldParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestructiveHold"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "permission_required",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/app/notification-consumers/{name}": {
       "post": {
         "tags": [
@@ -14092,6 +14260,14 @@
           "prefer"
         ]
       },
+      "ClearDestructiveHoldParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "ConfirmOrderParams": {
         "type": "object",
         "properties": {
@@ -15575,6 +15751,77 @@
           "amount_floor"
         ]
       },
+      "DestructiveHold": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "integer"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "ceiling": {
+            "type": "integer"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cleared_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchant_id",
+          "scope",
+          "action",
+          "window",
+          "observed",
+          "requested",
+          "ceiling",
+          "opened_at",
+          "cleared_at"
+        ]
+      },
+      "DestructiveHoldEvent": {
+        "type": "object",
+        "properties": {
+          "hold_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id",
+          "scope"
+        ]
+      },
       "DriftField": {
         "type": "object",
         "properties": {
@@ -16260,6 +16507,16 @@
       "HostEvent": {
         "type": "object",
         "properties": {
+          "destructive_hold": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DestructiveHoldEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -16276,6 +16533,8 @@
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
+              "destructive.hold_cleared",
+              "destructive.hold_opened",
               "mandate.revoked",
               "order.canceled",
               "order.completed",
@@ -16374,6 +16633,7 @@
           }
         },
         "required": [
+          "destructive_hold",
           "id",
           "merchant_id",
           "type",
