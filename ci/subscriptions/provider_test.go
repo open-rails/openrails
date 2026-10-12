@@ -76,6 +76,10 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		apply(&book)
 	}
 	if rail == "nmi" {
+		book.Subscriptions[0].AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + l.railSub, Amount: 9_990_000, Currency: "USD", IntervalHours: monthHours, FirstDueAt: start}
+		for i := range book.Transactions {
+			book.Transactions[i].NextBillingAt = &end
+		}
 		if book.Subscriptions[0].Dunning != nil {
 			w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) {
 				s.NextBilling = book.Subscriptions[0].PaidThrough.Add(monthHours * time.Hour)

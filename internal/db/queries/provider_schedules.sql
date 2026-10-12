@@ -1,7 +1,7 @@
 -- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, first_due_at, cadence_hours, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
-        sqlc.narg(initial_order_id)::uuid, sqlc.arg(source_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer,
+        sqlc.narg(initial_order_id)::uuid, sqlc.arg(source_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
         sqlc.arg(accepted_bill)::jsonb, sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id, subscription_id) DO NOTHING;
 

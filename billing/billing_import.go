@@ -112,6 +112,8 @@ type DeclaredTransaction struct {
 	Amount             int64     `json:"amount,string"`
 	Currency           string    `json:"currency"`
 	OccurredAt         time.Time `json:"occurred_at"`
+	// NextBillingAt is the verified provider boundary accompanying this receipt.
+	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 }
 
 // DeclaredSubscription is one subscription's facts, not classifications.
@@ -140,12 +142,14 @@ type DeclaredSubscription struct {
 // DeclaredProviderSchedule is the accepted recurring obligation of a provider
 // schedule. FirstDueAt anchors its first renewal; retry dates do not move it.
 type DeclaredProviderSchedule struct {
-	SourceReference string    `json:"source_reference"`
-	Amount          int64     `json:"amount,string"`
-	Currency        string    `json:"currency"`
-	Quantity        *int      `json:"quantity,omitempty"`
-	IntervalHours   int       `json:"interval_hours"`
-	FirstDueAt      time.Time `json:"first_due_at"`
+	SourceReference string `json:"source_reference"`
+	Amount          int64  `json:"amount,string"`
+	Currency        string `json:"currency"`
+	Quantity        *int   `json:"quantity,omitempty"`
+	IntervalHours   int    `json:"interval_hours,omitempty"`
+	// IntervalMonths selects calendar cadence; exactly one interval is set.
+	IntervalMonths int       `json:"interval_months,omitempty"`
+	FirstDueAt     time.Time `json:"first_due_at"`
 }
 
 // DeclaredAdminGrant is a comped product window with no payment behind it,

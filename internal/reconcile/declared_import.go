@@ -236,7 +236,7 @@ func ImportDeclaredSubscriptions(
 			continue
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
-			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
+			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || (schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.IntervalMonths != 0) && (schedule.IntervalMonths <= 0 || schedule.IntervalMonths > 1200 || schedule.IntervalHours != 0) || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
 				block("accepted_schedule requires verified reference, amount, currency, cadence and first renewal boundary")
 				continue
 			}
@@ -325,12 +325,16 @@ func ImportDeclaredSubscriptions(
 			if schedule.Quantity != nil {
 				quantity = *schedule.Quantity
 			}
+			var intervalHours *int
+			if schedule.IntervalHours > 0 {
+				intervalHours = &schedule.IntervalHours
+			}
 			bill := observed.Bill{PSPID: f.PspID, CustomerID: f.Customer, SubscriptionID: &sub.ID,
 				Owner: string(f.CollectionPolicy), Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
 				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: "Declared provider subscription",
 					Quantity: schedule.Quantity, UnitAmount: schedule.Amount / int64(quantity), Amount: schedule.Amount,
-					BillingIntervalHours: &schedule.IntervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}
-			if err := observed.DeclareSchedule(ctx, database, schedule.SourceReference, bill, schedule.FirstDueAt, schedule.IntervalHours, asOf); err != nil {
+					BillingIntervalHours: intervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}
+			if err := observed.DeclareSchedule(ctx, database, schedule.SourceReference, bill, schedule.FirstDueAt, schedule.IntervalHours, schedule.IntervalMonths, asOf); err != nil {
 				return out, fmt.Errorf("declared import accepted schedule %s: %w", f.SourceID, err)
 			}
 		}
