@@ -125,8 +125,31 @@ func run(ctx context.Context, addr, base, assets string) error {
 		message := messages[len(messages)-1]
 		write(w, 200, map[string]string{"code": message.Code, "link": message.Link})
 	})
-	mux.HandleFunc("POST /__test/stale-token/{user}", func(w http.ResponseWriter, r *http.Request) {
-		token, err := srv.AuthKit().MintAccessToken(r.Context(), r.PathValue("user"), iam.AccessTokenOptions{})
+	mux.HandleFunc("POST /__test/stale-session", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			write(w, 400, map[string]string{"error": "access token required"})
+			return
+		}
+		claims, err := srv.AuthKit().Verify(r.Context(), input.AccessToken)
+		if err != nil || claims.SessionID == "" {
+			write(w, 400, map[string]string{"error": "real sign-in session required"})
+			return
+		}
+		// Match authtest.StaleSession's fixture operation: age the real
+		// sign-in, then let AuthKit issue its own session assurance claims.
+		// No production freshness policy or response is replaced.
+		tag, err := pool.Exec(r.Context(), `UPDATE console_auth.refresh_sessions
+			SET last_authenticated_at = now() - interval '1 day',
+			    mfa_authenticated_at = CASE WHEN mfa_authenticated_at IS NULL THEN NULL ELSE now() - interval '1 day' END
+			WHERE id = $1::uuid`, claims.SessionID)
+		if err != nil || tag.RowsAffected() != 1 {
+			write(w, 500, map[string]string{"error": "fixture session could not be aged"})
+			return
+		}
+		token, err := srv.AuthKit().MintAccessToken(r.Context(), claims.UserID, iam.AccessTokenOptions{SessionID: claims.SessionID})
 		if err != nil {
 			write(w, 500, map[string]string{"error": err.Error()})
 			return

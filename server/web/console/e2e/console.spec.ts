@@ -145,22 +145,22 @@ test("account security remains usable when billing permissions are unavailable",
   ).toBeVisible()
 })
 
-test("a native AuthKit credential write asks for fresh sign-in and retries once", async ({
+test("a native root role change completes after the server requires fresh sign-in", async ({
   page,
   request,
 }) => {
   const operator = await staff(request)
-  const stale = await request.post(`/__test/stale-token/${operator.id}`)
-  expect(stale.status()).toBe(200)
-  const { access_token: token } = (await stale.json()) as {
-    access_token: string
-  }
+  const member = await staff(request)
   await page.route(
     "**/auth/v1/password/login",
     async (route) => {
       const response = await route.fetch()
       const body = await response.json()
-      body.token_set.access_token = token
+      const stale = await request.post("/__test/stale-session", {
+        data: { access_token: body.token_set.access_token },
+      })
+      expect(stale.status()).toBe(200)
+      body.token_set.access_token = (await stale.json()).access_token
       await route.fulfill({ response, json: body })
     },
     { times: 1 }
@@ -170,39 +170,31 @@ test("a native AuthKit credential write asks for fresh sign-in and retries once"
     .getByRole("navigation", { name: "Console", exact: true })
     .getByRole("link", { name: "Access", exact: true })
     .click()
-  const merchant = await page
-    .getByRole("combobox", { name: "Merchant", exact: true })
-    .inputValue()
-  await page
-    .getByRole("combobox", { name: "Manage access for", exact: true })
-    .selectOption(merchant)
-  await page.getByRole("link", { name: "API keys", exact: true }).click()
-  await page.getByRole("button", { name: "New key", exact: true }).click()
-  await page.getByLabel("Name", { exact: true }).fill("Browser proof")
-  await page
-    .getByRole("combobox", { name: "Role", exact: true })
-    .selectOption("merchant:viewer")
-  await page
-    .getByRole("button", { name: /Create key|Create API key/, exact: false })
-    .last()
-    .click()
+  const memberRow = page.getByRole("row").filter({ hasText: member.id })
+  const writes: number[] = []
+  page.on("response", (response) => {
+    if (
+      response.request().method() === "PUT" &&
+      response.url().endsWith(`/groups/root/members/users/${member.id}`)
+    )
+      writes.push(response.status())
+  })
+  await memberRow
+    .getByRole("combobox")
+    .selectOption("root:merchant-directory-viewer")
   const challenge = page
     .getByRole("dialog")
     .filter({ has: page.locator("input[type=password]") })
   await expect(challenge).toBeVisible()
+  expect(writes[0]).toBe(401)
   await challenge.locator("input[type=password]").fill(password)
-  await challenge
-    .getByRole("button", { name: /Continue|Confirm|Verify/ })
-    .click()
-  await expect(
-    page.getByRole("dialog").getByRole("button", { name: "Copy", exact: true })
-  ).toBeVisible()
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Close", exact: true })
-    .last()
-    .click()
-  await expect(page.getByText("Browser proof", { exact: true })).toBeVisible()
+  await challenge.getByRole("button", { name: "Confirm", exact: true }).click()
+  await expect(memberRow.getByRole("combobox")).toHaveValue(
+    "root:merchant-directory-viewer"
+  )
+  await expect
+    .poll(() => writes.filter((status) => status === 200))
+    .toEqual([200])
 })
 
 test("an emailed passwordless link uses its native confirmation endpoint once", async ({
@@ -279,15 +271,21 @@ test("a group invitation reaches enrollment through the shipped console", async 
     const newcomer = await guest.newPage()
     await newcomer.goto(link)
     await newcomer
-      .getByLabel(/Email|Identifier/)
+      .getByRole("textbox", { name: /Email|Identifier/ })
       .first()
       .fill(email)
     await newcomer
       .getByLabel("Username", { exact: true })
       .fill(`invited${Date.now()}`)
-    await newcomer.locator("input[type=password]").first().fill(password)
-    if ((await newcomer.locator("input[type=password]").count()) > 1)
-      await newcomer.locator("input[type=password]").nth(1).fill(password)
+    await newcomer
+      .locator("input[type=password]:visible")
+      .first()
+      .fill(password)
+    if ((await newcomer.locator("input[type=password]:visible").count()) > 1)
+      await newcomer
+        .locator("input[type=password]:visible")
+        .nth(1)
+        .fill(password)
     await newcomer
       .getByRole("button", { name: /Create account|Register/, exact: true })
       .click()
@@ -325,6 +323,6 @@ test("a group invitation reaches enrollment through the shipped console", async 
         .locator("option")
     ).toHaveText("alpha")
   } finally {
-    await guest.close()
+    await guest.close().catch(() => {})
   }
 })
