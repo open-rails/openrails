@@ -1,7 +1,9 @@
 -- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
-        sqlc.narg(initial_order_id)::uuid, sqlc.arg(source_reference)::text, sqlc.arg(provider_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
+        sqlc.narg(initial_order_id)::uuid,
+        (SELECT COALESCE(MAX(accepted_version), 0) + 1 FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid),
+        sqlc.arg(source_reference)::text, sqlc.arg(provider_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
         sqlc.arg(accepted_bill)::jsonb, sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id, subscription_id, source_reference) DO NOTHING;
 
@@ -12,7 +14,7 @@ SELECT * FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_i
 SELECT * FROM billing.provider_schedules
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND provider_reference = sqlc.arg(provider_reference)::text
-ORDER BY first_due_at ASC, source_reference ASC FOR UPDATE;
+ORDER BY first_due_at ASC, accepted_version ASC FOR UPDATE;
 
 -- name: GetProviderCycleReceipt :one
 SELECT * FROM billing.provider_cycle_receipts WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND transaction_id = sqlc.arg(transaction_id)::text;

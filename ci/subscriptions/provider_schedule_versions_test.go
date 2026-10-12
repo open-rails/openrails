@@ -64,5 +64,28 @@ func TestProviderScheduleVersionedReceiptIdentity(t *testing.T) {
 	require.NotEqual(t, accepted.SourceKey, revised.SourceKey)
 	require.Equal(t, amendment.Total, revised.Total)
 	require.True(t, revised.PeriodStart.Equal(due))
+	// Two confirmed changes before the same renewal retain their acceptance
+	// ordering. Replaying the earlier amendment cannot promote it again.
+	latest := amendment
+	latest.Lines = append([]observed.Line(nil), amendment.Lines...)
+	latest.Total, latest.Lines[0].Amount, latest.Lines[0].UnitAmount = 29_990_000, 29_990_000, 29_990_000
+	declare := func(source string, bill observed.Bill) error {
+		return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return observed.DeclareSchedule(ctx, d.NewWithPgxTx(tx), source, bill, due, hours, 0, w.clock.Now())
+		})
+	}
+	require.NoError(t, declare("second-confirmed-amendment", latest))
+	require.NoError(t, declare("verified-amendment", amendment))
+	firstReplay, err := resolve(current)
+	require.NoError(t, err)
+	require.Equal(t, revised.SourceKey, firstReplay.SourceKey)
+	current.TransactionID = "stale-first-amendment"
+	_, err = resolve(current)
+	require.ErrorContains(t, err, "exactly one accepted schedule version")
+	current.TransactionID, current.Amount = "latest-confirmed-amendment", latest.Total
+	last, err := resolve(current)
+	require.NoError(t, err)
+	require.Equal(t, latest.Total, last.Total)
+	require.NotEqual(t, revised.SourceKey, last.SourceKey)
 	require.Zero(t, w.engineCharges())
 }

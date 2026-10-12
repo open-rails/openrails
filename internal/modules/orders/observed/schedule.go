@@ -38,7 +38,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if order.CollectionOwner != OwnerNMISchedule && order.CollectionOwner != OwnerProvider || order.PspID == nil {
 		return errors.New("accepted schedule order has no provider collection owner")
 	}
-	sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid.UUID(), ID: subscriptionID})
+	sub, err := q.GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: mid.UUID(), ID: subscriptionID})
 	if err != nil || strings.TrimSpace(models.DerefStr(sub.RailSubscriptionID)) == "" {
 		return errors.New("accepted schedule requires its provider agreement reference")
 	}
@@ -96,6 +96,13 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 		return errors.New("declared schedule is an accepted agreement, not historical money")
 	}
 	q := d.Gen(ctx)
+	// Serialize accepted amendments. A second confirmed change for the same
+	// future cycle supersedes the first by durable acceptance order; source
+	// replay keeps its original version and cannot become current again.
+	if _, err := q.GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: mid.UUID(), ID: *bill.SubscriptionID}); err != nil {
+		return err
+	}
+
 	prior, err := q.GetProviderSchedule(ctx, gen.GetProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID, SourceReference: source})
 	if err != nil && !db.IsNotFound(err) {
 		return err
