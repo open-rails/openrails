@@ -52,6 +52,6 @@ func TestChargeLeaseIsCurrentAfterProviderRead(t *testing.T) {
 	reader := operationChargeReader{read: func() uuid.UUID { now = now.Add(2 * time.Second); return operation }}
 	finding := Finding{Type: FindingChargeMissingLocal, SubjectKey: "charge-after-expiry"}
 	snapshot := &RemoteSnapshot{Transactions: []RemoteTransaction{{TransactionID: finding.SubjectKey, Type: TransactionTypeSale, Success: true}}}
-	got := e.deferOperationCharges(t.Context(), ProviderStripe, uuid.New(), reader, snapshot, []Finding{finding})
+	got, _ := e.deferOperationCharges(t.Context(), ProviderStripe, uuid.New(), reader, snapshot, []Finding{finding})
 	require.Equal(t, []Finding{finding}, got, "a lease that expired during the metadata read owns no charge now")
 }

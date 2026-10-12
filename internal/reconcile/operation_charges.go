@@ -59,14 +59,16 @@ func (f *StripeFetcher) OperationOf(ctx context.Context, t *RemoteTransaction) (
 // OpenRails provider operation is executing right now (claimed, its lease
 // live): the operation records the charge it is making, so the charge is not
 // missing but still being recorded. A charge whose operation is not executing
-// (awaiting verification, ended without recording it) stays a finding.
-func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, pspID uuid.UUID, fetcher RailFetcher, snap *RemoteSnapshot, findings []Finding) []Finding {
+// (awaiting verification, ended without recording it) stays a finding. The
+// deferred transaction IDs keep an earlier finding open: execution alone is
+// not evidence that the missing local payment has been recorded.
+func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, pspID uuid.UUID, fetcher RailFetcher, snap *RemoteSnapshot, findings []Finding) ([]Finding, map[string]bool) {
 	if k, ok := fetcher.(keyedFetcher); ok {
 		fetcher = k.RailFetcher
 	}
 	reader, ok := fetcher.(OperationReader)
 	if !ok {
-		return findings
+		return findings, nil
 	}
 	charges := map[string]*RemoteTransaction{}
 	for i := range snap.Transactions {
@@ -81,11 +83,10 @@ func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, p
 		}
 	}
 	if len(candidates) == 0 {
-		return findings
+		return findings, nil
 	}
-	now := e.now()
-	if busy, err := e.Local.ExecutingOperations(ctx, pspID, nil, now); err != nil || !busy[uuid.Nil] {
-		return findings
+	if busy, err := e.Local.ExecutingOperations(ctx, pspID, nil, e.now()); err != nil || !busy[uuid.Nil] {
+		return findings, nil
 	}
 	operations := map[string]uuid.UUID{}
 	var ids []uuid.UUID
@@ -102,21 +103,23 @@ func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, p
 		}
 	}
 	if len(ids) == 0 {
-		return findings
+		return findings, nil
 	}
-	executing, err := e.Local.ExecutingOperations(ctx, pspID, ids, now)
+	executing, err := e.Local.ExecutingOperations(ctx, pspID, ids, e.now())
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("reconcile: executing operations unreadable; charges stay findings")
-		return findings
+		return findings, nil
 	}
 	out := findings[:0]
+	deferred := map[string]bool{}
 	for _, f := range findings {
 		if f.Type == FindingChargeMissingLocal && executing[operations[f.SubjectKey]] && operations[f.SubjectKey] != uuid.Nil {
 			log.WithContext(ctx).WithFields(log.Fields{"provider": provider, "transaction_id": f.SubjectKey, "operation_id": operations[f.SubjectKey]}).
 				Info("reconcile: charge left to the operation executing it")
+			deferred[f.SubjectKey] = true
 			continue
 		}
 		out = append(out, f)
 	}
-	return out
+	return out, deferred
 }
