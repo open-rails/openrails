@@ -130,7 +130,7 @@ proposal API. It uses the ordinary catalog authorization and is mounted only
 with catalog routes and the opt-in `catalog_copilot` capability. The
 `catalog-ask` request limit still applies. It changes no catalog rows and is
 explicitly outside the merchant Go `Client` surface; see
-[console assistance](../admin-console.md).
+[console assistance](../billing-admin.md).
 
 ## Checkout
 
