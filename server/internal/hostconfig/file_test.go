@@ -55,7 +55,7 @@ func TestFileReachesConfig(t *testing.T) {
 	f.EmailSMTP.Host = "smtp.example"
 	f.Redis.Addr = "redis:6379"
 	f.AdminConsole.Issuers = map[string]ConsoleIssuer{"merchant": {URL: "https://issuer.example", ClientID: "console"}}
-	f.PaymentPage.URL = "https://purchase.example"
+	f.PaymentOrigin = "https://pay.example"
 	cfg, err := f.config()
 	require.NoError(t, err)
 	for _, v := range []reflect.Value{reflect.ValueOf(cfg).Elem(), reflect.ValueOf(cfg.Config).Elem()} {

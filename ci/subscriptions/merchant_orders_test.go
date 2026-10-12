@@ -130,7 +130,7 @@ func merchantPaymentPageWorld(t *testing.T) *world {
 	t.Helper()
 	w := prepareWorld(t, 12)
 	w.booted = func(e *openrails.Engine) {
-		_, _, err := e.PaymentPage("https://purchase.e2e.test", nil)
+		_, _, err := e.PaymentPage("https://pay.e2e.test", nil)
 		require.NoError(t, err)
 	}
 	w.start()

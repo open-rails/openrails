@@ -472,19 +472,6 @@ export type CheckEntitlementsParams = {
   at?: string
 }
 
-export type PSPRoutingMatch = {
-  currency?: string
-  product?: string
-  price?: string
-  mode?: string
-  country?: string
-}
-
-export type PSPRoutingRule = {
-  match?: PSPRoutingMatch
-  prefer: string[]
-}
-
 export type ClearDestructiveHoldParams = {
   reason?: string
 }
@@ -529,7 +516,7 @@ export type CreateMyOrderParams = {
   expected_total?: string
   payment?: OrderPaymentParams
   reusable?: boolean
-  purchase?: MyOrderPayURLParams
+  pay_url?: MyOrderPayURLParams
 }
 
 export type CreateNetworkLinkParams = {
@@ -541,7 +528,7 @@ export type CreateOrderParams = {
   customer_id?: string
   lines?: OrderLineParams[]
   expires_at?: string
-  purchase?: OrderPayURLParams
+  pay_url?: OrderPayURLParams
 }
 
 export type CreatePSPParams = {
@@ -741,7 +728,7 @@ export type CustomerLink = {
   merchant_id: string
   customer_id: string
   account_id: string
-  method: "purchase" | "connect" | "sign_in"
+  method: "connect" | "payment_page" | "sign_in"
   status: "active" | "revoked"
   linked_at: string
   revoked_at: string | null
@@ -751,13 +738,13 @@ export type CustomerLink = {
 export type CustomerNetwork = {
   account_id: string
   linked_at: string
-  method: "purchase" | "connect" | "sign_in"
+  method: "connect" | "payment_page" | "sign_in"
 }
 
 export type CustomerNetworkHostEvent = {
   customer_id: string
   account_id: string
-  method: "purchase" | "connect" | "sign_in" | null
+  method: "connect" | "payment_page" | "sign_in" | null
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
@@ -1180,15 +1167,15 @@ export type MatrixCell = {
   maximum_amount?: string
 }
 
-export type MerchantPaymentPageSettings = {
-  embed_origins?: string[]
-}
-
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
   settings: MerchantSettings
   platform_vault: PlatformVaultState
+}
+
+export type MerchantPaymentPageSettings = {
+  embed_origins?: string[]
 }
 
 export type MerchantProfile = {
@@ -1211,7 +1198,7 @@ export type MerchantSettings = {
   arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
-  purchase?: MerchantPaymentPageSettings
+  payment_page?: MerchantPaymentPageSettings
   balance_notices?: BalanceNoticeSettings
   card_custody?: "hosted" | "merchant" | "platform"
   billing_policies?: BillingPolicy[]
@@ -1333,7 +1320,7 @@ export type MetricsSchema = {
 }
 
 export type MyOrderPayURLParams = {
-  ui_mode?: "embedded" | "hosted"
+  embedded?: boolean
 }
 
 export type NetworkLink = {
@@ -1402,7 +1389,12 @@ export type Order = {
   lines: OrderLine[]
   payment: OrderPayment
   payment_options: OrderPaymentOption[]
-  purchase: OrderPayment | null
+  pay_url: string | null
+  pay_url_expires_at: string | null
+  embedded: boolean
+  success_url: string | null
+  cancel_url: string | null
+  saved_payment_methods: boolean
   renewal: OrderRenewal | null
   usage: OrderUsage | null
   expires_at: string | null
@@ -1412,23 +1404,6 @@ export type Order = {
   voided_at: string | null
   uncollectible_at: string | null
   created_at: string
-}
-
-export type OrderPayment = {
-  url: string | null
-  ui_mode: "embedded" | "hosted"
-  expires_at: string
-  success_url: string | null
-  cancel_url: string | null
-  saved_payment_methods: boolean
-}
-
-export type OrderPayURLParams = {
-  ui_mode?: "embedded" | "hosted"
-  success_url?: string
-  cancel_url?: string
-  expires_at?: string
-  saved_payment_methods?: boolean
 }
 
 export type OrderHostEvent = {
@@ -1470,6 +1445,14 @@ export type OrderLineRefusal = {
   owned_by: string | null
   hint: string | null
   missing?: string[]
+}
+
+export type OrderPayURLParams = {
+  embedded?: boolean
+  success_url?: string
+  cancel_url?: string
+  expires_at?: string
+  saved_payment_methods?: boolean
 }
 
 export type OrderPayment = {
@@ -1582,7 +1565,7 @@ export type PSPPaymentConfig = {
   custodian: string
   display_name: string
   flow: string
-  purchase: boolean
+  routed: boolean
   config?: Record<string, string>
   status?: string
   retry_after?: number
@@ -1604,6 +1587,14 @@ export type PSPRoutingCandidate = {
   skip: string | null
 }
 
+export type PSPRoutingMatch = {
+  currency?: string
+  product?: string
+  price?: string
+  mode?: string
+  country?: string
+}
+
 export type PSPRoutingPreview = {
   policy: string
   rule: number | null
@@ -1611,6 +1602,11 @@ export type PSPRoutingPreview = {
   rail: "ccbill" | "nmi" | "solana" | "stripe" | null
   mode: string | null
   candidates: PSPRoutingCandidate[]
+}
+
+export type PSPRoutingRule = {
+  match?: PSPRoutingMatch
+  prefer: string[]
 }
 
 export type PackagePrice = {

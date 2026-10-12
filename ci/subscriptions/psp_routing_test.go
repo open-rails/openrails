@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 )
 
-func TestCheckoutRoutingRejectsCountry(t *testing.T) {
+func TestPSPRoutingRejectsCountry(t *testing.T) {
 	for _, tp := range []topology{embedded, remote} {
 		t.Run(string(tp), func(t *testing.T) {
 			t.Parallel()
@@ -35,12 +35,12 @@ func TestCheckoutRoutingRejectsCountry(t *testing.T) {
 			}
 
 			checkRouting("stripe") // No policy: the default preference still applies.
-			rules := []billing.CheckoutRoutingRule{
-				{Match: billing.CheckoutRoutingMatch{Currency: "EUR"}, Prefer: []string{"stripe"}},
+			rules := []billing.PSPRoutingRule{
+				{Match: billing.PSPRoutingMatch{Currency: "EUR"}, Prefer: []string{"stripe"}},
 				{Prefer: []string{"nmi"}},
 			}
 			_, err := client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				Settings: &billing.MerchantSettings{CheckoutRouting: &rules},
+				Settings: &billing.MerchantSettings{PSPRouting: &rules},
 			})
 			require.NoError(t, err)
 			checkRouting("nmi") // USD falls through to the final rule.
@@ -48,7 +48,7 @@ func TestCheckoutRoutingRejectsCountry(t *testing.T) {
 			rules[0].Prefer = []string{"nmi"}
 			rules[1].Prefer = []string{"stripe"}
 			before, err := client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				Settings: &billing.MerchantSettings{CheckoutRouting: &rules},
+				Settings: &billing.MerchantSettings{PSPRouting: &rules},
 			})
 			require.NoError(t, err)
 			checkRouting("nmi")
@@ -56,12 +56,12 @@ func TestCheckoutRoutingRejectsCountry(t *testing.T) {
 			path := "openrails/merchants/" + client.MerchantID().UUID().String() + "/merchant"
 			var doc map[string]any
 			version := w.vault.Get(t, path, &doc)
-			unsupported := []billing.CheckoutRoutingRule{
-				{Match: billing.CheckoutRoutingMatch{Country: "US"}, Prefer: []string{"stripe"}},
+			unsupported := []billing.PSPRoutingRule{
+				{Match: billing.PSPRoutingMatch{Country: "US"}, Prefer: []string{"stripe"}},
 				{Prefer: []string{"nmi"}},
 			}
 			_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				ExpectedRevision: &before.Revision, Settings: &billing.MerchantSettings{CheckoutRouting: &unsupported},
+				ExpectedRevision: &before.Revision, Settings: &billing.MerchantSettings{PSPRouting: &unsupported},
 			})
 			require.Equal(t, "invalid_param", codeOf(err), "%v", err)
 			require.ErrorContains(t, err, "match.country is not supported")
@@ -78,7 +78,7 @@ func TestCheckoutRoutingRejectsCountry(t *testing.T) {
 			}
 
 			w.editDoc("merchant", func(doc map[string]any) {
-				doc["settings"].(map[string]any)["checkout_routing"] = unsupported
+				doc["settings"].(map[string]any)["psp_routing"] = unsupported
 			})
 			served, err := engine.Graph(w.rt).Runtime.MerchantConfig.Get(ctx, client.MerchantID())
 			require.NoError(t, err)

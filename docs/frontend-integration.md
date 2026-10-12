@@ -320,7 +320,7 @@ when the bank asks them to authenticate, completes its `next_action` and
 `subscription_id`, `status`, `origin` and `overdue=true`.
 
 An order of one-time lines can also be paid on the PSP's hosted page (Stripe
-Checkout, an option with `accepts: ["redirect"]`): `payment: {return_url,
+Purchase, an option with `accepts: ["redirect"]`): `payment: {return_url,
 psp_id?}` answers `requires_action` with a `redirect_to_url` next action, and
 the customer comes back to `return_url` (an allowed origin) once they paid.
 

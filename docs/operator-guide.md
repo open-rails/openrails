@@ -257,8 +257,8 @@ psp_routing:
   with `{"price_id": "..."}` returns the same decision a real session
   would make, including the exact `routing_reason` it would store.
 
-Country conditions are rejected in routing configuration and previews because order
-checkout does not have a country when it chooses providers. Before deploying this
+Country conditions are rejected in routing configuration and previews because an order
+does not have a country when routing chooses its provider. Before deploying this
 validation, check existing merchant settings and explicitly replace any country rules.
 Billing address country is still accepted for payments; it does not control routing.
 

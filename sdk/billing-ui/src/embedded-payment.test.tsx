@@ -7,12 +7,12 @@ import {
   EmbeddedPayment,
 } from "./embedded-payment"
 
-const url = "https://purchase.example/pay/ord_1#pus_secret"
+const url = "https://pay.example/pay/ord_1#pus_secret"
 
 function post(
   frame: HTMLIFrameElement,
   data: unknown,
-  origin = "https://purchase.example",
+  origin = "https://pay.example",
   source: MessageEventSource | null = frame.contentWindow
 ) {
   act(() => {
@@ -41,7 +41,7 @@ describe("EmbeddedPayment", () => {
       success_url: "https://shop.example/thanks",
     }
     post(frame, complete, "https://evil.example")
-    post(frame, complete, "https://purchase.example", window)
+    post(frame, complete, "https://pay.example", window)
     expect(onComplete).not.toHaveBeenCalled()
 
     post(frame, { type: PAYMENT_RESIZE_MESSAGE, height: 812.4 })

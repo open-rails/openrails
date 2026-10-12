@@ -181,6 +181,10 @@ func softDeleteTables(t *testing.T) map[string]bool {
 			if strings.Contains(m[2], "DROP COLUMN deleted_at") {
 				delete(out, m[1])
 			}
+			if renamed, ok := strings.CutPrefix(m[2], "RENAME TO "); ok && out[m[1]] {
+				delete(out, m[1])
+				out[strings.TrimSpace(renamed)] = true
+			}
 		}
 	}
 	return out

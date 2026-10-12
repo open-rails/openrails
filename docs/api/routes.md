@@ -20,7 +20,7 @@ Health and capability discovery. Only the standalone server serves the root path
 | GET | `/health/ready` | public | — | — | 200 `Health` |  |
 | GET | `/v1/config` | public | — | — | 200 `PublicConfig` |  |
 
-## Purchase (public)
+## Payment (public)
 
 An order's Solana Pay transaction requests.
 
