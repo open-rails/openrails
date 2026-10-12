@@ -69,6 +69,6 @@ type Email struct {
 
 // EmailAddress is a mailbox and its display name.
 type EmailAddress struct {
-	Name    string
-	Address string
+	Name    string `yaml:"name" json:"name"`
+	Address string `yaml:"address" json:"address"`
 }

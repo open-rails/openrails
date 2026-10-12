@@ -15,20 +15,20 @@ import (
 // RedisConfig is a Redis connection: Addr, or a redis:// or rediss:// URL.
 type RedisConfig struct {
 	// Addr is host:port.
-	Addr string
+	Addr string `yaml:"addr" json:"addr"`
 	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
 	// TLS, in place of Addr, DB and TLS. Username and Password, when set, are
 	// used over the URL's.
-	URL string
+	URL string `yaml:"url" json:"url"`
 	// Username is the ACL user; empty is the default user.
-	Username string
-	Password string
-	DB       int
+	Username string `yaml:"username" json:"username"`
+	Password string `yaml:"password" json:"password"`
+	DB       int    `yaml:"db" json:"db"`
 	// TLS connects over TLS, verifying the server against the system roots,
 	// or against CACert, which implies TLS.
-	TLS bool
+	TLS bool `yaml:"tls" json:"tls"`
 	// CACert is the PEM bundle of the CA that signed the server's certificate.
-	CACert string
+	CACert string `yaml:"ca_cert" json:"ca_cert"`
 }
 
 // RedisOptions are c's client options.

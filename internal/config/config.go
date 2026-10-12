@@ -53,15 +53,15 @@ type Config struct {
 	// providers: "full" (normal operation), "limited" (no system-initiated
 	// provider writes) or "readonly" (no provider writes: it never charges
 	// anyone). Required. Independent of TestMode.
-	ProviderWriteMode string
+	ProviderWriteMode string `yaml:"provider_write_mode" json:"provider_write_mode"`
 
 	// TestMode selects sandbox or live provider credentials. Required. It
 	// never relaxes authentication, transport security or credential
 	// encryption.
-	TestMode CredentialPosture
+	TestMode CredentialPosture `yaml:"test_mode" json:"test_mode"`
 
 	// Database names the Postgres schemas New creates or upgrades.
-	Database DatabaseConfig
+	Database DatabaseConfig `yaml:"database" json:"database"`
 	// Merchants declares the merchants an embedded engine provisions on
 	// start, by slug; none leaves that to run time (a standalone server's
 	// are provisioned through its API). Without a Vault KV mount a
@@ -69,77 +69,77 @@ type Config struct {
 	// seeds Vault once, when Vault holds nothing for the merchant. A request
 	// acts on the merchant its credential is bound to: see
 	// MerchantDeclaration.Issuer.
-	Merchants map[string]MerchantDeclaration
+	Merchants map[string]MerchantDeclaration `yaml:"merchants" json:"merchants"`
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
-	PublicBillingBaseURL string
+	PublicBillingBaseURL string `yaml:"public_billing_base_url" json:"public_billing_base_url"`
 	// DashboardBaseURL is where administrative links point.
-	DashboardBaseURL string
+	DashboardBaseURL string `yaml:"dashboard_base_url" json:"dashboard_base_url"`
 
 	// DB opens OpenRails' own pool when Deps.Postgres is nil.
-	DB *DBConfig
+	DB *DBConfig `yaml:"db" json:"db"`
 	// Redis opens OpenRails' own client when Deps.Redis is nil.
-	Redis *RedisConfig
+	Redis *RedisConfig `yaml:"redis" json:"redis"`
 	// Logger sets the log level.
-	Logger *LoggerConfig
+	Logger *LoggerConfig `yaml:"logger" json:"logger"`
 	// SMTP selects the built-in SMTP sender for billing and control-plane
 	// email when Deps.Email is nil; with neither, OpenRails sends no email.
-	SMTP *SMTPConfig
+	SMTP *SMTPConfig `yaml:"smtp" json:"smtp"`
 	// RateLimits are the per-bucket request limits; nil takes the built-in
 	// defaults.
-	RateLimits *RateLimitsConfig
+	RateLimits *RateLimitsConfig `yaml:"rate_limits" json:"rate_limits"`
 	// RateLimitsDisabled turns off the built-in rate limits and captcha
 	// escalation, for a host that fronts billing with its own limiter.
-	RateLimitsDisabled bool
+	RateLimitsDisabled bool `yaml:"rate_limits_disabled" json:"rate_limits_disabled"`
 	// Captcha challenges a client that keeps hitting a rate limit.
-	Captcha *CaptchaConfig
+	Captcha *CaptchaConfig `yaml:"captcha" json:"captcha"`
 	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
 	// mounts: a KV mount makes Vault hold merchant configuration.
-	Vault *VaultConfig
+	Vault *VaultConfig `yaml:"vault" json:"vault"`
 
 	// LLM is the model behind the console's catalog questions.
 	// Without an API key those features are off.
-	LLM *LLMConfig
+	LLM *LLMConfig `yaml:"llm" json:"llm"`
 
 	// CatalogReconciliationInterval schedules the alert-only catalog
 	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
-	CatalogReconciliationInterval string
+	CatalogReconciliationInterval string `yaml:"catalog_reconciliation_interval" json:"catalog_reconciliation_interval"`
 
 	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
-	WebhookSecretOverlap string
+	WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
 
 	// ReturnOrigins are the exact origins (scheme://host[:port]) that checkout
 	// and billing-portal return URLs may name. Empty allows only the origin of
 	// PublicBillingBaseURL.
-	ReturnOrigins []string
+	ReturnOrigins []string `yaml:"return_origins" json:"return_origins"`
 
 	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
 	// resolving a client's address. Empty trusts none: the socket peer is the
 	// client.
-	TrustedProxies []string
+	TrustedProxies []string `yaml:"trusted_proxies" json:"trusted_proxies"`
 
 	// CloudflareProxies are Cloudflare's egress CIDRs, set only where
 	// Cloudflare fronts this origin. They are trusted like TrustedProxies, and
 	// they alone may assert CF-Connecting-IP.
-	CloudflareProxies []string
+	CloudflareProxies []string `yaml:"cloudflare_proxies" json:"cloudflare_proxies"`
 
 	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
 	// webhook origins. CCBill signs nothing, so the source address is the
 	// authentication: the list is honored only with TestMode sandbox and no
 	// live CCBill PSP. Empty accepts CCBill's own ranges alone.
-	CCBillWebhookIPAllowlist []string
+	CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 
 	// ProviderSandbox points sandbox provider clients at loopback gateways, to
 	// qualify a process against fake providers. Refused with TestMode live
 	// and for anything but a literal loopback address.
-	ProviderSandbox *ProviderSandboxConfig
+	ProviderSandbox *ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 	// HyperSwitch is the host's trusted HyperSwitch deployment.
-	HyperSwitch *HyperSwitchConfig
+	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool
+	EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -147,14 +147,14 @@ type Config struct {
 // userinfo; hostnames, even "localhost", are refused.
 type ProviderSandboxConfig struct {
 	// NMIGatewayURL replaces the NMI sandbox endpoints.
-	NMIGatewayURL string
+	NMIGatewayURL string `yaml:"nmi_gateway_url" json:"nmi_gateway_url"`
 	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
 	// pinned API version still apply.
-	StripeAPIURL string
+	StripeAPIURL string `yaml:"stripe_api_url" json:"stripe_api_url"`
 	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
-	SolanaRPCURL string
+	SolanaRPCURL string `yaml:"solana_rpc_url" json:"solana_rpc_url"`
 	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
-	CCBillDataLinkURL string
+	CCBillDataLinkURL string `yaml:"ccbill_datalink_url" json:"ccbill_datalink_url"`
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
@@ -265,28 +265,28 @@ func MerchantConfigKVMount(cfg *Config) string {
 // Deps.Vault) is the connection. Name a KV mount and Vault holds merchant
 // configuration; name only a Transit mount and it only signs.
 type VaultConfig struct {
-	Namespace   string
-	ScopePrefix string
+	Namespace   string `yaml:"namespace" json:"namespace"`
+	ScopePrefix string `yaml:"scope_prefix" json:"scope_prefix"`
 	// Address is the server URL; empty uses the Vault client's default.
-	Address string
+	Address string `yaml:"address" json:"address"`
 	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is
 	// token.
-	AuthMethod string
+	AuthMethod string `yaml:"auth_method" json:"auth_method"`
 	// Token is a pre-issued Vault token.
-	Token    string
-	RoleID   string
-	SecretID string
-	K8sRole  string
+	Token    string `yaml:"token" json:"token"`
+	RoleID   string `yaml:"role_id" json:"role_id"`
+	SecretID string `yaml:"secret_id" json:"secret_id"`
+	K8sRole  string `yaml:"k8s_role" json:"k8s_role"`
 	// AuthMount is where the approle or kubernetes auth method is mounted:
 	// the -path of `vault auth enable`, without auth/. Empty is the method's
 	// name.
-	AuthMount string
+	AuthMount string `yaml:"auth_mount" json:"auth_mount"`
 	// KVMount is the KV v2 mount merchant configuration lives in, under
 	// ScopePrefix (empty: "openrails"). Empty: a file holds it.
-	KVMount string
+	KVMount string `yaml:"kv_mount" json:"kv_mount"`
 	// TransitMount is the Transit mount Solana signing keys live under; empty
 	// is "transit".
-	TransitMount string
+	TransitMount string `yaml:"transit_mount" json:"transit_mount"`
 }
 
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
@@ -327,21 +327,21 @@ const (
 type LLMConfig struct {
 	// Provider selects the API dialect: "anthropic" (the default) or
 	// "openai". Any other value is refused.
-	Provider string
+	Provider string `yaml:"provider" json:"provider"`
 	// Model is the provider's model ID; empty is the provider's default.
-	Model string
+	Model string `yaml:"model" json:"model"`
 	// BaseURL replaces the provider's public endpoint: an absolute https URL.
 	// With openai it includes the version segment
 	// (https://host/v1); with anthropic it is the origin.
-	BaseURL string
+	BaseURL string `yaml:"base_url" json:"base_url"`
 	// APIKey is the provider credential. Empty turns the features off.
-	APIKey string
+	APIKey string `yaml:"api_key" json:"api_key"`
 	// CatalogCopilotEnabled turns on read-only questions about the catalog,
 	// which send aggregate catalog and subscriber counts to the provider.
-	CatalogCopilotEnabled bool
+	CatalogCopilotEnabled bool `yaml:"catalog_copilot_enabled" json:"catalog_copilot_enabled"`
 	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
 	// changes. Drafts are proposals; nothing is applied.
-	CatalogDraftingEnabled bool
+	CatalogDraftingEnabled bool `yaml:"catalog_drafting_enabled" json:"catalog_drafting_enabled"`
 }
 
 // LLMConfigured reports whether a model backend is configured (fail-closed on a
@@ -384,29 +384,29 @@ func LLMModel(c *LLMConfig) string {
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {
 	// Schema holds OpenRails' tables. Empty is "billing".
-	Schema string
+	Schema string `yaml:"schema" json:"schema"`
 	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
 	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
 	// host's River. Start runs OpenRails' own River client there, and a host
 	// fleet passed to Start with WithRiverClient must use the same schema.
-	RiverSchema string
+	RiverSchema string `yaml:"river_schema" json:"river_schema"`
 }
 
 // DBConfig is a Postgres connection. URL takes precedence; otherwise the
 // connection string is built from the parts.
 type DBConfig struct {
-	URL string
+	URL string `yaml:"url" json:"url"`
 
-	Host     string
-	Port     string
-	Database string
-	Username string
-	Password string
+	Host     string `yaml:"host" json:"host"`
+	Port     string `yaml:"port" json:"port"`
+	Database string `yaml:"database" json:"database"`
+	Username string `yaml:"username" json:"username"`
+	Password string `yaml:"password" json:"password"`
 	// SSLMode defaults to "require".
-	SSLMode string
+	SSLMode string `yaml:"sslmode" json:"sslmode"`
 
 	// SQLTrace logs every query at debug level on pools OpenRails opens.
-	SQLTrace bool
+	SQLTrace bool `yaml:"sql_trace" json:"sql_trace"`
 }
 
 // DBConnectionString returns the database connection string.
@@ -909,21 +909,21 @@ var ValidProviderWriteModes = map[string]bool{
 // 587. Billing email is sent from the merchant's profile from_email when it
 // has one; From is the deployment's own address, for everything else.
 type SMTPConfig struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
-	From     EmailAddress
+	Host     string       `yaml:"host" json:"host"`
+	Port     int          `yaml:"port" json:"port"`
+	Username string       `yaml:"username" json:"username"`
+	Password string       `yaml:"password" json:"password"`
+	From     EmailAddress `yaml:"from" json:"from"`
 }
 
 // LoggerConfig sets the log level: debug, info, warn or error.
 type LoggerConfig struct {
-	Level string
+	Level string `yaml:"level" json:"level"`
 }
 
 // RateLimit is one bucket's limit over a fixed one-minute window.
 type RateLimit struct {
-	RequestsPerMinute int
+	RequestsPerMinute int `yaml:"requests_per_minute" json:"requests_per_minute"`
 }
 
 const (
@@ -937,9 +937,9 @@ const (
 // on checkout, payment methods or subscriptions.
 type CaptchaConfig struct {
 	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
-	Provider  string
-	SiteKey   string
-	SecretKey string
+	Provider  string `yaml:"provider" json:"provider"`
+	SiteKey   string `yaml:"site_key" json:"site_key"`
+	SecretKey string `yaml:"secret_key" json:"secret_key"`
 }
 
 // CaptchaEnabled reports whether captcha challenges are active. There is no

@@ -130,7 +130,7 @@ to match after the mapped price ID is supplied.
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
-| `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
+| `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | The fields are removed: they are the standalone server's own settings. `Config` and its sections carry `yaml` and `json` keys instead |
 | `AuthConfig.Naming merchant.NamingConfig` | `server.NamingConfig`, `server.FormerNamesConfig`, `server.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` takes no options; a credential is an `openrails.RemoteCredential` given to `openrails.NewRemote` |
 | `Close` on a client from `With` closed the engine | There is no derived client: `Close` is the engine's, and a handle owns no lifecycle |

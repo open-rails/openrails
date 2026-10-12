@@ -12,9 +12,9 @@ import (
 // The SDK is a separate server in the vendor product, hence its explicit URL.
 type HyperSwitchConfig struct {
 	// AllowLoopbackHTTP admits an http loopback fixture with TestMode sandbox.
-	AllowLoopbackHTTP bool
-	APIBaseURL        string
-	SDKURL            string
+	AllowLoopbackHTTP bool   `yaml:"allow_loopback_http" json:"allow_loopback_http"`
+	APIBaseURL        string `yaml:"api_base_url" json:"api_base_url"`
+	SDKURL            string `yaml:"sdk_url" json:"sdk_url"`
 }
 
 func validateHyperSwitch(cfg *Config) error {

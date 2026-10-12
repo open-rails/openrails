@@ -3,6 +3,7 @@ package openrails
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -41,4 +42,67 @@ func TestMerchantFileRoundTrip(t *testing.T) {
 	got, err := ReadMerchantFile(path)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+// A host's own YAML file decodes into Config by its yaml tags.
+func TestConfigLoadsFromYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "billing.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+test_mode: sandbox
+provider_write_mode: full
+database: {schema: host_billing}
+db: {url: "postgres://app@db/app", sslmode: verify-full}
+vault:
+  address: https://vault.example:8200
+  namespace: team
+  scope_prefix: openrails-dev
+  auth_method: approle
+  role_id: role
+  secret_id: secret
+  auth_mount: approle-billing
+  kv_mount: kv
+  transit_mount: transit-billing
+`), 0o600))
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var cfg Config
+	require.NoError(t, yaml.UnmarshalWithOptions(raw, &cfg, yaml.DisallowUnknownField()))
+	require.Equal(t, Sandbox, cfg.TestMode)
+	require.Equal(t, "full", cfg.ProviderWriteMode)
+	require.Equal(t, DatabaseConfig{Schema: "host_billing"}, cfg.Database)
+	require.Equal(t, &DBConfig{URL: "postgres://app@db/app", SSLMode: "verify-full"}, cfg.DB)
+	require.Equal(t, &VaultConfig{
+		Address: "https://vault.example:8200", Namespace: "team", ScopePrefix: "openrails-dev",
+		AuthMethod: "approle", RoleID: "role", SecretID: "secret", AuthMount: "approle-billing",
+		KVMount: "kv", TransitMount: "transit-billing",
+	}, cfg.Vault)
+}
+
+// Every field Config holds has a yaml and a json key, so none decodes by a
+// library's default spelling. Merchants are the merchant file's shape.
+func TestConfigFieldsAreTagged(t *testing.T) {
+	seen := map[reflect.Type]bool{}
+	var walk func(path string, typ reflect.Type)
+	walk = func(path string, typ reflect.Type) {
+		switch typ.Kind() {
+		case reflect.Pointer, reflect.Slice, reflect.Map:
+			walk(path, typ.Elem())
+		case reflect.Struct:
+			if seen[typ] {
+				return
+			}
+			seen[typ] = true
+			for i := range typ.NumField() {
+				field := typ.Field(i)
+				if field.Name == "Merchants" && typ == reflect.TypeFor[Config]() {
+					continue
+				}
+				if field.Tag.Get("yaml") == "" || field.Tag.Get("json") == "" {
+					t.Errorf("%s.%s lacks a yaml or json key", path, field.Name)
+				}
+				walk(path+"."+field.Name, field.Type)
+			}
+		}
+	}
+	walk("Config", reflect.TypeFor[Config]())
 }

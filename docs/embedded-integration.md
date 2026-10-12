@@ -98,8 +98,9 @@ issues no grants.
 ### 3. Config and Deps
 
 `openrails.Config` is plain data; `openrails.Deps` is everything the engine
-reaches outside its process. Construction refuses to boot unless posture is
-explicit:
+reaches outside its process. `Config` and its sections carry `yaml` and `json`
+keys (`test_mode`, `db.url`, `vault.kv_mount`, …), so a host can decode its own
+file into it. Construction refuses to boot unless posture is explicit:
 
 | Config field | Required | Meaning |
 |---|---|---|
