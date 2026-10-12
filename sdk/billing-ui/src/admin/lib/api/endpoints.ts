@@ -489,13 +489,10 @@ export function createEndpoints(client: AdminClient) {
   // getPriceHistory returns the history of a price's key, most recent first:
   // when the key moved to which price.
   const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
-    api<ListPage<PriceKeyMovement>>(
-      `/catalog/prices/${priceId}/history`,
-      {
-        query: { limit: PAGE_MAX },
-        signal,
-      }
-    )
+    api<ListPage<PriceKeyMovement>>(`/catalog/prices/${priceId}/history`, {
+      query: { limit: PAGE_MAX },
+      signal,
+    })
 
   // --- Price migrations ---
 
@@ -663,7 +660,10 @@ export function createEndpoints(client: AdminClient) {
 
   // Omitted fields keep their values; the URL is write-only.
   const updateWebhook = (id: string, body: UpdateAlertWebhookParams) =>
-    api<AlertWebhook>(`/merchant/alert-webhooks/${id}`, { method: "PATCH", body })
+    api<AlertWebhook>(`/merchant/alert-webhooks/${id}`, {
+      method: "PATCH",
+      body,
+    })
 
   const deleteWebhook = (id: string) =>
     api<void>(`/merchant/alert-webhooks/${id}`, { method: "DELETE" })

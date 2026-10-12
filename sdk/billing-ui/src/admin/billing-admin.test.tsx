@@ -228,9 +228,18 @@ it("discards cached records when the host replaces the authenticated transport",
 
 it("refuses to display customer data when the supplied transport names another merchant", async () => {
   const { auth, requests } = transport("Wrong merchant data")
-  render(<BillingAdmin baseUrl="/billing/v1" auth={auth} merchant="requested-merchant" basePath="/billing"
-    navigation={{ pathname: "/billing/customers", search: "", navigate() {} }} />)
-  expect(await screen.findByRole("alert")).toHaveTextContent("bound to another merchant")
-  expect(requests.every(url => url.endsWith("/admin/access"))).toBe(true)
+  render(
+    <BillingAdmin
+      baseUrl="/billing/v1"
+      auth={auth}
+      merchant="requested-merchant"
+      basePath="/billing"
+      navigation={{ pathname: "/billing/customers", search: "", navigate() {} }}
+    />
+  )
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "bound to another merchant"
+  )
+  expect(requests.every((url) => url.endsWith("/admin/access"))).toBe(true)
   expect(screen.queryByText("Wrong merchant data")).toBeNull()
 })

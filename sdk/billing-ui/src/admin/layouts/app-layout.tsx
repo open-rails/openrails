@@ -50,9 +50,7 @@ function areaOf(
     pathname === prefix || pathname.startsWith(prefix + "/")
   if (under("/payments/health"))
     return { name: "payment health", allowed: access.metrics }
-  if (
-    ["/customers", "/subscriptions", "/payments", "/orders"].some(under)
-  )
+  if (["/customers", "/subscriptions", "/payments", "/orders"].some(under))
     return { name: "customer support", allowed: access.admin !== "none" }
   if (under("/ops") || under("/catalog/drift"))
     return { name: "merchant configuration", allowed: access.merchant_config }
@@ -87,8 +85,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </button>
       </div>
     )
-  if (activeMerchant.id && access?.scope_id && activeMerchant.id !== access.scope_id)
-    return <p role="alert" className="p-6"><AdminMessage id="The authenticated connection is bound to another merchant. Update the host connection before opening this merchant." /></p>
+  if (
+    activeMerchant.id &&
+    access?.scope_id &&
+    activeMerchant.id !== access.scope_id
+  )
+    return (
+      <p role="alert" className="p-6">
+        <AdminMessage id="The authenticated connection is bound to another merchant. Update the host connection before opening this merchant." />
+      </p>
+    )
   return (
     <TooltipProvider>
       <SidebarProvider>

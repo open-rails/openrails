@@ -41,10 +41,24 @@ export function BillingAdmin(props: BillingAdminProps) {
       baseUrl: props.baseUrl,
       generation: connection.generation + 1,
     })
-  return <BillingAdminInstance key={connection.generation} {...props} selected={selected} onSelected={setSelected} />
+  return (
+    <BillingAdminInstance
+      key={connection.generation}
+      {...props}
+      selected={selected}
+      onSelected={setSelected}
+    />
+  )
 }
 
-function BillingAdminInstance({ selected, onSelected, ...props }: BillingAdminProps & { selected?: string; onSelected: (value: string) => void }) {
+function BillingAdminInstance({
+  selected,
+  onSelected,
+  ...props
+}: BillingAdminProps & {
+  selected?: string
+  onSelected: (value: string) => void
+}) {
   const theme = useAdminTheme(props.appearance?.theme)
   const namespace = useId()
   const [portal, setPortal] = useState<HTMLDivElement | null>(null)

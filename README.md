@@ -610,8 +610,8 @@ the catalog, merchant configuration and business metrics. Enable it with
 [standalone admin console](docs/billing-admin.md).
 
 The browser console opens at `/admin` by default (or `admin_console.path`).
-`GET /v1/admin/dashboard` is a JSON API: it reads the saved dashboard layout
-and widget definitions. Chart data comes from `POST /v1/admin/metrics/query`.
+`GET /v1/metrics/dashboard` is a JSON API: it reads the saved dashboard layout
+and widget definitions. Chart data comes from `POST /v1/metrics/query`.
 An embedded host renders `BillingAdmin` under its own `basePath`.
 
 An embedded engine serves the billing API. The host owns its admin pages

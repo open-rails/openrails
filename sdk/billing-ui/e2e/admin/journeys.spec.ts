@@ -77,12 +77,21 @@ for (const theme of ["light", "dark", "auto"] as const) {
     await expect(
       page.getByRole("heading", { name: "Products", exact: true })
     ).toBeVisible()
-    await expect(page.locator(".orba").first()).toHaveAttribute("data-orba-theme", theme === "auto" ? "dark" : theme)
+    await expect(page.locator(".orba").first()).toHaveAttribute(
+      "data-orba-theme",
+      theme === "auto" ? "dark" : theme
+    )
     if (theme === "auto") {
       await page.emulateMedia({ colorScheme: "light" })
-      await expect(page.locator(".orba").first()).toHaveAttribute("data-orba-theme", "light")
+      await expect(page.locator(".orba").first()).toHaveAttribute(
+        "data-orba-theme",
+        "light"
+      )
       await page.emulateMedia({ colorScheme: "dark" })
-      await expect(page.locator(".orba").first()).toHaveAttribute("data-orba-theme", "dark")
+      await expect(page.locator(".orba").first()).toHaveAttribute(
+        "data-orba-theme",
+        "dark"
+      )
     }
     await expect(page.getByTestId("host-header")).toHaveCSS(
       "background-color",
@@ -94,13 +103,25 @@ for (const theme of ["light", "dark", "auto"] as const) {
     await expect(
       page.getByRole("heading", { name: "Products", exact: true })
     ).toBeVisible()
-    await page.screenshot({ path: test.info().outputPath(`admin-${theme}-desktop.png`), fullPage: true })
+    await page.screenshot({
+      path: test.info().outputPath(`admin-${theme}-desktop.png`),
+      fullPage: true,
+    })
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(
       page.getByRole("button", { name: "Toggle Sidebar", exact: true }).first()
     ).toBeVisible()
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.screenshot({ path: test.info().outputPath(`admin-${theme}-mobile.png`), fullPage: true })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true)
+    await page.screenshot({
+      path: test.info().outputPath(`admin-${theme}-mobile.png`),
+      fullPage: true,
+    })
   })
 }
 

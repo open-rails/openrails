@@ -8,7 +8,12 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons"
 import type { IconSvgElement } from "@hugeicons/react"
-import { useAdminArea, useCatalogArea, useMerchantConfig, useMetrics } from "./lib/capabilities"
+import {
+  useAdminArea,
+  useCatalogArea,
+  useMerchantConfig,
+  useMetrics,
+} from "./lib/capabilities"
 export interface AdminNavItem {
   title: string
   path: string

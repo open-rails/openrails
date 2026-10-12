@@ -53,9 +53,9 @@ it("offers creation only to a caller holding the catalog", async () => {
     await queries.invalidateQueries()
   })
   expect(button("Apply catalog")).toBeDefined()
-  expect(
-    requests.some((r) => r.path.startsWith("/catalog/revision"))
-  ).toBe(false)
+  expect(requests.some((r) => r.path.startsWith("/catalog/revision"))).toBe(
+    false
+  )
 })
 
 // An edit sends the revision its product read as expected_revision.
@@ -80,7 +80,7 @@ it("edits a product at the revision it read", async () => {
   const patch = requests.find((r) => r.method === "PATCH")
   expect(patch?.path).toBe("/catalog/products/prod_pro")
   expect(patch?.body).toEqual({ archived: true, expected_revision: 7 })
-  expect(
-    requests.some((r) => r.path.startsWith("/catalog/revision"))
-  ).toBe(false)
+  expect(requests.some((r) => r.path.startsWith("/catalog/revision"))).toBe(
+    false
+  )
 })

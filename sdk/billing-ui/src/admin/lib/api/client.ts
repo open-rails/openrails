@@ -192,9 +192,17 @@ export function createAdminClient(options: AdminClientOptions) {
   const api = async <T>(path: string, opts: RequestOptions = {}) =>
     (await apiResponse<T>(path, opts)).body
   const queryRoot = (requested?: string) => {
-    const merchant = requested !== undefined && requested !== options.merchant?.slug && requested !== options.merchant?.id
-      ? requested : options.merchant?.id || options.merchant?.slug || "unselected"
-    return [...(options.namespace ? ["billing-admin", options.namespace] : []), "merchant", merchant] as const
+    const merchant =
+      requested !== undefined &&
+      requested !== options.merchant?.slug &&
+      requested !== options.merchant?.id
+        ? requested
+        : options.merchant?.id || options.merchant?.slug || "unselected"
+    return [
+      ...(options.namespace ? ["billing-admin", options.namespace] : []),
+      "merchant",
+      merchant,
+    ] as const
   }
   return {
     namespace: options.namespace,

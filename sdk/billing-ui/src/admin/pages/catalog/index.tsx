@@ -130,10 +130,14 @@ export function CatalogDriftPage() {
   const { text: adminText } = useAdminUI()
   const merchantConfig = useMerchantConfig()
   if (!merchantConfig) return null
-  return <div className="flex flex-col gap-4">
-    <h1 className="text-2xl font-semibold tracking-tight">{adminText("Drift")}</h1>
-    <DriftTab />
-  </div>
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {adminText("Drift")}
+      </h1>
+      <DriftTab />
+    </div>
+  )
 }
 
 const CATALOG_PAGE_SIZE = 100
@@ -1039,7 +1043,9 @@ function DriftTab() {
 
   const queryClient = useQueryClient()
   const canRefresh = useMerchantConfig()
-  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift(canRefresh))
+  const { data, isPending: loading } = useQuery(
+    adminQueries.catalogDrift(canRefresh)
+  )
   const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
 
   return (

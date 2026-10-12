@@ -224,8 +224,7 @@ export function billingConfirmWarnings(customer: {
 }
 
 const permissionAreas: Record<string, string> = {
-  "customer:read":
-    "Read customers, subscriptions, payments, and orders.",
+  "customer:read": "Read customers, subscriptions, payments, and orders.",
   "customer:manage":
     "Change customer billing, including refunds, cancellations, and credits.",
   "catalog:manage":

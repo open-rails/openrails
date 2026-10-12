@@ -12,7 +12,8 @@ export const creditCustomerKey = (merchant: string, customer: string) =>
   ["merchant", merchant, "customers", customer] as const
 export function createCreditQueries(client: AdminClient, api: AdminAPI) {
   const { selectedMerchant } = client
-  const scopedCustomerKey = (merchant: string, customer: string) => [...client.queryRoot(merchant), "customers", customer] as const
+  const scopedCustomerKey = (merchant: string, customer: string) =>
+    [...client.queryRoot(merchant), "customers", customer] as const
   const {
     createCreditGrant,
     listCreditGrants,

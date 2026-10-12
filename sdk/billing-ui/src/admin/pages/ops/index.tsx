@@ -57,7 +57,9 @@ function FindingsTab() {
 
   const canUpdate = useMerchantConfig()
   const metrics = useMetrics()
-  const { data, isPending: loading } = useQuery(adminQueries.findings(canUpdate))
+  const { data, isPending: loading } = useQuery(
+    adminQueries.findings(canUpdate)
+  )
   const { data: gauges } = useQuery({
     ...adminQueries.findingSummary(),
     enabled: metrics,

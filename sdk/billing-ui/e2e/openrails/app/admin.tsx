@@ -7,10 +7,14 @@ import "../../../dist/admin.css"
 
 const params = new URLSearchParams(window.location.hash.slice(1))
 // Test-only bootstrap: keep the synthetic session through URL navigation and reload.
-const token = params.get("token") ?? sessionStorage.getItem("admin-test-token") ?? ""
+const token =
+  params.get("token") ?? sessionStorage.getItem("admin-test-token") ?? ""
 if (token) sessionStorage.setItem("admin-test-token", token)
 const requestedTheme = params.get("theme")
-const theme = requestedTheme === "dark" || requestedTheme === "auto" ? requestedTheme : "light"
+const theme =
+  requestedTheme === "dark" || requestedTheme === "auto"
+    ? requestedTheme
+    : "light"
 const historyOnly = window.location.pathname.startsWith("/admin/history")
 const auth = createAuthClient({ baseUrl: "/auth/v1", sessionHint: false })
 await auth.completeSignIn(async () => ({
