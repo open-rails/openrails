@@ -122,6 +122,7 @@ var omittedColumns = map[string]string{
 	"product_access":    "destructive_run_class",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
 	"provider_intents":  "destructive_run_class destructive_action_id",
+	"price_migrations":  "destructive_action_id",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {
