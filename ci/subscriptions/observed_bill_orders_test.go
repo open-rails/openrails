@@ -202,6 +202,7 @@ func TestObservedLateBillKeepsCancellation(t *testing.T) {
 	w.waive("evidenced", "normalized authenticated late receipt exercises local accounting without issuing another gateway charge")
 	l := importLegacy(t, w, "nmi", embedded)
 	w.refreshProviders()
+	w.armDestructive()
 	l.c.must(http.MethodPost, "/subscriptions/"+l.sub.String()+"/cancel", "", map[string]any{"reason": "finished"})
 	w.settle()
 	before := w.subscription(embedded, l.sub)
