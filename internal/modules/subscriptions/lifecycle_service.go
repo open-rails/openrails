@@ -963,7 +963,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			currency = price.Currency
 		}
 
-		if params.TransactionID != "" && acceptedPayment == nil {
+		// ProviderBill already states the actual money movements. Its paid
+		// flag can instead mean credits or out-of-band settlement; an event
+		// reference in TransactionID must not manufacture a gateway capture.
+		if params.ProviderBill == nil && params.TransactionID != "" && acceptedPayment == nil {
 			now := s.now().UTC()
 			if !params.AmountProvided && params.Amount <= 0 {
 				// No charged amount supplied: record the catalog list price, with
