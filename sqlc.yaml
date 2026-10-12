@@ -74,9 +74,10 @@ sql:
       - "internal/migrate/postgres/0075_operational_read_indexes.up.sql"
       - "internal/migrate/postgres/0076_dynamic_pricing.up.sql"
       - "internal/migrate/postgres/0077_retire_checkout_creation.up.sql"
-      - "internal/migrate/postgres/0078_provider_bill_orders.up.sql"
-      - "internal/migrate/postgres/0079_provider_schedule_bills.up.sql"
-      - "internal/migrate/postgres/0080_payment_order_identity.up.sql"
+      - "internal/migrate/postgres/0078_proposals.up.sql"
+      - "internal/migrate/postgres/0079_provider_bill_orders.up.sql"
+      - "internal/migrate/postgres/0080_provider_schedule_bills.up.sql"
+      - "internal/migrate/postgres/0081_payment_order_identity.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -478,7 +478,7 @@ func exportQuery(p contract.Profile) string {
 func exportWhere(table string) string {
 	where := "t.merchant_id=$1"
 	if table == "maintenance_runs" {
-		where += " AND t.kind IN ('prune','converge_enforce','merchant_purge')"
+		where += " AND t.kind IN ('prune','approval','merchant_purge')"
 	}
 	return where
 }

@@ -78,9 +78,10 @@ migration 0074_public_price_identifiers.up.sql sha256:cfb4de2b50acb4ff478177deb1
 migration 0075_operational_read_indexes.up.sql sha256:cd72215555b01a71af5b5785c786d7366b020428286d2c02426fba38a2c2510d
 migration 0076_dynamic_pricing.up.sql sha256:67d784d49e2ec82b305b55b9c903cd9de8430813b23c7aaa18d14d9aa78b9fc7
 migration 0077_retire_checkout_creation.up.sql sha256:4fb973340dd814d572e6cee45cec5e31cee9380669951fc02918633f0b083638
-migration 0078_provider_bill_orders.up.sql sha256:058bf95bc1449ae535d7c1234160e79b80d38f8e523169078595dcc31cd00592
-migration 0079_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
-migration 0080_payment_order_identity.up.sql sha256:73afc94f11e610f641460ab741d9843504bc77b409323f4f2a8ad64a490fc574
+migration 0078_proposals.up.sql sha256:9dec89446fbca70a67abd7b6cbb8c95fc8ef607fa5ad20f0d86ebcc3c3986a7f
+migration 0079_provider_bill_orders.up.sql sha256:058bf95bc1449ae535d7c1234160e79b80d38f8e523169078595dcc31cd00592
+migration 0080_provider_schedule_bills.up.sql sha256:4a56d5c444da06cee681ebc2a3f213ea0c492a2715400487ba043f89c494cafa
+migration 0081_payment_order_identity.up.sql sha256:73afc94f11e610f641460ab741d9843504bc77b409323f4f2a8ad64a490fc574
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -596,7 +597,7 @@ table billing.destructive_run_before_images
   constraint destructive_run_before_images_table_check CHECK ((table_name = ANY (ARRAY['subscriptions'::text, 'entitlements'::text, 'product_access'::text])))
   index CREATE UNIQUE INDEX destructive_run_before_images_identity_key ON billing.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id)
   index CREATE UNIQUE INDEX destructive_run_before_images_pkey ON billing.destructive_run_before_images USING btree (merchant_id, id)
-  trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('restored_at', 'destructive_run_class')
+  trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_before_image()
 
 table billing.document_sequences
   column merchant_id uuid NOT NULL
@@ -836,7 +837,7 @@ table billing.maintenance_runs
   constraint maintenance_runs_actor_check CHECK ((actor <> ''::text))
   constraint maintenance_runs_expected_rows_check CHECK (((expected_rows IS NULL) OR (expected_rows >= 0)))
   constraint maintenance_runs_id_run_class_key UNIQUE (merchant_id, id, run_class)
-  constraint maintenance_runs_kind_check CHECK (((((kind = 'reconciliation'::text) AND (mode = ANY (ARRAY['advisory'::text, 'enforce'::text])) AND (status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])) AND (psp_id IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = ANY (ARRAY['prune'::text, 'converge_enforce'::text, 'merchant_purge'::text])) AND (btrim(actor) <> ''::text) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (NOT dry_run) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
+  constraint maintenance_runs_kind_check CHECK (((((kind = 'reconciliation'::text) AND (mode = ANY (ARRAY['advisory'::text, 'enforce'::text])) AND (status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])) AND (psp_id IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = ANY (ARRAY['prune'::text, 'approval'::text, 'merchant_purge'::text])) AND (btrim(actor) <> ''::text) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (NOT dry_run) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
   constraint maintenance_runs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint maintenance_runs_pkey PRIMARY KEY (merchant_id, id)
   constraint maintenance_runs_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
@@ -2129,23 +2130,35 @@ table billing.reconciliation_findings
   column notified_at timestamp with time zone
   column notified_severity text
   column seen_run_class text GENERATED ALWAYS AS ( CASE WHEN ((first_seen_run IS NOT NULL) OR (last_seen_run IS NOT NULL)) THEN 'observation'::text ELSE NULL::text END) STORED
+  column change jsonb
+  column source text
+  column evidence_digest text
+  column approval_run_id uuid
+  constraint reconciliation_findings_approval_run_check CHECK (((NOT (resolution IS DISTINCT FROM 'approved'::text)) = (approval_run_id IS NOT NULL)))
+  constraint reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs(merchant_id, id) ON DELETE RESTRICT
   constraint reconciliation_findings_catalog_check CHECK ((((finding_type = ANY (ARRAY['catalog.orphan_in_stripe'::text, 'catalog.missing_in_stripe'::text, 'catalog.orphan_in_nmi'::text, 'catalog.missing_in_nmi'::text, 'catalog.missing_in_solana'::text, 'catalog.field_drift'::text])) AND (rail = ANY (ARRAY['stripe'::text, 'nmi'::text, 'solana'::text])) AND (psp_id IS NOT NULL) AND (openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text])) AND ((finding_type = 'catalog.field_drift'::text) OR (finding_type ~~ ('catalog.%_in_'::text || rail))) AND (first_seen_run IS NULL) AND (last_seen_run IS NULL) AND (subject_key = (jsonb_build_array((psp_id)::text, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)))::text)) OR ((finding_type !~~ 'catalog.%'::text) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
+  constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text])))))
+  constraint reconciliation_findings_evidence_digest_check CHECK ((((change IS NULL) = (evidence_digest IS NULL)) AND ((evidence_digest IS NULL) OR (evidence_digest ~ '^[0-9a-f]{64}$'::text))))
   constraint reconciliation_findings_first_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint reconciliation_findings_last_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint reconciliation_findings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint reconciliation_findings_pkey PRIMARY KEY (merchant_id, id)
+  constraint reconciliation_findings_proposal_resolution_check CHECK (((resolution IS NULL) OR (resolution <> ALL (ARRAY['approved'::text, 'dismissed'::text, 'superseded'::text])) OR (finding_type ~~ 'pull.%'::text)))
   constraint reconciliation_findings_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
-  constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text]))))
+  constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
+  constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))
   constraint reconciliation_findings_status_check CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text])))
   constraint reconciliation_findings_type_check CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
+  index CREATE INDEX reconciliation_findings_approval_run_id_idx ON billing.reconciliation_findings USING btree (merchant_id, approval_run_id) WHERE (approval_run_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_finding_type_idx ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]))
   index CREATE UNIQUE INDEX reconciliation_findings_finding_type_psp_id_subject_key_key ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT
   index CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, first_seen_run) WHERE (first_seen_run IS NOT NULL)
   index CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, last_seen_run) WHERE (last_seen_run IS NOT NULL)
   index CREATE INDEX reconciliation_findings_open_catalog_idx ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text))
   index CREATE UNIQUE INDEX reconciliation_findings_pkey ON billing.reconciliation_findings USING btree (merchant_id, id)
+  index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
   index CREATE INDEX reconciliation_findings_resolved_idx ON billing.reconciliation_findings USING btree (merchant_id, GREATEST(resolved_at, last_seen_at)) WHERE (resolved_at IS NOT NULL)
 
 table billing.reconciliation_state
@@ -3056,6 +3069,23 @@ function billing.finish_billing_restore(uuid,text,bigint)
       PERFORM billing.check_billing_restore_ledger(p_merchant);
       UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
           WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
+  END;
+  $function$
+
+function billing.guard_before_image()
+  CREATE OR REPLACE FUNCTION billing.guard_before_image()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF TG_OP = 'DELETE'
+         OR (OLD.after_lifecycle_rev IS NOT NULL AND NEW.after_lifecycle_rev IS DISTINCT FROM OLD.after_lifecycle_rev)
+         OR (to_jsonb(NEW) - ARRAY['restored_at','destructive_run_class','after_lifecycle_rev'])
+            IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['restored_at','destructive_run_class','after_lifecycle_rev']) THEN
+          RAISE EXCEPTION 'immutable billing facts in % cannot be rewritten', TG_TABLE_NAME USING ERRCODE = '23514';
+      END IF;
+      RETURN NEW;
   END;
   $function$
 

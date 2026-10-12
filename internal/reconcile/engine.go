@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
@@ -491,13 +492,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	for i := range findings {
 		finding := &findings[i]
 		if err := recoveryErrors[finding.SubjectKey]; err != nil && finding.Type == FindingChargeMissingLocal {
-			finding.Apply = nil
+			finding.Apply, finding.Change = nil, nil
 			finding.Status, finding.RequiresAdmin = FindingStatusRequiresReview, true
 			finding.RecommendedAction = "invoice receipt remains unresolved: " + err.Error()
 		}
 	}
 	findings, deferredCharges := e.deferOperationCharges(ctx, provider, binding.ID, fetcher, snap, findings)
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
+	newChangeBuilder(buildLocalIndex(local), local, now).attach(findings)
 	bindApplyActions(findings, binding.ID, runID)
 
 	if snap.Capabilities.Transactions {
@@ -533,6 +535,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		f := &findings[i]
 		if strings.HasPrefix(string(f.Type), "pull.") {
 			f.PSPID = binding.ID
+			f.Source = billing.ProposalSourcePull
 		}
 		rec, err := e.Store.UpsertFinding(ctx, runID, *f)
 		if err != nil {
@@ -750,7 +753,7 @@ func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, bind
 		coverage = snap.Coverage
 	}
 	return e.Runs.Open(ctx, OpenDestructiveRunParams{
-		PspID: pspID, Kind: DestructiveRunKindConvergeEnforce, Actor: e.actor(),
+		PspID: pspID, Kind: DestructiveRunKindApproval, Actor: e.actor(),
 		Coverage: coverage, ExpectedRows: plannedOverwrites, Note: note,
 	})
 }
@@ -777,6 +780,9 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 func bindApplyActions(findings []Finding, psp, runID uuid.UUID) {
 	pspID := &psp
 	for i := range findings {
+		if c := findings[i].Change; c != nil {
+			bindChange(&c.Apply, psp)
+		}
 		a := findings[i].Apply
 		if a == nil {
 			continue
@@ -795,6 +801,23 @@ func bindApplyActions(findings []Finding, psp, runID uuid.UUID) {
 		}
 		if a.AdoptPaymentMethod != nil {
 			a.AdoptPaymentMethod.EventRef = "pull:" + runID.String()
+		}
+	}
+}
+
+// bindChange stamps the pull's PSP onto the mirror rows a proposal creates.
+func bindChange(a *ChangeApply, psp uuid.UUID) {
+	pspID := &psp
+	if a.BackfillPayment != nil {
+		a.BackfillPayment.PspID = pspID
+	}
+	if a.RecordRefund != nil {
+		a.RecordRefund.PspID = pspID
+	}
+	if a.Materialize != nil {
+		a.Materialize.PspID = psp
+		if a.Materialize.Backfill != nil {
+			a.Materialize.Backfill.PspID = pspID
 		}
 	}
 }

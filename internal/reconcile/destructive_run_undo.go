@@ -14,7 +14,7 @@ import (
 )
 
 // One undo verb covers the whole destructive-run ledger: a prune reverses by
-// clearing tombstones, a converge-enforce pass from captured before-images. The
+// clearing tombstones, an approval run from captured before-images. The
 // kind is read from the ledger and dispatched on; a kind with no undo is
 // refused by name. Dry-run is the default, and applying needs a typed row count
 // matching the plan, because an undo is itself a mass mutation of the live book.
@@ -173,7 +173,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		plan.Restorable["payments"] = c.Payments
 		plan.Restorable["checkout_attempts"] = c.CheckoutAttempts
 		plan.Restorable["product_access"] = c.ProductAccess
-	case DestructiveRunKindConvergeEnforce:
+	case DestructiveRunKindApproval:
 		c, err := q.CountConvergeRestorableForRun(ctx, gen.CountConvergeRestorableForRunParams{MerchantID: mid, RunID: runID})
 		if err != nil {
 			return plan, fmt.Errorf("count converge-restorable rows: %w", err)
@@ -249,8 +249,8 @@ func UndoRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string
 		res.Restored["payments"] = r.Payments
 		res.Restored["checkout_attempts"] = r.CheckoutAttempts
 		res.Restored["product_access"] = r.ProductAccess
-	case DestructiveRunKindConvergeEnforce:
-		r, err := RollbackConvergeEnforceRun(ctx, database, runID, actor, recompute)
+	case DestructiveRunKindApproval:
+		r, err := RollbackApprovalRun(ctx, database, runID, actor, recompute)
 		if err != nil {
 			return res, err
 		}

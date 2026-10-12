@@ -35,14 +35,15 @@ ORDER BY started_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
--- A previously fixed/auto_fixed finding that reappears is
--- REOPENED with the freshly computed status; an ignored finding stays ignored
--- (an operator explicitly silenced this identity).
+-- A previously resolved finding that reappears is REOPENED with the freshly
+-- computed status; an ignored finding stays ignored (an operator explicitly
+-- silenced this identity), unless it is a dismissed proposal whose provider
+-- evidence now differs (evidence_digest).
 -- name: UpsertReconciliationFinding :one
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
-    first_seen_run, last_seen_run, psp_id, rail
+    first_seen_run, last_seen_run, psp_id, rail, change, source, evidence_digest
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(finding_type), sqlc.arg(subject_key),
     sqlc.arg(severity), sqlc.arg(status), sqlc.narg(recommended_action),
@@ -51,38 +52,65 @@ INSERT INTO billing.reconciliation_findings (
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
     sqlc.narg(run_id), sqlc.narg(run_id), sqlc.narg(psp_id)::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
-    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid)
+    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid),
+    sqlc.narg(change)::jsonb, sqlc.narg(source)::text, sqlc.narg(evidence_digest)::text
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored'
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN 'ignored'
         ELSE EXCLUDED.status
     END,
     recommended_action = EXCLUDED.recommended_action,
     evidence = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.evidence
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.evidence
         ELSE EXCLUDED.evidence
     END,
+    change = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.change
+        ELSE EXCLUDED.change
+    END,
+    evidence_digest = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.evidence_digest
+        ELSE EXCLUDED.evidence_digest
+    END,
+    source = COALESCE(EXCLUDED.source, billing.reconciliation_findings.source),
     resolved_at = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolution
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
+    -- A reopened finding is a new episode: the previous resolver and
+    -- approval run belong to the episode they closed.
+    resolved_by = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_by
+        WHEN billing.reconciliation_findings.resolved_at IS NULL THEN billing.reconciliation_findings.resolved_by
+        ELSE NULL
+    END,
+    approval_run_id = NULL,
     -- An inline auto_fixed is a resolution: clear the notify linkage so a
     -- reopen of this identity notifies again.
     notified_at = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_at
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_at
     END,
     notified_severity = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_severity
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_severity
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_severity
     END,
@@ -290,9 +318,85 @@ WHERE id = sqlc.arg(id)
   AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
+-- Proposals: the pull.* plane, approved or dismissed by internal/proposals
+-- only. Each id is locked and resolved in its own transaction.
+
+-- name: LockProposal :one
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND finding_type LIKE 'pull.%'
+FOR UPDATE;
+
+-- name: ResolveProposal :execrows
+-- approved and superseded close as fixed, dismissed as ignored (a dismissed
+-- proposal is raised again only on other evidence). The execution or the
+-- reason is recorded under evidence.resolution.
+UPDATE billing.reconciliation_findings
+SET status = CASE sqlc.arg(resolution)::text WHEN 'dismissed' THEN 'ignored' ELSE 'fixed' END,
+    resolution = sqlc.arg(resolution)::text,
+    operator_notes = sqlc.narg(operator_notes),
+    resolved_by = sqlc.narg(resolved_by),
+    approval_run_id = sqlc.narg(approval_run_id)::uuid,
+    evidence = CASE
+        WHEN sqlc.narg(resolution_evidence)::jsonb IS NULL THEN evidence
+        ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true)
+    END,
+    resolved_at = sqlc.arg(now)::timestamptz,
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND finding_type LIKE 'pull.%'
+  AND status IN ('reconcile_required', 'requires_review');
+
+-- name: ListProposals :many
+-- Open pull.* findings unless a status is named, most severe first, then
+-- oldest; keyset-paged.
+SELECT f.*
+FROM billing.reconciliation_findings f
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND f.finding_type LIKE 'pull.%'
+  AND (CASE
+         WHEN sqlc.narg(status)::text IS NULL THEN f.status IN ('reconcile_required', 'requires_review')
+         ELSE f.status = sqlc.narg(status)::text
+       END)
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR f.psp_id = sqlc.narg(psp_id)::uuid)
+  AND (sqlc.narg(kind)::text IS NULL OR f.change->>'kind' = sqlc.narg(kind)::text)
+  AND (sqlc.narg(source)::text IS NULL OR f.source = sqlc.narg(source)::text)
+  AND (sqlc.narg(after_rank)::int IS NULL
+       OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
+          > (sqlc.narg(after_rank)::int, sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: LatestCardVersionID :one
+-- An update_card proposal's basis: the card version it was computed against.
+SELECT COALESCE((SELECT v.id FROM billing.payment_method_versions v
+    WHERE v.merchant_id = sqlc.arg(merchant_id)::uuid AND v.payment_method_id = sqlc.arg(payment_method_id)::uuid
+    ORDER BY v.effective_at DESC, v.id DESC LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS id;
+
+-- name: ProposalRailIDRecorded :one
+-- A create or record proposal's basis is its rail id still unrecorded on the
+-- finding's PSP: a subscription's, or a payment's transaction.
+SELECT CASE WHEN sqlc.arg(subscription)::boolean
+    THEN EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+        AND s.psp_id = sqlc.arg(psp_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_id)::text AND s.deleted_at IS NULL)
+    ELSE EXISTS (SELECT 1 FROM billing.payments p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+        AND p.psp_id = sqlc.arg(psp_id)::uuid AND p.transaction_id = sqlc.arg(rail_id)::text AND p.deleted_at IS NULL)
+END::boolean AS recorded;
+
+-- name: ProposalPaymentID :one
+SELECT id FROM billing.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND transaction_id = sqlc.arg(transaction_id)::text AND deleted_at IS NULL;
+
+-- name: ListApprovalRunFindings :many
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND approval_run_id = sqlc.arg(run_id)::uuid
+ORDER BY resolved_at, id;
+
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
-       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
+       subscriptions.row_version, subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
        charged.id AS payment_method_id,
        subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
@@ -342,7 +446,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 -- rail_customer_ref is the rail's handle on the stored instrument (on NMI the
 -- customer_vault_id).
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
-       card_exp_month, card_exp_year
+       card_exp_month, card_exp_year,
+       COALESCE((SELECT v.id FROM billing.payment_method_versions v
+        WHERE v.merchant_id = payment_methods.merchant_id AND v.payment_method_id = payment_methods.id
+        ORDER BY v.effective_at DESC, v.id DESC LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS card_version_id
 FROM billing.payment_methods
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;

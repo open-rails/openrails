@@ -482,6 +482,8 @@ type diffOptions struct {
 	// decider invocation this diff makes: a cancel resting on older evidence
 	// is withheld and the row parks as `unknown`.
 	EvidenceFloor time.Time
+	// changes builds the proposals this diff raises.
+	changes *changeBuilder
 }
 
 // diffProvider runs every capability-gated pull-plane check for one provider
@@ -502,13 +504,14 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 	}
 
 	var findings []Finding
+	opts.changes = newChangeBuilder(idx, local, now)
 
 	if caps.Subscriptions {
 		findings = append(findings, diffSubscriptions(provider, snap, idx, ridx, traits, now, opts)...)
 		findings = append(findings, diffDuplicates(provider, idx, ridx)...)
 	}
 	if caps.Transactions {
-		findings = append(findings, diffTransactions(provider, snap, idx, corr, paymentsByTxnID, now)...)
+		findings = append(findings, diffTransactions(provider, snap, idx, corr, paymentsByTxnID, now, opts.changes)...)
 	}
 	if caps.Vault {
 		findings = append(findings, diffPaymentMethods(provider, local, ridx, traits)...)
@@ -518,6 +521,8 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 	// requires_review finding, raised here over the finished set so it covers
 	// every decider invocation this diff makes.
 	findings = append(findings, evidenceFlooredFindings(provider, findings)...)
+	// Every difference approving can apply is a proposal.
+	opts.changes.attach(findings)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Type != findings[j].Type {
@@ -655,13 +660,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			}
 		}
 	}
-	if !opts.Materialize {
-		return f
-	}
-
-	// Materialization: auto-create only when both identity and plan resolve
-	// unambiguously; anything else stays requires_review with the blocker
-	// documented.
+	// Materialization: proposed (and, in enforce, applied) only when both
+	// identity and plan resolve unambiguously; anything else stays
+	// requires_review with the blocker documented.
 	subjectID, identityVia, identityNote := resolvePS1Identity(r, idx)
 	link, planNote := resolvePS1Plan(r, planIdx)
 	var blockers []string
@@ -687,7 +688,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		blockers = append(blockers, "subscription was discovered on-chain with no local checkout trail (#714); creating billing state from chain data alone is an operator decision")
 	}
 	if len(blockers) > 0 {
-		remoteEv["materialize_blocked"] = strings.Join(blockers, "; ")
+		if opts.Materialize {
+			remoteEv["materialize_blocked"] = strings.Join(blockers, "; ")
+		}
 		return f
 	}
 
@@ -737,6 +740,12 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		}
 	}
 
+	if !opts.Materialize {
+		if opts.changes != nil {
+			f.Change = opts.changes.createSubscription(&f, action)
+		}
+		return f
+	}
 	f.Status = FindingStatusReconcileRequired
 	f.RequiresAdmin = false
 	f.Apply = &ApplyAction{Materialize: action}
@@ -932,11 +941,17 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "subscription is terminated locally but the rail still bills it; cancel it AT the rail (remote action, admin-only)",
 		}
-		if intent := deletionIntent(s); intent != nil {
+		switch intent := deletionIntent(s); {
+		case intent != nil:
 			f.IntentEvidence = intent
 			f.Status = FindingStatusReconcileRequired
 			f.RequiresAdmin = false
 			f.RecommendedAction = deletionIntentAction
+		case s.CollectionPolicy != models.CollectionPolicyProvider && opts.changes != nil:
+			// OpenRails owns this schedule: approving cancels it at the rail.
+			f.Type = FindingOrphanedSchedule
+			f.RecommendedAction = "subscription ended locally but its OpenRails-owned schedule still bills at the rail; approving queues the provider cancel"
+			f.Change = opts.changes.cancelSchedule(&f, s)
 		}
 		return []Finding{f}
 
@@ -1156,7 +1171,7 @@ func diffDuplicates(provider Provider, idx *localIndex, ridx *remoteIndex) []Fin
 
 // diffTransactions covers PS-4 (missing charge), PS-5 (unrecorded refund) and
 // PS-6 (chargeback vs live subscription).
-func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, corr *correlator, paymentsByTxnID map[string]*LocalPayment, now time.Time) []Finding {
+func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, corr *correlator, paymentsByTxnID map[string]*LocalPayment, now time.Time, changes *changeBuilder) []Finding {
 	caps := snap.Capabilities
 	var findings []Finding
 
@@ -1217,7 +1232,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 			if !t.positive() {
 				continue
 			}
-			findings = append(findings, makePS4(provider, t, corr, now))
+			findings = append(findings, makePS4(provider, t, corr, now, changes)...)
 
 		case TransactionTypeRefund:
 			if !caps.Refunds || !t.Success || t.TransactionID == "" {
@@ -1231,7 +1246,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 			if !caps.Chargebacks {
 				continue
 			}
-			if f, ok := makePS6(provider, t, corr, paymentsByTxnID); ok {
+			if f, ok := makePS6(provider, t, corr, paymentsByTxnID, changes); ok {
 				findings = append(findings, f)
 			}
 		}
@@ -1253,7 +1268,7 @@ func chargedAfterCancel(status, cancelType string, canceledAt *time.Time, at tim
 	return false
 }
 
-func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time.Time) Finding {
+func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time.Time, changes *changeBuilder) []Finding {
 	sub, how, ambiguous := corr.subForTxn(provider, t)
 	f := Finding{
 		Provider:       provider,
@@ -1275,11 +1290,13 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		} else {
 			f.RecommendedAction = "rail charge has no local payment and no local identity could be resolved; investigate manually"
 		}
+		return []Finding{f}
 	case sub.PriceID == nil:
 		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
 		f.LocalEvidence = localSubEvidence(sub)
 		f.RecommendedAction = "rail charge correlates to a local subscription without a price; backfill manually"
+		return []Finding{f}
 	default:
 		f.LocalEvidence = localSubEvidence(sub)
 		f.LocalEvidence["correlated_via"] = how
@@ -1289,7 +1306,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			f.Status = FindingStatusAdminRequired
 			f.RequiresAdmin = true
 			f.RecommendedAction = "rail charge has no local payment and its amount is not exact in the currency it is recorded in (" + err.Error() + "); backfill manually"
-			return f
+			return []Finding{f}
 		}
 		f.RecommendedAction = "enforce backfills the missing billing.payments row (deduped on rail+transaction_id)"
 		subID := sub.ID
@@ -1316,11 +1333,20 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		if inherited {
 			action.Metadata["currency_provenance"] = "inherited_from_subscription_price"
 		}
+		var afterCancel *Finding
 		if chargedAfterCancel(sub.Status, sub.CancelType, sub.CanceledAt, t.OccurredAt) {
 			action.Metadata["refund_review"] = "charged after cancellation"
-			action.ChargeAfterCancel = true
 			f.Severity = SeverityCritical
-			f.RecommendedAction += "; the charge landed after the subscription was canceled, so enforce queues its full refund"
+			f.RecommendedAction += "; the charge landed after the subscription was canceled: its refund is a proposal of its own"
+			afterCancel = &Finding{
+				Provider: provider, Type: FindingChargeAfterCancel, SubjectKey: t.TransactionID,
+				Severity: SeverityCritical, Status: FindingStatusRequiresReview, RequiresAdmin: true,
+				LocalEvidence: localSubEvidence(sub), RemoteEvidence: remoteTxnEvidence(t),
+				RecommendedAction: "the rail charged this subscription after it was canceled; approving queues the charge's full refund once the charge is recorded",
+			}
+			if changes != nil {
+				afterCancel.Change = changes.refundAfterCancel(afterCancel, sub, action)
+			}
 		}
 		// Restore the paid access promise independently of its billing cadence.
 		if sub.IsLive() {
@@ -1346,8 +1372,11 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			f.RecommendedAction += "; missing subscription access is restored from the accepted access duration"
 		}
 		f.Apply = &ApplyAction{BackfillPayment: action}
+		if afterCancel != nil {
+			return []Finding{f, *afterCancel}
+		}
 	}
-	return f
+	return []Finding{f}
 }
 
 // decodeSolanaDiscovery extracts the wallet-scan verdict envelope from a
@@ -1564,7 +1593,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	return f, true
 }
 
-func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment) (Finding, bool) {
+func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment, changes *changeBuilder) (Finding, bool) {
 	sub, how, _ := corr.subForTxn(provider, t)
 	if sub == nil {
 		// Try via the disputed charge's local payment.
@@ -1582,7 +1611,7 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}
 	localEv := localSubEvidence(sub)
 	localEv["correlated_via"] = how
-	return Finding{
+	f := Finding{
 		Provider:          provider,
 		Type:              FindingChargebackActiveSub,
 		SubjectKey:        t.TransactionID,
@@ -1591,8 +1620,12 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		RequiresAdmin:     true,
 		LocalEvidence:     localEv,
 		RemoteEvidence:    remoteTxnEvidence(t),
-		RecommendedAction: "chargeback received while the subscription is still active; review, then terminate + revoke and/or fight the dispute (remote action, admin-only)",
-	}, true
+		RecommendedAction: "chargeback received while the subscription is still active; approving revokes its access, or fight the dispute at the provider and dismiss",
+	}
+	if changes != nil {
+		f.Change = changes.revokeAccess(&f, sub)
+	}
+	return f, true
 }
 
 // diffPaymentMethods covers PS-7.

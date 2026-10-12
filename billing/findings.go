@@ -73,8 +73,14 @@ type Finding struct {
 	Resolution     *string                `json:"resolution"`
 	ResolvedBy     *string                `json:"resolved_by"`
 	Notes          *string                `json:"operator_notes"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	// Source, Change and ApprovalRunID are set on pull.* findings: what raised
+	// it, the change approving it applies (nil when only dismissing resolves
+	// it), and the approval run that applied it.
+	Source        *ProposalSource `json:"source"`
+	Change        *FindingChange  `json:"change"`
+	ApprovalRunID *RunID          `json:"approval_run_id"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 // FindingRecommendation is an action approving a finding runs, with the

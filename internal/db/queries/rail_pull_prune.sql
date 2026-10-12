@@ -127,7 +127,7 @@ UPDATE billing.product_access
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
--- Destructive runs (maintenance_runs kinds prune, converge_enforce,
+-- Destructive runs (maintenance_runs kinds prune, approval,
 -- merchant_purge). A run is opened before anything is written, so a crash
 -- mid-run still leaves a reversible record.
 
@@ -146,7 +146,7 @@ UPDATE billing.maintenance_runs
 SET status = sqlc.arg(status)::text,
     finished_at = sqlc.arg(now)::timestamptz,
     affected = sqlc.narg(affected)::jsonb
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = sqlc.arg(id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','approval','merchant_purge') AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
 -- name: MarkDestructiveRunReversed :one
@@ -155,19 +155,19 @@ SET status = 'reversed',
     reversed_at = sqlc.arg(now)::timestamptz,
     reversed_by = sqlc.arg(reversed_by)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND kind IN ('prune','converge_enforce','merchant_purge')
+  AND kind IN ('prune','approval','merchant_purge')
   AND id = sqlc.arg(id)::uuid
   AND status <> 'reversed'
 RETURNING *;
 
 -- name: GetDestructiveRun :one
 SELECT * FROM billing.maintenance_runs
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = sqlc.arg(id)::uuid;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','approval','merchant_purge') AND id = sqlc.arg(id)::uuid;
 
 -- name: ListDestructiveRuns :many
 SELECT * FROM billing.maintenance_runs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND kind IN ('prune','converge_enforce','merchant_purge')
+  AND kind IN ('prune','approval','merchant_purge')
   AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
 ORDER BY started_at DESC
 LIMIT sqlc.arg(lim)::int;

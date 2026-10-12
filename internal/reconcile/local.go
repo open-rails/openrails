@@ -41,6 +41,7 @@ func localRailNames(p Provider) []string {
 type LocalSubscription struct {
 	CollectionPolicy            models.CollectionPolicy
 	ID                          uuid.UUID
+	RowVersion                  int64
 	CustomerID                  uuid.UUID
 	PriceID                     *uuid.UUID
 	PriceCurrency               string // PriceID's currency; denominates charges a rail reports without one
@@ -105,6 +106,8 @@ type LocalPaymentMethod struct {
 	// id); empty when the rail has one instrument per customer ref.
 	RailMethodRef string
 	Card          models.Card
+	// CardVersionID is the card's latest version; uuid.Nil when it has none.
+	CardVersionID uuid.UUID
 }
 
 // LocalPrice is the slice of billing.prices the subscription materializer
@@ -128,6 +131,9 @@ type LocalState struct {
 	// Prices are the billable prices carrying provider links (all providers;
 	// the diff filters by the provider's local rail names).
 	Prices []LocalPrice
+	// PriceIDs is the public ID of every price the subscriptions and prices
+	// reference.
+	PriceIDs map[uuid.UUID]billing.PriceID
 }
 
 // LocalStateLoader loads the local rows the diff engine compares against a
@@ -200,6 +206,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	for _, row := range subs {
 		s := LocalSubscription{
 			ID:                          row.ID,
+			RowVersion:                  row.RowVersion,
 			CustomerID:                  row.CustomerID,
 			PriceID:                     row.PriceID,
 			PriceCurrency:               models.DerefStr(row.PriceCurrency),
@@ -283,12 +290,48 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			Rail:            row.Rail,
 			RailCustomerRef: models.DerefStr(row.RailCustomerRef),
 			RailMethodRef:   models.DerefStr(row.RailMethodRef),
+			CardVersionID:   row.CardVersionID,
 		}
 		pm.Card = models.CardFromColumns(row.CardBrand, row.CardLast4, row.CardExpMonth, row.CardExpYear)
 		state.PaymentMethods = append(state.PaymentMethods, pm)
 	}
 
+	if state.PriceIDs, err = publicPriceIDs(ctx, q, scopeMerchantID, state); err != nil {
+		return nil, err
+	}
 	return state, nil
+}
+
+// publicPriceIDs reads, in one query, the public ID of every price the state
+// references.
+func publicPriceIDs(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, state *LocalState) (map[uuid.UUID]billing.PriceID, error) {
+	seen := map[uuid.UUID]bool{}
+	var ids []uuid.UUID
+	add := func(id *uuid.UUID) {
+		if id != nil && *id != uuid.Nil && !seen[*id] {
+			seen[*id] = true
+			ids = append(ids, *id)
+		}
+	}
+	for i := range state.Subscriptions {
+		add(state.Subscriptions[i].PriceID)
+		add(state.Subscriptions[i].ScheduledPriceID)
+	}
+	for i := range state.Prices {
+		add(&state.Prices[i].ID)
+	}
+	out := make(map[uuid.UUID]billing.PriceID, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := q.ListPriceReferences(ctx, gen.ListPriceReferencesParams{MerchantID: merchantID.UUID(), Ids: ids})
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: price references: %w", err)
+	}
+	for _, row := range rows {
+		out[row.ID] = billing.PriceID(row.PublicID)
+	}
+	return out, nil
 }
 
 func (l *PGLocalStateLoader) ExecutingOperations(ctx context.Context, pspID uuid.UUID, ids []uuid.UUID, now time.Time) (map[uuid.UUID]bool, error) {

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"strings"
 	"time"
 
@@ -15,12 +13,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -91,14 +89,6 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 			return err
 		}
 		changed = count > 0
-		if a.ChargeAfterCancel {
-			clock := clockwork.NewFakeClockAt(w.now())
-			payment, err := payments.NewPaymentService(d, clock).GetByPSPTransactionID(ctx, models.Rail(a.Rail), a.TransactionID)
-			if err != nil {
-				return err
-			}
-			return intents.RefundChargeAfterCancel(ctx, d, payment, clock)
-		}
 		// The lifecycle convergence path applies the verified paid period.
 		// Replaying a money fact never grants today's catalog/current period.
 		return nil

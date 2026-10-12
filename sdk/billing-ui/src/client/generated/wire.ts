@@ -422,6 +422,28 @@ export type CatalogFieldConflict = {
   set_at: string
 }
 
+export type ChangeBasis = {
+  row_version: number | null
+  absent_rail_id: string | null
+  card_version_id: string | null
+}
+
+export type ChangeEffects = {
+  ends_access: boolean
+  moves_money: boolean
+  provider_write: boolean
+}
+
+export type ChangeEvidence = {
+  read: string
+  provider: Record<string, unknown> | null
+}
+
+export type ChangeSubject = {
+  type: string
+  id: string
+}
+
 export type ChangeSubscriptionParams = {
   price_id?: string
   quantity?: number
@@ -959,8 +981,23 @@ export type Finding = {
   resolution: string | null
   resolved_by: string | null
   operator_notes: string | null
+  source: "pull" | "verification" | null
+  change: FindingChange | null
+  approval_run_id: string | null
   created_at: string
   updated_at: string
+}
+
+export type FindingChange = {
+  kind: "adopt_subscription" | "cancel_provider_schedule" | "cancel_subscription" | "collect_skipped_renewal" | "create_subscription" | "record_charge" | "record_refund" | "refund_charge_after_cancel" | "revoke_access" | "update_card"
+  subject: ChangeSubject
+  customer_id: string | null
+  from: Record<string, unknown> | null
+  to: Record<string, unknown> | null
+  effects: ChangeEffects
+  basis: ChangeBasis
+  observed_at: string
+  evidence: ChangeEvidence
 }
 
 export type FindingRecommendation = {

@@ -104,7 +104,7 @@ func TestPullProviderStdoutGuidesPrune(t *testing.T) {
 // merchant is the exact id:<uuid> form, never a placeholder or a bare UUID.
 func TestUndoRunPrintsRunnableCommands(t *testing.T) {
 	mid := billing.MerchantID(uuid.New())
-	plan := reconcile.UndoPlan{RunID: uuid.New(), Kind: reconcile.DestructiveRunKindConvergeEnforce, Restorable: map[string]int64{"subscriptions": 2}}
+	plan := reconcile.UndoPlan{RunID: uuid.New(), Kind: reconcile.DestructiveRunKindApproval, Restorable: map[string]int64{"subscriptions": 2}}
 	var buf bytes.Buffer
 	printUndoPlan(&buf, plan, mid)
 	require.Contains(t, buf.String(), "  openrails undo-run --merchant id:"+mid.String()+" --run "+plan.RunID.String()+" --apply --expect-rows 2\n")

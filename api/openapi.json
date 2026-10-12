@@ -10172,6 +10172,7 @@
         "x-openrails-errors": [
           "finding_action_failed",
           "finding_not_actionable",
+          "finding_requires_merchant_config",
           "idempotency_key_reused",
           "invalid_param",
           "payment_not_found",
@@ -13816,6 +13817,103 @@
           "set_at"
         ]
       },
+      "ChangeBasis": {
+        "type": "object",
+        "properties": {
+          "row_version": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "absent_rail_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_version_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "row_version",
+          "absent_rail_id",
+          "card_version_id"
+        ]
+      },
+      "ChangeEffects": {
+        "type": "object",
+        "properties": {
+          "ends_access": {
+            "type": "boolean"
+          },
+          "moves_money": {
+            "type": "boolean"
+          },
+          "provider_write": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ends_access",
+          "moves_money",
+          "provider_write"
+        ]
+      },
+      "ChangeEvidence": {
+        "type": "object",
+        "properties": {
+          "read": {
+            "type": "string"
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "read",
+          "provider"
+        ]
+      },
+      "ChangeSubject": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
       "ChangeSubscriptionParams": {
         "type": "object",
         "properties": {
@@ -15923,6 +16021,40 @@
               }
             ]
           },
+          "source": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pull",
+                  "verification"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FindingChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approval_run_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -15954,8 +16086,90 @@
           "resolution",
           "resolved_by",
           "operator_notes",
+          "source",
+          "change",
+          "approval_run_id",
           "created_at",
           "updated_at"
+        ]
+      },
+      "FindingChange": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "adopt_subscription",
+              "cancel_provider_schedule",
+              "cancel_subscription",
+              "collect_skipped_renewal",
+              "create_subscription",
+              "record_charge",
+              "record_refund",
+              "refund_charge_after_cancel",
+              "revoke_access",
+              "update_card"
+            ]
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ChangeSubject"
+          },
+          "customer_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effects": {
+            "$ref": "#/components/schemas/ChangeEffects"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/ChangeBasis"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ChangeEvidence"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "customer_id",
+          "from",
+          "to",
+          "effects",
+          "basis",
+          "observed_at",
+          "evidence"
         ]
       },
       "FindingRecommendation": {
@@ -22827,6 +23041,11 @@
       "type": "invalid_request_error",
       "meaning": "The meter has no default rate card."
     },
+    "destructive_actions_held": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The kill switch holds changes that end access or write to a provider; the proposal stays open."
+    },
     "finding_action_failed": {
       "status": 502,
       "type": "api_error",
@@ -22836,6 +23055,11 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "The finding carries no recommendation to approve; ignore it or fix it out of band."
+    },
+    "finding_requires_merchant_config": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config."
     },
     "hold_not_found": {
       "status": 404,
@@ -23211,6 +23435,11 @@
       "status": 409,
       "type": "api_error",
       "meaning": "The provider did not confirm the outcome; read the resource before retrying."
+    },
+    "provider_writes_held": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open."
     },
     "psp_claim_requires_proof": {
       "status": 403,

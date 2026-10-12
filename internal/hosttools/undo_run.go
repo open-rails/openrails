@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -34,11 +35,13 @@ type UndoRunOptions struct {
 	Out        io.Writer
 	// MerchantConfig is a running app's merchant configuration; nil opens it.
 	MerchantConfig db.MerchantConfig
+	// Clock is the re-derivation's clock; nil is the wall clock.
+	Clock clockwork.Clock
 }
 
 // UndoRun reverses one destructive run of any reversible kind or, by default,
 // prints what reversing it would do. One verb covers the run ledger: a prune
-// reverses by clearing tombstones, a converge-enforce pass from captured
+// reverses by clearing tombstones, an approval run from captured
 // before-images, and an operator should not need to know which.
 //
 // A complete rollback is rollback → pull → converge. The derive half runs
@@ -51,9 +54,9 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
-	runID, err := uuid.Parse(strings.TrimSpace(opts.RunID))
+	runID, err := parseRunID(opts.RunID)
 	if err != nil {
-		return fmt.Errorf("undo-run: --run must be a destructive-run UUID (see `openrails prune list` / `openrails converge list`): %w", err)
+		return fmt.Errorf("undo-run: --run must be a run id, run_<uuid> or the bare UUID (see `openrails prune list` / `openrails proposals runs`): %w", err)
 	}
 	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
@@ -94,7 +97,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 		// A converge reversal invalidates Class D, so the re-derivation runs in
 		// this command: until it does, restored subscriptions carry no access.
 		recompute := func(ctx context.Context) error {
-			_, cerr := converge.NewConvergeEngine(database).Converge(ctx, converge.Scope{Merchant: merchantID})
+			_, cerr := converge.NewConvergeEngine(database, opts.Clock).Converge(ctx, converge.Scope{Merchant: merchantID})
 			return cerr
 		}
 		var e error
@@ -108,6 +111,15 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	}
 	printUndoResult(opts.Out, res, merchantID)
 	return nil
+}
+
+func parseRunID(raw string) (uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, billing.RunIDPrefix) {
+		id, err := billing.ParseRunID(raw)
+		return id.UUID(), err
+	}
+	return uuid.Parse(raw)
 }
 
 func encodeJSON(w io.Writer, v any) error {
@@ -185,7 +197,7 @@ func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.M
 	if res.EnforcementDisarmed {
 		fmt.Fprintln(w, "  enforcement disarmed: the next pull for this merchant runs ADVISORY until an operator re-arms it")
 	}
-	if res.Plan.Kind == reconcile.DestructiveRunKindConvergeEnforce {
+	if res.Plan.Kind == reconcile.DestructiveRunKindApproval {
 		if res.Recomputed {
 			fmt.Fprintln(w, "  grant effects re-derived from the (untouched) grant log — access is rebuilt, not restored")
 		} else {

@@ -38,6 +38,8 @@ type btFake struct {
 type btSale struct {
 	TransactionID, Number                string
 	InitiatedBy, Indicator, InitialTxnID string
+	// SecurityKey names the gateway account the proxy posted to.
+	SecurityKey string
 }
 
 func newBTFake(t *testing.T) (*btFake, string) {
@@ -144,7 +146,7 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sale := btSale{TransactionID: f.gateway(r.PostForm, number), Number: number, InitiatedBy: r.PostForm.Get("initiated_by"),
-			Indicator: r.PostForm.Get("stored_credential_indicator"), InitialTxnID: r.PostForm.Get("initial_transaction_id")}
+			Indicator: r.PostForm.Get("stored_credential_indicator"), InitialTxnID: r.PostForm.Get("initial_transaction_id"), SecurityKey: r.PostForm.Get("security_key")}
 		f.sales = append(f.sales, sale)
 		w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
 		_, _ = w.Write([]byte(url.Values{"response": {"1"}, "responsetext": {"SUCCESS"}, "authcode": {"123456"}, "transactionid": {sale.TransactionID},

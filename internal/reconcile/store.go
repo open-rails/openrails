@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,6 +57,12 @@ type FindingRecord struct {
 	Field              *string    `json:"-"`
 	OpenRailsValue     *string    `json:"-"`
 	ExternalValue      *string    `json:"-"`
+	// Change, Source and ApprovalRunID are a pull.* finding's proposal: what
+	// approving it applies, what raised it, and the approval run that did.
+	Change         *Change    `json:"-"`
+	Source         string     `json:"-"`
+	EvidenceDigest string     `json:"-"`
+	ApprovalRunID  *uuid.UUID `json:"-"`
 }
 
 // RunRecord is a persisted reconciliation run.
@@ -215,6 +222,10 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if f.PSPID != uuid.Nil {
 		pspID = &f.PSPID
 	}
+	proposal, err := proposalColumns(f)
+	if err != nil {
+		return FindingRecord{}, err
+	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        tid.UUID(),
 		FindingType:       string(f.Type),
@@ -225,11 +236,45 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 		Evidence:          findingEvidence(f),
 		RunID:             &runID,
 		PspID:             pspID,
+		Change:            proposal.change,
+		Source:            proposal.source,
+		EvidenceDigest:    proposal.digest,
 	})
 	if err != nil {
 		return FindingRecord{}, err
 	}
 	return FindingRecordFromRow(row), nil
+}
+
+type proposalCols struct {
+	change []byte
+	source *string
+	digest *string
+}
+
+// proposalColumns are a finding's proposal columns: a pull.* finding names
+// its source (the pull plane unless it says otherwise) and carries its change
+// with the change's evidence digest.
+func proposalColumns(f Finding) (proposalCols, error) {
+	var out proposalCols
+	if !strings.HasPrefix(string(f.Type), "pull.") {
+		return out, nil
+	}
+	source := string(f.Source)
+	if source == "" {
+		source = string(billing.ProposalSourcePull)
+	}
+	out.source = &source
+	if f.Change == nil {
+		return out, nil
+	}
+	raw, err := json.Marshal(f.Change)
+	if err != nil {
+		return out, fmt.Errorf("encode change: %w", err)
+	}
+	digest := f.Change.Digest()
+	out.change, out.digest = raw, &digest
+	return out, nil
 }
 
 func (s *PGStore) ListActionablePullFindings(ctx context.Context, pspID uuid.UUID) ([]FindingRecord, error) {
@@ -658,6 +703,7 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 		NotifiedAt:     row.NotifiedAt,
+		ApprovalRunID:  row.ApprovalRunID,
 
 		PSPID:              row.PspID,
 		ResourceType:       row.OpenrailsResourceType,
@@ -681,6 +727,15 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	}
 	if row.NotifiedSeverity != nil {
 		rec.NotifiedSeverity = *row.NotifiedSeverity
+	}
+	if row.Source != nil {
+		rec.Source = *row.Source
+	}
+	if row.EvidenceDigest != nil {
+		rec.EvidenceDigest = *row.EvidenceDigest
+	}
+	if change, err := DecodeChange(row.Change); err == nil {
+		rec.Change = change
 	}
 	return rec
 }

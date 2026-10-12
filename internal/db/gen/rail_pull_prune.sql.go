@@ -36,7 +36,7 @@ type CreateDestructiveRunParams struct {
 	Note         *string
 }
 
-// Destructive runs (maintenance_runs kinds prune, converge_enforce,
+// Destructive runs (maintenance_runs kinds prune, approval,
 // merchant_purge). A run is opened before anything is written, so a crash
 // mid-run still leaves a reversible record.
 func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (BillingMaintenanceRun, error) {
@@ -86,7 +86,7 @@ UPDATE billing.maintenance_runs
 SET status = $1::text,
     finished_at = $2::timestamptz,
     affected = $3::jsonb
-WHERE merchant_id = $4::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $5::uuid
+WHERE merchant_id = $4::uuid AND kind IN ('prune','approval','merchant_purge') AND id = $5::uuid
 RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
@@ -138,7 +138,7 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 
 const getDestructiveRun = `-- name: GetDestructiveRun :one
 SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
-WHERE merchant_id = $1::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $2::uuid
+WHERE merchant_id = $1::uuid AND kind IN ('prune','approval','merchant_purge') AND id = $2::uuid
 `
 
 type GetDestructiveRunParams struct {
@@ -181,7 +181,7 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 const listDestructiveRuns = `-- name: ListDestructiveRuns :many
 SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid
-  AND kind IN ('prune','converge_enforce','merchant_purge')
+  AND kind IN ('prune','approval','merchant_purge')
   AND ($2::text IS NULL OR kind = $2::text)
 ORDER BY started_at DESC
 LIMIT $3::int
@@ -413,7 +413,7 @@ SET status = 'reversed',
     reversed_at = $1::timestamptz,
     reversed_by = $2::text
 WHERE merchant_id = $3::uuid
-  AND kind IN ('prune','converge_enforce','merchant_purge')
+  AND kind IN ('prune','approval','merchant_purge')
   AND id = $4::uuid
   AND status <> 'reversed'
 RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class

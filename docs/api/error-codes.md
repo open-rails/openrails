@@ -55,8 +55,10 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_payment_method_invalid` | 400 | `invalid_request_error` | The card cannot be the customer's default for the currency. |
 | `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
+| `destructive_actions_held` | 409 | `invalid_request_error` | The kill switch holds changes that end access or write to a provider; the proposal stays open. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
+| `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
@@ -132,6 +134,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
+| `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials. |
 | `psp_exists` | 409 | `invalid_request_error` | The account is already a PSP, of this merchant or another; update it instead. |

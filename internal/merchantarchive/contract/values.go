@@ -238,7 +238,7 @@ func ValidateValues(p Profile, values []*string) error {
 				return bad()
 			}
 		case "maintenance_runs.kind":
-			if v != "prune" && v != "converge_enforce" && v != "merchant_purge" {
+			if v != "prune" && v != "approval" && v != "merchant_purge" {
 				return bad()
 			}
 		case "maintenance_runs.status":

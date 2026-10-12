@@ -69,7 +69,7 @@ func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg Admi
 }
 
 const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
-SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class, f.change, f.source, f.evidence_digest, f.approval_run_id
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid
   AND (CASE
@@ -149,6 +149,10 @@ func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg Admin
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
 			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -629,7 +633,7 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (BillingMainte
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
 WHERE id = $1 AND merchant_id = billing.current_merchant_id()
 `
 
@@ -667,6 +671,10 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (B
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
 		&i.SeenRunClass,
+		&i.Change,
+		&i.Source,
+		&i.EvidenceDigest,
+		&i.ApprovalRunID,
 	)
 	return i, err
 }
@@ -729,6 +737,25 @@ func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDoma
 	return fully_reconciled, err
 }
 
+const latestCardVersionID = `-- name: LatestCardVersionID :one
+SELECT COALESCE((SELECT v.id FROM billing.payment_method_versions v
+    WHERE v.merchant_id = $1::uuid AND v.payment_method_id = $2::uuid
+    ORDER BY v.effective_at DESC, v.id DESC LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS id
+`
+
+type LatestCardVersionIDParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// An update_card proposal's basis: the card version it was computed against.
+func (q *Queries) LatestCardVersionID(ctx context.Context, arg LatestCardVersionIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, latestCardVersionID, arg.MerchantID, arg.PaymentMethodID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listAbandonedProviderIntents = `-- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
@@ -783,7 +810,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 }
 
 const listActionablePullFindingsForPSP = `-- name: ListActionablePullFindingsForPSP :many
-SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review', 'ignored')
 ORDER BY finding_type, subject_key
@@ -832,6 +859,10 @@ func (q *Queries) ListActionablePullFindingsForPSP(ctx context.Context, arg List
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
 			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -941,6 +972,70 @@ func (q *Queries) ListActiveSubsMissingAccessProjection(ctx context.Context, arg
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.AccessDurationHoursSnapshot,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApprovalRunFindings = `-- name: ListApprovalRunFindings :many
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
+WHERE merchant_id = $1::uuid AND approval_run_id = $2::uuid
+ORDER BY resolved_at, id
+`
+
+type ListApprovalRunFindingsParams struct {
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+func (q *Queries) ListApprovalRunFindings(ctx context.Context, arg ListApprovalRunFindingsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listApprovalRunFindings, arg.MerchantID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingReconciliationFinding
+	for rows.Next() {
+		var i BillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1250,6 +1345,103 @@ func (q *Queries) ListPaidPendingSubscriptions(ctx context.Context, arg ListPaid
 	return items, nil
 }
 
+const listProposals = `-- name: ListProposals :many
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class, f.change, f.source, f.evidence_digest, f.approval_run_id
+FROM billing.reconciliation_findings f
+WHERE f.merchant_id = $1::uuid
+  AND f.finding_type LIKE 'pull.%'
+  AND (CASE
+         WHEN $2::text IS NULL THEN f.status IN ('reconcile_required', 'requires_review')
+         ELSE f.status = $2::text
+       END)
+  AND ($3::uuid IS NULL OR f.psp_id = $3::uuid)
+  AND ($4::text IS NULL OR f.change->>'kind' = $4::text)
+  AND ($5::text IS NULL OR f.source = $5::text)
+  AND ($6::int IS NULL
+       OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
+          > ($6::int, $7::timestamptz, $8::uuid))
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id
+LIMIT $9::int
+`
+
+type ListProposalsParams struct {
+	MerchantID uuid.UUID
+	Status     *string
+	PspID      *uuid.UUID
+	Kind       *string
+	Source     *string
+	AfterRank  *int32
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// Open pull.* findings unless a status is named, most severe first, then
+// oldest; keyset-paged.
+func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listProposals,
+		arg.MerchantID,
+		arg.Status,
+		arg.PspID,
+		arg.Kind,
+		arg.Source,
+		arg.AfterRank,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingReconciliationFinding
+	for rows.Next() {
+		var i BillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentlyClosedLastAccessWindows = `-- name: ListRecentlyClosedLastAccessWindows :many
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.product_id,
@@ -1337,7 +1529,7 @@ func (q *Queries) ListRecentlyClosedLastAccessWindows(ctx context.Context, arg L
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
 WHERE reconciliation_findings.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
   AND ($3::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = $3::text)
   AND ($4::text IS NULL OR finding_type = $4::text)
@@ -1402,6 +1594,10 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
 			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -1414,7 +1610,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationFindingsByIDs = `-- name: ListReconciliationFindingsByIDs :many
-SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class, f.change, f.source, f.evidence_digest, f.approval_run_id
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid AND f.id = ANY($2::uuid[])
 ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
@@ -1465,6 +1661,10 @@ func (q *Queries) ListReconciliationFindingsByIDs(ctx context.Context, arg ListR
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
 			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -2016,6 +2216,60 @@ func (q *Queries) ListUnverifiedSubscriptions(ctx context.Context, arg ListUnver
 	return items, nil
 }
 
+const lockProposal = `-- name: LockProposal :one
+
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
+WHERE merchant_id = $1::uuid AND id = $2::uuid AND finding_type LIKE 'pull.%'
+FOR UPDATE
+`
+
+type LockProposalParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Proposals: the pull.* plane, approved or dismissed by internal/proposals
+// only. Each id is locked and resolved in its own transaction.
+func (q *Queries) LockProposal(ctx context.Context, arg LockProposalParams) (BillingReconciliationFinding, error) {
+	row := q.db.QueryRow(ctx, lockProposal, arg.MerchantID, arg.ID)
+	var i BillingReconciliationFinding
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.FindingType,
+		&i.Rail,
+		&i.PspID,
+		&i.OpenrailsResourceType,
+		&i.OpenrailsResourceID,
+		&i.ExternalResourceID,
+		&i.Field,
+		&i.OpenrailsValue,
+		&i.ExternalValue,
+		&i.SubjectKey,
+		&i.Severity,
+		&i.Status,
+		&i.RecommendedAction,
+		&i.FirstSeenRun,
+		&i.LastSeenRun,
+		&i.LastSeenAt,
+		&i.ResolvedAt,
+		&i.Resolution,
+		&i.OperatorNotes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Evidence,
+		&i.ResolvedBy,
+		&i.NotifiedAt,
+		&i.NotifiedSeverity,
+		&i.SeenRunClass,
+		&i.Change,
+		&i.Source,
+		&i.EvidenceDigest,
+		&i.ApprovalRunID,
+	)
+	return i, err
+}
+
 const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE billing.reconciliation_findings
 SET status = 'auto_fixed',
@@ -2091,6 +2345,55 @@ func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, arg Mar
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const proposalPaymentID = `-- name: ProposalPaymentID :one
+SELECT id FROM billing.payments
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+  AND transaction_id = $3::text AND deleted_at IS NULL
+`
+
+type ProposalPaymentIDParams struct {
+	MerchantID    uuid.UUID
+	PspID         uuid.UUID
+	TransactionID string
+}
+
+func (q *Queries) ProposalPaymentID(ctx context.Context, arg ProposalPaymentIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, proposalPaymentID, arg.MerchantID, arg.PspID, arg.TransactionID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const proposalRailIDRecorded = `-- name: ProposalRailIDRecorded :one
+SELECT CASE WHEN $1::boolean
+    THEN EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = $2::uuid
+        AND s.psp_id = $3::uuid AND s.rail_subscription_id = $4::text AND s.deleted_at IS NULL)
+    ELSE EXISTS (SELECT 1 FROM billing.payments p WHERE p.merchant_id = $2::uuid
+        AND p.psp_id = $3::uuid AND p.transaction_id = $4::text AND p.deleted_at IS NULL)
+END::boolean AS recorded
+`
+
+type ProposalRailIDRecordedParams struct {
+	Subscription bool
+	MerchantID   uuid.UUID
+	PspID        uuid.UUID
+	RailID       string
+}
+
+// A create or record proposal's basis is its rail id still unrecorded on the
+// finding's PSP: a subscription's, or a payment's transaction.
+func (q *Queries) ProposalRailIDRecorded(ctx context.Context, arg ProposalRailIDRecordedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, proposalRailIDRecorded,
+		arg.Subscription,
+		arg.MerchantID,
+		arg.PspID,
+		arg.RailID,
+	)
+	var recorded bool
+	err := row.Scan(&recorded)
+	return recorded, err
 }
 
 const reconcileAdoptPaymentMethod = `-- name: ReconcileAdoptPaymentMethod :execrows
@@ -2171,7 +2474,10 @@ func (q *Queries) ReconcileExecutingOperations(ctx context.Context, arg Reconcil
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
-       card_exp_month, card_exp_year
+       card_exp_month, card_exp_year,
+       COALESCE((SELECT v.id FROM billing.payment_method_versions v
+        WHERE v.merchant_id = payment_methods.merchant_id AND v.payment_method_id = payment_methods.id
+        ORDER BY v.effective_at DESC, v.id DESC LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS card_version_id
 FROM billing.payment_methods
 WHERE payment_methods.merchant_id = $1::uuid AND rail = ANY ($2::text[])
   AND psp_id = $3::uuid
@@ -2193,6 +2499,7 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	CardLast4       *string
 	CardExpMonth    *int16
 	CardExpYear     *int16
+	CardVersionID   uuid.UUID
 }
 
 // rail_customer_ref is the rail's handle on the stored instrument (on NMI the
@@ -2216,6 +2523,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 			&i.CardLast4,
 			&i.CardExpMonth,
 			&i.CardExpYear,
+			&i.CardVersionID,
 		); err != nil {
 			return nil, err
 		}
@@ -2382,7 +2690,7 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
-       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
+       subscriptions.row_version, subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
        charged.id AS payment_method_id,
        subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
@@ -2417,6 +2725,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	CustomerID                  uuid.UUID
 	PriceID                     *uuid.UUID
 	ProductID                   uuid.UUID
+	RowVersion                  int64
 	Status                      string
 	Rail                        string
 	CollectionPolicy            string
@@ -2453,6 +2762,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.CustomerID,
 			&i.PriceID,
 			&i.ProductID,
+			&i.RowVersion,
 			&i.Status,
 			&i.Rail,
 			&i.CollectionPolicy,
@@ -2672,6 +2982,56 @@ func (q *Queries) ResolveClearedFindings(ctx context.Context, arg ResolveCleared
 	return result.RowsAffected(), nil
 }
 
+const resolveProposal = `-- name: ResolveProposal :execrows
+UPDATE billing.reconciliation_findings
+SET status = CASE $1::text WHEN 'dismissed' THEN 'ignored' ELSE 'fixed' END,
+    resolution = $1::text,
+    operator_notes = $2,
+    resolved_by = $3,
+    approval_run_id = $4::uuid,
+    evidence = CASE
+        WHEN $5::jsonb IS NULL THEN evidence
+        ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $5::jsonb, true)
+    END,
+    resolved_at = $6::timestamptz,
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
+    updated_at = $6::timestamptz
+WHERE merchant_id = $7::uuid AND id = $8::uuid
+  AND finding_type LIKE 'pull.%'
+  AND status IN ('reconcile_required', 'requires_review')
+`
+
+type ResolveProposalParams struct {
+	Resolution         string
+	OperatorNotes      *string
+	ResolvedBy         *string
+	ApprovalRunID      *uuid.UUID
+	ResolutionEvidence []byte
+	Now                time.Time
+	MerchantID         uuid.UUID
+	ID                 uuid.UUID
+}
+
+// approved and superseded close as fixed, dismissed as ignored (a dismissed
+// proposal is raised again only on other evidence). The execution or the
+// reason is recorded under evidence.resolution.
+func (q *Queries) ResolveProposal(ctx context.Context, arg ResolveProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveProposal,
+		arg.Resolution,
+		arg.OperatorNotes,
+		arg.ResolvedBy,
+		arg.ApprovalRunID,
+		arg.ResolutionEvidence,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveStandingFinding = `-- name: ResolveStandingFinding :execrows
 UPDATE billing.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
@@ -2806,7 +3166,7 @@ const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
-    first_seen_run, last_seen_run, psp_id, rail
+    first_seen_run, last_seen_run, psp_id, rail, change, source, evidence_digest
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
@@ -2815,45 +3175,72 @@ INSERT INTO billing.reconciliation_findings (
     CASE WHEN $5::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
     $8, $8, $9::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
-    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid)
+    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid),
+    $10::jsonb, $11::text, $12::text
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored'
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN 'ignored'
         ELSE EXCLUDED.status
     END,
     recommended_action = EXCLUDED.recommended_action,
     evidence = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.evidence
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.evidence
         ELSE EXCLUDED.evidence
     END,
+    change = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.change
+        ELSE EXCLUDED.change
+    END,
+    evidence_digest = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.evidence_digest
+        ELSE EXCLUDED.evidence_digest
+    END,
+    source = COALESCE(EXCLUDED.source, billing.reconciliation_findings.source),
     resolved_at = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolution
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
+    -- A reopened finding is a new episode: the previous resolver and
+    -- approval run belong to the episode they closed.
+    resolved_by = CASE
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_by
+        WHEN billing.reconciliation_findings.resolved_at IS NULL THEN billing.reconciliation_findings.resolved_by
+        ELSE NULL
+    END,
+    approval_run_id = NULL,
     -- An inline auto_fixed is a resolution: clear the notify linkage so a
     -- reopen of this identity notifies again.
     notified_at = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_at
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_at
     END,
     notified_severity = CASE
-        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_severity
+        WHEN billing.reconciliation_findings.status = 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_severity
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_severity
     END,
     last_seen_run = COALESCE(EXCLUDED.last_seen_run, billing.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class
+RETURNING id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id
 `
 
 type UpsertReconciliationFindingParams struct {
@@ -2866,12 +3253,16 @@ type UpsertReconciliationFindingParams struct {
 	Evidence          []byte
 	RunID             *uuid.UUID
 	PspID             *uuid.UUID
+	Change            []byte
+	Source            *string
+	EvidenceDigest    *string
 }
 
 // Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
-// A previously fixed/auto_fixed finding that reappears is
-// REOPENED with the freshly computed status; an ignored finding stays ignored
-// (an operator explicitly silenced this identity).
+// A previously resolved finding that reappears is REOPENED with the freshly
+// computed status; an ignored finding stays ignored (an operator explicitly
+// silenced this identity), unless it is a dismissed proposal whose provider
+// evidence now differs (evidence_digest).
 func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertReconciliationFindingParams) (BillingReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, upsertReconciliationFinding,
 		arg.MerchantID,
@@ -2883,6 +3274,9 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		arg.Evidence,
 		arg.RunID,
 		arg.PspID,
+		arg.Change,
+		arg.Source,
+		arg.EvidenceDigest,
 	)
 	var i BillingReconciliationFinding
 	err := row.Scan(
@@ -2914,6 +3308,10 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
 		&i.SeenRunClass,
+		&i.Change,
+		&i.Source,
+		&i.EvidenceDigest,
+		&i.ApprovalRunID,
 	)
 	return i, err
 }

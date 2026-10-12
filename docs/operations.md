@@ -220,7 +220,8 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
-| `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
+| `proposals list\|show\|approve\|dismiss\|runs` | review the changes provider reads propose; approve or dismiss them; list approval runs — see "Proposals" |
+| `prune list` | inspect the destructive runs a `--prune` opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 | `book status` / `book arm --by NAME` | report whether this database is the billing book's armed copy / arm it once every other copy is stopped |
@@ -504,7 +505,7 @@ openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--psp=<uuid>]
                         [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
 openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
 openrails prune list    --merchant=<slug> [--limit=N] [--format table|json]
-openrails converge list --merchant=<slug> [--limit=N] [--format table|json]
+openrails proposals runs --merchant=<slug> [--limit=N] [--format table|json]
 openrails undo-run      --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
 ```
 
@@ -519,6 +520,39 @@ pull lock, so it never runs beside a scheduled refresh of the same merchant.
 `--overwrite` is refused while the destructive-action kill switch is off (for
 the instance or the merchant) or the merchant's provider writes are readonly,
 as the scheduled refresh's overwrites are.
+
+### Proposals
+
+Every difference a provider read finds that OpenRails could apply is a
+proposal: a `pull.*` finding carrying a `change` (its kind, subject, from and
+to, effects, the basis it was computed against and the provider evidence). A
+person approves or dismisses it:
+
+```
+openrails proposals list    --merchant=<slug> [--psp=KEY] [--kind=K] [--source=pull|verification]
+openrails proposals show    --merchant=<slug> <fnd_id>
+openrails proposals approve --merchant=<slug> <fnd_id>… [--notes=N]
+openrails proposals approve --merchant=<slug> --psp=KEY --kind=record_charge --expect=N [--notes=N]
+openrails proposals dismiss --merchant=<slug> <fnd_id>… --notes=N
+openrails proposals runs    --merchant=<slug>
+```
+
+- Each id applies in its own transaction, through the lifecycle decider; a
+  call is 1 to 100 ids. A filtered set prints itself and applies only when
+  `--expect` equals its size.
+- An id whose basis moved (the subscription changed, the charge or card was
+  recorded since) is `superseded`, as is an end of access whose evidence is
+  older than 7 days. Nothing applies.
+- The kill switch holds changes that end access or write to a provider, and a
+  readonly write posture holds changes that move money or write to a provider:
+  they are `held` and stay open.
+- One approve call is one `approval` run on the maintenance ledger, recording
+  who approved; `undo-run --run <id>` reverses its lifecycle and access
+  changes. Recorded money facts and provider writes already sent stay.
+- A dismissed proposal comes back only when a read yields other provider
+  evidence.
+
+`ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
 
 ### `--prune` is reversible, and refuses uncertainty
 
@@ -563,7 +597,7 @@ before-images — but `undo-run` reads the kind from the ledger and dispatches, 
 nobody can reverse the wrong way round and be told it worked.
 
 ```
-openrails prune list --merchant=<slug>            # or `converge list`: find the run id
+openrails prune list --merchant=<slug>            # or `proposals runs`: find the run id
 openrails undo-run   --merchant=<slug> --run=<id>                        # PLAN — changes nothing
 openrails undo-run   --merchant=<slug> --run=<id> --apply --expect-rows=N
 openrails pull-provider --merchant=<slug>          # advisory: review findings, then re-arm

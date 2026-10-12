@@ -577,6 +577,16 @@ pkg openrails/billing, const CatalogDraftRefused CatalogDraftKind = "refused"
 pkg openrails/billing, const CatalogObjectMeter CatalogObjectKind = "meter"
 pkg openrails/billing, const CatalogObjectPrice CatalogObjectKind = "price"
 pkg openrails/billing, const CatalogObjectProduct CatalogObjectKind = "product"
+pkg openrails/billing, const ChangeAdoptSubscription ChangeKind = "adopt_subscription"
+pkg openrails/billing, const ChangeCancelProviderSchedule ChangeKind = "cancel_provider_schedule"
+pkg openrails/billing, const ChangeCancelSubscription ChangeKind = "cancel_subscription"
+pkg openrails/billing, const ChangeCollectSkippedRenewal ChangeKind = "collect_skipped_renewal"
+pkg openrails/billing, const ChangeCreateSubscription ChangeKind = "create_subscription"
+pkg openrails/billing, const ChangeRecordCharge ChangeKind = "record_charge"
+pkg openrails/billing, const ChangeRecordRefund ChangeKind = "record_refund"
+pkg openrails/billing, const ChangeRefundChargeAfterCancel ChangeKind = "refund_charge_after_cancel"
+pkg openrails/billing, const ChangeRevokeAccess ChangeKind = "revoke_access"
+pkg openrails/billing, const ChangeUpdateCard ChangeKind = "update_card"
 pkg openrails/billing, const ChannelManual PaymentChannel = "manual"
 pkg openrails/billing, const ChannelRail PaymentChannel = "rail"
 pkg openrails/billing, const ChargeFailed ChargeOutcome = "failed"
@@ -597,6 +607,8 @@ pkg openrails/billing, const CodeCustomerActionRequired untyped string = "custom
 pkg openrails/billing, const CodeCustomerIssuerMismatch untyped string = "customer_issuer_mismatch"
 pkg openrails/billing, const CodeDefaultPaymentMethodInvalid untyped string = "default_payment_method_invalid"
 pkg openrails/billing, const CodeDefaultPaymentMethodRequired untyped string = "default_payment_method_required"
+pkg openrails/billing, const CodeDestructiveActionsHeld untyped string = "destructive_actions_held"
+pkg openrails/billing, const CodeFindingRequiresMerchantConfig untyped string = "finding_requires_merchant_config"
 pkg openrails/billing, const CodeHostPrincipalInvalid untyped string = "host_principal_invalid"
 pkg openrails/billing, const CodeIdempotencyKeyInUse untyped string = "idempotency_key_in_use"
 pkg openrails/billing, const CodeIdempotencyKeyReused untyped string = "idempotency_key_reused"
@@ -640,6 +652,7 @@ pkg openrails/billing, const CodePriceIncreaseNoticeTooShort untyped string = "p
 pkg openrails/billing, const CodePriceMigrationNotFound untyped string = "price_migration_not_found"
 pkg openrails/billing, const CodeProductInUse untyped string = "product_in_use"
 pkg openrails/billing, const CodeProviderCancelHeld untyped string = "provider_cancel_held"
+pkg openrails/billing, const CodeProviderWritesHeld untyped string = "provider_writes_held"
 pkg openrails/billing, const CodeQuantityNotAllowed untyped string = "quantity_not_allowed"
 pkg openrails/billing, const CodeRateLimitExceeded untyped string = "rate_limit_exceeded"
 pkg openrails/billing, const CodeRequestBodyTooLarge untyped string = "request_body_too_large"
@@ -869,6 +882,14 @@ pkg openrails/billing, const ProductAccessSourceGrant ProductAccessSourceType = 
 pkg openrails/billing, const ProductAccessSourcePurchase ProductAccessSourceType = "purchase"
 pkg openrails/billing, const ProductAccessSourceSubscription ProductAccessSourceType = "subscription"
 pkg openrails/billing, const ProductIDPrefix untyped string = "prod_"
+pkg openrails/billing, const ProposalAlreadyResolved ProposalOutcome = "already_resolved"
+pkg openrails/billing, const ProposalApproved ProposalOutcome = "approved"
+pkg openrails/billing, const ProposalDismissed ProposalOutcome = "dismissed"
+pkg openrails/billing, const ProposalFailed ProposalOutcome = "failed"
+pkg openrails/billing, const ProposalHeld ProposalOutcome = "held"
+pkg openrails/billing, const ProposalSourcePull ProposalSource = "pull"
+pkg openrails/billing, const ProposalSourceVerification ProposalSource = "verification"
+pkg openrails/billing, const ProposalSuperseded ProposalOutcome = "superseded"
 pkg openrails/billing, const ProviderRefundKeep untyped string = "keep"
 pkg openrails/billing, const ProviderRefundRevokeOnAny untyped string = "revoke_on_any"
 pkg openrails/billing, const ProviderRefundRevokeOnFull untyped string = "revoke_on_full"
@@ -896,6 +917,7 @@ pkg openrails/billing, const RootOrdersManage Permission = "root:orders:manage"
 pkg openrails/billing, const RootUsageManage Permission = "root:usage:manage"
 pkg openrails/billing, const RootUsageRead Permission = "root:usage:read"
 pkg openrails/billing, const RootWorkerHealthRead Permission = "root:worker-health:read"
+pkg openrails/billing, const RunIDPrefix untyped string = "run_"
 pkg openrails/billing, const RunningChargeIDPrefix untyped string = "rch_"
 pkg openrails/billing, const RunningChargeRunning RunningChargeState = "running"
 pkg openrails/billing, const RunningChargeStopped RunningChargeState = "stopped"
@@ -926,6 +948,7 @@ pkg openrails/billing, const UsageByResource UsageGroupBy = "resource"
 pkg openrails/billing, const UsageEventIDPrefix untyped string = "uev_"
 pkg openrails/billing, const UsageFailed UsageOutcome = "failed"
 pkg openrails/billing, const UsageSucceeded UsageOutcome = "succeeded"
+pkg openrails/billing, func ChangeKinds() []ChangeKind
 pkg openrails/billing, func Currencies() []CurrencyUnits
 pkg openrails/billing, func CustomerNotificationActionRequested(string) bool
 pkg openrails/billing, func CustomerNotificationOptional(string, NotificationData) bool
@@ -962,6 +985,7 @@ pkg openrails/billing, func ParseProductAccessID(string) (ProductAccessID, error
 pkg openrails/billing, func ParseProductID(string) (ProductID, error)
 pkg openrails/billing, func ParseProvisioningTokenID(string) (ProvisioningTokenID, error)
 pkg openrails/billing, func ParseRenewalID(string) (RenewalID, error)
+pkg openrails/billing, func ParseRunID(string) (RunID, error)
 pkg openrails/billing, func ParseRunningChargeID(string) (RunningChargeID, error)
 pkg openrails/billing, func ParseSubscriptionID(string) (SubscriptionID, error)
 pkg openrails/billing, func ParseUsageEventID(string) (UsageEventID, error)
@@ -1004,6 +1028,7 @@ pkg openrails/billing, method (*ProductAccessID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*ProductID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*ProvisioningTokenID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*RenewalID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*RunID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*RunningChargeID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*StatusError) Error() string
 pkg openrails/billing, method (*StatusError) Is(error) bool
@@ -1127,6 +1152,10 @@ pkg openrails/billing, method (RenewalID) IsZero() bool
 pkg openrails/billing, method (RenewalID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (RenewalID) String() string
 pkg openrails/billing, method (RenewalID) UUID() uuid.UUID
+pkg openrails/billing, method (RunID) IsZero() bool
+pkg openrails/billing, method (RunID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (RunID) String() string
+pkg openrails/billing, method (RunID) UUID() uuid.UUID
 pkg openrails/billing, method (RunningChargeID) IsZero() bool
 pkg openrails/billing, method (RunningChargeID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (RunningChargeID) String() string
@@ -1261,6 +1290,9 @@ pkg openrails/billing, type AlertWebhookListParams struct
 pkg openrails/billing, type AlertWebhookListParams struct, IDs []AlertWebhookID
 pkg openrails/billing, type ApplyCatalogParams struct
 pkg openrails/billing, type ApplyCatalogParams struct, Force bool
+pkg openrails/billing, type ApproveProposalsParams struct
+pkg openrails/billing, type ApproveProposalsParams struct, IDs []FindingID `json:"ids"`
+pkg openrails/billing, type ApproveProposalsParams struct, Notes string `json:"notes"`
 pkg openrails/billing, type AskCatalogParams struct
 pkg openrails/billing, type AskCatalogParams struct, Question string `json:"question"`
 pkg openrails/billing, type Balance struct
@@ -1453,6 +1485,21 @@ pkg openrails/billing, type CatalogFieldConflict struct, LiveValue json.RawMessa
 pkg openrails/billing, type CatalogFieldConflict struct, SetAt time.Time `json:"set_at"`
 pkg openrails/billing, type CatalogFieldConflict struct, SetBy string `json:"set_by"`
 pkg openrails/billing, type CatalogObjectKind string
+pkg openrails/billing, type ChangeBasis struct
+pkg openrails/billing, type ChangeBasis struct, AbsentRailID *string `json:"absent_rail_id"`
+pkg openrails/billing, type ChangeBasis struct, CardVersionID *string `json:"card_version_id"`
+pkg openrails/billing, type ChangeBasis struct, RowVersion *int64 `json:"row_version"`
+pkg openrails/billing, type ChangeEffects struct
+pkg openrails/billing, type ChangeEffects struct, EndsAccess bool `json:"ends_access"`
+pkg openrails/billing, type ChangeEffects struct, MovesMoney bool `json:"moves_money"`
+pkg openrails/billing, type ChangeEffects struct, ProviderWrite bool `json:"provider_write"`
+pkg openrails/billing, type ChangeEvidence struct
+pkg openrails/billing, type ChangeEvidence struct, Provider map[string]any `json:"provider"`
+pkg openrails/billing, type ChangeEvidence struct, Read string `json:"read"`
+pkg openrails/billing, type ChangeKind string
+pkg openrails/billing, type ChangeSubject struct
+pkg openrails/billing, type ChangeSubject struct, ID string `json:"id"`
+pkg openrails/billing, type ChangeSubject struct, Type string `json:"type"`
 pkg openrails/billing, type ChangeSubscriptionParams struct
 pkg openrails/billing, type ChangeSubscriptionParams struct, IdempotencyKey string `json:"-"`
 pkg openrails/billing, type ChangeSubscriptionParams struct, PriceID *PriceID `json:"price_id,omitempty"`
@@ -1809,6 +1856,9 @@ pkg openrails/billing, type DelinquencyHostEvent struct, OverdueAmount int64 `js
 pkg openrails/billing, type DelinquencyHostEvent struct, OverdueOrders int64 `json:"overdue_orders"`
 pkg openrails/billing, type DelinquencyHostEvent struct, OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
 pkg openrails/billing, type DelinquencyHostEvent struct, ToState string `json:"to_state"`
+pkg openrails/billing, type DismissProposalsParams struct
+pkg openrails/billing, type DismissProposalsParams struct, IDs []FindingID `json:"ids"`
+pkg openrails/billing, type DismissProposalsParams struct, Notes string `json:"notes"`
 pkg openrails/billing, type DriftField struct
 pkg openrails/billing, type DriftField struct, Field string `json:"field"`
 pkg openrails/billing, type DriftField struct, OpenRailsValue string `json:"openrails_value"`
@@ -1861,6 +1911,8 @@ pkg openrails/billing, type ExtendAdmissionParams struct
 pkg openrails/billing, type ExtendAdmissionParams struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type ExtendAdmissionParams struct, RequestID string `json:"request_id"`
 pkg openrails/billing, type Finding struct
+pkg openrails/billing, type Finding struct, ApprovalRunID *RunID `json:"approval_run_id"`
+pkg openrails/billing, type Finding struct, Change *FindingChange `json:"change"`
 pkg openrails/billing, type Finding struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Finding struct, Evidence map[string]any `json:"evidence"`
 pkg openrails/billing, type Finding struct, ExternalResourceID *string `json:"external_resource_id"`
@@ -1880,10 +1932,21 @@ pkg openrails/billing, type Finding struct, ResolvedBy *string `json:"resolved_b
 pkg openrails/billing, type Finding struct, ResourceID *string `json:"resource_id"`
 pkg openrails/billing, type Finding struct, ResourceType *string `json:"resource_type"`
 pkg openrails/billing, type Finding struct, Severity string `json:"severity"`
+pkg openrails/billing, type Finding struct, Source *ProposalSource `json:"source"`
 pkg openrails/billing, type Finding struct, Status FindingStatus `json:"status"`
 pkg openrails/billing, type Finding struct, SubjectKey string `json:"subject_key"`
 pkg openrails/billing, type Finding struct, Type string `json:"finding_type"`
 pkg openrails/billing, type Finding struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type FindingChange struct
+pkg openrails/billing, type FindingChange struct, Basis ChangeBasis `json:"basis"`
+pkg openrails/billing, type FindingChange struct, CustomerID *CustomerID `json:"customer_id"`
+pkg openrails/billing, type FindingChange struct, Effects ChangeEffects `json:"effects"`
+pkg openrails/billing, type FindingChange struct, Evidence ChangeEvidence `json:"evidence"`
+pkg openrails/billing, type FindingChange struct, From map[string]any `json:"from"`
+pkg openrails/billing, type FindingChange struct, Kind ChangeKind `json:"kind"`
+pkg openrails/billing, type FindingChange struct, ObservedAt time.Time `json:"observed_at"`
+pkg openrails/billing, type FindingChange struct, Subject ChangeSubject `json:"subject"`
+pkg openrails/billing, type FindingChange struct, To map[string]any `json:"to"`
 pkg openrails/billing, type FindingID [16]byte
 pkg openrails/billing, type FindingListParams struct
 pkg openrails/billing, type FindingListParams struct, IDs []FindingID
@@ -2788,6 +2851,27 @@ pkg openrails/billing, type ProductSummary struct, ID ProductID `json:"id"`
 pkg openrails/billing, type ProductSummary struct, Key string `json:"key"`
 pkg openrails/billing, type ProductSummary struct, TierGroup *string `json:"tier_group"`
 pkg openrails/billing, type ProductSummary struct, TierRank int `json:"tier_rank"`
+pkg openrails/billing, type ProposalError struct
+pkg openrails/billing, type ProposalError struct, Code string `json:"code"`
+pkg openrails/billing, type ProposalError struct, Message string `json:"message"`
+pkg openrails/billing, type ProposalListParams struct
+pkg openrails/billing, type ProposalListParams struct, IDs []FindingID
+pkg openrails/billing, type ProposalListParams struct, Kind ChangeKind
+pkg openrails/billing, type ProposalListParams struct, PSPID PSPID
+pkg openrails/billing, type ProposalListParams struct, Source ProposalSource
+pkg openrails/billing, type ProposalListParams struct, Status FindingStatus
+pkg openrails/billing, type ProposalListParams struct, embedded PageRequest
+pkg openrails/billing, type ProposalOutcome string
+pkg openrails/billing, type ProposalResult struct
+pkg openrails/billing, type ProposalResult struct, Error *ProposalError `json:"error"`
+pkg openrails/billing, type ProposalResult struct, Execution map[string]any `json:"execution"`
+pkg openrails/billing, type ProposalResult struct, Finding *Finding `json:"finding"`
+pkg openrails/billing, type ProposalResult struct, ID FindingID `json:"id"`
+pkg openrails/billing, type ProposalResult struct, Outcome ProposalOutcome `json:"outcome"`
+pkg openrails/billing, type ProposalResults struct
+pkg openrails/billing, type ProposalResults struct, Data []ProposalResult `json:"data"`
+pkg openrails/billing, type ProposalResults struct, RunID *RunID `json:"run_id"`
+pkg openrails/billing, type ProposalSource string
 pkg openrails/billing, type ProvisionMerchantParams struct
 pkg openrails/billing, type ProvisionMerchantParams struct, DisplayName string
 pkg openrails/billing, type ProvisionMerchantParams struct, OwnerUserID string
@@ -2901,6 +2985,7 @@ pkg openrails/billing, type RevokeCreditGrantParams struct
 pkg openrails/billing, type RevokeCreditGrantParams struct, Reason string `json:"reason"`
 pkg openrails/billing, type RevokeProductAccessParams struct
 pkg openrails/billing, type RevokeProductAccessParams struct, Reason string `json:"reason"`
+pkg openrails/billing, type RunID [16]byte
 pkg openrails/billing, type RunningCharge struct
 pkg openrails/billing, type RunningCharge struct, AsOf time.Time `json:"as_of"`
 pkg openrails/billing, type RunningCharge struct, ChargedAmount int64 `json:"charged_amount,string"`

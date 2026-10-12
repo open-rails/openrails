@@ -188,7 +188,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		// Ignoring an alert is not financial resolution. Once a later pull
 		// actually sees this now-recorded receipt, it must close the finding
 		// from that proof instead of leaving the account held forever.
-		_, err = target.pool.Exec(t.Context(), target.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,operator_notes,recommended_action,evidence) VALUES($1,$2,'nmi','pull.charge.missing',$3,'high','ignored',now(),'ignored','notification muted during outage','qualify receipt','{}') ON CONFLICT(merchant_id,psp_id,finding_type,subject_key) DO UPDATE SET status='ignored',resolved_at=now(),resolution='ignored',operator_notes=EXCLUDED.operator_notes`), mid.UUID(), target.psp["nmi"].UUID(), target.nmi.LastSale().TransactionID)
+		_, err = target.pool.Exec(t.Context(), target.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,operator_notes,recommended_action,evidence,source) VALUES($1,$2,'nmi','pull.charge.missing',$3,'high','ignored',now(),'ignored','notification muted during outage','qualify receipt','{}','pull') ON CONFLICT(merchant_id,psp_id,finding_type,subject_key) DO UPDATE SET status='ignored',resolved_at=now(),resolution='ignored',operator_notes=EXCLUDED.operator_notes`), mid.UUID(), target.psp["nmi"].UUID(), target.nmi.LastSale().TransactionID)
 		require.NoError(t, err)
 	} else {
 		require.True(t, end.Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
@@ -249,7 +249,7 @@ func TestRecoveryGateRequiresCompletedAccountCoverage(t *testing.T) {
 	stamp("completed_events", w.clock.Now().Add(time.Hour))
 	require.ErrorIs(t, check(), providerrecovery.ErrPending, "future observation timestamps are not freshness")
 	stamp("completed_events", w.clock.Now().Add(-5*time.Minute))
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,recommended_action,evidence) VALUES($1,$2,'nmi','pull.charge.missing','unqualified-invoice','high','ignored',now(),'ignored','qualify actual receipt','{}')`), mid.UUID(), psp.UUID())
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,recommended_action,evidence,source) VALUES($1,$2,'nmi','pull.charge.missing','unqualified-invoice','high','ignored',now(),'ignored','qualify actual receipt','{}','pull')`), mid.UUID(), psp.UUID())
 	require.NoError(t, err)
 	require.ErrorIs(t, check(), providerrecovery.ErrPending, "new unresolved financial evidence overrides even recent complete coverage")
 	require.Len(t, w.nmi.Ledger(""), 1)
@@ -451,8 +451,8 @@ func TestCustomerCancelWaitsForProviderRecovery(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, embedded)
-			_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
-				SELECT id, 'pull.charge.missing', 'held-charge', 'high', 'reconcile_required', $2, $3 FROM billing.merchants WHERE slug = $1`), w.slug, w.psp[rail].UUID(), rail)
+			_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, psp_id, rail, source)
+				SELECT id, 'pull.charge.missing', 'held-charge', 'high', 'reconcile_required', $2, $3, 'pull' FROM billing.merchants WHERE slug = $1`), w.slug, w.psp[rail].UUID(), rail)
 			require.NoError(t, err)
 			cancel := func() (int, map[string]any) {
 				return e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
@@ -547,8 +547,8 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
 			}
 			require.NotEmpty(t, transaction)
 			_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings
-                (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
-                VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4)`),
+                (merchant_id, finding_type, subject_key, severity, status, psp_id, rail, source)
+                VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4, 'pull')`),
 				w.client[embedded].MerchantID().UUID(), transaction, w.psp[rail].UUID(), rail)
 			require.NoError(t, err)
 			// The financial finding deliberately keeps recovery incomplete, so
