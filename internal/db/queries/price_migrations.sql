@@ -5,11 +5,11 @@
 -- name: CreatePriceMigration :one
 INSERT INTO billing.price_migrations (
     merchant_id, from_price_id, from_product_id, from_price_key, to_price_id, effective_at,
-    fallback_policy, subscriptions_matched, subscriptions_skipped
+    fallback_policy, subscriptions_matched, subscriptions_skipped, destructive_action_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.narg(from_price_id)::uuid, sqlc.narg(from_product_id)::uuid,
     sqlc.narg(from_price_key)::text, sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz,
-    sqlc.arg(fallback_policy)::text, sqlc.arg(subscriptions_matched)::int, 0
+    sqlc.arg(fallback_policy)::text, sqlc.arg(subscriptions_matched)::int, 0, sqlc.narg(destructive_action_id)::uuid
 )
 RETURNING *;
 
@@ -73,3 +73,27 @@ WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (m.created_at, m.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: GetPriceMigrationByDestructiveAction :one
+SELECT * FROM billing.price_migrations WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(destructive_action_id)::uuid;
+
+-- Prepared means the complete cohort was scheduled by its originating command.
+-- The finalizer runs after domain locks have been released.
+-- name: ListSettledPriceMigrationActions :many
+SELECT a.id FROM billing.destructive_actions a JOIN billing.price_migrations m
+ ON m.merchant_id=a.merchant_id AND m.destructive_action_id=a.id
+WHERE a.merchant_id=sqlc.arg(merchant_id)::uuid AND a.state IN ('started','uncertain')
+ AND a.result='migration:'||m.id::text||':prepared'
+ AND NOT EXISTS(SELECT 1 FROM billing.scheduled_changes sc WHERE sc.merchant_id=m.merchant_id AND sc.price_migration_id=m.id AND sc.status IN ('scheduled','blocked'))
+ AND NOT EXISTS(SELECT 1 FROM billing.provider_intents p WHERE p.merchant_id=a.merchant_id AND p.destructive_action_id=a.id AND p.status NOT IN ('succeeded','failed_terminal','superseded','expired'))
+ORDER BY a.id LIMIT sqlc.arg(row_limit)::int;
+
+-- Directory addresses only; each finalization remains merchant scoped.
+-- name: ListSettledPriceMigrationMerchants :many
+SELECT DISTINCT a.merchant_id FROM billing.destructive_actions a JOIN billing.price_migrations m
+ ON m.merchant_id=a.merchant_id AND m.destructive_action_id=a.id
+WHERE a.state IN ('started','uncertain')
+ AND a.result='migration:'||m.id::text||':prepared'
+ AND NOT EXISTS(SELECT 1 FROM billing.scheduled_changes sc WHERE sc.merchant_id=m.merchant_id AND sc.price_migration_id=m.id AND sc.status IN ('scheduled','blocked'))
+ AND NOT EXISTS(SELECT 1 FROM billing.provider_intents p WHERE p.merchant_id=a.merchant_id AND p.destructive_action_id=a.id AND p.status NOT IN ('succeeded','failed_terminal','superseded','expired'))
+ORDER BY a.merchant_id LIMIT sqlc.arg(row_limit)::int;
