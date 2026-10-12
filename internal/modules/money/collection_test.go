@@ -75,7 +75,7 @@ func TestUsageCollectionEligibility(t *testing.T) {
 	past, future := now.Add(-time.Hour), now.Add(time.Hour)
 	order := func(edit func(*gen.BillingOrder)) gen.BillingOrder {
 		paid, failures, method := int64(0), int32(0), CollectionChargeAutomatically
-		o := gen.BillingOrder{Origin: "usage", Status: "open", CollectionMethod: &method, Total: 100, AmountPaid: &paid, CollectionFailureCount: &failures, DueAt: &past}
+		o := gen.BillingOrder{Origin: "usage", CollectionOwner: "engine", Status: "open", CollectionMethod: &method, Total: 100, AmountPaid: &paid, CollectionFailureCount: &failures, DueAt: &past}
 		edit(&o)
 		return o
 	}
@@ -87,6 +87,8 @@ func TestUsageCollectionEligibility(t *testing.T) {
 		scheduled bool // automatic collection
 	}{
 		{name: "new order past due", order: order(func(*gen.BillingOrder) {}), scheduled: true},
+		{name: "provider collects", order: order(func(o *gen.BillingOrder) { o.CollectionOwner = "provider" })},
+		{name: "NMI schedule collects", order: order(func(o *gen.BillingOrder) { o.CollectionOwner = "nmi_schedule" })},
 		{name: "not yet due", order: order(func(o *gen.BillingOrder) { o.DueAt = &future })},
 		{name: "after a failure", order: order(func(o *gen.BillingOrder) {
 			o.CollectionFailureCount, o.NextCollectionAttemptAt, o.DueAt = failed(1), &past, &future

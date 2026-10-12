@@ -226,6 +226,13 @@ export function OrderDetail({ order }: { order: Order }) {
             <AdminMessage id={"Status: "} />
             <StatusBadge status={order.payment.status} />
           </p>
+          {order.collection_owner !== "engine" && (
+            <p>
+              {order.collection_owner === "nmi_schedule"
+                ? "Collection follows the NMI schedule. Recovery is coordinated through the subscription."
+                : "The payment provider collects this bill. Payment activity appears in the history below."}
+            </p>
+          )}
           {failure && (
             <p>
               <AdminMessage id={"Last failure: "} />

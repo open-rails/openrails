@@ -145,9 +145,12 @@ export function PaymentDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label={adminText("Product")}>
-          {payment.product?.display_name ??
-            (payment.price_id ? shortId(payment.price_id, 16) : "—")}
+        <Fact label={adminText("Order")}>
+          {payment.order_id ? (
+            <Link className={link} to={`/orders/${payment.order_id}`}>
+              {shortId(payment.order_id, 16)}
+            </Link>
+          ) : "—"}
         </Fact>
         <Fact label={adminText("Card")}>{formatCard(payment.card)}</Fact>
         <Fact label={adminText("Channel")}>

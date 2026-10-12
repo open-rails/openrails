@@ -236,6 +236,8 @@ describe("order support model", () => {
     for (const status of ["processing", "complete", "void"] as const)
       expect(usageActions(order({ status }))).toEqual([])
     expect(usageActions(order({}, { amount_due: "0" }))).toEqual([])
+    for (const collection_owner of ["provider", "nmi_schedule"] as const)
+      expect(usageActions(order({ collection_owner }))).toEqual([])
     expect(
       usageActions({ ...order(), origin: "customer", usage: null })
     ).toEqual([])

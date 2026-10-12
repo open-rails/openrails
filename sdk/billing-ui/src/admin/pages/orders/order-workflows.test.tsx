@@ -67,6 +67,15 @@ it("does not expose immediate saved-card collection", async () => {
   expect(sent("/admin/customers/cus_1/payment-methods")).toHaveLength(0)
 })
 
+it.each(["provider", "nmi_schedule"] as const)("offers history but no manual settlement for %s bills", async (collection_owner) => {
+  await show(<OrderDetail order={{ ...order, collection_owner }} />)
+  expect(text()).not.toContain("Record payment")
+  expect(text()).not.toContain("Waive balance")
+  expect(text()).not.toContain("Mark uncollectible")
+  expect(text()).toContain("Payment history")
+  expect(requests.some((request) => request.method === "POST")).toBe(false)
+})
+
 it("pages the payment history by cursor", async () => {
   routes["/admin/payments"] = cursorPages(
     Array.from({ length: 26 }, (_, i) => paid(i)),

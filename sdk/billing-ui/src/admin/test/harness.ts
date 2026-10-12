@@ -520,6 +520,8 @@ export const aUsageOrder = (
   id,
   customer_id: "cus_1",
   origin: "usage",
+  collection_owner: "engine",
+  collection_psp_id: null,
   status: "open",
   number: null,
   currency: "USD",

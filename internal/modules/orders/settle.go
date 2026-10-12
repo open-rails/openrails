@@ -505,6 +505,9 @@ func (s *Service) RecordRemittance(ctx context.Context, in Remittance) (payment 
 		if err != nil {
 			return err
 		}
+		if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+			return ErrNotPayable
+		}
 		prior, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: mid.UUID(), Channel: string(models.ChannelManual), TransactionID: in.TransactionID})
 		switch {
 		case err == nil:
