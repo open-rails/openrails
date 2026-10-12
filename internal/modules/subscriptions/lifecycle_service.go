@@ -553,6 +553,15 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	subscription.Price = price
 
+	if params.Prepared != nil && params.Prepared.Amount == 0 && params.ExistingOrderID == nil {
+		// A free or pending accepted enrollment is still an order. Its
+		// zero-due settlement creates no payment, while a provider schedule
+		// freezes the explicitly accepted future cadence for its first bill.
+		if _, err := initialBill(ctx, dbb, params, subscription, nil, now); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if params.Prepared != nil && params.Prepared.Pending {
 		return subscription, nil, nil
 	}
@@ -828,9 +837,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				return err
 			}
 			// Money survives late, partial and duplicate observations. Only a
-			// newly settled renewal may advance the existing paid period.
+			// settled renewal newer than its locked paid period may advance it.
+			// A receipt committed by reconciliation before lifecycle completion
+			// remains repairable when a webhook later replays that same bill.
 			_, terminal := TerminalCancelReason(subscription)
-			if !recorded.Completed || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
+			if !bill.Settled || bill.Kind != "renewal" || terminal || subscription.CurrentPeriodEndsAt != nil && !bill.PeriodEnd.After(*subscription.CurrentPeriodEndsAt) {
 				return nil
 			}
 			copy := *params
@@ -889,9 +900,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		} else if bill := params.ProviderBill; bill != nil {
 			// The provider's finalized line is the paid agreement. A changed
 			// local catalog or scheduled change cannot reprice that receipt.
+			// Calendar schedules and invoice lines need no fixed hourly
+			// interval: their verified bill already supplies both boundaries.
 			var plan *observed.Line
 			for i := range bill.Lines {
-				if bill.Lines[i].PriceID != nil && bill.Lines[i].ProductID != nil && bill.Lines[i].BillingIntervalHours != nil {
+				if bill.Lines[i].PriceID != nil && bill.Lines[i].ProductID != nil {
 					if plan != nil {
 						return errors.New("provider renewal has ambiguous subscription lines")
 					}
