@@ -29,17 +29,32 @@ type catalogAdmission struct {
 	targets    map[catalogObject]bool
 	action     *destructive.Action
 	rolledBack bool
-	finished   bool
-	external   bool
+	// unstarted: refused before its write ran, so no provider call was made.
+	unstarted bool
+	finished  bool
+	external  bool
 }
 
 type catalogClassification func(context.Context, *Service, catalogState) ([]catalogObject, error)
 
 // catalogCommand plans under a read lock, releases it, and admits the whole
 // affected set before a provider call or a catalog transaction. The commit
-// rechecks the snapshot and its actual changed targets; nested effects reuse
-// this admission instead of spending another unit.
+// rechecks the admitted targets and its actual changed targets; nested effects
+// reuse this admission instead of spending another unit. A concurrent edit
+// that moves the plan releases the admission as no-effect and plans again.
 func catalogCommand[T any](ctx context.Context, s *Service, target string, terms any, origin string, external bool, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
+	for attempt := 1; ; attempt++ {
+		out, err = catalogCommandOnce(ctx, s, target, terms, origin, external, plan, write)
+		if !errors.Is(err, errCatalogSnapshotMoved) {
+			return out, err
+		}
+		if attempt == maxCatalogSnapshotAttempts {
+			return out, apperr.New(409, "catalog_revision_conflict", "the catalog kept changing during this edit; retry")
+		}
+	}
+}
+
+func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, terms any, origin string, external bool, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
 	if _, ok := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission); ok {
 		return write(ctx, s)
 	}
@@ -89,16 +104,22 @@ func catalogCommand[T any](ctx context.Context, s *Service, target string, terms
 				Revision int64
 			}{obj.String(), revision})
 		}
+		// The key names its principal: concurrent equal edits by two actors are
+		// separate commands, and the one that changes nothing releases its unit.
+		principal := []string{"automation", origin}
+		var actor destructive.Actor
+		if origin == "" {
+			if actor, err = destructive.ActorFromContext(ctx); err != nil {
+				return out, err
+			}
+			principal = []string{actor.Issuer, actor.ID}
+		}
 		command := destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CatalogChange, Target: target,
-			Key: "catalog:" + destructive.Digest([]any{target, digest, revisions}), Digest: digest, Units: int64(len(scope.targets))}
+			Key: "catalog:" + destructive.Digest([]any{target, digest, revisions, principal}), Digest: digest, Units: int64(len(scope.targets)), Actor: actor}
 		var action destructive.Action
 		if origin != "" {
 			action, err = admissions.AdmitAutonomous(ctx, command, origin)
 		} else {
-			command.Actor, err = destructive.ActorFromContext(ctx)
-			if err != nil {
-				return out, err
-			}
 			action, err = admissions.Admit(ctx, command)
 		}
 		if err != nil {
@@ -115,7 +136,7 @@ func catalogCommand[T any](ctx context.Context, s *Service, target string, terms
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		outcome := destructive.OutcomeUncertain
-		if scope.rolledBack && !scope.external {
+		if scope.rolledBack && (!scope.external || scope.unstarted) {
 			outcome = destructive.OutcomeNoEffect
 		}
 		err = errors.Join(err, s.rt.DestructiveAdmissions.Finish(finish, mid.UUID(), scope.action.ID, outcome, ""))
@@ -144,12 +165,21 @@ func substantiveCatalogTargets(before, after catalogState) []catalogObject {
 		// A meter's hidden rate-card projection is the product's rate_cards
 		// field, already counted once under that owning product.
 	}
-	for obj := range after {
-		if before[obj] == nil {
-			changed[obj] = true
+	// A new object is additive: it changes no existing customer's billing or
+	// access, so creating one is never destructive.
+	return slices.SortedFunc(maps.Keys(changed), compareCatalogObjects)
+}
+
+// sameCatalogTargets reports whether every admitted target is as planned.
+// Unrelated concurrent edits do not move a plan; an unplanned effect is
+// caught by the commit's changed-target check.
+func sameCatalogTargets(admission *catalogAdmission, now catalogState) bool {
+	for obj := range admission.targets {
+		if !reflect.DeepEqual(admission.before[obj], now[obj]) {
+			return false
 		}
 	}
-	return slices.SortedFunc(maps.Keys(changed), compareCatalogObjects)
+	return true
 }
 
 func catalogObjectWithProductID(state catalogState, id billing.ProductID) (catalogObject, *catalogObjectState, error) {
@@ -163,7 +193,7 @@ func catalogObjectWithProductID(state catalogState, id billing.ProductID) (catal
 
 func catalogFieldsChanged(obj catalogObject, old *catalogObjectState, fields map[string]json.RawMessage) bool {
 	if old == nil {
-		return true
+		return false
 	}
 	for field, value := range fields {
 		if substantiveCatalogField(obj.kind, field) && !bytes.Equal(old.fields[field], value) {
@@ -218,8 +248,6 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 		return nil, nil
 	}
 }
-
-func sameCatalogSnapshot(a, b catalogState) bool { return reflect.DeepEqual(a, b) }
 
 func applicationAdmissionPlan(document catalogwire.Application, prepared *catalogApplicationPreparation, force bool) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
@@ -281,11 +309,7 @@ func createProductPlan(req billing.CreateProductParams) catalogClassification {
 		if _, err := catalogwire.NormalizeEntitlements(req.Entitlements); err != nil {
 			return nil, err
 		}
-		obj := productObject(key)
-		if state[obj] != nil {
-			return nil, nil
-		}
-		return []catalogObject{obj}, nil
+		return nil, nil
 	}
 }
 
@@ -388,9 +412,6 @@ func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 			if productKey == "" || strings.TrimSpace(req.ProductData.DisplayName) == "" {
 				return nil, apperr.Invalidf("product_data requires key and display_name")
 			}
-			if state[productObject(productKey)] == nil {
-				targets = append(targets, productObject(productKey))
-			}
 		} else if !req.ProductID.IsZero() {
 			obj, _, err := catalogObjectWithProductID(state, req.ProductID)
 			if err != nil {
@@ -466,11 +487,6 @@ func sidecarPlan(desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions
 		}
 		for key, m := range beforeMeters {
 			if n, ok := afterMeters[key]; !ok || !reflect.DeepEqual(m, n) {
-				targets[meterObject(key)] = true
-			}
-		}
-		for key, m := range afterMeters {
-			if o, ok := beforeMeters[key]; !ok || !reflect.DeepEqual(o, m) {
 				targets[meterObject(key)] = true
 			}
 		}

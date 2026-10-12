@@ -78,8 +78,8 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		if scoped.catalogBefore, err = readCatalogState(ctx, q, mid.UUID()); err != nil {
 			return err
 		}
-		if admission != nil && !sameCatalogSnapshot(admission.before, scoped.catalogBefore) {
-			admission.rolledBack = true
+		if admission != nil && !sameCatalogTargets(admission, scoped.catalogBefore) {
+			admission.rolledBack, admission.unstarted = true, true
 			return errCatalogSnapshotMoved
 		}
 		var callErr error
@@ -98,11 +98,13 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			return destructive.ErrActionFinal
 		}
 		for _, object := range affected {
-			if admission == nil || !admission.targets[object] {
-				if admission != nil {
-					admission.rolledBack = true
-				}
+			if admission == nil {
 				return fmt.Errorf("catalog target %s has no destructive admission", object)
+			}
+			if !admission.targets[object] {
+				// The catalog moved after planning; plan and admit again.
+				admission.rolledBack = true
+				return errCatalogSnapshotMoved
 			}
 		}
 		if !scoped.catalogApplying {

@@ -22,17 +22,21 @@ import (
 
 func TestDestructiveCatalogBatchRefusedBeforeAnyChange(t *testing.T) {
 	w := newWorld(t)
+	client := w.client[embedded]
 	doc := &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{}}
 	for i := range 6 {
 		key := fmt.Sprintf("guard-product-%d", i)
-		doc.Products[key] = catalog.ApplyProduct{DisplayName: catalog.Value(key)}
+		_, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key})
+		require.NoError(t, err, "creating a product is additive and spends no unit")
+		doc.Products[key] = catalog.ApplyProduct{DisplayName: catalog.Value(key), Entitlements: catalog.Value([]string{"guard:batch"})}
 	}
-	_, err := w.client[embedded].ApplyCatalog(t.Context(), doc, billing.ApplyCatalogParams{})
+	_, err := client.ApplyCatalog(t.Context(), doc, billing.ApplyCatalogParams{})
 	require.Error(t, err)
 	require.Equal(t, "rate_limit_exceeded", codeOf(err))
 	for key := range doc.Products {
-		_, err := productByKey(t.Context(), w.client[embedded], key)
-		require.Error(t, err, "a refused whole batch creates no target")
+		product, err := productByKey(t.Context(), client, key)
+		require.NoError(t, err)
+		require.Empty(t, product.Entitlements, "a refused whole batch changes no target")
 	}
 	var count int
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+w.schema+".destructive_actions WHERE origin='host'").Scan(&count))
@@ -44,7 +48,7 @@ func TestDestructiveCatalogNoopAndCosmeticSurviveHold(t *testing.T) {
 	client := w.client[embedded]
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "guard-product", DisplayName: "Guard product"})
 	require.NoError(t, err)
-	for i := range 4 {
+	for i := range 5 {
 		product, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{fmt.Sprintf("guard:%d", i)})})
 		require.NoError(t, err)
 	}
