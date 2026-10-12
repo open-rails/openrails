@@ -433,6 +433,9 @@ export function fakeBilling(
         return json(200, { data, next_cursor: null })
       }
       if (key === "GET /me/orders") {
+        // Like OpenRails: a set of ids takes no other parameter.
+        if (url.searchParams.has("ids") && [...url.searchParams.keys()].some((k) => k !== "ids"))
+          return apiError(400, "invalid_query", "ids takes no other parameter")
         const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)
         const rows = ids.length
           ? state.orders.filter((o) => ids.includes(String(o.id)))

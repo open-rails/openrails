@@ -606,10 +606,15 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         overdue?: boolean
       } = {}
     ): Promise<ListPage<Order>> {
+      // A set of ids is the whole query: it takes no paging or filter.
+      if (opts.ids?.length)
+        return json(orderPage, "/me/orders", {
+          query: { ids: opts.ids.join(",") },
+          signal: opts.signal,
+        })
       return json(orderPage, "/me/orders", {
         query: {
           ...cursorQuery(opts, 20),
-          ids: opts.ids?.length ? opts.ids.join(",") : undefined,
           origin: opts.origin,
           status: opts.status,
           subscription_id: opts.subscriptionId,

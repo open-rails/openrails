@@ -428,7 +428,7 @@ export function usePayments(options: PaymentsOptions = {}): PaymentsState {
       ]
       const orders: Record<string, Order> = {}
       if (ids.length) {
-        const bills = await client.listOrders({ ids, limit: ids.length, signal })
+        const bills = await client.listOrders({ ids, signal })
         for (const o of bills.data) orders[o.id] = o
       }
       return { ...page, orders }
