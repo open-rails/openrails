@@ -174,6 +174,9 @@ type RemotePaymentMethod struct {
 
 // RemoteSnapshot is the normalized result of one fetch against one provider.
 type RemoteSnapshot struct {
+	// BillsRecorded marks already committed invoice/settlement observations.
+	// Lifecycle-only evidence must never be written again as synthetic cash.
+	BillsRecorded  bool                  `json:"-"`
 	Provider       Provider              `json:"provider"`
 	PspID          string                `json:"psp_id,omitempty"`
 	FetchedAt      time.Time             `json:"fetched_at"`
