@@ -146,6 +146,9 @@ func TestRecordedUsageResourceKeepsItsRating(t *testing.T) {
 	params.Resource = "2"
 	sixth := p.record(params)
 	require.EqualValues(t, 300, sixth.Amount, "explicit numeric metadata retains precedence")
-	require.Equal(t, params.Metadata, sixth.Metadata)
+	encodedMetadata, err := json.Marshal(sixth.Metadata)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"resource":3}`, string(encodedMetadata))
+	require.Equal(t, int64(3), params.Metadata["resource"], "input numeric metadata is untouched")
 	require.EqualValues(t, 9_200, p.balance(customer).BalanceAmount)
 }
