@@ -792,6 +792,22 @@ func (w *world) settleQuiet() {
 	}
 }
 
+// wakeQuiet makes every snoozed operation runnable now without asserting,
+// for use off the test goroutine while a request is held.
+func (w *world) wakeQuiet() {
+	jobs := w.jobs
+	if jobs == nil {
+		return
+	}
+	page, err := jobs.JobList(context.Background(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable).First(100))
+	if err != nil {
+		return
+	}
+	for _, job := range page.Jobs {
+		_, _ = jobs.JobRetry(context.Background(), job.ID)
+	}
+}
+
 // wake makes every snoozed operation runnable now, as an operator retry
 // does, after the engine clock passed its next attempt. An operation running
 // as the clock moved may have read the old time and snoozed past it, so wake

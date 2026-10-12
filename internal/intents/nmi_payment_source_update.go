@@ -522,6 +522,7 @@ func (t *PaymentSourceUpdateThrough) EnqueueSwap(ctx context.Context, tx pgx.Tx,
 	if gated, ok := t.Runner.Store.(*Store); ok {
 		store = gated.withTxDB(d)
 	}
+	params.Inline = true
 	row, err := store.Enqueue(ctx, params)
 	return row.ID, err
 }

@@ -241,7 +241,7 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 			email = strings.TrimSpace(*user.Email)
 		}
 		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: psp.Key, Email: email, RequestedPrice: requested}
-		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: reason})
+		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: reason, Inline: true})
 		return err
 	})
 	var conflict *pgconn.PgError

@@ -329,7 +329,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 			AmountCents: amountCents, Currency: payment.Currency, Reason: strings.TrimSpace(req.Reason), RevokeAccess: req.RevokeAccess,
 			ProviderTarget: providerTarget},
 		IdempotencyKey: intentKey, NextAttemptAt: r.Clock.Now().UTC(),
-		Origin: intents.OriginAdmin, OriginReason: "admin refund request",
+		Origin: intents.OriginAdmin, OriginReason: "admin refund request", Inline: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("enqueue refund intent: %w", err)

@@ -15,12 +15,14 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
-// riverSettles holds every request in w that accepted an operation of kind
-// until River's worker has settled it, so the worker, not the request,
-// records the outcome. settled counts the operations it held.
+// riverSettles stalls every request in w that accepted an operation of kind
+// past its hold on that operation, until River's worker has settled it, so the
+// worker, not the request, records the outcome. settled counts the operations
+// it held.
 func (w *world) riverSettles(kind string) (settled *atomic.Int32, remove func()) {
 	settled = &atomic.Int32{}
 	status := func(id uuid.UUID) string {
@@ -34,12 +36,13 @@ func (w *world) riverSettles(kind string) (settled *atomic.Int32, remove func())
 		if s.Point != failpoint.BeforeInline || s.Kind != kind || status(s.Operation) == "" {
 			return nil
 		}
+		w.advance(intents.DefaultLease)
 		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 			if st := status(s.Operation); st == "succeeded" || st == "failed_terminal" {
 				settled.Add(1)
 				return nil
 			}
-			w.settleQuiet()
+			w.wakeQuiet()
 		}
 		return errors.New("River's worker never settled the operation")
 	})

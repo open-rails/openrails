@@ -7,19 +7,22 @@
 -- a superseded or expired one revives with attempts reset; anything else is
 -- untouched. Frozen operations (tier changes, collections, manual rebills,
 -- sales, initial membership) are never refreshed or revived: a same-key race
--- must not replace a frozen commercial decision.
+-- must not replace a frozen commercial decision. lease_expires_at, when set,
+-- is the producer's hold on the first attempt it runs inline.
 -- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id
+    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id,
+    lease_expires_at
 ) VALUES (
     COALESCE(sqlc.narg(id)::uuid, uuidv7()), sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(subject), sqlc.narg(credential), sqlc.narg(expires_at),
-    sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.narg(destructive_action_id)::uuid
+    sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.narg(destructive_action_id)::uuid,
+    sqlc.narg(lease_expires_at)::timestamptz
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -65,6 +68,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     expires_at = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE billing.provider_intents.expires_at
+    END,
+    lease_expires_at = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN COALESCE(EXCLUDED.lease_expires_at, billing.provider_intents.lease_expires_at)
+        ELSE billing.provider_intents.lease_expires_at
     END,
     attempts = CASE
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0

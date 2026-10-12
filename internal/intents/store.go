@@ -86,6 +86,11 @@ type EnqueueParams struct {
 	// context; system/background paths carry none.
 	Actor     string
 	ExpiresAt *time.Time
+	// Inline is set by a producer that runs the operation itself once its
+	// admission commits. The new row holds that first attempt for one
+	// DefaultLease from NextAttemptAt, so its River wake defers to the producer
+	// and runs the operation only when the producer died before claiming it.
+	Inline bool
 }
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
@@ -371,6 +376,11 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if actor != "" {
 		actorPtr = &actor
 	}
+	var held *time.Time
+	if p.Inline {
+		until := p.NextAttemptAt.Add(DefaultLease).UTC()
+		held = &until
+	}
 	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
 	var row gen.BillingProviderIntent
@@ -396,6 +406,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			ExpiresAt:           p.ExpiresAt,
 			PspID:               uuidPtrOrNil(p.PspID),
 			CustodianID:         uuidPtrOrNil(p.CustodianID),
+			LeaseExpiresAt:      held,
 		})
 		if err != nil {
 			return err
@@ -406,7 +417,11 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if OperationTerminal(row.Status) {
 			return nil
 		}
-		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(row.NextAttemptAt))
+		wake := row.NextAttemptAt
+		if row.Status == StatusPending && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.After(wake) {
+			wake = *row.LeaseExpiresAt
+		}
+		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(wake))
 	})
 	return row, err
 }

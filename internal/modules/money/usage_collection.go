@@ -417,7 +417,7 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 				// renders; recovery finds a collection's sale by it.
 				Description: fmt.Sprintf("invoice %s", orderID),
 			},
-			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason,
+			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason, Inline: true,
 			Actor: func() string {
 				if opts.initiator == charge.InitiatorCustomer {
 					return payer.UUID().String()

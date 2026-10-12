@@ -292,6 +292,7 @@ func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, 
 // caller loses nothing. A key that conflicts with an unclaimable row
 // (succeeded, terminal, mid-lease, expired) returns that row untouched.
 func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
+	p.Inline = true
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
@@ -304,6 +305,7 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Bi
 // returned (the existing row when the key was taken) and refuses it before
 // anything executes or is returned.
 func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, owns func(gen.BillingProviderIntent) error) (gen.BillingProviderIntent, error) {
+	p.Inline = true
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
 		return gen.BillingProviderIntent{}, err

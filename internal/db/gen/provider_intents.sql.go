@@ -647,14 +647,16 @@ const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id
+    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id,
+    lease_expires_at
 ) VALUES (
     COALESCE($1::uuid, uuidv7()), $2, $3, $4,
     $5, $6, $7,
     $8, $9, 'pending',
     $10::timestamptz, $11,
     $12, $13, $14, $15, $16,
-    $17::uuid, $18::uuid, $19::uuid
+    $17::uuid, $18::uuid, $19::uuid,
+    $20::timestamptz
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -701,6 +703,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE billing.provider_intents.expires_at
     END,
+    lease_expires_at = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN COALESCE(EXCLUDED.lease_expires_at, billing.provider_intents.lease_expires_at)
+        ELSE billing.provider_intents.lease_expires_at
+    END,
     attempts = CASE
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
         ELSE billing.provider_intents.attempts
@@ -733,6 +739,7 @@ type EnqueueProviderIntentParams struct {
 	PspID               *uuid.UUID
 	CustodianID         *uuid.UUID
 	DestructiveActionID *uuid.UUID
+	LeaseExpiresAt      *time.Time
 }
 
 // Financial operation ledger, always merchant-scoped. Production dispatch is one
@@ -743,7 +750,8 @@ type EnqueueProviderIntentParams struct {
 // a superseded or expired one revives with attempts reset; anything else is
 // untouched. Frozen operations (tier changes, collections, manual rebills,
 // sales, initial membership) are never refreshed or revived: a same-key race
-// must not replace a frozen commercial decision.
+// must not replace a frozen commercial decision. lease_expires_at, when set,
+// is the producer's hold on the first attempt it runs inline.
 func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
 		arg.ID,
@@ -765,6 +773,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		arg.PspID,
 		arg.CustodianID,
 		arg.DestructiveActionID,
+		arg.LeaseExpiresAt,
 	)
 	var i BillingProviderIntent
 	err := row.Scan(

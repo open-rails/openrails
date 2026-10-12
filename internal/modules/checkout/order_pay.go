@@ -480,7 +480,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			payload.PaymentMethodID, payload.Instrument, payload.Token, charged = methodID, instrument, collected, &methodID
 		}
 		intent, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: target.Rail, PspID: chosen.PSPID,
-			IntentType: payments.TypeNMISale, Payload: payload, IdempotencyKey: operationKey, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "order payment"})
+			IntentType: payments.TypeNMISale, Payload: payload, IdempotencyKey: operationKey, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "order payment", Inline: true})
 		if err != nil {
 			return err
 		}

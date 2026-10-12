@@ -182,7 +182,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if !windowEnd.After(now) {
 			return ErrRebillNotRetryable
 		}
-		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd})
+		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd, Inline: true})
 		if err != nil {
 			return err
 		}
