@@ -1053,7 +1053,6 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 		recovery := &models.Payment{
 			ID:                uuidutil.NewV7(),
 			CustomerID:        original.CustomerID,
-			PriceID:           original.PriceID,
 			SubscriptionID:    original.SubscriptionID,
 			OrderID:           original.OrderID,
 			RefundedPaymentID: &original.ID,
