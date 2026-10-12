@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client/client"
 import type { Product } from "./client/types"
-import { Offers } from "./offers"
+import { ProductList } from "./product-list"
 import { BillingProvider } from "./react/provider"
 import {
   MERCHANT,
@@ -79,11 +79,11 @@ function mount(ui: ReactNode, server: FakeBilling) {
   )
 }
 
-describe("Offers", () => {
-  it("offers each product it names, a button per price", async () => {
+describe("ProductList", () => {
+  it("displays each product it names, a button per price", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101", "course-bundle"]}
         onPaid={vi.fn()}
@@ -92,7 +92,7 @@ describe("Offers", () => {
       server
     )
 
-    expect(await screen.findAllByTestId("offer")).toHaveLength(2)
+    expect(await screen.findAllByTestId("product")).toHaveLength(2)
     expect(
       screen.getByRole("heading", { name: "Course 101" })
     ).toBeInTheDocument()
@@ -112,7 +112,7 @@ describe("Offers", () => {
   it("looks every key up in one read", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101", "course-bundle", "channel-membership"]}
         onPaid={vi.fn()}
@@ -120,7 +120,7 @@ describe("Offers", () => {
       />,
       server
     )
-    expect(await screen.findAllByTestId("offer")).toHaveLength(3)
+    expect(await screen.findAllByTestId("product")).toHaveLength(3)
     expect(
       screen.getByRole("heading", { name: "Membership" })
     ).toBeInTheDocument()
@@ -135,7 +135,7 @@ describe("Offers", () => {
   it("labels a recurring price with its cadence", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["channel-membership"]}
         onPaid={vi.fn()}
@@ -153,7 +153,7 @@ describe("Offers", () => {
     server.orderStatus = "complete"
     const onPaid = vi.fn()
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={onPaid}
@@ -184,7 +184,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     const onSignInRequired = vi.fn()
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101"]}
         signedIn={false}
@@ -204,7 +204,7 @@ describe("Offers", () => {
     server.fail["POST /me/orders"] = apiError(401, "authentication_required")
     const onSignInRequired = vi.fn()
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={vi.fn()}
@@ -227,7 +227,7 @@ describe("Offers", () => {
     )
     const onSignInRequired = vi.fn()
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={vi.fn()}
@@ -241,11 +241,11 @@ describe("Offers", () => {
     expect(onSignInRequired).not.toHaveBeenCalled()
   })
 
-  it("offers the host's products without asking OpenRails", async () => {
+  it("displays the host's products without asking OpenRails", async () => {
     const server = fakeBilling({ products: [] })
     const products = catalog().slice(2) as unknown as Product[]
     mount(
-      <Offers
+      <ProductList
         products={products}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
@@ -259,10 +259,27 @@ describe("Offers", () => {
     expect(server.calls).not.toContain("GET /products")
   })
 
+  it("hides an archived product even when its prices remain current", async () => {
+    const server = fakeBilling({ products: [] })
+    const products = catalog().slice(0, 1) as unknown as Product[]
+    products[0].archived = true
+    mount(
+      <ProductList
+        products={products}
+        onPaid={vi.fn()}
+        onSignInRequired={vi.fn()}
+      />,
+      server
+    )
+    expect(screen.queryByRole("button", { name: "$4.99" })).toBeNull()
+    expect(screen.queryByTestId("product")).toBeNull()
+    expect(server.calls).not.toContain("GET /catalog/products")
+  })
+
   it("says when none of its products is on sale", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers
+      <ProductList
         merchant={MERCHANT}
         keys={["course-999"]}
         onPaid={vi.fn()}
@@ -278,7 +295,12 @@ describe("Offers", () => {
   it("asks nothing for no keys", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers merchant={MERCHANT} keys={[]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />,
+      <ProductList
+        merchant={MERCHANT}
+        keys={[]}
+        onPaid={vi.fn()}
+        onSignInRequired={vi.fn()}
+      />,
       server
     )
     expect(

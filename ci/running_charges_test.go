@@ -595,8 +595,10 @@ func TestRunningChargeDrawsALotBeforeItLapses(t *testing.T) {
 func TestRunningChargeTxCommitsWithHostRows(t *testing.T) {
 	w := newChargeWorld(t)
 	customer := w.funded(10_000_000)
+	local, err := w.bill.LocalMerchant(w.client.MerchantID())
+	require.NoError(t, err)
 	rentals := pgx.Identifier{w.f.schema, "host_rentals"}.Sanitize()
-	_, err := w.f.pool.Exec(t.Context(), "CREATE TABLE "+rentals+" (reference text PRIMARY KEY, state text NOT NULL)")
+	_, err = w.f.pool.Exec(t.Context(), "CREATE TABLE "+rentals+" (reference text PRIMARY KEY, state text NOT NULL)")
 	require.NoError(t, err)
 	state := func(reference string) string {
 		t.Helper()
@@ -616,7 +618,7 @@ func TestRunningChargeTxCommitsWithHostRows(t *testing.T) {
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		_, err = tx.Exec(t.Context(), "INSERT INTO "+rentals+" (reference, state) VALUES ($1, 'ready') ON CONFLICT (reference) DO NOTHING", params.Reference)
 		require.NoError(t, err)
-		charge, err := w.client.StartRunningChargeTx(w.ctx, tx, params)
+		charge, err := local.StartRunningChargeTx(w.ctx, tx, params)
 		require.NoError(t, err)
 		if commit {
 			require.NoError(t, tx.Commit(t.Context()))
@@ -654,7 +656,7 @@ func TestRunningChargeTxCommitsWithHostRows(t *testing.T) {
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		_, err = tx.Exec(t.Context(), "UPDATE "+rentals+" SET state = 'released' WHERE reference = $1", params.Reference)
 		require.NoError(t, err)
-		charge, err := w.client.StopRunningChargeTx(w.ctx, tx, params.Reference, billing.StopRunningChargeParams{})
+		charge, err := local.StopRunningChargeTx(w.ctx, tx, params.Reference, billing.StopRunningChargeParams{})
 		require.NoError(t, err)
 		if commit {
 			require.NoError(t, tx.Commit(t.Context()))
@@ -675,13 +677,6 @@ func TestRunningChargeTxCommitsWithHostRows(t *testing.T) {
 	require.Equal(t, stopped, release(true), "a replayed stop answers the same")
 	require.Len(t, w.postings(customer), 1)
 
-	// A remote handle has no host transaction to join.
-	remote, err := openrails.NewRemoteMerchant("https://openrails.invalid", openrails.RemoteCredential{APIKey: "key"})
-	require.NoError(t, err)
-	_, err = remote.StartRunningChargeTx(w.ctx, nil, params)
-	require.ErrorIs(t, err, openrails.ErrRemoteClient)
-	_, err = remote.StopRunningChargeTx(w.ctx, nil, params.Reference, billing.StopRunningChargeParams{})
-	require.ErrorIs(t, err, openrails.ErrRemoteClient)
 }
 
 // A start that names a minimum is refused unless the customer's capacity

@@ -28,6 +28,7 @@ type ScheduledChange struct {
 	SubscriptionID   uuid.UUID
 	FromPriceID      uuid.UUID
 	PriceID          uuid.UUID
+	PublicPriceID    billing.PriceID
 	Quantity         *int
 	EffectiveAt      time.Time
 	Source           billing.ScheduledChangeSource
@@ -54,7 +55,7 @@ func (c *ScheduledChange) View() *billing.ScheduledChange {
 		return nil
 	}
 	out := &billing.ScheduledChange{
-		PriceID: billing.PriceID(c.PriceID), Quantity: c.Quantity, EffectiveAt: c.EffectiveAt.UTC(),
+		PriceID: c.PublicPriceID, Quantity: c.Quantity, EffectiveAt: c.EffectiveAt.UTC(),
 		Source: c.Source, CreatedAt: c.CreatedAt.UTC(),
 	}
 	if c.PriceMigrationID != nil {

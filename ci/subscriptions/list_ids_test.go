@@ -35,6 +35,16 @@ func idsOf(t *testing.T, page map[string]any, key ...string) []string {
 	return out
 }
 
+// unknownWireID preserves the resource kind while choosing an absent ID.
+func unknownWireID(t *testing.T, id string) string {
+	t.Helper()
+	if price, err := billing.ParsePriceID(id); err == nil && !price.IsZero() {
+		return "unknown:" + uuid.NewString() + ":v1"
+	}
+	require.GreaterOrEqual(t, len(id), 36, "a UUID resource has a complete body")
+	return id[:len(id)-36] + uuid.NewString()
+}
+
 // cloneElsewhere copies a record to another merchant under a fresh id, as if
 // that merchant held it, and answers the copy's wire id. Foreign keys are off
 // for the copy: nothing of the other merchant's needs to exist, and the copy
@@ -44,7 +54,9 @@ func (w *world) cloneElsewhere(table, wireID, set string) string {
 	w.t.Helper()
 	ctx := w.t.Context()
 	prefix, raw := "", wireID
-	if at := strings.LastIndex(wireID, "_"); at >= 0 {
+	if table == "prices" {
+		raw = w.priceStorageID(pid(wireID)).String()
+	} else if at := strings.LastIndex(wireID, "_"); at >= 0 {
 		prefix, raw = wireID[:at+1], wireID[at+1:]
 	}
 	var columns []string
@@ -55,6 +67,12 @@ func (w *world) cloneElsewhere(table, wireID, set string) string {
 	require.NoError(w.t, err)
 	list := strings.Join(columns, ", ")
 	id, merchant := uuid.New(), uuid.New()
+	copyID := prefix + id.String()
+	if table == "prices" {
+		key := "foreign-" + id.String()
+		copyID = strings.Split(wireID, ":")[0] + ":" + key + ":v1"
+		set += fmt.Sprintf(", key = '%s', revision = 0, public_id = '%s'", key, copyID)
+	}
 	tx, err := w.pool.Begin(ctx)
 	require.NoError(w.t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -69,7 +87,7 @@ func (w *world) cloneElsewhere(table, wireID, set string) string {
 	}
 	require.NoError(w.t, tx.Commit(ctx))
 	w.t.Cleanup(func() { w.dropElsewhere(table, merchant) })
-	return prefix + id.String()
+	return copyID
 }
 
 // dropElsewhere removes another merchant's copies, past the triggers that
@@ -219,11 +237,11 @@ func TestListsReadNamedRecords(t *testing.T) {
 			ask = mine[1:]
 		}
 		// Another merchant's record; configuration has none in this schema.
-		foreign := mine[0][:len(mine[0])-36] + uuid.NewString()
+		foreign := unknownWireID(t, mine[0])
 		if fixture.table != "" {
 			foreign = w.cloneElsewhere(fixture.table, mine[0], fixture.set)
 		}
-		unknown := foreign[:len(foreign)-36] + uuid.NewString()
+		unknown := unknownWireID(t, foreign)
 		named := append(append([]string{}, ask...), foreign, unknown, ask[0])
 		status, page = get("ids=" + strings.Join(named, ","))
 		require.Equal(t, http.StatusOK, status, "%s: %v", route.Key(), page)

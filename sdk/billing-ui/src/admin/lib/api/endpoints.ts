@@ -465,7 +465,7 @@ export function createEndpoints(client: AdminClient) {
   // also reads every PSP's copy and reports its drift: a read, never a write,
   // and slow enough that it stays opt-in.
   const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-    api<Price>(`/catalog/prices/${id}`, {
+    api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, {
       query: verify ? { verify: true } : undefined,
       signal,
     })
@@ -484,12 +484,12 @@ export function createEndpoints(client: AdminClient) {
   // updatePrice archives or restores a price, or changes its PSP links
   // (a PSP set to null is unlinked).
   const updatePrice = (id: string, body: UpdatePriceParams) =>
-    api<Price>(`/catalog/prices/${id}`, { method: "PATCH", body })
+    api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, { method: "PATCH", body })
 
   // getPriceHistory returns the history of a price's key, most recent first:
   // when the key moved to which price.
   const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
-    api<ListPage<PriceKeyMovement>>(`/catalog/prices/${priceId}/history`, {
+    api<ListPage<PriceKeyMovement>>(`/catalog/prices/${encodeURIComponent(priceId)}/history`, {
       query: { limit: PAGE_MAX },
       signal,
     })

@@ -19,8 +19,8 @@ day. One stored instant per customer says when its balance is next looked at.
 ## Routes and methods
 
 Your backend's routes, behind `billing.MerchantUsageManage` or
-`billing.RootUsageManage`, each write with an
-`Idempotency-Key` ([routes](api/routes.md)):
+`billing.RootUsageManage` ([routes](api/routes.md)). The durable `reference`
+owns replay; no `Idempotency-Key` header is needed:
 
 | Route | Go method | Answers |
 | --- | --- | --- |
@@ -29,11 +29,12 @@ Your backend's routes, behind `billing.MerchantUsageManage` or
 | `GET /v1/app/running-charges/{reference}` | `GetRunningCharge` | 200, charged as of now |
 | `GET /v1/app/running-charges` | `ListRunningCharges` | 200, newest first, by `customer_id`, `state` and `depleted` |
 
-An embedded host also has `Client.StartRunningChargeTx` and
-`Client.StopRunningChargeTx`, which run inside a transaction of the host's own
+An embedded host obtains `local, err := engine.LocalMerchant(merchantID)` and
+uses `local.StartRunningChargeTx` and `local.StopRunningChargeTx` inside its transaction
 on the same database: commit the start with the row that says the work is
 ready, and the stop with the row that says it was released, so a crash leaves
-both or neither. A remote client answers `openrails.ErrRemoteClient`.
+both or neither. The shared `Client` has no transaction methods; remote callers
+use ordinary `StartRunningCharge` and `StopRunningCharge` requests.
 
 ## Start
 

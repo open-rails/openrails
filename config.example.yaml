@@ -222,7 +222,7 @@ admin_console:
 #   base_url: ""             # optional endpoint override (env LLM_BASE_URL) — with provider=openai
 #                            # this serves any OpenAI-compatible backend, base INCLUDES /v1
 #                            # (e.g. https://api.groq.com/openai/v1, https://models.example/v1)
-#   catalog_copilot_enabled: false   # #779 Phase 1 consent: /catalog/ask sends aggregate
+#   catalog_copilot_enabled: false   # #779 Phase 1 consent: /console/catalog/ask sends aggregate
 #                            # catalog/subscriber-count data to the LLM provider; env
 #                            # LLM_CATALOG_COPILOT_ENABLED
 #   catalog_drafting_enabled: false  # #779 Phase 2: arms the draft_price_change/draft_catalog_diff

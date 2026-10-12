@@ -80,7 +80,7 @@ const APIKeyPrefix = "openrails"
 
 var (
 	supportGrants = []billing.Permission{billing.MerchantCustomerRead, billing.MerchantCustomerManage}
-	viewerGrants  = []billing.Permission{billing.MerchantCustomerRead}
+	viewerGrants  = []billing.Permission{billing.MerchantCustomerRead, billing.MerchantCatalogRead, billing.MerchantConfigRead, billing.MerchantMetricsRead, billing.MerchantUsageRead}
 )
 
 func merchantRole(name string, perms ...billing.Permission) iam.Role {

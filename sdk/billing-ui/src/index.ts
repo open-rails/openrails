@@ -1,5 +1,5 @@
 // @openrails/billing-ui — styled OpenRails buying and account billing.
-// `BuyButton`/`Offers` are the purchase; the account panels manage what was
+// `BuyButton`/`ProductList` are the purchase; the account panels manage what was
 // bought. `BillingProvider` (also in `./react`, without styles) gives them the
 // client, appearance and words; the client and money formatting are here too,
 // so a React app imports from one place. The entry installs its isolated
@@ -89,7 +89,7 @@ export {
 } from "./i18n"
 
 export { BuyButton, type BuyButtonProps } from "./buy-button"
-export { Offers, type OffersProps } from "./offers"
+export { ProductList, type ProductListProps } from "./product-list"
 export { CardBrandPlate } from "./components/card-brands"
 export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
 export { browserCountry, initialCountry } from "./lib/billing"

@@ -758,11 +758,11 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 	if err != nil {
 		return nil, err
 	}
-	return tierChangeResponse(intent)
+	return s.tierChangeResponse(ctx, intent)
 }
 
 // stripeTierChangeResponse renders a Stripe tier change (tierChangeResponse).
-func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+func stripeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.PriceID) (*TierChangeResponse, error) {
 	var p StripeTierChangePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
@@ -770,7 +770,7 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 	subID := billing.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		PriceID: billing.PriceID(p.PriceID),
+		PriceID: priceID,
 		Rail:    string(models.RailStripe), SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		Effective: effectiveOf(p.Action),

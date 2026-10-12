@@ -675,6 +675,17 @@
         "tags": [
           "app"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -729,6 +740,15 @@
           "app"
         ],
         "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -795,8 +815,7 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       }
     },
@@ -815,10 +834,12 @@
             }
           },
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -853,8 +874,7 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:application",
-          "app_write"
+          "tier:application"
         ]
       }
     },
@@ -933,6 +953,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1002,6 +1031,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1038,7 +1076,7 @@
         ]
       }
     },
-    "/v1/admin/orders/{id}/void": {
+    "/v1/admin/orders/{id}/waive-balance": {
       "post": {
         "tags": [
           "admin"
@@ -1050,6 +1088,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1102,6 +1149,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1137,84 +1193,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/orders/{id}/retry-collection": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetryOrderCollectionParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Order"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:customer:manage",
-          "root": "root:customer:manage"
-        },
-        "x-openrails-operation-limit": "off_channel",
-        "x-openrails-errors": [
-          "card_declined",
-          "idempotency_key_required",
-          "idempotency_key_reused",
-          "invalid_param",
-          "order_action_not_allowed",
-          "order_not_payable",
-          "order_payment_in_progress",
-          "payment_failed",
-          "payment_method_stale",
-          "payment_option_unavailable",
-          "payment_provider_rejected",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
         ]
       }
     },
@@ -1407,106 +1385,6 @@
         ]
       }
     },
-    "/v1/app/catalog/products": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "entitlement",
-            "in": "query",
-            "style": "form",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "keys",
-            "in": "query",
-            "style": "form",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:read",
-          "root": "root:catalog:read"
-        },
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request"
-        ]
-      }
-    },
     "/v1/catalog/apply": {
       "post": {
         "tags": [
@@ -1518,6 +1396,15 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1591,6 +1478,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1633,8 +1529,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
@@ -1655,6 +1551,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1680,8 +1585,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "default_rate_card_not_found",
@@ -1708,6 +1613,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1762,11 +1676,12 @@
         ]
       }
     },
-    "/v1/catalog/ask": {
+    "/v1/console/catalog/ask": {
       "post": {
         "tags": [
           "catalog"
         ],
+        "x-openrails-console-only": true,
         "requestBody": {
           "content": {
             "application/json": {
@@ -1798,8 +1713,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-mounted-when": "catalog_copilot",
         "x-openrails-errors": [
@@ -1818,6 +1733,17 @@
       "post": {
         "tags": [
           "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -1946,6 +1872,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1988,8 +1923,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2018,6 +1953,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2042,8 +1986,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2068,6 +2012,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2131,6 +2084,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2166,6 +2128,17 @@
       "post": {
         "tags": [
           "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -2291,6 +2264,15 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2333,8 +2315,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2372,6 +2354,15 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2396,8 +2387,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2425,6 +2416,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2506,6 +2506,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2548,8 +2557,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "catalog_benefit_overlap",
@@ -2682,6 +2691,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2751,6 +2769,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2799,6 +2826,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2866,6 +2902,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2914,6 +2959,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3022,6 +3076,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -3104,6 +3167,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -3164,6 +3236,17 @@
       "post": {
         "tags": [
           "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -3259,6 +3342,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -3301,8 +3393,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -3319,6 +3411,17 @@
       "post": {
         "tags": [
           "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -3351,8 +3454,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -3381,6 +3484,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -3405,8 +3517,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -3429,6 +3541,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4146,6 +4267,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -4207,6 +4337,17 @@
       "post": {
         "tags": [
           "app"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -4306,6 +4447,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -4367,6 +4517,15 @@
           "admin"
         ],
         "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -4435,6 +4594,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4602,6 +4770,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -4670,6 +4847,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -4718,6 +4904,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4774,6 +4969,17 @@
       "post": {
         "tags": [
           "admin"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -4884,6 +5090,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -4953,6 +5168,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -5001,6 +5225,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5099,6 +5332,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -5175,6 +5417,15 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5323,17 +5574,195 @@
         ]
       }
     },
+    "/v1/app/admissions/{request_id}": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admission"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
+        },
+        "x-openrails-errors": [
+          "admission_not_found",
+          "invalid_param",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application"
+        ]
+      }
+    },
     "/v1/app/admissions": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Admission"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
+        },
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      },
       "post": {
         "tags": [
           "app"
         ],
         "parameters": [
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5376,41 +5805,41 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       }
     },
-    "/v1/app/admissions/capture": {
-      "post": {
+    "/v1/app/usage-events/{id}": {
+      "get": {
         "tags": [
           "app"
         ],
         "parameters": [
           {
-            "name": "Idempotency-Key",
-            "in": "header",
+            "name": "id",
+            "in": "path",
+            "required": true,
             "schema": {
               "type": "string"
             }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CaptureAdmissionBatchParams"
-              }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
-        },
+        ],
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CaptureBatchResult"
+                  "$ref": "#/components/schemas/UsageEvent"
                 }
               }
             }
@@ -5426,146 +5855,169 @@
         ],
         "x-openrails-auth": "application",
         "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
         },
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_param",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "app_write"
-        ]
-      }
-    },
-    "/v1/app/admissions/release": {
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReleaseAdmissionBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmissionBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "app_write"
-        ]
-      }
-    },
-    "/v1/app/admissions/extend": {
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExtendAdmissionBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmissionBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "app_write"
+          "tier:application"
         ]
       }
     },
     "/v1/app/usage-events": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UsageEvent"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
+        },
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      },
       "post": {
         "tags": [
           "app"
         ],
         "parameters": [
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5608,8 +6060,184 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
+        ]
+      }
+    },
+    "/v1/app/admissions/capture": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureAdmissionBatchParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/admissions/release": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseAdmissionBatchParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/admissions/extend": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendAdmissionBatchParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
         ]
       }
     },
@@ -5700,10 +6328,12 @@
         ],
         "parameters": [
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5759,8 +6389,7 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       },
       "get": {
@@ -5801,6 +6430,15 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5844,8 +6482,8 @@
         ],
         "x-openrails-auth": "application",
         "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -5872,10 +6510,12 @@
             }
           },
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5920,8 +6560,7 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       }
     },
@@ -5937,6 +6576,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5962,8 +6610,8 @@
         ],
         "x-openrails-auth": "application",
         "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
         },
         "x-openrails-errors": [
           "running_charge_not_found"
@@ -5978,11 +6626,22 @@
         "tags": [
           "admin"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreatePaymentParams"
+                "$ref": "#/components/schemas/RecordExternalPaymentParams"
               }
             }
           }
@@ -6120,6 +6779,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -6187,6 +6855,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -6235,6 +6912,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -6469,6 +7155,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -6535,6 +7230,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -6661,6 +7365,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -6727,6 +7440,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -6915,6 +7637,15 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -7513,6 +8244,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -7555,8 +8295,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -7572,6 +8312,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -7636,6 +8387,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -7660,8 +8420,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -7683,6 +8443,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -7740,6 +8509,17 @@
         "tags": [
           "merchant_config"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7771,8 +8551,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param"
@@ -7787,6 +8567,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
           "202": {
@@ -7895,6 +8686,17 @@
         "tags": [
           "merchant_config"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -7917,8 +8719,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
@@ -7928,6 +8730,17 @@
       "patch": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -7994,6 +8807,15 @@
               "minItems": 1,
               "maxItems": 100
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -8036,8 +8858,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "service_unavailable"
@@ -8050,6 +8872,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -8109,6 +8942,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -8150,6 +8992,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -8205,6 +9056,17 @@
         "tags": [
           "merchant_config"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -8241,6 +9103,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -8295,6 +9168,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -8396,6 +9280,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -8458,10 +9351,12 @@
         ],
         "parameters": [
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -8504,8 +9399,7 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       }
     },
@@ -8513,6 +9407,17 @@
       "get": {
         "tags": [
           "access"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -8545,6 +9450,17 @@
       "post": {
         "tags": [
           "metrics"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -8595,6 +9511,17 @@
         "tags": [
           "metrics"
         ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -8630,6 +9557,17 @@
       "get": {
         "tags": [
           "metrics"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -8668,6 +9606,17 @@
       "put": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -8767,6 +9716,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -8809,8 +9767,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -8834,6 +9792,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -8859,8 +9826,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -8884,6 +9851,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9082,6 +10058,15 @@
               "minItems": 1,
               "maxItems": 100
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -9124,9 +10109,10 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9136,6 +10122,17 @@
       "post": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -9171,6 +10168,7 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -9193,6 +10191,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -9213,6 +10220,7 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -9327,6 +10335,15 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10463,10 +11480,20 @@
             ]
           },
           "catalog": {
-            "type": "boolean"
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "update"
+            ]
           },
           "merchant_config": {
-            "type": "boolean"
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "update"
+            ]
           },
           "metrics": {
             "type": "boolean"
@@ -10476,6 +11503,45 @@
           },
           "assistants": {
             "$ref": "#/components/schemas/AdminAssistants"
+          },
+          "application_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "merchant:catalog:manage",
+                "merchant:catalog:read",
+                "merchant:config:manage",
+                "merchant:config:read",
+                "merchant:customer:manage",
+                "merchant:customer:read",
+                "merchant:customers:read",
+                "merchant:entitlements:read",
+                "merchant:events:read",
+                "merchant:metrics:read",
+                "merchant:orders:manage",
+                "merchant:usage:manage",
+                "merchant:usage:read",
+                "root:admin-rate-limits:unlock",
+                "root:catalog:manage",
+                "root:catalog:read",
+                "root:config:manage",
+                "root:config:read",
+                "root:customer:manage",
+                "root:customer:read",
+                "root:customers:read",
+                "root:entitlements:read",
+                "root:events:read",
+                "root:merchants:delete",
+                "root:merchants:read",
+                "root:merchants:restore",
+                "root:metrics:read",
+                "root:orders:manage",
+                "root:usage:manage",
+                "root:usage:read",
+                "root:worker-health:read"
+              ]
+            }
           }
         },
         "required": [
@@ -10484,7 +11550,8 @@
           "merchant_config",
           "metrics",
           "scope_id",
-          "assistants"
+          "assistants",
+          "application_permissions"
         ]
       },
       "AdminAssistants": {
@@ -12842,25 +13909,6 @@
           },
           "billing_details": {
             "$ref": "#/components/schemas/BillingDetails"
-          }
-        }
-      },
-      "CreatePaymentParams": {
-        "type": "object",
-        "properties": {
-          "order_id": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "transaction_id": {
-            "type": "string"
-          },
-          "paid_at": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -19241,6 +20289,25 @@
           "up_to"
         ]
       },
+      "RecordExternalPaymentParams": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "RecordUsageBatchParams": {
         "type": "object",
         "properties": {
@@ -19464,14 +20531,6 @@
             "type": "string"
           },
           "override_params": {}
-        }
-      },
-      "RetryOrderCollectionParams": {
-        "type": "object",
-        "properties": {
-          "payment_method_id": {
-            "type": "string"
-          }
         }
       },
       "RetrySubscriptionNowParams": {
@@ -21145,11 +22204,6 @@
     }
   },
   "x-openrails-error-sets": {
-    "app_write": [
-      "idempotency_key_in_progress",
-      "idempotency_key_required",
-      "idempotency_key_reused"
-    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -21170,6 +22224,8 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
+      "invalid_param",
+      "merchant_mismatch",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded"
@@ -21185,7 +22241,9 @@
       "customer_issuer_mismatch",
       "database_busy",
       "internal_error",
+      "invalid_param",
       "invoker_scoped_principal",
+      "merchant_mismatch",
       "merchant_unresolved",
       "network_account_linked",
       "permission_required",
@@ -21202,6 +22260,8 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
+      "invalid_param",
+      "merchant_mismatch",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded"
@@ -21216,6 +22276,8 @@
       "credential_revoked",
       "database_busy",
       "internal_error",
+      "invalid_param",
+      "merchant_mismatch",
       "merchant_unresolved",
       "network_terms_required",
       "permission_required",
@@ -21249,6 +22311,8 @@
       "database_busy",
       "host_principal_invalid",
       "internal_error",
+      "invalid_param",
+      "merchant_mismatch",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded"
@@ -21530,11 +22594,6 @@
       "type": "invalid_request_error",
       "meaning": "This deployment serves no hosted checkout, or the order cannot take one."
     },
-    "idempotency_key_in_progress": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "A request with this Idempotency-Key is still running; retry it later."
-    },
     "idempotency_key_in_use": {
       "status": 409,
       "type": "invalid_request_error",
@@ -21619,6 +22678,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The merchant's configuration is read from a file; change the file."
+    },
+    "merchant_mismatch": {
+      "status": 412,
+      "type": "invalid_request_error",
+      "meaning": "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed."
     },
     "merchant_unresolved": {
       "status": 403,

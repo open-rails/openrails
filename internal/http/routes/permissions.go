@@ -47,14 +47,16 @@ func (p Pair) check() error {
 
 // The staff groups' pairs, and the programmatic routes' own (Route.Permission).
 var (
-	needAdminRead      = Pair{billing.MerchantCustomerRead, billing.RootCustomerRead}
-	needAdminUpdate    = Pair{billing.MerchantCustomerManage, billing.RootCustomerManage}
-	needCatalog        = Pair{billing.MerchantCatalogManage, billing.RootCatalogManage}
-	needMerchantConfig = Pair{billing.MerchantConfigManage, billing.RootConfigManage}
-	needMetrics        = Pair{billing.MerchantMetricsRead, billing.RootMetricsRead}
+	needAdminRead          = Pair{billing.MerchantCustomerRead, billing.RootCustomerRead}
+	needAdminUpdate        = Pair{billing.MerchantCustomerManage, billing.RootCustomerManage}
+	needCatalog            = Pair{billing.MerchantCatalogManage, billing.RootCatalogManage}
+	needMerchantConfigRead = Pair{billing.MerchantConfigRead, billing.RootConfigRead}
+	needMerchantConfig     = Pair{billing.MerchantConfigManage, billing.RootConfigManage}
+	needMetrics            = Pair{billing.MerchantMetricsRead, billing.RootMetricsRead}
 
 	needEntitlements = Pair{billing.MerchantEntitlementsRead, billing.RootEntitlementsRead}
-	needOffers       = Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}
+	needCatalogRead  = Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}
+	needUsageRead    = Pair{billing.MerchantUsageRead, billing.RootUsageRead}
 	needUsage        = Pair{billing.MerchantUsageManage, billing.RootUsageManage}
 	needEvents       = Pair{billing.MerchantEventsRead, billing.RootEventsRead}
 	needOrders       = Pair{billing.MerchantOrdersManage, billing.RootOrdersManage}
@@ -66,8 +68,14 @@ var (
 func (r Route) Needs() Pair {
 	switch r.Group {
 	case CatalogAdmin:
+		if r.Level == LevelRead {
+			return needCatalogRead
+		}
 		return needCatalog
 	case MerchantConfig:
+		if r.Level == LevelRead {
+			return needMerchantConfigRead
+		}
 		return needMerchantConfig
 	case Metrics:
 		return needMetrics

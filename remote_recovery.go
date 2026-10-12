@@ -84,7 +84,8 @@ func (c *Client) ResumeSubscription(ctx context.Context, id billing.Subscription
 // SetSubscriptionPaymentMethod gives a subscription its own card, another of
 // the customer's saved cards, or with a nil PaymentMethodID makes it follow
 // the customer's default card for its currency, and returns the
-// subscription.
+// subscription. Staff selection preserves the retry schedule and does not
+// resume stopped dunning; it is not an immediate collection request.
 func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	if params.PaymentMethodID != nil && params.PaymentMethodID.IsZero() {
 		return nil, invalidErr("payment_method_id is invalid")

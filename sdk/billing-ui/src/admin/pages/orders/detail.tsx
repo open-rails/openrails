@@ -26,14 +26,12 @@ import {
   DialogFooter,
 } from "#orck/admin/components/ui/dialog"
 import { useCursorPages } from "#orck/admin/lib/cursor-pages"
-import { ApiError } from "#orck/admin/lib/api/client"
 import type { Order, OrderUsage, Payment } from "#orck/client/generated/wire"
 import type { UsageAction } from "#orck/admin/lib/api/order-endpoints"
 
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
 import {
   currencyScale,
-  formatCard,
   formatDate,
   formatNativeAmount,
   shortId,
@@ -344,7 +342,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
 }
 
 function UsageActions({ order }: { order: Order }) {
-  const { toast, usageActionMutation, adminQueries } = useAdminServices()
+  const { toast, usageActionMutation } = useAdminServices()
 
   const { id: adminId } = useAdminUI()
 
@@ -352,17 +350,9 @@ function UsageActions({ order }: { order: Order }) {
   const [action, setAction] = useState<UsageAction | null>(null)
   const [amount, setAmount] = useState("")
   const [reference, setReference] = useState("")
-  const [paymentMethod, setPaymentMethod] = useState("")
-  const [retryKey, setRetryKey] = useState(() => crypto.randomUUID())
   const [error, setError] = useState<string | null>(null)
   const client = useQueryClient()
   const mutation = useMutation(usageActionMutation(client, order.customer_id))
-  // The retry picker offers the customer's saved cards, read on demand.
-  const methods = useQuery(
-    adminQueries.customerPaymentMethods(
-      action === "retry_collection" ? order.customer_id : undefined
-    )
-  )
   const actions = canUpdate ? usageActions(order) : []
   async function submit() {
     if (!action || mutation.isPending) return
@@ -372,8 +362,6 @@ function UsageActions({ order }: { order: Order }) {
         throw new Error(
           "This action is no longer available. Refresh the order before continuing."
         )
-      if (action === "retry_collection" && !paymentMethod)
-        throw new Error("Choose a saved payment method.")
       if (action === "record_payment" && !reference.trim())
         throw new Error("Enter the bank or payment reference.")
       let paid: string | undefined
@@ -388,17 +376,10 @@ function UsageActions({ order }: { order: Order }) {
         action,
         amount: paid,
         reference: reference.trim(),
-        paymentMethodId: paymentMethod,
-        idempotencyKey: retryKey,
       })
       toast(usageResultMessage(result))
-      // A finished collection needs a new key for the next.
-      if (action === "retry_collection") setRetryKey(crypto.randomUUID())
       setAction(null)
     } catch (failure) {
-      // A declined charge is settled; any other failure replays its key.
-      if (failure instanceof ApiError && failure.status === 402)
-        setRetryKey(crypto.randomUUID())
       setError(
         failure instanceof Error ? failure.message : "Order action failed."
       )
@@ -423,7 +404,7 @@ function UsageActions({ order }: { order: Order }) {
         {actions.map((value) => (
           <Button
             key={value}
-            variant={value === "void" ? "destructive" : "outline"}
+            variant={value === "waive_balance" ? "destructive" : "outline"}
             onClick={() => {
               setAction(value)
               setError(null)
@@ -482,46 +463,6 @@ function UsageActions({ order }: { order: Order }) {
                   onChange={(e) => setReference(e.target.value)}
                 />
               </div>
-            </div>
-          )}
-          {action === "retry_collection" && (
-            <div>
-              {methods.error ? (
-                <p role="alert" className="mb-2 text-destructive">
-                  {methods.error.message}
-                </p>
-              ) : (
-                methods.data?.length === 0 && (
-                  <p className="mb-2 text-sm">
-                    <AdminMessage
-                      id={
-                        "No saved payment methods. Add one on the customer page before retrying collection."
-                      }
-                    />
-                  </p>
-                )
-              )}
-              <Label htmlFor={adminId("order-payment-method")}>
-                <AdminMessage id={"Saved payment method"} />
-              </Label>
-              <select
-                id={adminId("order-payment-method")}
-                className="h-9 w-full rounded-md border bg-background px-2"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-              >
-                <option value="">
-                  <AdminMessage id={"Choose a method"} />
-                </option>
-                {(methods.data ?? []).map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {method.card?.last4
-                      ? formatCard(method.card)
-                      : shortId(method.id)}{" "}
-                    ({method.rail})
-                  </option>
-                ))}
-              </select>
             </div>
           )}
           {error && (

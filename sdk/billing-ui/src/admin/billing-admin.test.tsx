@@ -14,8 +14,8 @@ import type { BillingAdminAuth } from "./types"
 
 const access = {
   admin: "read",
-  catalog: false,
-  merchant_config: false,
+  catalog: "none",
+  merchant_config: "none",
   metrics: false,
   scope_id: "same-merchant",
   assistants: {

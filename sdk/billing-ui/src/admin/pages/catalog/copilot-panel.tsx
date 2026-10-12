@@ -61,7 +61,7 @@ export function CatalogCopilotPanel({
       : "ask failed"
     : null
 
-  // Enabling the copilot is an operator setup step (see docs/admin-console.md);
+  // Enabling the copilot is an operator setup step (see docs/billing-admin.md);
   // an unconfigured feature is not page furniture, so render nothing.
   if (!enabled) {
     return null

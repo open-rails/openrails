@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-const testPriceID = "price_11111111-1111-1111-1111-111111111111"
+const testPriceID = "premium:monthly:v1"
 
 // The fingerprint is a durable replay identity: whitespace-insensitive where
 // the executor trims, and a replay under another body conflicts.
@@ -88,6 +88,21 @@ func TestIdempotencyKeyDerivation(t *testing.T) {
 
 	price := uuid.New()
 	require.NotEqual(t, GenerateKeyForSale("u", price), GenerateKeyForSubscription("u", price))
+}
+
+func TestPriceSpellingDoesNotChangeAcceptedCheckoutFingerprint(t *testing.T) {
+	old := CheckoutAttemptCreateRequest{PriceID: "price_11111111-1111-4111-8111-111111111111", Mode: "subscription", Metadata: map[string]string{"source": "checkout"}}
+	current := old
+	current.PriceID = "premium:monthly:v1"
+	current.fingerprintPriceID = old.PriceID
+	require.Equal(t, checkoutAttemptRequestFingerprint(&old), checkoutAttemptRequestFingerprint(&current))
+	require.Equal(t, "premium:monthly:v1", current.PriceID, "normalizing a fingerprint does not change the actual public selector")
+	other := current
+	other.PriceID, other.fingerprintPriceID = "premium:monthly:v2", "price_22222222-2222-4222-8222-222222222222"
+	require.NotEqual(t, checkoutAttemptRequestFingerprint(&current), checkoutAttemptRequestFingerprint(&other))
+	other = current
+	other.Metadata = map[string]string{"source": "changed"}
+	require.NotEqual(t, checkoutAttemptRequestFingerprint(&current), checkoutAttemptRequestFingerprint(&other))
 }
 
 // SAQ A: a card number in any session field is refused loudly. Identifiers

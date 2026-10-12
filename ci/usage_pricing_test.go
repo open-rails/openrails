@@ -23,6 +23,7 @@ import (
 type pricing struct {
 	t       *testing.T
 	ctx     context.Context
+	engine  *openrails.Engine
 	client  *openrails.Client
 	product billing.ProductID
 	started time.Time
@@ -30,10 +31,10 @@ type pricing struct {
 
 func newPricing(t *testing.T, f *fixture, slug string) *pricing {
 	t.Helper()
-	client := f.runtime(t, slug+"-"+uuid.NewString()[:8])
+	engine, client := f.runtimeWithStripe(t, slug+"-"+uuid.NewString()[:8], nil)
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "usage", DisplayName: "Usage"})
 	require.NoError(t, err)
-	return &pricing{t: t, ctx: t.Context(), client: client, product: product.ID, started: time.Now().UTC().Truncate(time.Second)}
+	return &pricing{t: t, ctx: t.Context(), engine: engine, client: client, product: product.ID, started: time.Now().UTC().Truncate(time.Second)}
 }
 
 // meter declares a meter of eventType and its rate card.
@@ -377,7 +378,7 @@ func TestUsageReportGroupsByMeter(t *testing.T) {
 	bill, client := f.runtimeWithStripe(t, "report-"+uuid.NewString()[:8], nil)
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "usage", DisplayName: "Usage"})
 	require.NoError(t, err)
-	p := &pricing{t: t, ctx: t.Context(), client: client, product: product.ID}
+	p := &pricing{t: t, ctx: t.Context(), engine: bill, client: client, product: product.ID}
 	byModel := catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{DivideBy: 1_000_000,
 		Matrix: &catalog.Matrix{Dimension: "model", Cells: map[string]catalog.MatrixCell{"small": {UnitAmount: 1_000_000}, "large": {UnitAmount: 10_000_000}}}}}
 	p.meter("input-tokens", "chat", catalog.AggregationSum, "input_tokens", map[string]string{"model": "metadata.model"}, byModel, nil)

@@ -147,7 +147,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// answered for a corrected one.
 		replay := func(row gen.BillingUsageEvent) error {
 			var rerr error
-			if ev, rerr = usageEventFromGen(row); rerr != nil {
+			if ev, rerr = UsageEventFromRow(row); rerr != nil {
 				return rerr
 			}
 			if ev.Outcome != outcome {
@@ -385,7 +385,7 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 		if gerr != nil {
 			return gerr
 		}
-		ev, gerr = usageEventFromGen(row)
+		ev, gerr = UsageEventFromRow(row)
 		if gerr != nil {
 			return gerr
 		}

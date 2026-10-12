@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -26,17 +27,38 @@ func TestUsageSweepArgsMirrorEngineJob(t *testing.T) {
 	require.Equal(t, QueueBilling, UsageSweepArgs{}.InsertOpts().Queue)
 }
 
-// What only an engine's handle offers refuses a remote handle instead of
-// pretending.
-func TestRemoteHandleRefusesEmbeddedOperations(t *testing.T) {
-	c, err := NewRemoteMerchant("https://billing.example", RemoteCredential{APIKey: "k"})
+// Embedded-only operations cannot appear on a remote Client's method set.
+func TestLocalOperationsAreNotRemoteMethods(t *testing.T) {
+	common := reflect.TypeFor[*Client]()
+	local := reflect.TypeFor[*LocalClient]()
+	for name := range embeddedMethods {
+		_, remoteHas := common.MethodByName(name)
+		require.False(t, remoteHas, name)
+		_, localHas := local.MethodByName(name)
+		require.True(t, localHas, name)
+	}
+	require.Equal(t, common.NumMethod()+len(embeddedMethods), local.NumMethod())
+}
+
+func TestLocalMerchantRequiresAnEngine(t *testing.T) {
+	local, err := (&Engine{}).LocalMerchant(billing.MerchantID{})
+	require.Error(t, err)
+	require.Nil(t, local)
+}
+
+// Constructing a local extension does no I/O and keeps the shared handle and
+// internal tooling bound to the same engine and merchant.
+func TestLocalMerchantPreservesEngineAndMerchant(t *testing.T) {
+	core := &engine.Engine{}
+	bill := &Engine{engine: core}
+	local, err := bill.LocalMerchant(testMerchant)
 	require.NoError(t, err)
-	_, err = c.DeclarePSP(t.Context(), billing.PSPDeclaration{})
-	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.SCIMHandler()
-	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.StartRunningChargeTx(t.Context(), nil, billing.StartRunningChargeParams{})
-	require.ErrorIs(t, err, ErrRemoteClient)
+	require.Equal(t, testMerchant, local.MerchantID())
+	require.Same(t, core, engine.Of(local))
+	require.Same(t, core, engine.Of(local.Client))
+	require.Nil(t, engine.Of(&LocalClient{}))
+	_, err = bill.LocalMerchant(billing.MerchantID{})
+	require.ErrorIs(t, err, billing.ErrInvalid)
 }
 
 // Merchant refuses the zero ID before anything is read.

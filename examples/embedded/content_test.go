@@ -348,9 +348,9 @@ func (a *app) buy(t *testing.T, token, product, price string) {
 	var line map[string]string
 	var total string
 	for _, p := range catalog.Data {
-		for _, offer := range p.Prices {
-			if p.Key == product && offer.Key == price {
-				line, total = map[string]string{"price_id": offer.ID}, offer.UnitAmount
+		for _, priceRow := range p.Prices {
+			if p.Key == product && priceRow.Key == price {
+				line, total = map[string]string{"price_id": priceRow.ID}, priceRow.UnitAmount
 			}
 		}
 	}

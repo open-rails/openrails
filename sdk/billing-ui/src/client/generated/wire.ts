@@ -12,11 +12,12 @@ export type AcknowledgeHostEventsParams = {
 
 export type AdminAccess = {
   admin: "none" | "read" | "update"
-  catalog: boolean
-  merchant_config: boolean
+  catalog: "none" | "read" | "update"
+  merchant_config: "none" | "read" | "update"
   metrics: boolean
   scope_id: string
   assistants: AdminAssistants
+  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:customers:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:metrics:read" | "merchant:orders:manage" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:customers:read" | "root:entitlements:read" | "root:events:read" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:orders:manage" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
 }
 
 export type AdminAssistants = {
@@ -503,13 +504,6 @@ export type CreatePaymentMethodParams = {
   token?: string
   card?: CardEntry
   billing_details?: BillingDetails
-}
-
-export type CreatePaymentParams = {
-  order_id?: string
-  amount?: string
-  transaction_id?: string
-  paid_at?: string
 }
 
 export type CreatePriceMigrationParams = {
@@ -1843,6 +1837,13 @@ export type RateTier = {
   flat_amount?: string
 }
 
+export type RecordExternalPaymentParams = {
+  order_id?: string
+  amount?: string
+  transaction_id?: string
+  paid_at?: string
+}
+
 export type RecordUsageBatchParams = {
   items?: RecordUsageParams[]
 }
@@ -1902,10 +1903,6 @@ export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
-}
-
-export type RetryOrderCollectionParams = {
-  payment_method_id?: string
 }
 
 export type RetrySubscriptionNowParams = {

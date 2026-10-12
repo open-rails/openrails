@@ -143,10 +143,13 @@ function ReadBillingCapability({
       )}
       {children(
         !!data &&
-          (data.admin !== "none" ||
-            data.catalog ||
-            data.merchant_config ||
-            data.metrics),
+          (data.admin === "read" ||
+            data.admin === "update" ||
+            data.catalog === "read" ||
+            data.catalog === "update" ||
+            data.merchant_config === "read" ||
+            data.merchant_config === "update" ||
+            data.metrics === true),
         access.isPending
       )}
     </>

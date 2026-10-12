@@ -16,17 +16,21 @@ export function useAccess(): AdminAccess | undefined {
 // none sees only that they have no access.
 export function hasAnyArea(access: AdminAccess): boolean {
   return (
-    access.admin !== "none" ||
-    access.catalog ||
-    access.merchant_config ||
-    access.metrics
+    access.admin === "read" ||
+    access.admin === "update" ||
+    access.catalog === "read" ||
+    access.catalog === "update" ||
+    access.merchant_config === "read" ||
+    access.merchant_config === "update" ||
+    access.metrics === true
   )
 }
 
 // useAdminArea reports customer support: customers, subscriptions, payments,
 // and orders.
 export function useAdminArea(): boolean {
-  return (useAccess()?.admin ?? "none") !== "none"
+  const level = useAccess()?.admin
+  return level === "read" || level === "update"
 }
 
 // useAdminUpdates reports whether the caller may change customers' billing;
@@ -37,7 +41,8 @@ export function useAdminUpdates(): boolean {
 
 // useCatalogArea reports the catalog area: its reads and its edits.
 export function useCatalogArea(): boolean {
-  return useAccess()?.catalog ?? false
+  const level = useAccess()?.catalog
+  return level === "read" || level === "update"
 }
 
 // useMerchantConfigEdits reports whether that configuration can change here:
@@ -47,32 +52,42 @@ export function useMerchantConfigEdits(): boolean {
   const { adminQueries } = useAdminServices()
 
   const { data } = useQuery(adminQueries.config())
-  return data?.capabilities.features?.merchant_config_edits ?? false
+  const updates = useMerchantConfigUpdates()
+  return (
+    updates && (data?.capabilities.features?.merchant_config_edits ?? false)
+  )
 }
 
 // useCatalogWrites reports whether the caller may edit the catalog: the
 // catalog area is theirs.
 export function useCatalogWrites(): boolean {
-  return useCatalogArea()
+  return useAccess()?.catalog === "update"
 }
 
 // useMerchantConfig reports the merchant's own configuration: PSPs, settings,
 // findings and notifications.
 export function useMerchantConfig(): boolean {
-  return useAccess()?.merchant_config ?? false
+  const level = useAccess()?.merchant_config
+  return level === "read" || level === "update"
+}
+
+// useMerchantConfigUpdates reports authority to change merchant configuration,
+// including operational actions that do not edit its source document.
+export function useMerchantConfigUpdates(): boolean {
+  return useAccess()?.merchant_config === "update"
 }
 
 // useMetrics reports business metrics: the dashboard, its widgets, the Ops
 // gauges.
 export function useMetrics(): boolean {
-  return useAccess()?.metrics ?? false
+  return useAccess()?.metrics === true
 }
 
 // useDashboardLayout reports whether the caller may edit the dashboard's
 // layout: it shows metrics and is the merchant's configuration.
 export function useDashboardLayout(): boolean {
   const access = useAccess()
-  return (access?.metrics && access.merchant_config) ?? false
+  return access?.metrics === true && access.merchant_config === "update"
 }
 
 // configTabs are the settings tabs that are the merchant's configuration.
@@ -84,8 +99,7 @@ const adminTabs = ["customer-controls"]
 // settingsTab is the settings tab shown for the requested one: the first tab
 // when none is requested, the requested one is not shown, or the tabs are not
 // the caller's: the configuration tabs need MerchantConfig, customer controls
-// customer support. others are the rest shown: Roles and the host
-// extensions' tabs.
+// customer support. others are the host's additional settings tabs.
 export function settingsTab(
   requested: string | null,
   config: boolean,

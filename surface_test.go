@@ -22,9 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
-// The Go client is the admin API: every merchant route has exactly one
-// Client method and every Client method is exactly one merchant route. The
-// two lists below are every exception, each with its reason.
+// The Go client covers merchant operations: every regular merchant route
+// has exactly one Client method and each method one route. Optional console
+// assistance explicitly declares ConsoleOnly; the lists below name local
+// helpers and embedded-only operations with their reasons.
 
 // handleMethods say what a handle is or ask the token endpoint, which is no
 // merchant route.
@@ -45,6 +46,7 @@ var engineMethods = map[string]string{
 	"Routes":         "the HTTP surface the host mounts",
 	"RiverJobs":      "the jobs a host-owned River fleet runs",
 	"Merchant":       "a merchant's handle",
+	"LocalMerchant":  "an embedded extension of a merchant's handle",
 	"MerchantBySlug": "the handle of a merchant Config declares",
 }
 
@@ -55,7 +57,7 @@ var remoteMethods = map[string]string{
 	"Merchant": "a merchant's handle",
 }
 
-// embeddedMethods are operations only an in-process engine offers. Each one
+// embeddedMethods are operations only LocalClient offers. Each one
 // serves a hosted product or runs inside a transaction of the host's, so no
 // merchant route can carry it; the reason names the host that calls it. The
 // control plane's cross-merchant operations are package server's.
@@ -76,9 +78,9 @@ var routeArguments = map[string][]any{
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
-	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID(uuid.New()), ToPriceID: billing.PriceID(uuid.New())}},
+	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1"), ToPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1")}},
 	"PreviewPriceMigration": {billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: "monthly"}},
-	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
+	"UpdatePrice":           {billing.PriceID("test:" + uuid.NewString() + ":v1"), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
 	"UpdateProduct":         {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
 	"UpdateAlertWebhook":    {billing.AlertWebhookID(uuid.New()), billing.UpdateAlertWebhookParams{Enabled: catalog.Value(true)}},
 	"UpdateCustomer":        {billing.CustomerID(uuid.New()), billing.UpdateCustomerParams{BillingPolicy: catalog.Null[string]()}},
@@ -103,6 +105,9 @@ var synonyms = []string{"Retrieve", "Fetch", "Read", "Find", "Lookup", "Search",
 // fill sets v so that a method's own checks pass: every field set.
 func fill(v reflect.Value, depth int) {
 	switch v.Interface().(type) {
+	case billing.PriceID:
+		v.Set(reflect.ValueOf(billing.PriceID("test:price:v1")))
+		return
 	case time.Time:
 		v.Set(reflect.ValueOf(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 		return
@@ -238,14 +243,6 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			continue
 		}
 		seen, err := p.call(p.client, m)
-		if _, ok := embeddedMethods[m.Name]; ok {
-			// An embedded-only method refuses a remote client.
-			require.Empty(t, seen, "%s is listed as embedded-only and calls a route", m.Name)
-			if m.Type.NumOut() > 0 && m.Type.Out(m.Type.NumOut()-1) == reflect.TypeFor[error]() {
-				require.ErrorIs(t, err, ErrRemoteClient, m.Name)
-			}
-			continue
-		}
 		if len(seen) != 1 {
 			t.Errorf("%s must call exactly one route, not %v (error: %v); otherwise list it with its reason", m.Name, seen, err)
 			continue
@@ -288,7 +285,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 		require.True(t, names[name], "handleMethods lists %s, which Client does not have", name)
 	}
 	for name := range embeddedMethods {
-		require.True(t, names[name], "embeddedMethods lists %s, which Client does not have", name)
+		require.False(t, names[name], "embeddedMethods lists %s, which must not be on Client", name)
 	}
 
 	for _, r := range routes.Catalog() {

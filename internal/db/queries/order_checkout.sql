@@ -54,3 +54,12 @@ JOIN billing.merchants m ON m.id = o.merchant_id
 WHERE o.id = sqlc.arg(id)::uuid
   AND m.deleted_at IS NULL AND m.status = 'active'
 LIMIT 2;
+
+-- name: SaveOrderCheckoutReceipt :exec
+-- The creation retry recovers only this capability, never a cached order.
+-- It commits with the order and its hash, and lives no longer than the checkout.
+INSERT INTO billing.idempotency_keys
+    (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
+VALUES (sqlc.arg(merchant_id)::uuid, 'hosted_checkout_creation', sqlc.arg(order_id)::uuid::text,
+    'succeeded', sqlc.arg(order_id)::uuid, jsonb_build_object('secret', sqlc.arg(secret)::text),
+    sqlc.arg(now)::timestamptz, sqlc.arg(expires_at)::timestamptz);

@@ -7,6 +7,12 @@ content, nonempty destinations and failed references roll the transaction back.
 Callers must discard any partial export on error. These functions own their
 transactions and expect an unbound application-role database handle.
 
+Historical archives without price revisions reconstruct them in `(created_at,
+id)` order within each merchant/product/price key, matching the original
+revision migration. Version 1 price rows stage in a transaction-local PostgreSQL
+table so streaming stays bounded in Go memory. Explicit revisions survive
+unchanged, and public price IDs are derived after the revision is known.
+
 `internal/archivewire` owns bounded framing and footer verification shared with
 the Client. The engine-owned `contract` package applies table order, row widths
 and stored-value rules; the remote Client does not link these billing contracts.
@@ -123,8 +129,8 @@ The destination must be empty, including its catalog. Creating a product before
 restore produces the ordinary `not_empty` refusal; the importer never rewrites
 incoming product IDs.
 
-Archive format v1 is the only supported format and includes application metadata
-in the current positional row profiles. There are no legacy readers or converters.
-Artifacts from discarded draft formats must be exported again using the current
-library. Catalog revision and application receipts remain in the hashed snapshot,
+Exports use archive format v2; imports accept v1 and v2, including application
+metadata and supported historical positional row profiles. Unsupported draft
+formats must be exported again using the current library. Catalog revision and
+application receipts remain in the hashed snapshot,
 and replaying a completed restore cannot reset a later revision.

@@ -87,16 +87,6 @@ type ProductListParams struct {
 	ForSale      *bool
 }
 
-// OfferListParams asks what a customer may buy: the products on sale granting
-// any of Entitlements, or named by Keys, or both when both are given (at
-// least one is required, each at most MaxBatchItems), each with its live
-// prices. It is the host backend's read; the public catalog takes keys only.
-type OfferListParams struct {
-	PageRequest
-	Entitlements []string
-	Keys         []string
-}
-
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
 // AccessDurationHours of access (null: no scheduled expiry). BillingIntervalHours
 // separately sets its recurring cadence (null: one-time charge).
@@ -115,7 +105,8 @@ type Price struct {
 	// of the key or its PSP links. An edit may send it back as
 	// expected_revision.
 	Revision int64 `json:"revision"`
-	// Version numbers this price's terms within its key, from zero.
+	// Version numbers this price's immutable terms within its key, from one.
+	// It is the v1 suffix in ID; restoring archived terms keeps that version.
 	Version              int64                   `json:"version"`
 	ID                   PriceID                 `json:"id"`
 	Key                  string                  `json:"key"`

@@ -61,7 +61,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
 | `hosted_checkout_unavailable` | 400 | `invalid_request_error` | This deployment serves no hosted checkout, or the order cannot take one. |
-| `idempotency_key_in_progress` | 409 | `invalid_request_error` | A request with this Idempotency-Key is still running; retry it later. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |
 | `idempotency_key_reused` | 422 | `invalid_request_error` | The idempotency key already committed with different terms. |
@@ -79,6 +78,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
+| `merchant_mismatch` | 412 | `invalid_request_error` | The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed. |
 | `merchant_unresolved` | 403 | `authorization_error` | The credential is bound to no merchant here. |
 | `meter_in_use` | 409 | `invalid_request_error` | The meter is referenced and cannot change this way. |
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |

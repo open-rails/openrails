@@ -196,7 +196,10 @@ func (s *Service) pruneCatalogObjects(ctx context.Context, objects []catalogObje
 		case billing.CatalogObjectPrice:
 			var deleted bool
 			if deleted, err = s.deletePriceKey(ctx, state.productID, obj.priceKey); err == nil && !deleted && !archived {
-				_, err = s.DeactivatePrice(ctx, billing.PriceID(state.priceID))
+				var id billing.PriceID
+				if id, err = s.catalogDatabase().PriceReference(ctx, state.priceID); err == nil {
+					_, err = s.DeactivatePrice(ctx, id)
+				}
 			}
 		}
 		if err != nil {

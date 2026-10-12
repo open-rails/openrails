@@ -128,7 +128,7 @@ test("the membership unlocks members-only videos and every course", async ({ pag
   await page.goto("/courses/live-qa")
   await expect(page).toHaveURL("/courses/live-qa/buy")
   await expect(page.getByRole("heading", { name: "Channel membership" })).toBeVisible()
-  await expect(page.getByTestId("offer")).toHaveCount(1)
+  await expect(page.getByTestId("product")).toHaveCount(1)
   await expect(button(page, "$99.00 every 365 days")).toBeVisible()
   await signIn(page, button(page, "$10.00 every 30 days"), carol)
   await pay(page, button(page, "$10.00 every 30 days"), /^Pay \$10\.00/)

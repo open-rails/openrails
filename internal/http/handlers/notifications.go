@@ -1,13 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -44,7 +45,7 @@ func GetNotifications(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	notes, err := customerNotificationPage(page, func(afterAt *time.Time, afterID *uuid.UUID, fetch int32) ([]gen.BillingNotification, error) {
+	notes, err := customerNotificationPage(ctx, r.State.DB.Gen(ctx), page, func(afterAt *time.Time, afterID *uuid.UUID, fetch int32) ([]gen.BillingNotification, error) {
 		return r.State.DB.Gen(ctx).ListCustomerNotifications(ctx, gen.ListCustomerNotificationsParams{
 			MerchantID: merchantID, CustomerID: customerID, Seen: query.Seen, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
@@ -99,7 +100,7 @@ func MarkMyNotificationsRead(r *httprequest.Request) {
 		out.Notifications[id] = nil
 	}
 	for _, row := range rows {
-		n, err := models.NotificationFromGen(row)
+		n, err := db.NotificationFromGen(ctx, r.State.DB.Gen(ctx), row)
 		if err != nil {
 			r.InternalError("decode notification failed", err)
 			return
@@ -111,7 +112,7 @@ func MarkMyNotificationsRead(r *httprequest.Request) {
 }
 
 // customerNotificationPage runs a keyset notification query for one page.
-func customerNotificationPage(page billing.PageRequest, fetch func(*time.Time, *uuid.UUID, int32) ([]gen.BillingNotification, error)) (billing.ListPage[billing.Notification], error) {
+func customerNotificationPage(ctx context.Context, q *gen.Queries, page billing.PageRequest, fetch func(*time.Time, *uuid.UUID, int32) ([]gen.BillingNotification, error)) (billing.ListPage[billing.Notification], error) {
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return billing.ListPage[billing.Notification]{}, err
@@ -127,7 +128,7 @@ func customerNotificationPage(page billing.PageRequest, fetch func(*time.Time, *
 	cut := pagination.Cut(rows, limit, func(n gen.BillingNotification) any { return pagination.TimeID{At: n.CreatedAt, ID: n.ID} })
 	out := billing.ListPage[billing.Notification]{Next: cut.Next, Items: make([]billing.Notification, 0, len(cut.Items))}
 	for _, row := range cut.Items {
-		n, err := models.NotificationFromGen(row)
+		n, err := db.NotificationFromGen(ctx, q, row)
 		if err != nil {
 			return billing.ListPage[billing.Notification]{}, err
 		}

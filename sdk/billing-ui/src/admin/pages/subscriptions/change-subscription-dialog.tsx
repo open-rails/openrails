@@ -204,9 +204,7 @@ function ChangeSubscriptionForm({
           </DialogTitle>
           <DialogDescription>
             <AdminMessage
-              id={
-                "Change at the customer&apos;s request, as their own change would: an upgrade or more seats is charged to their card now; a downgrade or fewer seats waits for the next renewal. The customer is told."
-              }
+              id={"Schedule the customer's plan or seats for the next renewal. No card is charged now. Choosing the current plan and seats clears a pending change. The customer is told."}
             />
           </DialogDescription>
         </DialogHeader>
@@ -293,7 +291,7 @@ function ChangeSubscriptionForm({
               onChange={(event) => setReason(event.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              <AdminMessage id={"Kept with the change and any charge."} />
+              <AdminMessage id={"Kept with the scheduled change."} />
             </p>
           </div>
 

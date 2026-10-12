@@ -60,7 +60,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			if partial {
 				amount = 40_000_000
 			}
-			params := billing.CreatePaymentParams{OrderID: first.ID, Amount: amount, TransactionID: "bank-remittance"}
+			params := billing.RecordExternalPaymentParams{OrderID: first.ID, Amount: amount, TransactionID: "bank-remittance"}
 			type result struct {
 				payment *billing.Payment
 				err     error
@@ -68,7 +68,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			results := make(chan result, 2)
 			for range 2 {
 				go func() {
-					payment, err := client.CreatePayment(ctx, params)
+					payment, err := client.RecordExternalPayment(ctx, params)
 					results <- result{payment, err}
 				}()
 			}
@@ -85,25 +85,25 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, owed-amount, paid.Usage.AmountDue)
 			for range 2 {
-				replay, err := client.CreatePayment(ctx, params)
+				replay, err := client.RecordExternalPayment(ctx, params)
 				require.NoError(t, err, "replay survives reduced amount_due and paid status")
 				require.Equal(t, receipt.ID, replay.ID)
 			}
 			changed := params
 			changed.Amount++
-			_, err = client.CreatePayment(ctx, changed)
+			_, err = client.RecordExternalPayment(ctx, changed)
 			requirePaymentRefusal(t, err, 422, billing.CodeIdempotencyKeyReused)
 			if partial {
-				_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: first.ID, Amount: owed - amount, TransactionID: "remainder"})
+				_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: first.ID, Amount: owed - amount, TransactionID: "remainder"})
 				require.NoError(t, err)
-				replay, err := client.CreatePayment(ctx, params)
+				replay, err := client.RecordExternalPayment(ctx, params)
 				require.NoError(t, err)
 				require.Equal(t, receipt.ID, replay.ID, "an older partial payment answers on the fully paid invoice")
 				paid, err = client.GetOrder(ctx, first.ID)
 				require.NoError(t, err)
 			}
 			require.Equal(t, billing.OrderComplete, paid.Status)
-			_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: first.ID, Amount: 1, TransactionID: "new-payment-after-paid"})
+			_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: first.ID, Amount: 1, TransactionID: "new-payment-after-paid"})
 			requirePaymentRefusal(t, err, 409, billing.CodeOrderActionNotAllowed)
 			payments, err := client.ListPayments(ctx, billing.PaymentListParams{OrderID: first.ID})
 			require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			next := invoice()
 			other := params
 			other.OrderID = next.ID
-			_, err = client.CreatePayment(ctx, other)
+			_, err = client.RecordExternalPayment(ctx, other)
 			requirePaymentRefusal(t, err, 422, billing.CodeIdempotencyKeyReused)
 			nextAfter, err := client.GetOrder(ctx, next.ID)
 			require.NoError(t, err)
@@ -130,13 +130,13 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			revoked, err := openrails.NewRemoteMerchant(w.server.URL+mountPrefix, openrails.RemoteCredential{Token: func(context.Context) (string, error) { return token, nil }})
 			require.NoError(t, err)
 			w.auth.revoked.Store(sid, struct{}{})
-			_, err = revoked.CreatePayment(ctx, params)
+			_, err = revoked.RecordExternalPayment(ctx, params)
 			var refusal *billing.StatusError
 			require.ErrorAs(t, err, &refusal)
 			require.Equal(t, 401, refusal.Status)
 			stranger, err := w.rt.Merchant(billing.MerchantID(uuid.New()))
 			require.NoError(t, err)
-			_, err = stranger.CreatePayment(ctx, params)
+			_, err = stranger.RecordExternalPayment(ctx, params)
 			require.Error(t, err, "the original invoice is not accessible in another book")
 			// Ledger counts and sums prove no replay/mismatch moved money again.
 			var transfers int

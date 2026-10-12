@@ -147,7 +147,7 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 		}
 		if _, err = d.Gen(ctx).LockPurchasableCheckoutPrice(ctx, gen.LockPurchasableCheckoutPriceParams{MerchantID: mid.UUID(), PriceID: *session.PriceID}); err != nil {
 			if db.IsNotFound(err) {
-				return fmt.Errorf("%w: offer is no longer available", ErrCheckoutAttemptValidation)
+				return fmt.Errorf("%w: price is no longer available", ErrCheckoutAttemptValidation)
 			}
 			return err
 		}

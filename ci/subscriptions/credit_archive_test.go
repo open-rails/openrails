@@ -93,7 +93,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 			table = record.Table
 			return writer.Table(table)
 		}
-		if table == "prices" && record.Values[2] != nil && *record.Values[2] == selected.ID.UUID().String() {
+		if table == "prices" && record.Values[2] != nil && *record.Values[2] == w.priceStorageID(selected.ID).String() {
 			record.Values[len(record.Values)-1] = new(`{"min_amount":"1000000","max_amount":"2000000"}`)
 		}
 		return writer.Row(record.Values)

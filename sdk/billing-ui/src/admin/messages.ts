@@ -123,8 +123,8 @@ export const billingAdminMessages = {
   "Catalog updates are unavailable. You can still browse products and prices.":
     "Catalog updates are unavailable. You can still browse products and prices.",
   "Category / reason": "Category / reason",
-  "Change at the customer&apos;s request, as their own change would: an upgrade or more seats is charged to their card now; a downgrade or fewer seats waits for the next renewal. The customer is told.":
-    "Change at the customer&apos;s request, as their own change would: an upgrade or more seats is charged to their card now; a downgrade or fewer seats waits for the next renewal. The customer is told.",
+  "Schedule the customer's plan or seats for the next renewal. No card is charged now. Choosing the current plan and seats clears a pending change. The customer is told.":
+    "Schedule the customer's plan or seats for the next renewal. No card is charged now. Choosing the current plan and seats clears a pending change. The customer is told.",
   "Change payment method": "Change payment method",
   "Change price": "Change price",
   "Change price for ": "Change price for ",
@@ -286,8 +286,7 @@ export const billingAdminMessages = {
     "Invoice profile saved. Billed orders were not changed.",
   "Keep it": "Keep it",
   "Keep its own range": "Keep its own range",
-  "Kept with the change and any charge.":
-    "Kept with the change and any charge.",
+  "Kept with the scheduled change.": "Kept with the scheduled change.",
   Key: "Key",
   Kind: "Kind",
   "Kind / reason": "Kind / reason",

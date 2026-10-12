@@ -108,7 +108,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		Auth:           s.Auth,
 		ProviderRoutes: &providerRoutes,
 	})
-	if httproutes.StaffGroups(opts.Groups) {
+	if httproutes.StaffGroups(opts.Groups) || opts.Groups.Programmatic {
 		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			AdminLimiter: s.AdminLimiter,

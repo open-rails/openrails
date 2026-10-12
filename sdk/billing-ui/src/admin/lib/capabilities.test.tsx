@@ -58,8 +58,15 @@ function EditsProbe() {
 }
 
 // configured mounts the public configuration with features.
-const configured = (features: Record<string, boolean> | null) => {
+const configured = (
+  features: Record<string, boolean> | null,
+  level: AdminAccess["merchant_config"] = "update"
+) => {
   const queries = client()
+  queries.setQueryData(adminQueries.access().queryKey, {
+    ...none,
+    merchant_config: level,
+  })
   if (features)
     queries.setQueryData(adminQueries.config().queryKey, {
       capabilities: { route_groups: { merchant_config: true }, features },
@@ -73,14 +80,15 @@ const configured = (features: Record<string, boolean> | null) => {
 
 const none: AdminAccess = {
   admin: "none",
-  catalog: false,
-  merchant_config: false,
+  catalog: "none",
+  merchant_config: "none",
   metrics: false,
   scope_id: "",
   assistants: {
     catalog_copilot: false,
     catalog_drafting: false,
   },
+  application_permissions: [],
 }
 
 describe("the console's areas", () => {
@@ -91,12 +99,16 @@ describe("the console's areas", () => {
     expect(holding({ ...none, admin: "update" })).toContain(
       ">admin,admin-updates<"
     )
-    expect(holding({ ...none, catalog: true })).toContain(
+    expect(holding({ ...none, catalog: "read" })).toContain(">catalog<")
+    expect(
+      holding({ ...none, merchant_config: "read", metrics: true })
+    ).toContain(">config,metrics<")
+    expect(holding({ ...none, catalog: "update" })).toContain(
       ">catalog,catalog-edits<"
     )
     expect(holding({ ...none, metrics: true })).toContain(">metrics<")
     expect(
-      holding({ ...none, merchant_config: true, metrics: true })
+      holding({ ...none, merchant_config: "update", metrics: true })
     ).toContain(">config,metrics,layout<")
   })
 
@@ -105,8 +117,35 @@ describe("the console's areas", () => {
     expect(hasAnyArea({ ...none, metrics: true })).toBe(true)
   })
 
+  it("does not infer access from missing or unknown levels", () => {
+    for (const access of [
+      {},
+      {
+        ...none,
+        admin: undefined,
+        catalog: undefined,
+        merchant_config: undefined,
+      },
+      {
+        ...none,
+        admin: "unknown",
+        catalog: "unknown",
+        merchant_config: "unknown",
+      },
+    ]) {
+      expect(hasAnyArea(access as AdminAccess)).toBe(false)
+      expect(holding(access as AdminAccess)).toContain("<span></span>")
+    }
+    for (const area of ["admin", "catalog", "merchant_config"] as const)
+      for (const level of ["read", "update"] as const)
+        expect(hasAnyArea({ ...none, [area]: level })).toBe(true)
+  })
+
   it("offer configuration edits only where the configuration is editable", () => {
     expect(configured({ merchant_config_edits: true })).toContain(">edits<")
+    expect(configured({ merchant_config_edits: true }, "read")).toContain(
+      "read-only"
+    )
     expect(configured({ merchant_config_edits: false })).toContain("read-only")
     expect(configured({})).toContain("read-only")
     expect(configured(null)).toContain("read-only")

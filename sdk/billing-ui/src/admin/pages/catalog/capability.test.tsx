@@ -37,8 +37,8 @@ it("offers creation only to a caller holding the catalog", async () => {
   const requests = await server({
     "GET /admin/access": () => ({
       admin: "none",
-      catalog: enabled,
-      merchant_config: false,
+      catalog: enabled ? "update" : "read",
+      merchant_config: "none",
       metrics: false,
     }),
     "GET /catalog/products": { data: [], next_cursor: null },

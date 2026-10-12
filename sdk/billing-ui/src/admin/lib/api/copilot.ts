@@ -16,7 +16,7 @@ export function createCopilot(client: AdminClient) {
 
   // askCatalog is not mounted unless the deployment enables the assistant.
   const askCatalog = (question: string) =>
-    api<CatalogAnswer>("/catalog/ask", {
+    api<CatalogAnswer>("/console/catalog/ask", {
       method: "POST",
       body: { question } satisfies AskCatalogParams,
     })

@@ -92,8 +92,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 	if err != nil || typedNewPriceID.IsZero() {
 		return nil, api.Coded(billing.CodeInvalidParam, "invalid price_id").WithParam("price_id")
 	}
-	newPriceID := typedNewPriceID.UUID()
-	newPrice, err := r.State.PriceService.GetByID(r.Request.Context(), newPriceID)
+	newPrice, err := r.State.PriceService.GetByPublicID(r.Request.Context(), typedNewPriceID)
 	if err != nil || newPrice == nil {
 		return nil, api.Coded(codePriceNotFound, "target price not found")
 	}
@@ -239,13 +238,18 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 			r.APIError(api.Coded(billing.CodeInvalidParam, "invalid price_id").WithParam("price_id"))
 			return
 		}
-		result, err := recurring.ReplayTierChange(oldSub, target.UUID(), signature)
+		targetPrice, err := r.State.PriceService.GetByPublicID(r.Request.Context(), target)
+		if err != nil {
+			writeChangeTierError(r, err)
+			return
+		}
+		result, err := recurring.ReplayTierChange(oldSub, targetPrice.ID, signature)
 		if err != nil {
 			r.APIError(solanaClientError(err))
 			return
 		}
 		if result != nil {
-			r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+			r.SuccessJSON(solanaTierChangeResponse(result.Receipt, target))
 			return
 		}
 	}
@@ -262,7 +266,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 	}
 	out := billing.SubscriptionChange{
 		Effective:        "period_end",
-		PriceID:          billing.PriceID(resolved.newPrice.ID),
+		PriceID:          resolved.newPrice.PublicID,
 		Rail:             string(models.RailSolana),
 		Currency:         resolved.newPrice.Currency,
 		NextChargeAmount: resolved.newPrice.Amount,
@@ -364,13 +368,13 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.APIError(solanaClientError(err))
 		return
 	}
-	r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+	r.SuccessJSON(solanaTierChangeResponse(result.Receipt, resolved.newPrice.PublicID))
 }
 
-func solanaTierChangeResponse(receipt *models.SolanaTierChangeReceipt) billing.SubscriptionChange {
+func solanaTierChangeResponse(receipt *models.SolanaTierChangeReceipt, priceID billing.PriceID) billing.SubscriptionChange {
 	id := billing.SubscriptionID(receipt.SubscriptionID)
 	out := billing.SubscriptionChange{
-		Status: "succeeded", Effective: "period_end", PriceID: billing.PriceID(receipt.PriceID),
+		Status: "succeeded", Effective: "period_end", PriceID: priceID,
 		Rail: string(models.RailSolana), SubscriptionID: &id, Currency: receipt.Currency,
 		AmountDueNow: receipt.AmountDueNow, NextChargeAmount: receipt.NextChargeAmount,
 		NextChargeDate: &receipt.NextChargeDate,

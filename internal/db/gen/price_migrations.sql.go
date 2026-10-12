@@ -88,8 +88,10 @@ func (q *Queries) CreatePriceMigration(ctx context.Context, arg CreatePriceMigra
 }
 
 const getPriceMigration = `-- name: GetPriceMigration :one
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
@@ -109,6 +111,8 @@ type GetPriceMigrationParams struct {
 
 type GetPriceMigrationRow struct {
 	BillingPriceMigration BillingPriceMigration
+	FromPricePublicID     *string
+	ToPricePublicID       string
 	ProductKey            *string
 	Scheduled             int64
 	Applied               int64
@@ -132,6 +136,8 @@ func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationPa
 		&i.BillingPriceMigration.SubscriptionsSkipped,
 		&i.BillingPriceMigration.CreatedAt,
 		&i.BillingPriceMigration.CanceledAt,
+		&i.FromPricePublicID,
+		&i.ToPricePublicID,
 		&i.ProductKey,
 		&i.Scheduled,
 		&i.Applied,
@@ -142,8 +148,10 @@ func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationPa
 }
 
 const listPriceMigrationsByIDs = `-- name: ListPriceMigrationsByIDs :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
@@ -164,6 +172,8 @@ type ListPriceMigrationsByIDsParams struct {
 
 type ListPriceMigrationsByIDsRow struct {
 	BillingPriceMigration BillingPriceMigration
+	FromPricePublicID     *string
+	ToPricePublicID       string
 	ProductKey            *string
 	Scheduled             int64
 	Applied               int64
@@ -193,6 +203,8 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 			&i.BillingPriceMigration.SubscriptionsSkipped,
 			&i.BillingPriceMigration.CreatedAt,
 			&i.BillingPriceMigration.CanceledAt,
+			&i.FromPricePublicID,
+			&i.ToPricePublicID,
 			&i.ProductKey,
 			&i.Scheduled,
 			&i.Applied,
@@ -210,8 +222,10 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 }
 
 const listPriceMigrationsPage = `-- name: ListPriceMigrationsPage :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
@@ -239,6 +253,8 @@ type ListPriceMigrationsPageParams struct {
 
 type ListPriceMigrationsPageRow struct {
 	BillingPriceMigration BillingPriceMigration
+	FromPricePublicID     *string
+	ToPricePublicID       string
 	ProductKey            *string
 	Scheduled             int64
 	Applied               int64
@@ -275,6 +291,8 @@ func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigr
 			&i.BillingPriceMigration.SubscriptionsSkipped,
 			&i.BillingPriceMigration.CreatedAt,
 			&i.BillingPriceMigration.CanceledAt,
+			&i.FromPricePublicID,
+			&i.ToPricePublicID,
 			&i.ProductKey,
 			&i.Scheduled,
 			&i.Applied,

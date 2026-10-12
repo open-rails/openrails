@@ -400,8 +400,8 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 // finalize points the local subscription at the new payment method (its own
 // card, or none to follow the default) — only ever called AFTER the provider
 // side is confirmed. Idempotent; a subscription row gone out-of-band leaves
-// nothing to finalize. A subscription waiting for a new card resumes dunning
-// on it. Its recurring mandate moves with it, citing the new card's recurring
+// nothing to finalize. Customer-origin swaps may resume dunning; staff swaps
+// preserve it. The recurring mandate moves with it, citing the new card's recurring
 // lineage, else the verification the swap carries.
 func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.BillingProviderIntent, p NMIPaymentSourceUpdatePayload) error {
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -434,8 +434,12 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 		if p.Follow {
 			sub.PaymentMethodID = nil
 		}
-		if err := subscriptions.ReplaceMethod(sub, now); err != nil {
-			return err
+		// The durable origin survives retries and delayed finalization. Staff
+		// can select the future instrument, never advance its dunning clock.
+		if intent.Origin != string(OriginAdmin) {
+			if err := subscriptions.ReplaceMethod(sub, now); err != nil {
+				return err
+			}
 		}
 		return repo.UpdateAt(ctx, sub, now)
 	})

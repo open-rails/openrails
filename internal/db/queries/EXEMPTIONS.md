@@ -14,6 +14,29 @@ Every allowlist entry is classified **PERMANENT** (bounded by design) or
 mandatory rationale, and is rejected if duplicated. An entry that stops tripping
 fails the build as stale — fixing a query deletes its line.
 
+### Immutable price identity lookup
+
+`LookupPriceStorageID` has one `unindexed-filter` exemption. Its lookup is
+`merchant_id = $1 AND sha256(public_id::bytea) = sha256($2::bytea)`, served by
+`prices_public_id_idx`. It also requires exact `public_id = $2` equality;
+the hash is an index accelerator, never identity or authorization. The
+fixed-width expression index supports existing keys whose percent-encoded IDs
+exceed PostgreSQL's btree text-entry size. No new key-length limit is imposed.
+
+The audit's column catalog does not represent expression-index coverage, and
+an empty-table generic plan can choose another merchant index. PostgreSQL 18
+with 5,000 prices uses `prices_public_id_idx` for the lookup, checks the exact
+string as its residual filter, and returns one row with three shared-buffer
+hits (`EXPLAIN (ANALYZE, BUFFERS)`). One immutable product/key/version tuple
+identifies at most one price in a merchant. The API route accepts one ID.
+
+Batch identity lookup has no exemption: `ListPriceStorageIDs` explicitly
+limits results to `COALESCE(cardinality(ids), 0)`. Duplicate or unknown IDs
+cannot expand that bound; NULL and empty batches return no rows. Public batch
+lookup and order creation each accept at most 100 IDs (`MaxBatchItems` and
+`MaxOrderLines`). Historical references remain resolvable, while ordinary
+catalog loaders apply visibility after identity resolution.
+
 ## How the query auditor works
 
 `sqlc vet` PREPAREs each query, which proves it is valid SQL and nothing more.

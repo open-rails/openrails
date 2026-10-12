@@ -181,6 +181,16 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		var previousDigest *string
 		var previousRows *int64
 		var restoredCatalogRevision int64
+		var stageLegacyPrices bool
+		var stagedPrices *contract.Profile
+		flushPrices := func() error {
+			if stagedPrices == nil {
+				return nil
+			}
+			_, err := tx.Exec(ctx, restoreLegacyPricesQuery(*stagedPrices), id.UUID())
+			stagedPrices = nil
+			return err
+		}
 		info, err := contract.Read(in, func(h archivewire.Header) error {
 			if h.MerchantID != id.String() {
 				return &Error{Code: "merchant_mismatch"}
@@ -193,6 +203,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				if _, err := tx.Exec(ctx, legacyEntitlementsDDL); err != nil {
 					return err
 				}
+				if _, err := tx.Exec(ctx, legacyPricesDDL); err != nil {
+					return err
+				}
+				stageLegacyPrices = true
 			}
 			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
 			if err != nil {
@@ -208,6 +222,13 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if previousDigest != nil {
 				return nil
 			}
+			// Prices precede every row that references them. Finish their
+			// chronological numbering before admitting the next table's rows.
+			if p.Name != "prices" {
+				if err := flushPrices(); err != nil {
+					return err
+				}
+			}
 			args := make([]any, len(values), len(values)+1)
 			for i, v := range values {
 				if v != nil {
@@ -218,6 +239,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				args = append(args, dropBefore(restoreNow))
 			}
 			target := "billing." + p.Name
+			if stageLegacyPrices && p.Name == "prices" {
+				target = legacyPricesTable
+				stagedPrices = &p
+			}
 			if p.Name == contract.LegacyEntitlements.Name {
 				target = legacyEntitlementsTable
 			}
@@ -231,6 +256,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				return err
 			}
 			return &Error{Code: "invalid_artifact", Err: err}
+		}
+		if err := flushPrices(); err != nil {
+			return err
 		}
 		result = Result{MerchantID: info.MerchantID, Digest: info.Digest, Rows: info.Rows, Replayed: previousDigest != nil}
 		if previousDigest != nil {
@@ -293,6 +321,28 @@ func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 // legacyEntitlementsTable holds a version 1 archive's per-key windows while
 // restore converts them to product access.
 const legacyEntitlementsTable = "pg_temp.legacy_entitlements"
+
+// A revision-less archive can stream prices in UUID order. Stage rows in
+// PostgreSQL so their missing revisions use migration 3's (created_at,id)
+// chronology without retaining the whole price catalog in Go memory. Explicit
+// revisions survive unchanged, and the normal insert trigger derives public_id.
+const legacyPricesTable = "pg_temp.legacy_prices"
+const legacyPricesDDL = `CREATE TEMP TABLE legacy_prices ON COMMIT DROP AS SELECT * FROM billing.prices WITH NO DATA`
+
+func restoreLegacyPricesQuery(p contract.Profile) string {
+	columns, values := make([]string, len(p.Columns)), make([]string, len(p.Columns))
+	for i, c := range p.Columns {
+		columns[i] = pgx.Identifier{c.Name}.Sanitize()
+		values[i] = columns[i]
+		if c.Name == "revision" {
+			values[i] = "COALESCE(revision, inferred_revision)"
+		}
+	}
+	return `WITH numbered AS (
+ SELECT *, row_number() OVER (PARTITION BY merchant_id,product_id,key ORDER BY created_at,id)-1 AS inferred_revision
+ FROM ` + legacyPricesTable + ` WHERE merchant_id=$1
+) INSERT INTO billing.prices (` + strings.Join(columns, ",") + `) SELECT ` + strings.Join(values, ",") + ` FROM numbered`
+}
 
 const legacyEntitlementsDDL = `CREATE TEMP TABLE legacy_entitlements (
 	merchant_id uuid NOT NULL, id uuid NOT NULL, entitlement text COLLATE "C" NOT NULL,

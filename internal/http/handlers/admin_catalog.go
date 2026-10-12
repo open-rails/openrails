@@ -241,7 +241,7 @@ func GetPrice(r *httprequest.Request) {
 		return
 	}
 	if query.Verify {
-		if states, vErr := svc.VerifyPriceSync(r.Request.Context(), id.UUID()); vErr == nil && len(states) > 0 {
+		if states, vErr := svc.VerifyPublicPriceSync(r.Request.Context(), id); vErr == nil && len(states) > 0 {
 			out.PSPs = states
 		}
 	}
@@ -296,7 +296,7 @@ func priceIDParam(r *httprequest.Request) (billing.PriceID, bool) {
 	id, err := billing.ParsePriceID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.APIError(invalidParam("id", "invalid price id"))
-		return billing.PriceID{}, false
+		return billing.PriceID(""), false
 	}
 	return id, true
 }

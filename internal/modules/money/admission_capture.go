@@ -330,7 +330,7 @@ func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row ge
 			return nil, err
 		}
 		if err == nil {
-			ev, err := usageEventFromGen(event)
+			ev, err := UsageEventFromRow(event)
 			if err != nil {
 				return nil, err
 			}

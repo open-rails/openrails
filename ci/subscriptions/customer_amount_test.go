@@ -61,6 +61,12 @@ func TestCreditDepositOrders(t *testing.T) {
 	}
 	current, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
-	require.Zero(t, current.UnitAmount, "each deposit must leave the shared offer unchanged")
-	require.Zero(t, current.Version, "deposits are not catalog price versions")
+	require.Zero(t, current.UnitAmount, "each deposit must leave the shared price descriptor unchanged")
+	require.EqualValues(t, 1, price.Version)
+	require.Equal(t, price.Version, current.Version, "deposits do not create catalog price versions")
+	require.Equal(t, price.ID, current.ID)
+	require.Equal(t, price.CustomerAmount, current.CustomerAmount)
+	versions, err := client.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
+	require.NoError(t, err)
+	require.Len(t, versions.Items, 1, "chosen deposit amounts exist on orders, not new catalog rows")
 }

@@ -38,6 +38,58 @@ that went, and what replaced it; the sections below give the details.
 | The console's merchant in `sessionStorage`, sent as the header | A token exchanged for the chosen merchant, held in memory |
 | The client merchant-selection guide | [Merchant binding](merchant-binding.md) |
 
+## Programmatic retries and merchant expectations
+
+Programmatic writes no longer use a generic HTTP response cache. Preserve the
+operation's `request_id`, `(source, source_id)`, or running-charge `reference`
+when retrying, including after a lost response. New domain IDs mean new work,
+even when an old `Idempotency-Key` is reused. Orders, refunds and subscription
+changes still use their documented `Idempotency-Key` operation receipts.
+Admission replay returns the current hold state; immutable capture and usage
+receipts remain unchanged. JSON whitespace, object-key ordering and supported
+normalization no longer turn an equivalent retry into a transport conflict.
+Update the server before using an SDK that omits redundant HTTP keys.
+
+A Go remote handle with a known merchant sends `OpenRails-Expected-Merchant`
+on every request. Current servers refuse a credential bound elsewhere before
+executing the operation (`412 merchant_mismatch`). The optional expectation
+never selects a merchant, and older servers may ignore it; response-header
+checking alone cannot prevent an already-executed write on those servers.
+
+## Price-ID cutover
+
+For an existing database on the current migration chain, migration 0073 replaces
+public `price_<uuid>` spellings with `product-key:price-key:v1` spellings. Private
+database foreign keys and immutable financial terms stay unchanged. This is
+separate from importing a historical v0 baseline described above.
+
+Preserve a mapping for every merchant before switching application references:
+
+1. Before upgrading, export all pages of prices, including archived versions,
+   and their products. Retain each old price ID, product key, price key and old
+   zero-based `Price.Version`. The new SDK's
+   `billing.NewPriceID(productKey, priceKey, oldVersion+1)` constructs the new ID
+   with canonical escaping; do not concatenate unescaped keys yourself.
+2. Upgrade the server and SDK together. For a self-hosted database, an operator
+   can alternatively obtain the exact mapping after migration with the read-only
+   query below. Hosted operators can provide the equivalent merchant export.
+3. Translate the host application's stored IDs and queued requests using that
+   merchant's mapping, then resume requests. Regenerate cached browser catalog
+   data. Historical prices retain their original version even when archived.
+
+```sql
+SELECT merchant_id, 'price_' || id::text AS old_price_id, public_id AS price_id
+FROM billing.prices
+WHERE merchant_id = $1::uuid;
+```
+
+Use the configured billing schema if it differs from `billing`. The new public
+API deliberately refuses UUID aliases; it cannot look up an old UUID-only host
+reference. Do not change provider-issued price IDs, OpenRails' private database
+references or arbitrary metadata that happens to contain a similar string.
+Retries keep their original operation identity; accepted order receipts continue
+to match after the mapped price ID is supplied.
+
 ## 1. Configuration
 
 ### `openrails.Config` and `Deps`
@@ -183,10 +235,11 @@ on one merchant from either, and no call names its merchant.
 | `client.Start`, `Close`, `Ready`, `Probes`, `Routes`, `RiverJobs` | The same methods on the `*openrails.Engine`; each adapter's `Mount` takes the engine |
 | `openrails.NewRemote(url, opts...)` returned the `*Client` | `openrails.NewRemote` takes `openrails.RemoteOptions` and returns the `*openrails.Remote`: `Merchant(id)` is a merchant's handle, `Ready` and `Close` are the remote's. `openrails.NewRemoteMerchant` is one merchant's handle directly |
 | `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `CredentialTarget` | An `openrails.RemoteCredential` (`APIKey` or `Token`) per merchant, in `RemoteOptions.Credentials` by merchant ID. A response naming another merchant fails the call with an `openrails.BoundMerchantError` |
-| `WithHTTPClient`, `WithTimeout` | `RemoteOptions.HTTPClient` and `RemoteOptions.Timeout`; in process, and with `openrails.NewRemoteMerchant`, the call's context is its bound |
+| `WithHTTPClient`, `WithTimeout` | `RemoteOptions.HTTPClient` and `RemoteOptions.Timeout`, or `RemoteMerchantOptions.HTTPClient` and `RemoteMerchantOptions.Timeout` for `openrails.NewRemoteMerchant`; the call context can set a shorter bound |
 | `WithMerchant`, `ForMerchantID` on a call; `WithDefaultMerchant`, `WithMerchantID`; `client.With` | Removed: a handle acts on its own merchant. Take the other merchant's handle |
 | `openrails.RequestMerchant` | Removed: OpenRails binds the merchant; a host's `Authenticate` says who the request is |
-| `client.DeclarePSP(ctx, merchantID, declaration)` | `client.DeclarePSP(` on the merchant's handle takes the declaration alone |
+| `client.DeclarePSP(ctx, merchantID, declaration)` | `engine.LocalMerchant(merchantID)` returns a `LocalClient`; `local.DeclarePSP(ctx, declaration)` takes the declaration alone |
+| Local-only methods on `*Client` | `DeclarePSP`, `SCIMHandler`, `StartRunningChargeTx`, `StopRunningChargeTx`, `AdmitTx`, `CaptureAdmissionsTx`, and `ReleaseAdmissionsTx` are on `*LocalClient`, constructed by `Engine.LocalMerchant`; pass `local.Client` where a shared client is required. `ErrRemoteClient` is removed |
 | `server.Server.Client` | `server.Server.Engine`, whose `Merchant(id)` is any live merchant's handle |
 | `openrails billing export` and `import` with `--url`, `get-merchant-config` and `apply-merchant-config` with `--server-url`, took `--merchant` | They act on the token's merchant and refuse `--merchant`, which names a local merchant |
 
@@ -223,7 +276,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`; its receipt reports the catalog revision (`applied_revision`), and each product, price and meter its own `revision` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
 | `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`; the meter's rate card prices every customer (no per-customer price) |
-| `ListOffersForEntitlements` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
+| `Entitlement-based catalog lookup` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
@@ -288,11 +341,11 @@ upgrade; its buyer buys through an order.
 | `Payment` with `Object`, `Refunded`, `Captured`, string ids | `billing.Payment` with `Kind`, a typed `Status`, `Channel`, `PSPID`, `Card`, `Failure`, and `Refunds` as a slice |
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; the customer sets a default card per currency on `/v1/me` |
-| `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | Invoices are usage orders: `client.ListOrders(` with `Origin: billing.OrderOriginUsage`, `client.GetOrder(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `OrderID`, `client.CreatePayment(` with `OrderID` |
+| `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | Invoices are usage orders: `client.ListOrders(` with `Origin: billing.OrderOriginUsage`, `client.GetOrder(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `OrderID`, `client.RecordExternalPayment(` with `OrderID` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
 | `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderComplete` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
-| `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.CreatePayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
+| `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.RecordExternalPayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 | `Subscription.RailSubscriptionID`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
 | `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | A usage order's `Usage.PeriodStartsAt`, `PeriodEndsAt`; orders are listed newest first, by `Origin`, `Status` and `Overdue` |
 
@@ -301,7 +354,7 @@ upgrade; its buyer buys through an order.
 | Before | After |
 |---|---|
 | `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in the public `GET /v1/config` |
-| `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
+| `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `local.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. A `Remote`'s `Ready` checks reachability; any authenticated call proves the credential |
 | `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.UpdateAlertWebhook(`, `client.DeleteAlertWebhook(` |
@@ -369,7 +422,7 @@ fields (`400 unknown_field`), and every error code is in
 
 | Before | After |
 |---|---|
-| `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
+| `/v1/merchant/…` (mixed staff and configuration routes) | Customer billing operations use `/v1/admin/…`; deployment and merchant configuration use `/v1/merchant/…`; catalog uses `/v1/catalog/…`. The [route inventory](api/routes.md) lists each path |
 | The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential bound to no merchant here is `403 merchant_unresolved`; a missing permission `403 permission_required` |
 | The `OpenRails-Merchant` header (a merchant's slug or `id:<uuid>`) and its codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | Removed: the credential binds the merchant, by its group (the merchant id), its declared issuer or the OpenRails object it was issued for; anything else is `403 merchant_unresolved`. A customer of another issuer whose subject is already taken is `403 customer_issuer_mismatch` |
 | `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; rails in `GET /v1/config` |
@@ -382,6 +435,9 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/metrics/query` |
 | `/v1/merchant/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
 | `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |
+| `VoidOrder`, `POST /v1/admin/orders/{id}/void` | `WaiveOrderBalance`, `POST /v1/admin/orders/{id}/waive-balance`: explicitly forgives outstanding usage debt. `CancelOrder` cancels an unpaid purchase; `MarkOrderUncollectible` stops collection and retains debt |
+| `CreatePayment` (merchant API) | `RecordExternalPayment`, still `POST /v1/admin/payments`: records money already received outside OpenRails |
+| `RetryOrderCollection`, `POST /v1/admin/orders/{id}/retry-collection` | Removed. Customers explicitly pay; the automatic worker collects under their agreement and retry policy |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…`, `/v1/me/payment-method-setups…` | `POST /v1/me/payment-methods` with a Stripe `pm_` as `token`; `/v1/me/payment-methods/{id}/confirm` after 3-D Secure |
@@ -398,8 +454,8 @@ fields (`400 unknown_field`), and every error code is in
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |
-| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard` behind `AdminRead`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
-| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
+| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard` behind `AdminRead`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | Metrics use `billing.MerchantMetricsRead`; catalog reads and the optional console ask use `billing.MerchantCatalogRead`, while catalog writes use `billing.MerchantCatalogManage` (or their `root:` twins). `GET /v1/admin/access` answers what the caller holds |
+| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/console/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 
 ### Shapes
@@ -508,7 +564,7 @@ calendar ([data retention](operations.md#data-retention)):
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
 | `getSolanaConfig()` | `getCustomerConfig()`; the network is `payment.solana.network` |
 | `getConfig()` and `useConfig()` with `payment` and `merchant` | `getConfig()` and `useConfig()` are the deployment's part; `getCustomerConfig()` and `useCustomerConfig()` read the merchant's `payment` and `merchant` (`GET /v1/me/config`) |
-| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<Offers keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<Offers merchant keys>` |
+| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<ProductList keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<ProductList merchant keys>` |
 | A `getToken` you refresh yourself | `tokenSource({ fetchToken })` keeps the token in memory and replaces it before it expires; `redeemAssertion` redeems a backend's customer assertion |
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/me/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
@@ -520,9 +576,8 @@ calendar ([data retention](operations.md#data-retention)):
 | `cancelSubscription`, `resumeSubscription`, `setSubscriptionPaymentMethod` resolved to nothing | Each resolves to the `Subscription` |
 | Generated list fields typed `T[] \| null` | `T[]`: the server always writes `[]` |
 
-A page that posted to `/v1/checkout` renders `<Checkout>` on a session instead.
-Stripe cards are saved with Elements and paid on the session when the PSP
-declares a `publishable_key`; without one, a one-off Stripe price redirects.
+A page that posted to `/v1/checkout` now renders `<OrderCheckout orderId>`
+for an unpaid order, or uses `<BuyButton>` to create and pay a customer order.
 
 ## 6. Reading the database
 
@@ -569,8 +624,8 @@ use the normal configurable HTTP feature buckets described in
 is removed. Standalone and embedded HTTP use the same counters (Redis, else
 the process's memory); trusted in-process Client operations retain their normal boundary.
 
-Merchant billing archives use the single current format, v1, and preserve arbitrary
-application metadata. Regenerate artifacts from discarded draft formats; see
+Merchant billing archives export format v2 and accept v1 and v2, preserving
+arbitrary application metadata. Regenerate artifacts from discarded draft formats; see
 [merchant portability](merchant-portability.md#archive-format-and-metadata).
 
 ### Catalog batches and product-local price keys
@@ -579,7 +634,7 @@ Catalog documents carry `schema_version` and their changes. Remove `application_
 `expected_revision`, and `catalog_version`: the server remembers the canonical
 content hash per merchant. Replays remain no-ops after later edits. A new hash
 applies atomically; hashes do not determine which unseen batch is newer.
-`Routes.MerchantConfig` controls HTTP catalog-write route exposure only; authorized
+`RouteGroups.Catalog` controls HTTP catalog-route exposure; authorized
 in-process client calls always work. `MerchantDeclaration.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 
@@ -589,34 +644,40 @@ reads a key's prices, and `ListPriceHistory(ctx, priceID, page)` its history
 using `price_key` also supply `product_key`; requests using immutable price IDs
 keep their current shape.
 
-A price exposes an automatically assigned `revision`, starting at zero within
-its product/key. `UpdatePrice` no longer accepts `key`: create a new offer and
-archive the old one. Price terms and parent are immutable; product and price
-rows cannot be deleted. Existing UUIDs and purchase references survive the
-additive migrations. Reusing historical financial terms preserves their original
-revision, while price-key history records the new activation. A product's
-`revision` advances on actual edits without retaining full product versions.
+A price exposes a financial `version` starting at one within its product/key,
+also carried in its canonical `product-key:price-key:v1` ID. Its separate
+`revision` is the optimistic-concurrency counter for edits to that price key.
+`UpdatePrice` no longer accepts `key`: create a new price and archive the old
+one. Price terms and parent are immutable. Private database UUIDs and purchase
+references survive the additive migrations; public UUID price IDs are replaced
+as described in the [cutover](#price-id-cutover). Reusing historical financial
+terms preserves their original version, while price-key history records the
+new activation. A product's `revision` advances on actual edits without
+retaining full product versions.
 
 
 ### Catalog, merchant configuration and customer-support permissions
 
 Catalog management uses `/v1/catalog/`, including `/products`, `/prices`,
-`/meters`, `/apply`, `/ask` and `/price-migrations`. Merchant configuration
+`/meters`, `/apply` and `/price-migrations`. The optional catalog assistant uses
+`POST /v1/console/catalog/ask`, outside the merchant Go client. Merchant configuration
 uses `/v1/merchant/`, including `/psps`, `/configuration`, `/findings`,
 `/alert-webhooks`, `/billing-archive`, `/billing-import` and
-`/provisioning-tokens`. `PUT /v1/merchant/dashboard` saves the layout; its
-read and metric-generation routes use `/v1/metrics/dashboard`. Metrics query,
-schema and ask routes use `/v1/metrics/`; their former `/v1/admin/` paths are removed.
+`/provisioning-tokens` when customer provisioning is available.
+`PUT /v1/merchant/dashboard` saves the layout; its read uses
+`GET /v1/metrics/dashboard`. Metrics query and schema use `/v1/metrics/`;
+AI metrics questions and dashboard generation are removed.
 The former configuration paths under `/v1/admin/` are not mounted.
 
 Public product lookup is `GET /v1/products?merchant=<merchant id>`. Update
-storefront callers: `/v1/catalog/products` now requires catalog management
+storefront callers: `/v1/catalog/products` now requires catalog read
 permission and never serves as an alias for the public product list.
 
 Support staff use `merchant:customer:read` and `merchant:customer:manage`,
 with matching `root:` permissions. Update custom roles, API-key roles and
 trusted-issuer grants from `billing` to `customer`; old names grant no access.
-Catalog and configuration retain `merchant:catalog:manage` and
-`merchant:config:manage`; metrics retains `merchant:metrics:read`. A support
-role does not gain those operator capabilities. Hosts retain findings by
-enabling `RouteGroups.MerchantConfig` and granting configuration authority.
+Catalog and configuration have separate `merchant:catalog:read` /
+`merchant:catalog:manage` and `merchant:config:read` / `merchant:config:manage`
+permissions; metrics retains `merchant:metrics:read`. Hosts retain findings by
+enabling `RouteGroups.MerchantConfig`: reading needs configuration read,
+resolving needs configuration manage. Grant both when a caller needs both.

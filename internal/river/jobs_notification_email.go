@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -73,7 +72,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 				}
 				for i := range rows {
 					progress.Mark(ctx, "notification email "+rows[i].ID.String())
-					n, err := models.NotificationFromGen(rows[i])
+					n, err := db.NotificationFromGen(ctx, w.DB.Gen(ctx), rows[i])
 					if err != nil {
 						sweepErr = preferSweepError(sweepErr, fmt.Errorf("notification %s decode: %w", rows[i].ID, err))
 						failed++
@@ -135,7 +134,7 @@ func (w NotificationEmailWorker) Work(ctx context.Context, job *river.Job[subscr
 		if err != nil {
 			return err
 		}
-		n, err := models.NotificationFromGen(row)
+		n, err := db.NotificationFromGen(ctx, w.DB.Gen(ctx), row)
 		if err != nil {
 			return err
 		}

@@ -92,31 +92,10 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("order requests and cache", () => {
-  it("replays a retry under the same key", async () => {
-    const queries = client()
-    const retry = {
-      id: "order-1",
-      action: "retry_collection" as const,
-      paymentMethodId: "method-1",
-      idempotencyKey: "operation-1",
-    }
-    const options = usageActionMutation(queries, "customer-1")
-    await exec(queries, options, retry)
-    await exec(queries, options, retry)
-    expect(calls(requests)).toEqual([
-      "POST /admin/orders/order-1/retry-collection",
-      "POST /admin/orders/order-1/retry-collection",
-    ])
-    for (const attempt of requests) {
-      expect(attempt.headers.get("Idempotency-Key")).toBe("operation-1")
-      expect(attempt.body).toEqual({ payment_method_id: "method-1" })
-    }
-  })
-
   it("posts each usage action to its route", async () => {
     const queries = client()
     const options = usageActionMutation(queries, "customer-1")
-    await exec(queries, options, { id: "order-1", action: "void" })
+    await exec(queries, options, { id: "order-1", action: "waive_balance" })
     await exec(queries, options, {
       id: "order-1",
       action: "mark_uncollectible",
@@ -128,7 +107,7 @@ describe("order requests and cache", () => {
       reference: "wire-1",
     })
     expect(calls(requests)).toEqual([
-      "POST /admin/orders/order-1/void",
+      "POST /admin/orders/order-1/waive-balance",
       "POST /admin/orders/order-1/mark-uncollectible",
       "POST /admin/payments",
     ])
@@ -186,11 +165,11 @@ describe("order requests and cache", () => {
     const root = orderKeys.root()
     queries.setQueryData(root, {})
     queries.setQueryData(queryKeys.customer("customer-1"), {})
-    routes["POST /admin/orders/order-1/void"] = () =>
+    routes["POST /admin/orders/order-1/waive-balance"] = () =>
       Response.json({ error: { message: "uncertain" } }, { status: 503 })
     selectMerchant("merchant-b")
     await expect(
-      exec(queries, options, { id: "order-1", action: "void" })
+      exec(queries, options, { id: "order-1", action: "waive_balance" })
     ).rejects.toThrow("uncertain")
     expect(queries.getQueryState(root)?.isInvalidated).toBe(true)
     expect(root[1]).toBe("merchant-a")
@@ -245,19 +224,14 @@ describe("order support model", () => {
     expect(usageActions(order())).toEqual([
       "record_payment",
       "mark_uncollectible",
-      "void",
+      "waive_balance",
     ])
     expect(
       usageActions(order({}, { collection_method: "charge_automatically" }))
-    ).toEqual([
-      "retry_collection",
-      "record_payment",
-      "mark_uncollectible",
-      "void",
-    ])
+    ).toEqual(["record_payment", "mark_uncollectible", "waive_balance"])
     expect(usageActions(order({ status: "uncollectible" }))).toEqual([
       "record_payment",
-      "void",
+      "waive_balance",
     ])
     for (const status of ["processing", "complete", "void"] as const)
       expect(usageActions(order({ status }))).toEqual([])

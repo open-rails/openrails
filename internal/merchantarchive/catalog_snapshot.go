@@ -268,7 +268,7 @@ func validateCatalogReferences(ctx context.Context, tx pgx.Tx, id billing.Mercha
 	if invalid {
 		return &Error{Code: "integrity", Table: "catalog_applications"}
 	}
-	// Current available offers share the full billing archive's credit contract;
+	// Current available prices share the full billing archive's credit contract;
 	// archived price terms remain historical facts, independent of current benefits.
 	for _, check := range referenceChecks {
 		if check.table == "prices" {

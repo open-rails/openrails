@@ -2,8 +2,12 @@ package hostedcheckout
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -40,7 +44,77 @@ func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.Merc
 	case n != 1:
 		return "", apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "only an open merchant order without a checkout takes one")
 	}
+	if err := q.SaveOrderCheckoutReceipt(ctx, gen.SaveOrderCheckoutReceiptParams{
+		MerchantID: mid.UUID(), OrderID: c.OrderID.UUID(), Secret: secret, Now: now, ExpiresAt: c.ExpiresAt,
+	}); err != nil {
+		return "", err
+	}
 	return URL(origin, c.OrderID, secret), nil
+}
+
+// ReplayURL recovers the original capability only for an authenticated,
+// matching order-creation retry. The caller has already checked the durable
+// request digest and customer binding. It reads current order state rather
+// than replaying a cached response, and ordinary order reads never call it.
+func ReplayURL(ctx context.Context, q *gen.Queries, origin string, order gen.BillingOrder, now time.Time) (string, error) {
+	if origin == "" || order.Origin != string(billing.OrderOriginMerchant) || order.Status != string(billing.OrderOpen) ||
+		order.CheckoutExpiresAt == nil || !order.CheckoutExpiresAt.After(now) ||
+		order.ExpiresAt != nil && !order.ExpiresAt.After(now) {
+		return "", nil
+	}
+
+	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: order.MerchantID, Operation: "hosted_checkout_creation", IdempotencyKey: order.ID.String()})
+	legacy := false
+	if db.IsNotFound(err) && order.IdempotencyKey != nil {
+		if key, ok := strings.CutPrefix(*order.IdempotencyKey, "app:"); ok && key != "" {
+			// Before domain-owned receipts, this one response held the capability.
+			// Read only its secret; never replay the old order or other response data.
+			row, err = q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: order.MerchantID, Operation: "POST /v1/app/orders", IdempotencyKey: key})
+			legacy = true
+		}
+	}
+	if db.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if row.Status != "succeeded" || !row.ExpiresAt.After(now) {
+		return "", nil
+	}
+	var receipt struct {
+		Secret string `json:"secret"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal(row.Result, &receipt); err != nil {
+		return "", err
+	}
+	if legacy {
+		// Read just identity and capability fields, leaving old price shapes opaque.
+		var created struct {
+			ID         billing.OrderID    `json:"id"`
+			CustomerID billing.CustomerID `json:"customer_id"`
+			Checkout   *struct {
+				URL string `json:"url"`
+			} `json:"checkout"`
+		}
+		if err := json.Unmarshal([]byte(receipt.Body), &created); err != nil {
+			return "", err
+		}
+		if created.ID.UUID() != order.ID || created.CustomerID.UUID() != order.CustomerID || created.Checkout == nil {
+			return "", nil
+		}
+		link, err := url.Parse(created.Checkout.URL)
+		if err != nil || link.Path != PagePath(created.ID) {
+			return "", nil
+		}
+		receipt.Secret = link.Fragment
+	}
+	hash, ok := Hash(receipt.Secret)
+	if !ok || subtle.ConstantTimeCompare(hash, order.CheckoutSecretHash) != 1 {
+		return "", nil
+	}
+	return URL(origin, billing.OrderID(order.ID), receipt.Secret), nil
 }
 
 // Resolve finds the checkout a presented secret opens: ErrNotFound for none

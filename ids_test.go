@@ -20,7 +20,6 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 		of     func(uuid.UUID) wireID
 	}{
 		{billing.ProductIDPrefix, func(s string) (wireID, error) { return billing.ParseProductID(s) }, func(u uuid.UUID) wireID { return billing.ProductID(u) }},
-		{billing.PriceIDPrefix, func(s string) (wireID, error) { return billing.ParsePriceID(s) }, func(u uuid.UUID) wireID { return billing.PriceID(u) }},
 		{billing.SubscriptionIDPrefix, func(s string) (wireID, error) { return billing.ParseSubscriptionID(s) }, func(u uuid.UUID) wireID { return billing.SubscriptionID(u) }},
 		{billing.PaymentIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentID(s) }, func(u uuid.UUID) wireID { return billing.PaymentID(u) }},
 		{billing.PaymentMethodIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentMethodID(s) }, func(u uuid.UUID) wireID { return billing.PaymentMethodID(u) }},
@@ -68,12 +67,12 @@ func TestTypedIDsJSON(t *testing.T) {
 		Nullable *billing.PaymentID      `json:"payment_id"`
 		Method   billing.PaymentMethodID `json:"payment_method_id"`
 	}
-	raw, err := json.Marshal(doc{Price: billing.PriceID(u)})
+	raw, err := json.Marshal(doc{Price: billing.PriceID("premium:monthly:v1")})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"price_id":"price_`+u.String()+`","payment_id":null,"payment_method_id":""}`, string(raw))
+	require.JSONEq(t, `{"price_id":"premium:monthly:v1","payment_id":null,"payment_method_id":""}`, string(raw))
 	var back doc
 	require.NoError(t, json.Unmarshal(raw, &back))
-	require.Equal(t, doc{Price: billing.PriceID(u)}, back)
+	require.Equal(t, doc{Price: billing.PriceID("premium:monthly:v1")}, back)
 	for _, bad := range []string{`{"price_id":"prod_` + u.String() + `"}`, `{"price_id":"` + u.String() + `"}`, `{"price_id":7}`} {
 		require.Error(t, json.Unmarshal([]byte(bad), &back), bad)
 	}

@@ -78,6 +78,15 @@ func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 	return shop
 }
 
+// localRuntime is the explicit extension for tests that need the embedded engine.
+func (f *fixture) localRuntime(t *testing.T, slug string) *openrails.LocalClient {
+	t.Helper()
+	bill, shop := f.runtimeWithStripe(t, slug, nil)
+	local, err := bill.LocalMerchant(shop.MerchantID())
+	require.NoError(t, err)
+	return local
+}
+
 // boot builds an engine, closed at cleanup, and the handle of the merchant
 // cfg declares. The test hosts' issuer (authtest.Issuer) binds that one
 // merchant, as a single-merchant host declares its own, unless cfg names
@@ -187,11 +196,11 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
 	forSale := true
-	offers, err := client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"content:welcome"}, ForSale: &forSale})
+	prices, err := client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"content:welcome"}, ForSale: &forSale})
 	require.NoError(t, err)
-	require.Len(t, offers.Items, 1)
-	require.Len(t, offers.Items[0].Prices, 1)
-	require.Equal(t, price.ID, offers.Items[0].Prices[0].ID)
+	require.Len(t, prices.Items, 1)
+	require.Len(t, prices.Items[0].Prices, 1)
+	require.Equal(t, price.ID, prices.Items[0].Prices[0].ID)
 }
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {

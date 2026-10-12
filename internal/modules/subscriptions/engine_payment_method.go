@@ -43,6 +43,17 @@ var ErrRecurringAgreementRequired = apperr.Conflictf("the card requires a qualif
 // It never changes schedule ownership or issues a provider schedule mutation.
 // Accepted uncertain payments keep their frozen instrument until resolved.
 func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Context, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verify RecurringVerifier) error {
+	return s.updateEnginePaymentMethod(ctx, subscriptionID, customer, methodID, verify, true)
+}
+
+// UpdateEnginePaymentMethodForStaff selects the card without resuming stopped
+// dunning or bringing a scheduled retry forward. Only the customer-owned
+// payment-method operation may request that recovery behavior.
+func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethodForStaff(ctx context.Context, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verify RecurringVerifier) error {
+	return s.updateEnginePaymentMethod(ctx, subscriptionID, customer, methodID, verify, false)
+}
+
+func (s *SubscriptionLifecycleService) updateEnginePaymentMethod(ctx context.Context, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verify RecurringVerifier, resumeDunning bool) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -52,7 +63,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		var needs *verification
 		err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
-			needs, err = s.moveEngineMethod(ctx, s.DB.NewWithPgxTx(tx), mid.UUID(), subscriptionID, customer, methodID, verified)
+			needs, err = s.moveEngineMethod(ctx, s.DB.NewWithPgxTx(tx), mid.UUID(), subscriptionID, customer, methodID, verified, resumeDunning)
 			return err
 		})
 		if err != nil || needs == nil {
@@ -66,7 +77,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 
 // moveEngineMethod returns the verification the move needs first when the
 // card has no recurring lineage and verified is nil.
-func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *db.DB, merchantID, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verified *charge.Mandate) (*verification, error) {
+func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *db.DB, merchantID, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verified *charge.Mandate, resumeDunning bool) (*verification, error) {
 	q := d.Gen(ctx)
 	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customer}); err != nil {
 		return nil, err
@@ -100,7 +111,7 @@ func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *
 	if err != nil || needs != nil {
 		return needs, err
 	}
-	return nil, s.moveRecurring(ctx, d, sub, method.ID, lineage, s.now())
+	return nil, s.moveRecurring(ctx, d, sub, method.ID, lineage, s.now(), resumeDunning)
 }
 
 // engineCard reads, under its shared row lock, a saved card of sub's customer
@@ -220,13 +231,14 @@ func (s *SubscriptionLifecycleService) verifyRecurring(ctx context.Context, veri
 
 // moveRecurring makes sub's recurring mandate the one on methodID citing
 // lineage, and stores sub with the card it now has (its own, or none to follow
-// the default). A live membership waiting on its card retries on this one.
-func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.DB, sub *models.Subscription, methodID uuid.UUID, lineage *charge.Mandate, now time.Time) error {
+// the default). Customer-authorized selection can resume dunning; staff
+// selection preserves its existing state and retry schedule.
+func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.DB, sub *models.Subscription, methodID uuid.UUID, lineage *charge.Mandate, now time.Time, resumeDunning bool) error {
 	if _, err := mandates.Replace(ctx, d.Gen(ctx), mandates.Agreement{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PaymentMethodID: methodID, PSPID: sub.PspID, Rail: string(sub.Rail),
 		Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: lineage, AcceptedAt: now}, now); err != nil {
 		return err
 	}
-	if sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod {
+	if resumeDunning && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) {
 		if err := ReplaceMethod(sub, now); err != nil {
 			return err
 		}

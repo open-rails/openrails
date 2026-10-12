@@ -3,19 +3,17 @@ import type { UsageAction } from "#orck/admin/lib/api/order-endpoints"
 import { amountFromInput } from "#orck/admin/lib/format"
 
 export const usageActionLabels: Record<UsageAction, string> = {
-  void: "Void order",
+  waive_balance: "Waive balance",
   mark_uncollectible: "Mark uncollectible",
   record_payment: "Record payment",
-  retry_collection: "Retry collection",
 }
 export const usageActionDescriptions: Record<UsageAction, string> = {
-  void: "Write off what the order still owes. Its payments stay recorded.",
+  waive_balance:
+    "Forgive the remaining debt. Existing payments stay recorded and are not refunded.",
   mark_uncollectible:
     "Stop scheduled collection. What the order owes remains owed; collecting it again reopens it.",
   record_payment:
     "Record money already received outside automatic collection. This does not charge a payment method.",
-  retry_collection:
-    "Charge what the order owes to the selected saved card now. An in-progress collection must finish first.",
 }
 // usageActions are what staff who may change billing can do to a usage
 // order in its state: none while a collection is in progress.
@@ -24,22 +22,9 @@ export function usageActions(order: Order): UsageAction[] {
   if (!usage || BigInt(usage.amount_due) <= 0n) return []
   switch (order.status) {
     case "open":
-      return [
-        ...(usage.collection_method === "charge_automatically"
-          ? (["retry_collection"] as const)
-          : []),
-        "record_payment",
-        "mark_uncollectible",
-        "void",
-      ]
+      return ["record_payment", "mark_uncollectible", "waive_balance"]
     case "uncollectible":
-      return [
-        ...(usage.collection_method === "charge_automatically"
-          ? (["retry_collection"] as const)
-          : []),
-        "record_payment",
-        "void",
-      ]
+      return ["record_payment", "waive_balance"]
   }
   return []
 }

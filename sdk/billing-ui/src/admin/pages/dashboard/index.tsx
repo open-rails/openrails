@@ -67,8 +67,9 @@ export function DashboardPage() {
 
 // firstArea is where a caller without metrics starts.
 function firstArea(access: AdminAccess): string {
-  if (access.admin !== "none") return "/customers"
-  if (access.catalog) return "/catalog"
+  if (access.admin === "read" || access.admin === "update") return "/customers"
+  if (access.catalog === "read" || access.catalog === "update")
+    return "/catalog"
   return "/settings"
 }
 

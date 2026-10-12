@@ -485,9 +485,9 @@ func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListPar
 	return params, true
 }
 
-// VoidOrder handles POST /v1/admin/orders/{id}/void: voids an unpaid usage
+// WaiveOrderBalance handles POST /v1/admin/orders/{id}/waive-balance: voids an unpaid usage
 // order.
-func VoidOrder(r *httprequest.Request) {
+func WaiveOrderBalance(r *httprequest.Request) {
 	usageOrderAction(r, (*billingservice.Service).VoidMerchantOrder)
 }
 
@@ -509,33 +509,4 @@ func usageOrderAction(r *httprequest.Request, act func(*billingservice.Service, 
 		return
 	}
 	writeOrder(r, order)
-}
-
-// RetryOrderCollection handles POST /v1/admin/orders/{id}/retry-collection:
-// charges what a usage order owes to one of its customer's cards. A failed
-// charge answers 402 with the order.
-func RetryOrderCollection(r *httprequest.Request) {
-	id, ok := orderID(r)
-	if !ok {
-		return
-	}
-	key := orderKey(r)
-	if key == "" {
-		return
-	}
-	var body billing.RetryOrderCollectionParams
-	if !r.BindJSON(&body) {
-		return
-	}
-	svc := orderService(r)
-	if svc == nil {
-		return
-	}
-	body.IdempotencyKey = key
-	answer, err := svc.RetryOrderCollection(r.Request.Context(), id, body)
-	if err != nil {
-		writeOrderError(r, err)
-		return
-	}
-	answerOrder(r, answer)
 }

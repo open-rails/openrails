@@ -146,7 +146,7 @@ func (s *PriceMigrationService) resolve(ctx context.Context, p billing.CreatePri
 			return nil, apperr.Invalidf("to_price_id is required")
 		}
 	} else {
-		if plan.target, err = s.price(ctx, p.ToPriceID.UUID()); err != nil {
+		if plan.target, err = s.price(ctx, p.ToPriceID); err != nil {
 			return nil, err
 		}
 		if plan.target.Archived {
@@ -154,7 +154,7 @@ func (s *PriceMigrationService) resolve(ctx context.Context, p billing.CreatePri
 		}
 	}
 	if !byKey {
-		if plan.fromPrice, err = s.price(ctx, p.FromPriceID.UUID()); err != nil {
+		if plan.fromPrice, err = s.price(ctx, p.FromPriceID); err != nil {
 			return nil, err
 		}
 		if plan.target != nil && plan.fromPrice.ID == plan.target.ID {
@@ -189,8 +189,8 @@ func (s *PriceMigrationService) resolve(ctx context.Context, p billing.CreatePri
 	return plan, nil
 }
 
-func (s *PriceMigrationService) price(ctx context.Context, id uuid.UUID) (*models.Price, error) {
-	price, err := s.prices.GetByID(ctx, id)
+func (s *PriceMigrationService) price(ctx context.Context, id billing.PriceID) (*models.Price, error) {
+	price, err := s.prices.GetByPublicID(ctx, id)
 	if db.IsNotFound(err) {
 		return nil, errMigrationPriceNotFound
 	}
@@ -363,7 +363,7 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 	if plan.target == nil {
 		return out, nil
 	}
-	target := billing.PriceID(plan.target.ID)
+	target := plan.target.PublicID
 	out.ToPriceID = &target
 	classes, byRail, err := s.classify(ctx, plan, cohort)
 	if err != nil {
@@ -611,7 +611,7 @@ func (s *PriceMigrationService) notify(ctx context.Context, sub *models.Subscrip
 	}
 	effective := effectiveAt.UTC()
 	data := billing.NotificationData{
-		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: billing.PriceID(from.ID), ToPriceID: billing.PriceID(to.ID),
+		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: from.PublicID, ToPriceID: to.PublicID,
 		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: to.Currency, EffectiveAt: &effective,
 	}
 	event := models.NotificationSubscriptionRepriceScheduled
@@ -638,7 +638,7 @@ func (s *PriceMigrationService) Get(ctx context.Context, id billing.PriceMigrati
 	if err != nil {
 		return nil, err
 	}
-	out := priceMigrationView(row.BillingPriceMigration, row.ProductKey, row.Scheduled, row.Applied, row.Canceled, row.Blocked)
+	out := priceMigrationView(row.BillingPriceMigration, row.FromPricePublicID, row.ToPricePublicID, row.ProductKey, row.Scheduled, row.Applied, row.Canceled, row.Blocked)
 	return &out, nil
 }
 
@@ -655,7 +655,7 @@ func (s *PriceMigrationService) List(ctx context.Context, p billing.PriceMigrati
 			return page, err
 		}
 		for _, r := range rows {
-			page.Items = append(page.Items, priceMigrationView(r.BillingPriceMigration, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
+			page.Items = append(page.Items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
 		}
 		return page, nil
 	}
@@ -687,17 +687,17 @@ func (s *PriceMigrationService) List(ctx context.Context, p billing.PriceMigrati
 	}
 	items := make([]billing.PriceMigration, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, priceMigrationView(r.BillingPriceMigration, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
+		items = append(items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
 	}
 	return pagination.Cut(items, limit, func(m billing.PriceMigration) any {
 		return pagination.TimeID{At: m.CreatedAt, ID: m.ID.UUID()}
 	}), nil
 }
 
-func priceMigrationView(m gen.BillingPriceMigration, productKey *string, scheduled, applied, canceled, blocked int64) billing.PriceMigration {
+func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string, productKey *string, scheduled, applied, canceled, blocked int64) billing.PriceMigration {
 	out := billing.PriceMigration{
-		ID: billing.PriceMigrationID(m.ID), FromPriceID: (*billing.PriceID)(m.FromPriceID), PriceKey: m.FromPriceKey,
-		ToPriceID: billing.PriceID(m.ToPriceID), EffectiveAt: m.EffectiveAt.UTC(), FallbackPolicy: billing.MigrationFallback(m.FallbackPolicy),
+		ID: billing.PriceMigrationID(m.ID), FromPriceID: (*billing.PriceID)(fromID), PriceKey: m.FromPriceKey,
+		ToPriceID: billing.PriceID(toID), EffectiveAt: m.EffectiveAt.UTC(), FallbackPolicy: billing.MigrationFallback(m.FallbackPolicy),
 		Matched: int(m.SubscriptionsMatched), Skipped: int(m.SubscriptionsSkipped),
 		Scheduled: int(scheduled), Applied: int(applied), Canceled: int(canceled), Blocked: int(blocked),
 		CreatedAt: m.CreatedAt.UTC(), CanceledAt: m.CanceledAt,
