@@ -10,7 +10,8 @@ import (
 // Provider identity is financial history. Schema foreign keys retain the rows;
 // these checks also bind their frozen JSON and payer to the same merchant book.
 // An accepted provider alias can describe its line differently from checkout;
-// match the financial fields admission compares, while preserving both texts.
+// match the financial fields admission compares, while preserving both texts
+// and the provider's separately accepted service-period evidence.
 var providerBillReferenceChecks = []rowCheck{
 	{"payments", `order_id IS NULL OR NOT EXISTS (
  SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=payments.order_id
@@ -26,10 +27,8 @@ var providerBillReferenceChecks = []rowCheck{
  AND o.id=provider_bills.order_id AND o.customer_id=provider_bills.customer_id AND o.psp_id=provider_bills.psp_id
  AND o.customer_id::text=snapshot->>'CustomerID' AND o.psp_id::text=snapshot->>'PSPID'
  AND o.collection_owner=snapshot->>'Owner' AND o.currency=snapshot->>'Currency' AND o.total::text=snapshot->>'Total'
- AND ((o.origin IN ('customer','merchant') AND snapshot->>'Kind' IN ('purchase','initial'))
-   OR (o.origin='subscription' AND o.subscription_id::text=snapshot->>'SubscriptionID' AND o.subscription_bill_kind=snapshot->>'Kind'
-     AND o.period_starts_at=(snapshot->>'PeriodStart')::timestamptz AND o.period_ends_at=(snapshot->>'PeriodEnd')::timestamptz
-     AND o.due_at=COALESCE(NULLIF(snapshot->>'DueAt','0001-01-01T00:00:00Z'),snapshot->>'PeriodStart')::timestamptz)))
+
+ AND (o.subscription_id IS NULL OR o.subscription_id::text=snapshot->>'SubscriptionID'))
  OR source_kind IS DISTINCT FROM snapshot->>'SourceKind' OR source_key IS DISTINCT FROM snapshot->>'SourceKey'
  OR provider_reference IS DISTINCT FROM snapshot->>'ProviderReference'
  OR (snapshot->>'SubscriptionID' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.subscriptions s
