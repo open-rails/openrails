@@ -316,11 +316,20 @@ func cycleSourceKey(subscriptionID uuid.UUID, scheduleSource string, due time.Ti
 // executed cycle is settled the charge is an extra capture of the newest one.
 func approvedReceiptCycle(schedule gen.BillingProviderSchedule, unpaid int, receipt ScheduleReceipt) (time.Time, error) {
 	first, hours, months := schedule.FirstDueAt, int(schedule.CadenceHours), int(schedule.CadenceMonths)
+	day := receipt.OccurredAt.UTC().Truncate(24 * time.Hour)
+	if receipt.NextBillingAt.IsZero() {
+		// The provider no longer reports a boundary (its schedule ended): the
+		// charge settles the unpaid cycle only inside that cycle's own window.
+		due, end := scheduleBoundary(first, hours, months, unpaid), scheduleBoundary(first, hours, months, unpaid+1)
+		if day.Before(due.Truncate(24*time.Hour)) || !day.Before(end.Truncate(24*time.Hour)) {
+			return time.Time{}, errNoCycle
+		}
+		return due, nil
+	}
 	next, err := scheduleBoundaryIndex(first, hours, months, receipt.NextBillingAt)
 	if err != nil || next < 1 {
 		return time.Time{}, errNoCycle
 	}
-	day := receipt.OccurredAt.UTC().Truncate(24 * time.Hour)
 	if !day.Before(receipt.NextBillingAt.UTC().Truncate(24 * time.Hour)) {
 		return time.Time{}, errNoCycle
 	}

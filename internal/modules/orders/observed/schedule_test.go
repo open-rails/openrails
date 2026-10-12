@@ -64,9 +64,15 @@ func TestApprovedReceiptsSettleTheOldestExecutedCycle(t *testing.T) {
 		{"at or after the provider's next boundary", 0, "2026-03-31", "2026-03-31", ""},
 		{"no executed cycle", 0, "2026-01-31", "2026-01-31", ""},
 		{"changed retry date", 0, "2026-03-02", "2026-03-01", ""},
+		{"ended schedule inside the unpaid cycle", 1, "", "2026-03-01", "2026-02-28"},
+		{"ended schedule after the unpaid cycle", 0, "", "2026-03-01", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			due, err := approvedReceiptCycle(schedule, tc.unpaid, ScheduleReceipt{NextBillingAt: day(tc.next), OccurredAt: day(tc.at).Add(15 * time.Hour), Approved: true})
+			var next time.Time
+			if tc.next != "" {
+				next = day(tc.next)
+			}
+			due, err := approvedReceiptCycle(schedule, tc.unpaid, ScheduleReceipt{NextBillingAt: next, OccurredAt: day(tc.at).Add(15 * time.Hour), Approved: true})
 			if tc.want == "" {
 				require.ErrorIs(t, err, errNoCycle)
 				return

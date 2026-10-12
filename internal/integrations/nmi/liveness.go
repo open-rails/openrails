@@ -273,6 +273,9 @@ func (c *NMIClient) GetRecurringLiveness(ctx context.Context, subscriptionID str
 
 // parseV5Date accepts the date shapes v5 emits (ISO 8601 timestamp or bare
 // date) and returns a UTC time.
+// NextBilling is the schedule's next billing date.
+func (s V5Subscription) NextBilling() (time.Time, error) { return parseV5Date(s.NextBillingDate) }
+
 func parseV5Date(raw string) (time.Time, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

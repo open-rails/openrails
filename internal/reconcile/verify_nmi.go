@@ -110,6 +110,12 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 				snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, live.NextChargeDate, now)}
 			}
 		}
+		// Each sale carries the schedule's next date as its cycle evidence.
+		if len(snap.Subscriptions) == 1 {
+			for i := range snap.Transactions {
+				snap.Transactions[i].NextBillingAt = snap.Subscriptions[0].NextBillingAt
+			}
+		}
 		snaps[sub.ID] = snap
 	}
 	return errors.Join(errs, applyVerified(ctx, database, lc, subs, snaps, now))
@@ -328,8 +334,12 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 			return fmt.Errorf("nmi roster: %w", err)
 		}
 		live := map[string][]string{} // vault -> live schedules
+		nextBilling := map[string]*time.Time{}
 		for _, s := range roster {
 			live[strings.TrimSpace(s.CustomerVaultID)] = append(live[strings.TrimSpace(s.CustomerVaultID)], s.ID)
+			if next, err := s.NextBilling(); err == nil {
+				nextBilling[s.ID] = &next
+			}
 		}
 		byRail := map[string]*models.Subscription{}
 		since := now.Add(-3 * 365 * 24 * time.Hour)
@@ -366,6 +376,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 					if err != nil {
 						return err
 					}
+					transaction.NextBillingAt = nextBilling[sub.RailSubscriptionID]
 					perSub[sub] = append(perSub[sub], transaction)
 				}
 			}
