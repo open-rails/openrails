@@ -396,3 +396,48 @@ func TestCCBillUsernameIsTheDirectorys(t *testing.T) {
 	status, body := w.postCCBill("NewSaleFailure", ccbillSourceIP, failure(name))
 	require.NotEqual(t, http.StatusOK, status, "a username no customer holds names nobody: %v", body)
 }
+
+// CCBill upgrades replace the provider agreement. The upgrade charge and
+// following renewal remain separate orders, and old accepted receipts survive.
+func TestCCBillUpgradeRetainsVersionedOrders(t *testing.T) {
+	w := newWorld(t)
+	m := importCCBill(t, w)
+	hours := monthHours
+	newRef, transaction := ccbillNumericID(), ccbillNumericID()
+	flex, rbo, form := uuid.NewString(), ccbillNumericID(), "upgraded-monthly"
+	price, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{
+		ProductID: m.price.ProductID, Key: "upgrade-" + uuid.NewString()[:8], UnitAmount: 19_990_000, Currency: "USD",
+		BillingIntervalHours: &hours, AccessDurationHours: &hours,
+		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": form, "flex_id": flex, "recurring_billing_option_id": rbo}},
+	})
+	require.NoError(t, err)
+	start := w.clock.Now()
+	next := start.Add(monthHours * time.Hour)
+	upgrade := map[string]string{"originalSubscriptionId": m.railSub, "subscriptionId": newRef, "transactionId": transaction,
+		"formName": form, "flexId": flex, "subscriptionTypeId": rbo, "billedInitialPrice": "19.99", "billedRecurringPrice": "19.99",
+		"billedCurrencyCode": "840", "recurringPeriod": "30", "nextRenewalDate": ccbillDate(next)}
+	w.deliverCCBill("UpgradeSuccess", upgrade)
+	sub := w.subscription(embedded, m.sub)
+	require.Equal(t, price.ID, sub.PriceID)
+	require.Equal(t, newRef, str(sub.RailSubscriptionID))
+	require.Equal(t, ccbillDate(next), ccbillDate(*sub.CurrentPeriodEndsAt))
+	paid := m.payment(transaction)
+	require.NotNil(t, paid)
+	require.NotNil(t, paid.OrderID)
+	orders, err := w.client[embedded].ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: m.sub})
+	require.NoError(t, err)
+	require.Len(t, orders.Items, 2, "imported initial bill and upgrade bill")
+	w.deliverCCBill("UpgradeSuccess", upgrade)
+	require.Len(t, w.payments(embedded, m.c.id), 2)
+	m.railSub, m.paidThrough = newRef, *sub.CurrentPeriodEndsAt
+	w.advance(m.paidThrough.Sub(w.clock.Now()) + time.Hour)
+	renewedUntil := m.paidThrough.Add(monthHours * time.Hour)
+	renewal := m.renewal(ccbillNumericID(), renewedUntil)
+	renewal["billedAmount"], renewal["accountingAmount"] = "19.99", "19.99"
+	w.deliverCCBill("RenewalSuccess", renewal)
+	orders, err = w.client[embedded].ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: m.sub})
+	require.NoError(t, err)
+	require.Len(t, orders.Items, 3)
+	require.Equal(t, ccbillDate(renewedUntil), ccbillDate(*w.subscription(embedded, m.sub).CurrentPeriodEndsAt))
+	require.Zero(t, w.engineCharges(), "observing an upgrade never charges its provider")
+}
