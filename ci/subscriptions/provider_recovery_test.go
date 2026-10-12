@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,16 +13,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -434,4 +438,149 @@ func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments WHERE refunded_payment_id=$1`), original.ID.UUID()).Scan(&refunds))
 	require.Equal(t, 1, refunds)
 	require.Equal(t, 1, e.providerAttempts())
+}
+
+// A customer's cancel while the account's provider book is held (here by an
+// unresolved financial finding) is refused for a retry, not failed: 503
+// service_unavailable, the membership unchanged. Once the finding is resolved
+// the same cancel goes through.
+func TestCustomerCancelWaitsForProviderRecovery(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, rail, embedded)
+			_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
+				SELECT id, 'pull.charge.missing', 'held-charge', 'high', 'reconcile_required', $2, $3 FROM billing.merchants WHERE slug = $1`), w.slug, w.psp[rail].UUID(), rail)
+			require.NoError(t, err)
+			cancel := func() (int, map[string]any) {
+				return e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
+			}
+			status, body := cancel()
+			require.Equal(t, http.StatusServiceUnavailable, status, "%v", body)
+			require.Equal(t, "service_unavailable", errorCode(body))
+			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
+			require.Nil(t, w.subscription(embedded, e.sub).CanceledAt)
+
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.reconciliation_findings SET status = 'fixed', resolution = 'admin_fixed', resolved_at = now() WHERE subject_key = 'held-charge'`))
+			require.NoError(t, err)
+			status, body = cancel()
+			require.Equal(t, http.StatusOK, status, "%v", body)
+			require.NotNil(t, w.subscription(embedded, e.sub).CanceledAt)
+		})
+	}
+}
+
+// A pull that reads a renewal charge while its collection is still executing
+// leaves the charge to that operation: no missing-charge finding holds the
+// account, the collection records its payment, and the customer's cancel that
+// follows goes through. The providers stamp their charges ten minutes back,
+// past the pull's indexing lag, so the pull sees the charge while the
+// collection still holds it.
+func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			w := prepareWorld(t, 12)
+			past := func() time.Time { return w.clock.Now().Add(-10 * time.Minute) }
+			w.nmi = newNMIFake(past)
+			w.stripe.SetClock(past)
+			w.start()
+			e := enroll(t, w, rail, embedded)
+			initialTransaction := e.providerLedger()[0].ID
+			if rail == "stripe" {
+				initialTransaction = e.providerLedger()[0].Charge
+			}
+			e.toFreshPeriodEnd()
+			sub := uuid.MustParse(subUUID(e.sub))
+			held, release := make(chan struct{}), make(chan struct{})
+			var reached, freed sync.Once
+			free := func() { freed.Do(func() { close(release) }) }
+			t.Cleanup(free)
+			remove := failpoint.Set(func(_ context.Context, s failpoint.Site) error {
+				if s.Point != failpoint.AfterProvider || s.Subscription != sub || s.Kind != "subscription_collection" {
+					return nil
+				}
+				reached.Do(func() { close(held) })
+				<-release
+				return nil
+			})
+			defer remove()
+			_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			require.NoError(t, err)
+			select {
+			case <-held:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the renewal never reached the provider")
+			}
+			pullNow := func(want rivertype.JobState) {
+				t.Helper()
+				pull, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
+				require.NoError(t, err)
+				var observed *rivertype.JobRow
+				require.Eventually(t, func() bool {
+					job, err := w.jobs.JobGet(t.Context(), pull)
+					if err != nil || (job.FinalizedAt == nil && job.State != want) {
+						return false
+					}
+					observed = job
+					return true
+				}, time.Minute, 50*time.Millisecond, "the pull runs while the collection records its charge")
+				require.Equal(t, want, observed.State, "the pull must reach its expected recovery state: %v", observed.Errors)
+			}
+			pullNow(rivertype.JobStateCompleted)
+			require.Empty(t, w.openFindings("pull.charge.missing"), "the charge is its operation's, not missing")
+
+			// A previously raised financial finding needs actual local payment
+			// evidence to resolve. A live lease alone cannot clear it.
+			var transaction string
+			for _, charge := range e.providerLedger() {
+				id := charge.ID
+				if rail == "stripe" {
+					id = charge.Charge
+				}
+				if id != initialTransaction {
+					transaction = id
+				}
+			}
+			require.NotEmpty(t, transaction)
+			_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings
+                (merchant_id, finding_type, subject_key, severity, status, psp_id, rail)
+                VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4)`),
+				w.client[embedded].MerchantID().UUID(), transaction, w.psp[rail].UUID(), rail)
+			require.NoError(t, err)
+			// The financial finding deliberately keeps recovery incomplete, so
+			// this job must retry even though the provider observation succeeds.
+			// Count completed, error-free observations that actually read charges;
+			// an arbitrary failed pull cannot satisfy this regression.
+			completedObservations := func() (int, error) {
+				var n int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.maintenance_runs
+                    WHERE merchant_id = $1 AND kind = 'reconciliation' AND rails = ARRAY[$2]::text[]
+                      AND status = 'completed' AND error IS NULL
+                      AND (summary->'providers'->$2->>'remote_transactions')::int > 0`),
+					w.client[embedded].MerchantID().UUID(), rail).Scan(&n)
+				return n, err
+			}
+			before, err := completedObservations()
+			require.NoError(t, err)
+			pullNow(rivertype.JobStateRetryable)
+			require.Eventually(t, func() bool {
+				n, err := completedObservations()
+				return err == nil && n > before
+			}, time.Minute, 50*time.Millisecond, "the held finding survives an actual successful provider observation")
+			require.Contains(t, w.openFindings("pull.charge.missing"), transaction, "execution is not evidence of a recorded payment")
+
+			free()
+			w.settle()
+			require.Len(t, e.providerLedger(), 2, "one renewal charge")
+			require.Len(t, completed(w.payments(embedded, e.c.id)), 2, "the collection recorded it")
+			pullNow(rivertype.JobStateCompleted)
+			require.Empty(t, w.openFindings("pull.charge.missing"), "the recorded payment resolves its finding")
+			status, body := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "moving on"})
+			require.Equal(t, http.StatusOK, status, "%v", body)
+		})
+	}
 }

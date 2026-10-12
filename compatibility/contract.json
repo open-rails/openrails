@@ -3579,6 +3579,7 @@
       "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
