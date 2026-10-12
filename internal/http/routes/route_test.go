@@ -30,7 +30,7 @@ var scimPathShape = regexp.MustCompile(`^/v1/app/scim/v2(/([A-Z][A-Za-z]*|\{[a-z
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
 	Admin:          {"/v1/admin/"},
-	CatalogAdmin:   {"/v1/catalog/"},
+	CatalogAdmin:   {"/v1/catalog/", "/v1/console/catalog/"},
 	Access:         {"/v1/admin/access/"},
 	MerchantConfig: {"/v1/merchant/"},
 	Metrics:        {"/v1/metrics/"},
@@ -180,7 +180,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// A bare runtime has no merchant directory, no LLM, no customer network
 	// and merchant configuration in a file.
 	require.Equal(t, []string{
-		"catalog_copilot POST /v1/catalog/ask",
+		"catalog_copilot POST /v1/console/catalog/ask",
 		"customer_network DELETE /v1/network/links/{link_id}",
 		"customer_network DELETE /v1/network/links/{link_id}/payment-methods/{id}",
 		"customer_network GET /v1/app/customers",
@@ -369,6 +369,10 @@ func TestManagementRoutesHaveNoLegacyAliases(t *testing.T) {
 		var previous []string
 		switch route.Group {
 		case CatalogAdmin:
+			if route.ConsoleOnly {
+				previous = []string{"/v1/catalog/ask", "/v1/admin/catalog/ask", "/v1/operator/catalog/ask"}
+				break
+			}
 			require.True(t, strings.HasPrefix(route.Path, "/v1/catalog/"), route.Key())
 			suffix := strings.TrimPrefix(route.Path, "/v1/catalog/")
 			if !strings.HasPrefix(suffix, "price-migrations") {
@@ -397,4 +401,19 @@ func TestManagementRoutesHaveNoLegacyAliases(t *testing.T) {
 		}
 	}
 	require.Positive(t, management)
+}
+
+func TestProvisioningConsumerAndCredentialsShareCapability(t *testing.T) {
+	for _, hostDirectory := range []bool{false, true} {
+		for _, programmatic := range []bool{false, true} {
+			rt := &app.Runtime{Config: &config.Config{}, HostUserInfo: hostDirectory}
+			seen := map[string]int{}
+			opts := Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{MerchantConfig: true, Programmatic: programmatic}}
+			RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, rt, opts)
+			RegisterAppRoutes(recorder{base: "/v1", seen: seen}, rt, opts)
+			for _, key := range []string{"POST /v1/app/scim/v2/Users", "GET /v1/merchant/provisioning-tokens", "POST /v1/merchant/provisioning-tokens", "DELETE /v1/merchant/provisioning-tokens/{id}"} {
+				require.Equal(t, !hostDirectory && programmatic, seen[key] == 1, key)
+			}
+		}
+	}
 }

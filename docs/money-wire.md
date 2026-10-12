@@ -26,13 +26,13 @@ beside a `currency`. No field name carries a currency.
 
 ## Ids
 
-A resource's id is typed, prefixed text on every body, path and query
+Except for prices, a resource's id is typed, prefixed text on every body, path and query
 parameter that names it, and only that spelling is accepted: a bare UUID or
 another kind's prefix is `400 invalid_param`.
 
 | Prefix | Resource | Prefix | Resource |
 |---|---|---|---|
-| `prod_` | product | `price_` | price |
+| `prod_` | product | | |
 | `sub_` | subscription | `pay_` | payment |
 | `pm_` | payment method | `ord_` | order |
 | `psp_` | PSP | `chk_` | checkout attempt |
@@ -43,6 +43,13 @@ another kind's prefix is `400 invalid_param`.
 | `uev_` | usage event | `hev_` | host event |
 | `ntf_` | notification | `fnd_` | finding |
 | `awh_` | alert webhook | | |
+
+A price ID is `product-key:price-key:v1`, such as `premium:buy-usd:v1`.
+Financial versions start at one; reusing archived terms restores the same ID.
+Reserved bytes in either key are percent-encoded with uppercase hex (`:` is
+`%3A`, `/` is `%2F`, `%` is `%25`). URL-encode the complete ID as a path
+segment; the Go client does this automatically. UUID price spellings are not
+accepted by public APIs.
 
 Customer and merchant ids are plain UUIDs. A price or product *key* is a
 separate, opaque handle (`price_key`, `product_key`, the `keys` and `key` list filters); a

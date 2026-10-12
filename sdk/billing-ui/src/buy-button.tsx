@@ -8,7 +8,7 @@ import { isBillingError, toBillingError } from "#orck/client/errors"
 import type { Order } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
-import { offerLabel } from "#orck/lib/offer-label"
+import { priceLabel } from "#orck/lib/price-label"
 import { OrderModal } from "#orck/modal"
 import { useCurrencyScales } from "#orck/react/config"
 import { useBillingContext } from "#orck/react/context"
@@ -64,7 +64,7 @@ export function BuyButton({
     <Purchase
       {...props}
       priceId={price?.id}
-      label={props.label ?? (price ? offerLabel(price, scales, m, locale) : "")}
+      label={props.label ?? (price ? priceLabel(price, scales, m, locale) : "")}
     />
   )
 }

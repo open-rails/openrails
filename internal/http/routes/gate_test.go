@@ -73,7 +73,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		}
 		if r.Staff() {
 			require.Equal(t, AuthMerchant, r.Auth, key)
-			if r.Group == Admin || r.Group == CatalogAdmin {
+			if r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig {
 				require.Contains(t, []Level{LevelRead, LevelUpdate}, r.Level, key)
 			} else {
 				require.Empty(t, r.Level, "%s: a configuration or metrics route has its group's one permission", key)
@@ -271,8 +271,14 @@ func TestGatesAskTheVerified(t *testing.T) {
 				}
 			case AuthSignedIn:
 				want = []string{"Authenticate"}
-				for _, pair := range []Pair{needAdminRead, needAdminUpdate, needCatalog, needMerchantConfig, needMetrics} {
+				for _, pair := range []Pair{needAdminRead, needAdminUpdate, {billing.MerchantCatalogRead, billing.RootCatalogRead}, needCatalog, needMerchantConfigRead, needMerchantConfig, needMetrics} {
 					want = append(want, asks(pair)...)
+				}
+				if who.SubjectKind == billingauth.SubjectApplication {
+					env := newEnv(gatedRuntime(t), Options{Groups: everyGroup})
+					for _, pair := range env.applicationPermissions {
+						want = append(want, asks(pair)...)
+					}
 				}
 			case AuthMerchant:
 				want = append([]string{"Authenticate"}, asks(r.Needs())...)
@@ -540,9 +546,9 @@ func TestStaffGate(t *testing.T) {
 	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootEventsRead: true}}, "GET /v1/app/host-events", nil)
 	require.Equal(t, http.StatusNoContent, got.status, "events alone")
 	require.Equal(t, "GET /v1/app/host-events", got.staff.Route)
-	// Its writes run once per Idempotency-Key.
+	// Naturally identified writes need no redundant HTTP retry key.
 	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
-	require.Equal(t, http.StatusBadRequest, got.status, "a programmatic write without an Idempotency-Key")
+	require.Equal(t, http.StatusNoContent, got.status, "acknowledging named events needs no Idempotency-Key")
 
 	// The retired selector header names nothing.
 	got = runRoute(t, rt, &recordingAuth{who: person}, "GET /v1/admin/payments", map[string]string{retiredSelector: "id:" + merchantB.String()})
@@ -662,7 +668,7 @@ func TestMountFailsClosed(t *testing.T) {
 	on := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(on, "/v1", rt), rt, Options{Auth: merchantOnly, Groups: config.RouteGroups{Admin: true}})
 	RegisterAppRoutes(router.NewMux(on, "/v1", rt), rt, Options{Auth: merchantOnly, Groups: config.RouteGroups{Programmatic: true}})
-	env := newEnv(rt, Options{})
+	env := newEnv(rt, Options{Groups: everyGroup})
 	for _, r := range Catalog() {
 		mounted := slices.ContainsFunc(on.Entries, func(e router.Entry) bool { return e.Method == r.Method && e.Path == r.Path })
 		require.Equal(t, (r.Group == Admin || r.Group == App || r.Group == Access) && env.mounts(r), mounted, r.Key())
@@ -883,6 +889,14 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &access))
 		require.Equal(t, merchantA.String(), access.ScopeID)
 		access.ScopeID = ""
+		require.Empty(t, access.ApplicationPermissions)
+		access.ApplicationPermissions = nil
+		if access.Catalog == billing.AccessNone {
+			access.Catalog = ""
+		}
+		if access.MerchantConfig == billing.AccessNone {
+			access.MerchantConfig = ""
+		}
 		return access
 	}
 	set := func(perms ...billing.Permission) map[billing.Permission]bool {
@@ -903,13 +917,14 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 		want           billing.AdminAccess
 		inRoot, atShop []billing.Permission
 	}{
+		{billing.AdminAccess{Admin: billing.AccessNone, Catalog: billing.AccessRead, MerchantConfig: billing.AccessRead}, []billing.Permission{billing.RootCatalogRead, billing.RootConfigRead}, []billing.Permission{billing.MerchantCatalogRead, billing.MerchantConfigRead}},
 		{billing.AdminAccess{Admin: billing.AccessRead}, []billing.Permission{billing.RootCustomerRead}, []billing.Permission{billing.MerchantCustomerRead}},
 		{billing.AdminAccess{Admin: billing.AccessUpdate, Metrics: true},
 			[]billing.Permission{billing.RootCustomerRead, billing.RootCustomerManage, billing.RootMetricsRead},
 			[]billing.Permission{billing.MerchantCustomerRead, billing.MerchantCustomerManage, billing.MerchantMetricsRead}},
-		{billing.AdminAccess{Admin: billing.AccessNone, Catalog: true, MerchantConfig: true},
-			[]billing.Permission{billing.RootCatalogManage, billing.RootConfigManage},
-			[]billing.Permission{billing.MerchantCatalogManage, billing.MerchantConfigManage}},
+		{billing.AdminAccess{Admin: billing.AccessNone, Catalog: billing.AccessUpdate, MerchantConfig: billing.AccessUpdate},
+			[]billing.Permission{billing.RootCatalogRead, billing.RootCatalogManage, billing.RootConfigRead, billing.RootConfigManage},
+			[]billing.Permission{billing.MerchantCatalogRead, billing.MerchantCatalogManage, billing.MerchantConfigRead, billing.MerchantConfigManage}},
 	} {
 		require.Equal(t, tc.want, read(staff, root(tc.inRoot...)))
 		require.Equal(t, tc.want, read(staff, at(tc.atShop...)), "the merchant: names answer the same levels")
@@ -921,9 +936,11 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 
 	// Assistants require an enabled provider, consent, a mounted area, and its permission.
 	rt.Config.LLM = &config.LLMConfig{APIKey: "test-key", CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
-	catalog := root(billing.RootCatalogManage)
+	catalog := root(billing.RootCatalogRead, billing.RootCatalogManage)
 	require.Equal(t, billing.AdminAssistants{}, read(staff, root(billing.RootMetricsRead)).Assistants, "metrics permission grants no catalog assistant")
 	require.Equal(t, billing.AdminAssistants{CatalogCopilot: true, CatalogDrafting: true}, read(staff, catalog).Assistants)
+	require.Equal(t, billing.AdminAssistants{CatalogCopilot: true, CatalogDrafting: true}, read(staff, root(billing.RootCatalogRead)).Assistants, "the assistant is a catalog read; applying a draft still requires manage")
+	require.Equal(t, billing.AdminAssistants{}, read(staff, root(billing.RootCatalogManage)).Assistants, "manage without read does not open the catalog")
 	require.Equal(t, billing.AdminAssistants{}, read(staff, root()).Assistants, "no access to catalog")
 	require.Equal(t, billing.AdminAssistants{}, read(config.RouteGroups{Admin: true}, catalog).Assistants, "catalog not mounted")
 	rt.Config.LLM = &config.LLMConfig{APIKey: "test-key", CatalogDraftingEnabled: true}
@@ -1118,5 +1135,58 @@ func TestCustomerIssuer(t *testing.T) {
 		got := customer(tc.auth, tc.admit)
 		require.Equal(t, http.StatusForbidden, got.status, name)
 		require.Equal(t, tc.code, got.code, name)
+	}
+}
+
+// Application discovery works without any console areas and never attributes
+// application-only authority to a human carrying the same permission.
+func TestAccessProgrammaticOnly(t *testing.T) {
+	rt := gatedRuntime(t)
+	for _, who := range []billingauth.Identity{authtest.Application("backend"), authtest.User(userA)} {
+		for _, groups := range []config.RouteGroups{{Programmatic: true}, {Admin: true}} {
+			auth := &recordingAuth{who: who, allowed: map[billing.Permission]bool{}, at: map[billing.Permission]bool{billing.MerchantUsageRead: true, billing.MerchantOrdersManage: true, billing.MerchantCustomersRead: true}}
+			table := &router.Table{}
+			RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: auth, Groups: groups, live: live})
+			w := do(table.Handler(), http.MethodGet, "/v1/admin/access", nil)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var access billing.AdminAccess
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &access))
+			require.Equal(t, billing.AccessNone, access.Admin)
+			require.Equal(t, billing.AccessNone, access.Catalog)
+			if groups.Programmatic && who.SubjectKind == billingauth.SubjectApplication {
+				require.Equal(t, []billing.Permission{billing.MerchantOrdersManage, billing.MerchantUsageRead}, access.ApplicationPermissions, "network customer lookup is not mounted")
+			} else {
+				require.Empty(t, access.ApplicationPermissions)
+			}
+		}
+	}
+}
+
+func TestReadPermissionsCannotWrite(t *testing.T) {
+	for _, tc := range []struct {
+		permission  billing.Permission
+		read, write string
+	}{
+		{billing.MerchantConfigRead, "GET /v1/merchant/configuration", "PATCH /v1/merchant/configuration"},
+		{billing.MerchantUsageRead, "GET /v1/app/running-charges", "POST /v1/app/running-charges"},
+	} {
+		t.Run(string(tc.permission), func(t *testing.T) {
+			auth := &recordingAuth{who: authtest.Application("reader"), allowed: map[billing.Permission]bool{}, at: map[billing.Permission]bool{tc.permission: true}}
+			rt := gatedRuntime(t)
+			env := newEnv(rt, Options{Auth: auth, Groups: everyGroup, live: live})
+			for _, key := range []string{tc.read, tc.write} {
+				method, path, _ := strings.Cut(key, " ")
+				route, ok := Lookup(method, path)
+				require.True(t, ok)
+				table := &router.Table{}
+				router.NewMux(table, "", rt).Handle(method, path, func(r *httprequest.Request) { r.SuccessJSON(map[string]bool{"reached": true}) }, env.gates(route)...)
+				w := do(table.Handler(), method, path, nil)
+				if key == tc.read {
+					require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				} else {
+					require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+				}
+			}
+		})
 	}
 }

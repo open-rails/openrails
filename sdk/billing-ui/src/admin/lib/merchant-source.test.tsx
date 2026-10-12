@@ -7,8 +7,8 @@ it("uses the supplied merchant directory independently in each mounted instance"
     authFetch: async () =>
       Response.json({
         admin: "none",
-        catalog: false,
-        merchant_config: false,
+        catalog: "none",
+        merchant_config: "none",
         metrics: false,
         scope_id: "",
         assistants: {},

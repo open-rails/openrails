@@ -33,7 +33,7 @@ func resolveCheckoutPrice(ctx context.Context, prices *catalog.PriceService, id,
 	}
 	if id != "" {
 		parsed, _ := billing.ParsePriceID(id)
-		return prices.GetByID(ctx, parsed.UUID())
+		return prices.GetByPublicID(ctx, parsed)
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {

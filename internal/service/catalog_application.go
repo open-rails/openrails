@@ -352,7 +352,11 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 				if err != nil {
 					return err
 				}
-				if err := prices.UpdatePSPLinks(ctx, current.ID.UUID(), preparedLinks); err != nil {
+				resolved, err := prices.GetByPublicID(ctx, current.ID)
+				if err != nil {
+					return err
+				}
+				if err := prices.UpdatePSPLinks(ctx, resolved.ID, preparedLinks); err != nil {
 					return err
 				}
 				changed = true

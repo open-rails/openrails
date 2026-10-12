@@ -22,8 +22,10 @@ UPDATE billing.price_migrations SET canceled_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND canceled_at IS NULL;
 
 -- name: GetPriceMigration :one
-SELECT sqlc.embed(m), product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
@@ -36,8 +38,10 @@ CROSS JOIN LATERAL (
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = sqlc.arg(id)::uuid;
 
 -- name: ListPriceMigrationsByIDs :many
-SELECT sqlc.embed(m), product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
@@ -51,8 +55,10 @@ WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = ANY(sqlc.arg(ids)::
 ORDER BY m.created_at DESC, m.id DESC;
 
 -- name: ListPriceMigrationsPage :many
-SELECT sqlc.embed(m), product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.price_migrations m
+LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
+JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,

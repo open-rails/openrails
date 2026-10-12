@@ -61,7 +61,8 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		}
 
 		// The id is the terms': a deleted price of these terms revives.
-		if _, err := gen.New(tx).RevivePrice(ctx, gen.RevivePriceParams{MerchantID: tid.UUID(), ID: priceID, Archived: req.Archived}); err != nil {
+		revived, err := gen.New(tx).RevivePrice(ctx, gen.RevivePriceParams{MerchantID: tid.UUID(), ID: priceID, Archived: req.Archived})
+		if err != nil {
 			return fmt.Errorf("revive price %s: %w", priceID, err)
 		}
 		existing, existErr := prices.GetByID(ctx, priceID)
@@ -71,7 +72,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		reactivating := existErr == nil
 		// Same terms, same key, no archive change, nothing displaced: no movement
 		// to log.
-		trueNoOp := reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
+		trueNoOp := revived == 0 && reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
 
 		if reactivating {
 			if existing.Archived != req.Archived {

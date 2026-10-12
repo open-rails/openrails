@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -60,7 +61,7 @@ func (q *Quote) Preview(options []billing.OrderPaymentOption) billing.OrderPrevi
 	for _, l := range q.Lines {
 		line := billing.OrderPreviewLine{Quantity: l.Quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: l.Ownership, Refusal: l.Refusal}
 		if l.Price != nil {
-			line.PriceID, line.BillingIntervalHours, line.AccessDurationHours = billing.PriceID(l.Price.ID), l.Price.BillingIntervalHours, l.Price.AccessDurationHours
+			line.PriceID, line.BillingIntervalHours, line.AccessDurationHours = l.Price.PublicID, l.Price.BillingIntervalHours, l.Price.AccessDurationHours
 		}
 		if l.Product != nil {
 			line.ProductID, line.Description = billing.ProductID(l.Product.ID), l.Product.DisplayName
@@ -123,15 +124,19 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	if err := CheckLines(lines); err != nil {
 		return nil, err
 	}
-	ids := make([]uuid.UUID, len(lines))
+	ids := make([]string, len(lines))
 	for i, l := range lines {
-		ids[i] = l.PriceID.UUID()
+		ids[i] = l.PriceID.String()
 	}
-	rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: merchantID, Ids: ids})
+	stored, err := db.ResolvePriceIDs(ctx, q, merchantID, ids)
 	if err != nil {
 		return nil, err
 	}
-	prices := map[uuid.UUID]*models.Price{}
+	rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: merchantID, Ids: stored})
+	if err != nil {
+		return nil, err
+	}
+	prices := map[billing.PriceID]*models.Price{}
 	products := map[uuid.UUID]*models.Product{}
 	for _, row := range rows {
 		price, err := models.PriceFromGen(row.BillingPrice)
@@ -142,7 +147,7 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 		if err != nil {
 			return nil, err
 		}
-		prices[price.ID], products[product.ID] = price, product
+		prices[price.PublicID], products[product.ID] = price, product
 	}
 	productIDs := make([]uuid.UUID, 0, len(products))
 	for id := range products {
@@ -164,7 +169,7 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	for i, l := range lines {
 		line := &out.Lines[i]
 		line.Quantity = l.Quantity
-		price := prices[l.PriceID.UUID()]
+		price := prices[l.PriceID]
 		if price == nil {
 			line.Refusal = refusal(RefusalUnavailable, "The price does not exist.")
 			continue

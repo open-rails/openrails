@@ -65,6 +65,7 @@ import {
   useAccess,
   useCatalogWrites,
   useMerchantConfig,
+  useMerchantConfigUpdates,
 } from "#orck/admin/lib/capabilities"
 
 // Each part of the catalog is its own page, reached from the sub-items the
@@ -671,15 +672,15 @@ function PriceRow({ price, product }: { price: Price; product?: Product }) {
   }
   return (
     <LinkedTableRow
-      to={`/catalog/prices/${price.id}`}
+      to={`/catalog/prices/${encodeURIComponent(price.id)}`}
       className={price.archived ? "opacity-60" : undefined}
     >
       <TableCell className="text-xs text-muted-foreground">
         <Link
           className="underline-offset-2 hover:underline"
-          to={`/catalog/prices/${price.id}`}
+          to={`/catalog/prices/${encodeURIComponent(price.id)}`}
         >
-          {shortId(price.id, 13)}
+          {price.id}
         </Link>
       </TableCell>
       <TableCell className="font-medium">{productName}</TableCell>
@@ -1042,10 +1043,9 @@ function DriftTab() {
     useAdminServices()
 
   const queryClient = useQueryClient()
-  const canRefresh = useMerchantConfig()
-  const { data, isPending: loading } = useQuery(
-    adminQueries.catalogDrift(canRefresh)
-  )
+  const canRead = useMerchantConfig()
+  const canRefresh = useMerchantConfigUpdates()
+  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift(canRead))
   const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
 
   return (

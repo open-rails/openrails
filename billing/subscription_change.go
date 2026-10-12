@@ -8,7 +8,9 @@ import "time"
 // them. Only a per-seat price has seats: a quantity for any other is refused
 // with quantity_not_allowed. Reason is why staff make the change, required
 // on a change (not a preview) and kept with it and any charge. IdempotencyKey
-// identifies the change; reuse it until the change resolves.
+// identifies the change; reuse it until the change resolves. Staff changes on
+// engine-billed subscriptions take effect at renewal, with no immediate charge.
+// The customer endpoints use their own immediate upgrade/seat-increase flow.
 type ChangeSubscriptionParams struct {
 	PriceID        *PriceID `json:"price_id,omitempty"`
 	Quantity       *int     `json:"quantity,omitempty"`
@@ -111,7 +113,7 @@ const (
 	// subscription is missing or differs from OpenRails' (another price, a
 	// provider schedule); reconcile it first.
 	CodeSubscriptionChangeProviderConflict = "subscription_change_provider_conflict"
-	// CodeStoredCredentialRequired: a merchant-initiated charge (a staff
-	// change charged now) found no active agreement on the card for it.
+	// CodeStoredCredentialRequired is retained for historical merchant-initiated
+	// charge refusals. New staff changes schedule the next renewal.
 	CodeStoredCredentialRequired = "stored_credential_required"
 )

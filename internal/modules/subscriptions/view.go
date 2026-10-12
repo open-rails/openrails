@@ -25,9 +25,13 @@ func (r *UserSubscriptionResponse) View() billing.Subscription {
 // shared billing.Subscription: the merchant and self routes both serve it.
 // dunning is the case DunningViews read, nil when none.
 func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *billing.SubscriptionDunning, now time.Time) billing.Subscription {
+	var priceID billing.PriceID
+	if price != nil {
+		priceID = price.PublicID
+	}
 	out := billing.Subscription{
 		CollectionPolicy: string(sub.CollectionPolicy), Dunning: dunning, DeletionScheduledAt: sub.DeletionScheduledAt,
-		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: billing.PriceID(sub.PriceID),
+		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: priceID,
 		Quantity: CloneQuantity(sub.Quantity),
 		PSPID:    billing.PSPID(sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: normalize.OptionalString(sub.RailSubscriptionID), Status: billing.SubscriptionStatus(sub.Status),
 		StartedAt: sub.StartedAt, EndedAt: sub.EndedAt, CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,

@@ -77,7 +77,7 @@ shown, never enforced). Other attributes are accepted and ignored.
 | `POST /Bulk` | up to 1000 operations or 1 MiB; each applies on its own, `failOnErrors` stops early; a `POST` needs a `bulkId` |
 | `GET /ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | discovery |
 
-Errors are RFC 7644 error bodies, a credential your `Auth` refuses among them. An engine's handle on the merchant serves the same routes (`SCIMHandler()`)
+Errors are RFC 7644 error bodies, a credential your `Auth` refuses among them. The local extension from `engine.LocalMerchant(merchantID)` serves the same routes (`local.SCIMHandler()`)
 in process, rooted at the SCIM root, for a directory in the same binary.
 
 ## Newest wins

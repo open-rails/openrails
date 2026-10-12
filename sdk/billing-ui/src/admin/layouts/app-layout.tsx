@@ -49,12 +49,24 @@ function areaOf(
   const under = (prefix: string) =>
     pathname === prefix || pathname.startsWith(prefix + "/")
   if (under("/payments/health"))
-    return { name: "payment health", allowed: access.metrics }
+    return { name: "payment health", allowed: access.metrics === true }
   if (["/customers", "/subscriptions", "/payments", "/orders"].some(under))
-    return { name: "customer support", allowed: access.admin !== "none" }
+    return {
+      name: "customer support",
+      allowed: access.admin === "read" || access.admin === "update",
+    }
   if (under("/ops") || under("/catalog/drift"))
-    return { name: "merchant configuration", allowed: access.merchant_config }
-  if (under("/catalog")) return { name: "the catalog", allowed: access.catalog }
+    return {
+      name: "merchant configuration",
+      allowed:
+        access.merchant_config === "read" ||
+        access.merchant_config === "update",
+    }
+  if (under("/catalog"))
+    return {
+      name: "the catalog",
+      allowed: access.catalog === "read" || access.catalog === "update",
+    }
   return null
 }
 

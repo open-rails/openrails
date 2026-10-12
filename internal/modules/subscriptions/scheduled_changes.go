@@ -156,7 +156,16 @@ func PendingChanges(ctx context.Context, d *db.DB, subscriptionIDs []uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
+	priceIDs := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		priceIDs = append(priceIDs, row.PriceID)
+	}
+	refs, err := db.PriceReferences(ctx, d.Gen(ctx), priceIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range models.ScheduledChangesFromGen(rows) {
+		c.PublicPriceID = refs[c.PriceID]
 		out[c.SubscriptionID] = c
 	}
 	return out, nil

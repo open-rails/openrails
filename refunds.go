@@ -3,7 +3,6 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -18,14 +17,15 @@ func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
+	key, err := requiredIdempotencyKey(params.IdempotencyKey, requestOptions)
+	if err != nil {
+		return nil, err
 	}
 	if params.Full == (params.Amount != 0) || params.Amount < 0 {
 		return nil, invalidErr("exactly one of a positive amount or full is required")
 	}
 	var out billing.Payment
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/payments/"+payment+"/refunds", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/payments/"+payment+"/refunds", params, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -2,11 +2,10 @@ import type { AdminClient } from "./client"
 import { type PageRequest } from "./client"
 
 import type {
-  CreatePaymentParams,
+  RecordExternalPaymentParams,
   ListPage,
   Order,
   Payment,
-  RetryOrderCollectionParams,
 } from "#orck/client/generated/wire"
 
 // Orders are listed newest first.
@@ -20,15 +19,13 @@ export interface OrderFilters {
 
 // UsageAction is what staff do to an unpaid usage order.
 export type UsageAction =
-  "void" | "mark_uncollectible" | "record_payment" | "retry_collection"
+  "waive_balance" | "mark_uncollectible" | "record_payment"
 
 export interface UsageActionRequest {
   id: string
   action: UsageAction
   amount?: string
   reference?: string
-  paymentMethodId?: string
-  idempotencyKey?: string
 }
 export function createOrderEndpoints(client: AdminClient) {
   const { api } = client
@@ -61,7 +58,7 @@ export function createOrderEndpoints(client: AdminClient) {
     request: UsageActionRequest
   ): Promise<Order | Payment> {
     if (request.action === "record_payment") {
-      const body: CreatePaymentParams = {
+      const body: RecordExternalPaymentParams = {
         order_id: request.id,
         amount: request.amount ?? "",
         transaction_id: request.reference ?? "",
@@ -69,21 +66,11 @@ export function createOrderEndpoints(client: AdminClient) {
       return api<Payment>("/admin/payments", { method: "POST", body })
     }
     const path = {
-      void: "void",
+      waive_balance: "waive-balance",
       mark_uncollectible: "mark-uncollectible",
-      retry_collection: "retry-collection",
     }[request.action]
-    const body: RetryOrderCollectionParams | undefined =
-      request.action === "retry_collection"
-        ? { payment_method_id: request.paymentMethodId }
-        : undefined
     return api<Order>(`/admin/orders/${request.id}/${path}`, {
       method: "POST",
-      headers:
-        request.action === "retry_collection"
-          ? { "Idempotency-Key": request.idempotencyKey ?? "" }
-          : undefined,
-      body,
     })
   }
   return { listOrders, getOrder, listOrderPayments, applyUsageAction }

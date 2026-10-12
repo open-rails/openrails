@@ -6,8 +6,8 @@
   "data": {
     "currency": "USD",
     "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    "from_price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    "to_price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    "from_price_id": "pro:monthly:v1",
+    "to_price_id": "pro:monthly:v2",
     "old_amount": "9223372036854775807",
     "new_amount": "-9223372036854775808",
     "effective_at": "2026-09-16T00:00:00.123456789Z"

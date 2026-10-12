@@ -19,7 +19,7 @@ func newCatalogCmd() *cobra.Command {
 func newCatalogExportCmd() *cobra.Command {
 	var merchant, out string
 	var overwrite bool
-	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export all persisted catalog history as a sealed YAML snapshot", Long: "Preserves archived products and prices, UUIDs, revisions, key movements, provider bindings, meters, rate cards and catalog receipts. Does not export purchases, balances, credentials or provider jobs. Use dump-merchant-catalog for editable active-offer YAML.", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export all persisted catalog history as a sealed YAML snapshot", Long: "Preserves archived products and prices, UUIDs, revisions, key movements, provider bindings, meters, rate cards and catalog receipts. Does not export purchases, balances, credentials or provider jobs. Use dump-merchant-catalog for editable active-price YAML.", Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		mid, err := parseBillingArchiveMerchant(merchant)
 		if err != nil {

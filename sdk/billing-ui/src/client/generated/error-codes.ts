@@ -56,7 +56,6 @@ export type OpenRailsErrorCode =
   | "host_event_not_found"
   | "host_principal_invalid"
   | "hosted_checkout_unavailable"
-  | "idempotency_key_in_progress"
   | "idempotency_key_in_use"
   | "idempotency_key_required"
   | "idempotency_key_reused"
@@ -74,6 +73,7 @@ export type OpenRailsErrorCode =
   | "invalid_settlement_status_request"
   | "invoker_scoped_principal"
   | "merchant_config_read_only"
+  | "merchant_mismatch"
   | "merchant_unresolved"
   | "meter_in_use"
   | "meter_rate_card_conflict"
@@ -246,7 +246,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
   hosted_checkout_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no hosted checkout, or the order cannot take one." },
-  idempotency_key_in_progress: { status: 409, type: "invalid_request_error", meaning: "A request with this Idempotency-Key is still running; retry it later." },
   idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },
   idempotency_key_reused: { status: 422, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
@@ -264,6 +263,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
+  merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },
   merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential is bound to no merchant here." },
   meter_in_use: { status: 409, type: "invalid_request_error", meaning: "The meter is referenced and cannot change this way." },
   meter_rate_card_conflict: { status: 409, type: "invalid_request_error", meaning: "The meter and its rate card disagree." },

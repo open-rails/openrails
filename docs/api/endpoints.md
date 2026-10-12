@@ -44,8 +44,12 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Idempotency.** Send `Idempotency-Key` only on the routes that read it
   (marked in [routes.md](routes.md)): checkout, orders, refunds, tier changes,
   usage order collection. Each such operation keeps its own durable receipt: the same key
-  with the same terms answers the original result, and with other terms
-  `422 idempotency_key_reused`. There is no generic response cache; every
+  with the same terms recovers the operation, and with other terms
+  `422 idempotency_key_reused`. Admissions instead use `request_id`, usage
+  events use `(source, source_id)`, and running charges use `reference`;
+  those routes need no HTTP key. Admissions return the current hold state,
+  while capture and usage retries recover their original financial receipts.
+  There is no generic response cache; every
   request authenticates and authorizes again. One key names one purchase:
   generate it when the buyer decides to buy, store it with the order, and send
   the same key on every retry of that request (timeouts, network errors,
@@ -83,7 +87,7 @@ read or manage permissions do not grant access to this operator inbox.
 | Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link, and the order names its merchant |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
 | Customer support: `/v1/admin/*`; metrics: `/v1/metrics/*`; catalog: `/v1/catalog/*`; merchant configuration: `/v1/merchant/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
-| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
+| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; replay identity belongs to each operation. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
 Every staff and programmatic route is gated by its permission (each route's
@@ -94,18 +98,39 @@ the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. Admin operations do not require a recent
 sign-in. Customer-network routes marked `sensitive` retain their
 recent-sign-in policy. A `/v1/app` route refuses a person
-(`403 application_required`), and answers a retried write's `Idempotency-Key`
-with the first response; the key sent with another request is
-`422 idempotency_key_reused`.
+(`403 application_required`). Programmatic writes use their documented durable
+identity, with the same replay behavior as embedded calls.
 
 A `/v1/me` route acts on the credential's own customer; no path names a user.
 The merchant a request acts on is the one its credential is bound to; nothing
-in the request names it ([auth](../auth.md)). Every merchant-bound answer names
-it in the `OpenRails-Bound-Merchant` header.
+in the request selects it ([auth](../auth.md)). Every merchant-bound answer names
+it in the `OpenRails-Bound-Merchant` header. Merchant client routes also accept
+`OpenRails-Expected-Merchant: <uuid>` as an optional precondition: after
+credential binding, a mismatch returns `412 merchant_mismatch` before the
+operation runs. It never selects or grants access to a merchant. The Go
+client sends it whenever its handle knows its merchant.
 
 Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route
 sends no CORS headers.
+
+## Operational inspection
+
+`GET /v1/app/admissions/{request_id}` and `GET /v1/app/admissions` read current
+admission state without replaying or extending a hold ([admission operations](../admission-operations.md#inspecting-admissions)).
+`GET /v1/app/usage-events/{id}` and `GET /v1/app/usage-events` inspect recorded
+usage facts and source identities ([usage event inspection](../usage-event-inspection.md)).
+Both pairs require `merchant:usage:read` (or its root equivalent) and paginate
+through existing retained records; inspection cannot create charges.
+
+## Optional console assistance
+
+`POST /v1/console/catalog/ask` is the catalog console's optional Q&A and draft
+proposal API. It uses the ordinary catalog authorization and is mounted only
+with catalog routes and the opt-in `catalog_copilot` capability. The
+`catalog-ask` request limit still applies. It changes no catalog rows and is
+explicitly outside the merchant Go `Client` surface; see
+[console assistance](../billing-admin.md).
 
 ## Checkout
 
@@ -260,7 +285,11 @@ the default; `card` shows the card that pays it. Changing the default moves
 every subscription that follows it, and
 `PUT /v1/me/subscriptions/{id}/payment-method` (staff:
 `Client.SetSubscriptionPaymentMethod`) sets or, with `null`, clears one's own
-card. A subscription bought with the default card follows it.
+card. A subscription bought with the default card follows it. Staff selection
+preserves the existing dunning state and next retry deadline, even when the
+same card is submitted again. It neither advances a retry nor resumes a case
+waiting for a new card. Customer card replacement retains its recovery flow;
+the customer may explicitly pay the outstanding order.
 
 Each move carries the subscription's recurring agreement to the card; a card
 with none on the subscription's account is verified first ($0, once per
@@ -347,7 +376,8 @@ even after intervening edits.
 
 A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
-automatic revisions starting at zero. `PATCH` archives or restores a price and
+financial versions starting at one, identified as `product-key:price-key:v1`.
+The separate `revision` tracks edits to the price key. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
 drift findings, each with the `psp_id` that was compared, and

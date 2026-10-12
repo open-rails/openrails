@@ -3,11 +3,11 @@
 package subscriptions_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -217,6 +217,9 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", err)
+			wire, marshalErr := json.Marshal(status.ErrorDetails)
+			require.NoError(t, marshalErr)
+			require.NotContains(t, string(wire), w.priceStorageID(next.ID).String(), "the public refusal never exposes the private attempt target")
 			w.settle()
 			require.Len(t, l.tierSales(), sales)
 			require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
@@ -228,7 +231,7 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			require.False(t, l.c.entitled(next.ent))
 			rows := w.attempts(l.c.id)
 			require.Len(t, rows, 1, "the refused proration is one attempt")
-			require.Equal(t, []string{"upgrade", "nmi_schedule", "saved", "insufficient_funds", strings.TrimPrefix(next.ID.String(), "price_")}, []string{rows[0].Kind, rows[0].Owner, rows[0].CardEntry, str(rows[0].Reason), str(rows[0].Target)})
+			require.Equal(t, []string{"upgrade", "nmi_schedule", "saved", "insufficient_funds", w.priceStorageID(next.ID).String()}, []string{rows[0].Kind, rows[0].Owner, rows[0].CardEntry, str(rows[0].Reason), str(rows[0].Target)})
 			require.NotEmpty(t, str(rows[0].TransactionID))
 		})
 	}

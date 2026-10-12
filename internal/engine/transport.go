@@ -67,6 +67,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	opts := httproutes.HostOptions()
 	caps := embedhttp.CapabilitiesFor(rt, opts.Groups, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
 	opts.Capabilities = &caps
+	httproutes.RegisterMetaRoutes(router.NewMux(mux, "", rt), opts)
 	httproutes.RegisterStaffRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	// The same body cap the HTTP mounts apply: an oversized request gets the

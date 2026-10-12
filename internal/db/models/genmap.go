@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -158,7 +159,7 @@ func PaymentsFromGen(rows []gen.BillingPayment) ([]*Payment, error) {
 }
 
 func PriceFromGen(p gen.BillingPrice) (*Price, error) {
-	m := &Price{Revision: p.Revision,
+	m := &Price{Revision: p.Revision, PublicID: billing.PriceID(p.PublicID),
 		ID:                   p.ID,
 		MerchantID:           p.MerchantID,
 		ProductID:            p.ProductID,

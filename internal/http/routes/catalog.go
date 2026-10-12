@@ -29,8 +29,6 @@ var (
 var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthPublic, Merchant: MerchantQuery,
 		Query: params(required(repeated("keys")), required(text("merchant"))), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_query", "resource_not_found"), Handler: h(handlers.ListPublicProducts)},
-	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: needOffers, Name: "ListOffers",
-		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
 	{Method: POST, Path: "/v1/catalog/apply", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate,
 		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
@@ -44,7 +42,7 @@ var catalogRoutes = []Route{
 
 	// The catalog assistant answers questions about the catalog and drafts
 	// price changes for a person to review; it never changes a catalog row.
-	{Method: POST, Path: "/v1/catalog/ask", Group: CatalogAdmin, Auth: AuthMerchant, Name: "AskCatalog", Level: LevelRead, When: FeatureCatalogCopilot,
+	{Method: POST, Path: "/v1/console/catalog/ask", Group: CatalogAdmin, Auth: AuthMerchant, ConsoleOnly: true, Level: LevelRead, When: FeatureCatalogCopilot,
 		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
 
 	{Method: POST, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProduct", Level: LevelUpdate,

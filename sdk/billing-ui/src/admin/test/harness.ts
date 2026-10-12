@@ -58,14 +58,15 @@ const BOOTSTRAP = {
 // asks AuthKit only where a test names one.
 export const FULL_ACCESS: AdminAccess = {
   admin: "update",
-  catalog: true,
-  merchant_config: true,
+  catalog: "update",
+  merchant_config: "update",
   metrics: true,
   scope_id: "",
   assistants: {
     catalog_copilot: true,
     catalog_drafting: false,
   },
+  application_permissions: [],
 }
 
 const memoryStorage = (): Storage => {

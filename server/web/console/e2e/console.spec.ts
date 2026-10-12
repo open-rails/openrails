@@ -120,30 +120,53 @@ test("support sees its merchant and account, with no Access administration", asy
   ).toBeVisible()
 })
 
-test("account security remains usable when billing permissions are unavailable", async ({
-  page,
-  request,
-}) => {
-  const operator = await staff(request, "support")
-  await login(page, operator.email)
-  let failedRequests = 0
-  await page.route("**/v1/admin/access", (route) => {
-    failedRequests += 1
-    return route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ error: { message: "Billing is unavailable." } }),
+for (const billingAccess of ["unavailable", "none", "missing"] as const) {
+  test(`account security remains usable when billing permissions are ${billingAccess}`, async ({
+    page,
+    request,
+  }) => {
+    const operator = await staff(request, "support")
+    await login(page, operator.email)
+    let accessRequests = 0
+    await page.route("**/v1/admin/access", (route) => {
+      accessRequests += 1
+      return route.fulfill({
+        status: billingAccess === "unavailable" ? 503 : 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          billingAccess === "unavailable"
+            ? { error: { message: "Billing is unavailable." } }
+            : billingAccess === "none"
+              ? {
+                  admin: "none",
+                  catalog: "none",
+                  merchant_config: "none",
+                  metrics: false,
+                }
+              : {}
+        ),
+      })
     })
+    await page.goto("/admin/account")
+    await expect.poll(() => accessRequests).toBeGreaterThan(0)
+    const navigation = page.getByRole("navigation", {
+      name: "Console",
+      exact: true,
+    })
+    await expect(
+      navigation.getByRole("link", { name: "Billing", exact: true })
+    ).toHaveCount(0)
+    await expect(
+      navigation.getByRole("link", { name: "Account", exact: true })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "Account security", exact: true })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("list", { name: "Active sessions", exact: true })
+    ).toBeVisible()
   })
-  await page.goto("/admin/account")
-  await expect.poll(() => failedRequests).toBeGreaterThan(0)
-  await expect(
-    page.getByRole("heading", { name: "Account security", exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByRole("list", { name: "Active sessions", exact: true })
-  ).toBeVisible()
-})
+}
 
 test("a native root role change completes after the server requires fresh sign-in", async ({
   page,

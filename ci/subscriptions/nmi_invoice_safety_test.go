@@ -191,7 +191,7 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 	f.settle()
 	requireInvoicePaidOnce(f, first, 1, 1, nmiInvoiceAmount, 0)
 	invoice := newNMIInvoice(f, c)
-	_, err := f.any().client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: invoice, Amount: 25_000_000, TransactionID: "bank-partial"})
+	_, err := f.any().client[remote].RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: invoice, Amount: 25_000_000, TransactionID: "bank-partial"})
 	require.NoError(t, err)
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	// Every process is off for five days; clocks advance while none can submit.

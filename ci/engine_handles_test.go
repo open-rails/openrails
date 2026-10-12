@@ -92,7 +92,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	}
 
 	// An unknown merchant has a handle; its first call is refused.
-	unknown, err := bill.Merchant(billing.MerchantID(uuid.New()))
+	unknown, err := bill.LocalMerchant(billing.MerchantID(uuid.New()))
 	require.NoError(t, err)
 	_, err = unknown.GetBalance(ctx, customer, "USD")
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved)
@@ -110,8 +110,10 @@ func TestEngineMerchantHandles(t *testing.T) {
 	_, err = unknown.StartRunningChargeTx(ctx, tx, billing.StartRunningChargeParams{Reference: "rental/1", CustomerID: customer, Currency: "USD", RatePerHour: 1_000_000})
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved, "the host's transaction is bound to a live merchant only")
 
-	// What only an engine's handle has acts on the handle's merchant.
-	psp, err := elsewhere.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, AccountID: "000000"})
+	// The local extension binds the same merchant as the common handle.
+	local, err := bill.LocalMerchant(elsewhere.MerchantID())
+	require.NoError(t, err)
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, AccountID: "000000"})
 	require.NoError(t, err)
 	listed, err := elsewhere.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)

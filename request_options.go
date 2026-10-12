@@ -9,10 +9,11 @@ type requestOptions struct {
 	idempotencyKey string
 }
 
-// WithIdempotencyKey sends key as a programmatic write's Idempotency-Key: a
-// retry with it answers the first response. Without it each call sends its
-// own key, and the operation's own ids (request, source, operation) keep a
-// retry safe.
+// WithIdempotencyKey sends key on an operation that reads Idempotency-Key,
+// such as CreateOrder or RefundPayment. If params also names a key, they
+// must agree. Operations identified by request_id, source/source_id or
+// reference use those identities instead; this option does not cache their
+// responses or replace their durable identity.
 func WithIdempotencyKey(key string) RequestOption {
 	key = strings.TrimSpace(key)
 	return func(o *requestOptions) { o.idempotencyKey = key }
@@ -27,4 +28,19 @@ func idempotencyKey(options []RequestOption) string {
 		}
 	}
 	return request.idempotencyKey
+}
+
+// requiredIdempotencyKey resolves the two SDK spellings of an operation key.
+func requiredIdempotencyKey(key string, options []RequestOption) (string, error) {
+	key = strings.TrimSpace(key)
+	if option := idempotencyKey(options); option != "" {
+		if key != "" && key != option {
+			return "", invalidErr("Idempotency-Key differs between params and request option")
+		}
+		key = option
+	}
+	if key == "" {
+		return "", invalidErr("Idempotency-Key required")
+	}
+	return key, nil
 }

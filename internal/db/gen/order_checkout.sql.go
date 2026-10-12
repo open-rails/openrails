@@ -163,6 +163,35 @@ func (q *Queries) ResolveOrderCheckoutMerchant(ctx context.Context, secretHash [
 	return items, nil
 }
 
+const saveOrderCheckoutReceipt = `-- name: SaveOrderCheckoutReceipt :exec
+INSERT INTO billing.idempotency_keys
+    (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
+VALUES ($1::uuid, 'hosted_checkout_creation', $2::uuid::text,
+    'succeeded', $2::uuid, jsonb_build_object('secret', $3::text),
+    $4::timestamptz, $5::timestamptz)
+`
+
+type SaveOrderCheckoutReceiptParams struct {
+	MerchantID uuid.UUID
+	OrderID    uuid.UUID
+	Secret     string
+	Now        time.Time
+	ExpiresAt  time.Time
+}
+
+// The creation retry recovers only this capability, never a cached order.
+// It commits with the order and its hash, and lives no longer than the checkout.
+func (q *Queries) SaveOrderCheckoutReceipt(ctx context.Context, arg SaveOrderCheckoutReceiptParams) error {
+	_, err := q.db.Exec(ctx, saveOrderCheckoutReceipt,
+		arg.MerchantID,
+		arg.OrderID,
+		arg.Secret,
+		arg.Now,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const setOrderCheckout = `-- name: SetOrderCheckout :execrows
 UPDATE billing.orders
 SET checkout_secret_hash = $1::bytea,

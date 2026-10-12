@@ -16,13 +16,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// AdminChangeSubscription changes a subscription's price or seats at the
-// customer's request, as the customer's own change would: an upgrade or more
-// seats are charged now, merchant-initiated under the card's agreement; a
-// downgrade or fewer seats wait for the renewal. The reason and the staff
-// member are kept with the change and its charge, and the customer is told.
-// CheckoutService runs as the subscription's customer so ownership and rail
-// behavior match the customer's own change.
+// AdminChangeSubscription schedules price or seat changes at the next renewal.
+// It never starts a saved-card charge. Selecting the current terms clears a
+// pending engine change immediately. Provider-billed upgrades require the
+// customer's own flow. The reason and staff identity stay with the change.
 func AdminChangeSubscription(r *httprequest.Request) {
 	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok {
@@ -53,8 +50,8 @@ func AdminChangeSubscription(r *httprequest.Request) {
 	writeTierChangeResponse(r, resp)
 }
 
-// AdminPreviewSubscriptionChange quotes a staff change: what it charges now
-// and from the next renewal.
+// AdminPreviewSubscriptionChange quotes the next renewal after a staff change;
+// nothing is charged by this change.
 func AdminPreviewSubscriptionChange(r *httprequest.Request) {
 	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok || !adminTierChangeAdmissible(r, subscription) {

@@ -1425,7 +1425,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 	f.LocalEvidence = map[string]any{
 		"checkout_attempt_id": checkoutAttemptRef(d.MemoLocalID),
 		"customer_id":         customerID.String(),
-		"price_id":            billing.PriceID(priceID).String(),
+		"price_id":            d.PublicPriceID,
 		"correlated_via":      "purchase_memo",
 	}
 	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"

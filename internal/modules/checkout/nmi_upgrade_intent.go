@@ -641,7 +641,7 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 // nmiUpgradeTierChangeResponse renders an NMI upgrade (tierChangeResponse).
 // While unresolved it names the predecessor the operation owns; once
 // committed, the successor.
-func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, error) {
+func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.PriceID) (*TierChangeResponse, error) {
 	var p subscriptions.NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
@@ -653,7 +653,7 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 		action = "downgrade"
 	}
 	resp := &TierChangeResponse{
-		Effective: effectiveOf(action), PriceID: billing.PriceID(p.PriceID),
+		Effective: effectiveOf(action), PriceID: priceID,
 		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 	}

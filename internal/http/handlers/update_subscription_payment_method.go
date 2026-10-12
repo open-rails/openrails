@@ -89,7 +89,11 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	verify := r.State.RecurringVerifier(subscription.MerchantID, origin)
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
-		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, methodID, verify); err != nil {
+		selectMethod := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod
+		if !enforceOwnership {
+			selectMethod = r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethodForStaff
+		}
+		if err := selectMethod(ctx, subscription.ID, subscription.CustomerID, methodID, verify); err != nil {
 			writeMoveRefusal(r, err, "Failed to select payment method")
 			return
 		}

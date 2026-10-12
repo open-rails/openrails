@@ -1,4 +1,4 @@
-// Offers sells products by key: each one on sale, one buy button per price.
+// ProductList sells products by key: each one on sale, one buy button per price.
 // The host decides what to sell (its server names the products, say from its
 // gate's 402) and what happens once it's paid.
 import * as React from "react"
@@ -17,24 +17,24 @@ import {
   CardTitle,
 } from "#orck/components/ui/card"
 import { useMessages } from "#orck/i18n/context"
-import { offerLabel } from "#orck/lib/offer-label"
+import { priceLabel } from "#orck/lib/price-label"
 import { useCurrencyScales } from "#orck/react/config"
 import { useProducts, type ProductsState } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
 
-export interface OffersProps {
+export interface ProductListProps {
   /** The id of the merchant whose catalog `keys` are looked up in. */
   merchant?: string
   /**
    * What to sell: these product keys of `merchant`, such as a course, its
    * bundle and the membership that also unlocks it, looked up in OpenRails'
    * public catalog. The host's server names them (the Go Client's
-   * ListOffers finds the products granting an entitlement).
+   * ListProducts finds the products granting an entitlement).
    */
   keys?: string[]
   /**
-   * The products to offer instead, from the host's own server (the Go
-   * Client's ListOffers): nothing is fetched.
+   * The products to display instead, from the host's own server (the Go
+   * Client's ListProducts): nothing is fetched.
    */
   products?: Product[]
   /**
@@ -53,33 +53,33 @@ export interface OffersProps {
   className?: string
 }
 
-export function Offers({ products, ...props }: OffersProps) {
+export function ProductList({ products, ...props }: ProductListProps) {
   return products ? (
-    <OfferList
+    <ProductCards
       {...props}
       state={{ products, error: null, refetch: () => {} }}
     />
   ) : (
-    <FetchedOffers {...props} />
+    <FetchedProducts {...props} />
   )
 }
 
-function FetchedOffers(props: OffersProps) {
+function FetchedProducts(props: ProductListProps) {
   const state = useProducts({
     merchant: props.merchant ?? "",
     keys: props.keys ?? [],
   })
-  return <OfferList {...props} state={state} />
+  return <ProductCards {...props} state={state} />
 }
 
-function OfferList({
+function ProductCards({
   onPaid,
   onSignInRequired,
   signedIn,
   appearance,
   className,
   state,
-}: OffersProps & {
+}: ProductListProps & {
   state: Pick<ProductsState, "products" | "error" | "refetch">
 }) {
   const m = useMessages()
@@ -87,24 +87,25 @@ function OfferList({
   const scope = useScopeProps(appearance)
   const scales = useCurrencyScales()
 
-  // A deposit's amount is chosen before checkout; Offers sells fixed prices.
-  const offers = (state.products ?? [])
+  // A deposit's amount is chosen before checkout; ProductList sells fixed prices.
+  const products = (state.products ?? [])
+    .filter((product) => !product.archived)
     .map((product) => ({
       product,
       prices: product.prices.filter((p) => !p.archived && !p.customer_amount),
     }))
-    .filter((offer) => offer.prices.length > 0)
+    .filter((entry) => entry.prices.length > 0)
 
   let body: React.ReactNode
   if (state.products === null && state.error) {
     body = <ErrorState error={state.error} onRetry={state.refetch} />
   } else if (state.products === null) {
     body = <ListSkeleton />
-  } else if (offers.length === 0) {
-    body = <EmptyState title={m.t("offers.empty")} />
+  } else if (products.length === 0) {
+    body = <EmptyState title={m.t("products.empty")} />
   } else {
-    body = offers.map(({ product, prices }) => (
-      <Card key={product.id} className="gap-4" data-testid="offer">
+    body = products.map(({ product, prices }) => (
+      <Card key={product.id} className="gap-4" data-testid="product">
         <CardHeader>
           <CardTitle role="heading" aria-level={2}>
             {product.display_name}
@@ -118,7 +119,7 @@ function OfferList({
             <Purchase
               key={price.id}
               priceId={price.id}
-              label={offerLabel(price, scales, m, locale)}
+              label={priceLabel(price, scales, m, locale)}
               onPaid={onPaid}
               onSignInRequired={onSignInRequired}
               signedIn={signedIn}

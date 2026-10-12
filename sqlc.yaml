@@ -70,6 +70,8 @@ sql:
       - "internal/migrate/postgres/0071_rate_at_ingest.up.sql"
       - "internal/migrate/postgres/0072_capture_quantities.up.sql"
       - "internal/migrate/postgres/0073_notification_events.up.sql"
+      - "internal/migrate/postgres/0073_public_price_identifiers.up.sql"
+      - "internal/migrate/postgres/0074_operational_read_indexes.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

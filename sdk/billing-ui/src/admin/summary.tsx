@@ -227,14 +227,17 @@ const permissionAreas: Record<string, string> = {
   "customer:read": "Read customers, subscriptions, payments, and orders.",
   "customer:manage":
     "Change customer billing, including refunds, cancellations, and credits.",
-  "catalog:manage":
-    "Read and change products, prices, meters, and catalog migrations.",
+  "catalog:manage": "Change products, prices, meters, and catalog migrations.",
+  "catalog:read": "Read products, prices, meters, and catalog migrations.",
+  "config:read":
+    "Read merchant configuration, PSPs, findings, and notifications.",
   "config:manage":
-    "Read and change merchant configuration, PSPs, findings, and notifications.",
+    "Change merchant configuration, PSPs, findings, and notifications.",
   "metrics:read": "Read revenue metrics, reports, and dashboards.",
   "entitlements:read":
     "Read customer entitlements through the application API.",
-  "catalog:read": "Read offers through the application API.",
+  "usage:read":
+    "Read usage, admissions, and running charges through the application API.",
   "usage:manage": "Admit and charge usage through the application API.",
   "events:read":
     "Read and acknowledge billing events through the application API.",

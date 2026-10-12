@@ -173,7 +173,7 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 	// Historical data can reference a one-off price even though a membership
 	// requires a cadence. Preserve that invalid association, not mutable prices.
-	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, price_id = $3, status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now(), noCycle.ID.UUID())
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, price_id = $3, status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now(), w.priceStorageID(noCycle.ID))
 	require.NoError(t, err)
 	charges := l.engineCharges()
 	w.runRenewals()

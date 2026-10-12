@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -54,6 +55,8 @@ type RecordUsageParams struct {
 	// Amount is the host-priced cost (>= 0). 0 leaves the event to its
 	// meters' rate cards; an event no priced meter consumes is metered only.
 	Amount int64
+	// Resource is what was metered (an endpoint, a plan slug); empty is none.
+	Resource string
 	// Key is the idempotency coordinate; its operation must be
 	// UsageOperation(EventType), so two event types at one (source, source_id)
 	// post two distinct charges.
@@ -147,7 +150,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// answered for a corrected one.
 		replay := func(row gen.BillingUsageEvent) error {
 			var rerr error
-			if ev, rerr = usageEventFromGen(row); rerr != nil {
+			if ev, rerr = UsageEventFromRow(row); rerr != nil {
 				return rerr
 			}
 			if ev.Outcome != outcome {
@@ -199,7 +202,20 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			if cerr != nil {
 				return cerr
 			}
-			if quantities, cerr = usageQuantities(cards, eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}); cerr != nil {
+			fields := eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}
+			// Resource used to be copied into metadata by the service. Keep
+			// that rating input without changing caller or stored metadata;
+			// an explicit metadata value, including nil, keeps precedence.
+			if resource := strings.TrimSpace(params.Resource); resource != "" {
+				if _, exists := fields.Metadata["resource"]; !exists {
+					fields.Metadata = maps.Clone(fields.Metadata)
+					if fields.Metadata == nil {
+						fields.Metadata = make(map[string]any)
+					}
+					fields.Metadata["resource"] = resource
+				}
+			}
+			if quantities, cerr = usageQuantities(cards, fields); cerr != nil {
 				return cerr
 			}
 		}
@@ -290,6 +306,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Invoker:          params.Invoker,
 			Currency:         cur,
 			EventType:        params.EventType,
+			Resource:         nilIfEmpty(strings.TrimSpace(params.Resource)),
 			Dimensions:       params.Dimensions,
 			Amount:           charge,
 			ForgivenAmount:   forgiven,
@@ -385,7 +402,7 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 		if gerr != nil {
 			return gerr
 		}
-		ev, gerr = usageEventFromGen(row)
+		ev, gerr = UsageEventFromRow(row)
 		if gerr != nil {
 			return gerr
 		}

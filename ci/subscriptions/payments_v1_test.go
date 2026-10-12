@@ -40,27 +40,27 @@ func TestRecordedOrderPayment(t *testing.T) {
 			order, err := billing.ParseOrderID(open.body["id"].(string))
 			require.NoError(t, err)
 
-			short := billing.CreatePaymentParams{OrderID: order, Amount: 1_000_000, TransactionID: "cash-short-" + uuid.NewString()}
-			_, err = client.CreatePayment(t.Context(), short)
+			short := billing.RecordExternalPaymentParams{OrderID: order, Amount: 1_000_000, TransactionID: "cash-short-" + uuid.NewString()}
+			_, err = client.RecordExternalPayment(t.Context(), short)
 			requireCode(t, err, http.StatusConflict, "payment_exceeds_due")
 
-			params := billing.CreatePaymentParams{OrderID: order, Amount: 2_000_000, TransactionID: "cash-" + uuid.NewString()}
-			first, err := client.CreatePayment(t.Context(), params)
+			params := billing.RecordExternalPaymentParams{OrderID: order, Amount: 2_000_000, TransactionID: "cash-" + uuid.NewString()}
+			first, err := client.RecordExternalPayment(t.Context(), params)
 			require.NoError(t, err)
 			require.Equal(t, []any{billing.PaymentCharge, billing.PaymentSucceeded, int64(2_000_000), "USD", billing.ChannelManual}, []any{first.Kind, first.Status, first.Amount, first.Currency, first.Channel})
 			require.Nil(t, first.Rail)
 			require.Equal(t, &order, first.OrderID)
 			require.True(t, c.entitled("recorded:post"))
 
-			again, err := client.CreatePayment(t.Context(), params)
+			again, err := client.RecordExternalPayment(t.Context(), params)
 			require.NoError(t, err)
 			require.Equal(t, first.ID, again.ID, "the same terms answer the first payment")
 			changed := params
 			changed.Amount = 3_000_000
-			_, err = client.CreatePayment(t.Context(), changed)
+			_, err = client.RecordExternalPayment(t.Context(), changed)
 			require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 			requireCode(t, err, http.StatusUnprocessableEntity, "idempotency_key_reused")
-			_, err = client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: order, Amount: 2_000_000, TransactionID: "cash-twice-" + uuid.NewString()})
+			_, err = client.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order, Amount: 2_000_000, TransactionID: "cash-twice-" + uuid.NewString()})
 			requireCode(t, err, http.StatusConflict, "order_not_payable")
 			require.Len(t, completed(w.payments(tp, c.id)), 1, "nothing else was recorded")
 
@@ -82,7 +82,7 @@ func TestRecordedOrderPayment(t *testing.T) {
 			require.Equal(t, http.StatusCreated, recurring.status, "%v", recurring.body)
 			memberOrder, err := billing.ParseOrderID(recurring.body["id"].(string))
 			require.NoError(t, err)
-			_, err = client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: memberOrder, Amount: 5_000_000, TransactionID: "cash-member-" + uuid.NewString()})
+			_, err = client.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: memberOrder, Amount: 5_000_000, TransactionID: "cash-member-" + uuid.NewString()})
 			requireCode(t, err, http.StatusConflict, "order_has_recurring_line")
 		})
 	}
@@ -102,7 +102,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 		require.Equal(t, http.StatusCreated, open.status, "%v", open.body)
 		order, err := billing.ParseOrderID(open.body["id"].(string))
 		require.NoError(t, err)
-		p, err := client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: order, Amount: price.UnitAmount, TransactionID: fmt.Sprintf("cash-%d-%s", i, uuid.NewString())})
+		p, err := client.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order, Amount: price.UnitAmount, TransactionID: fmt.Sprintf("cash-%d-%s", i, uuid.NewString())})
 		require.NoError(t, err)
 		recorded = append([]billing.PaymentID{p.ID}, recorded...)
 	}

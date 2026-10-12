@@ -37,7 +37,7 @@ import type { Finding } from "#orck/admin/lib/api/types"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import { formatDate } from "#orck/admin/lib/format"
 
-import { useMerchantConfig, useMetrics } from "#orck/admin/lib/capabilities"
+import { useMerchantConfig, useMerchantConfigUpdates, useMetrics } from "#orck/admin/lib/capabilities"
 
 export function OpsPage() {
   return useMerchantConfig() ? <FindingsTab /> : null
@@ -55,11 +55,10 @@ function FindingsTab() {
 
   const { adminQueries } = useAdminServices()
 
-  const canUpdate = useMerchantConfig()
+  const canRead = useMerchantConfig()
+  const canUpdate = useMerchantConfigUpdates()
   const metrics = useMetrics()
-  const { data, isPending: loading } = useQuery(
-    adminQueries.findings(canUpdate)
-  )
+  const { data, isPending: loading } = useQuery(adminQueries.findings(canRead))
   const { data: gauges } = useQuery({
     ...adminQueries.findingSummary(),
     enabled: metrics,

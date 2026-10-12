@@ -1091,6 +1091,8 @@ type BillingPrice struct {
 	Quantity []byte
 	// When the price was deleted, with its product or its key: nothing referenced it. Reads leave it out; declaring the same terms again revives it.
 	DeletedAt *time.Time
+	// Public immutable ID product-key:price-key:v1. Percent-encoded keys; financial versions start at one. UUID id remains a private foreign key.
+	PublicID string
 }
 
 // One row per price key of a product: its revision advances on every change to any of its versions or their PSP links. Written only by the prices and price_psp_bindings triggers, which rebuild it on restore.

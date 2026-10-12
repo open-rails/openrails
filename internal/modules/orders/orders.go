@@ -113,7 +113,8 @@ func (s *Service) now() time.Time {
 // Order is one stored order with its lines.
 type Order struct {
 	gen.BillingOrder
-	Lines []gen.BillingOrderLine
+	Lines           []gen.BillingOrderLine
+	PriceReferences map[uuid.UUID]billing.PriceID
 }
 
 // Payable reports an open order not past its expiry (a renewal has none).
@@ -212,7 +213,7 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		line := billing.OrderLine{ID: billing.OrderLineID(l.ID), Description: l.Description, Quantity: intPtr(l.Quantity), UnitAmount: l.UnitAmount, Amount: l.Amount,
 			BillingIntervalHours: intPtr(l.BillingIntervalHours), AccessDurationHours: intPtr(l.AccessDurationHours), Source: l.Source}
 		if l.PriceID != nil && l.ProductID != nil && l.Ownership != nil {
-			price, product, ownership := billing.PriceID(*l.PriceID), billing.ProductID(*l.ProductID), catalog.Ownership(*l.Ownership)
+			price, product, ownership := o.PriceReferences[*l.PriceID], billing.ProductID(*l.ProductID), catalog.Ownership(*l.Ownership)
 			line.PriceID, line.ProductID, line.Ownership = &price, &product, &ownership
 		}
 		if l.SubscriptionID != nil {

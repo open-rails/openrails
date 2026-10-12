@@ -35,10 +35,10 @@ import (
 // (boundMerchant) and, by the route's tier, checks who the subject is, asks
 // the Verified's Can for the route's permission (its merchant: name in that
 // merchant's scope, else its root: name in the Authenticator's root scope).
-// Nothing in the request names the merchant. Network routes marked
-// Sensitive also ask for CheckRecentSignIn. It answers every refusal itself, as
-// auth.Refuse says, and binds the verdict in its own context, where handlers
-// re-check it.
+// Network routes marked Sensitive also ask for CheckRecentSignIn. The optional
+// expected-merchant precondition can refuse a binding, never select one.
+// It answers every refusal itself, as auth.Refuse says, and binds the verdict
+// in its own context, where handlers re-check it.
 
 // MountError refuses a route the mount cannot gate. Mounting stops; a route
 // is never mounted open.
@@ -351,6 +351,21 @@ func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Ver
 		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
 	pin(r, target)
+	if values, present := r.Request.Header[http.CanonicalHeaderKey(merchant.ExpectedHeader)]; present {
+		var expected billing.MerchantID
+		var parseErr error
+		if len(values) == 1 {
+			expected, parseErr = billing.ParseMerchantID(strings.TrimSpace(values[0]))
+		}
+		if len(values) != 1 || parseErr != nil || expected.IsZero() {
+			r.AbortCode(billing.CodeInvalidParam, merchant.ExpectedHeader+" must contain one nonzero merchant UUID")
+			return nil, billingauth.Identity{}, billingauth.Target{}, false
+		}
+		if expected != target.MerchantID {
+			r.AbortCode(billing.CodeMerchantMismatch, "The credential is bound to a different merchant; the operation was not executed.")
+			return nil, billingauth.Identity{}, billingauth.Target{}, false
+		}
+	}
 	return v, c, target, true
 }
 
@@ -973,16 +988,25 @@ func adminAccess(e *Env) router.Handler {
 		g := e.Groups
 		support := has(g.Admin, needAdminRead)
 		access := billing.AdminAccess{
-			Admin:          level(support, support && has(g.Admin, needAdminUpdate)),
-			Catalog:        has(g.Catalog, needCatalog),
-			MerchantConfig: has(g.MerchantConfig, needMerchantConfig),
-			Metrics:        has(g.Metrics, needMetrics),
-			ScopeID:        merchantScope(root, staff.Merchant).ID,
+			Admin:                  level(support, support && has(g.Admin, needAdminUpdate)),
+			Catalog:                level(has(g.Catalog, Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}), has(g.Catalog, needCatalog)),
+			MerchantConfig:         level(has(g.MerchantConfig, needMerchantConfigRead), has(g.MerchantConfig, needMerchantConfig)),
+			Metrics:                has(g.Metrics, needMetrics),
+			ScopeID:                merchantScope(root, staff.Merchant).ID,
+			ApplicationPermissions: []billing.Permission{},
+		}
+		if staff.Identity.SubjectKind == billingauth.SubjectApplication {
+			for _, pair := range e.applicationPermissions {
+				if has(true, pair) {
+					access.ApplicationPermissions = append(access.ApplicationPermissions, pair.Merchant)
+				}
+			}
+			slices.Sort(access.ApplicationPermissions)
 		}
 		llm := e.Runtime.Config.LLM
 		access.Assistants = billing.AdminAssistants{
-			CatalogCopilot:  access.Catalog && config.LLMCatalogCopilotConfigured(llm),
-			CatalogDrafting: access.Catalog && config.LLMCatalogDraftingConfigured(llm),
+			CatalogCopilot:  access.Catalog != billing.AccessNone && config.LLMCatalogCopilotConfigured(llm),
+			CatalogDrafting: access.Catalog != billing.AccessNone && config.LLMCatalogDraftingConfigured(llm),
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

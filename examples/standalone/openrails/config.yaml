@@ -41,7 +41,8 @@ auth:
 # Route groups beyond the public, customer (/v1/me) and webhook routes.
 route_groups:
   admin: true        # customer support; the app's backend reads customers with merchant:customer:read
-  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read) and offers (merchant:catalog:read)
+  catalog: true      # product and price reads (merchant:catalog:read)
+  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read)
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:

@@ -160,7 +160,7 @@ func TestOverdueUsageOrders(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "past_due is not an order status: %v", body)
 
 	// Paid, it is no longer overdue.
-	_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: invoice.ID, Amount: owed, TransactionID: "wire-1"})
+	_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: invoice.ID, Amount: owed, TransactionID: "wire-1"})
 	require.NoError(t, err)
 	paid, err := client.GetOrder(ctx, invoice.ID)
 	require.NoError(t, err)

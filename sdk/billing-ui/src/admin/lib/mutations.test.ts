@@ -178,7 +178,7 @@ const cases: Case[] = [
   [
     "asks the catalog copilot without invalidating the catalog",
     (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
-    "POST /catalog/ask",
+    "POST /console/catalog/ask",
     [],
   ],
   [

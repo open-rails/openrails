@@ -81,15 +81,6 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	if err != nil {
 		return nil, err
 	}
-	metadata := in.Metadata
-	if in.Resource = strings.TrimSpace(in.Resource); in.Resource != "" {
-		if metadata == nil {
-			metadata = map[string]any{}
-		}
-		if _, ok := metadata["resource"]; !ok {
-			metadata["resource"] = in.Resource
-		}
-	}
 	payer := in.CustomerID
 	params := money.RecordUsageParams{
 		Payer:      &payer,
@@ -98,8 +89,9 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		EventType:  strings.TrimSpace(in.EventType),
 		Dimensions: in.Dimensions,
 		Amount:     in.Amount,
+		Resource:   in.Resource,
 		Key:        in.Key,
-		Metadata:   metadata,
+		Metadata:   in.Metadata,
 		OccurredAt: in.OccurredAt,
 		Failed:     in.Failed,
 		Delegated:  in.InvokerType == billing.InvokerTypeDelegated,
@@ -113,6 +105,10 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	if err != nil {
 		return nil, err
 	}
+	return usageEventReceipt(ev), nil
+}
+
+func usageEventReceipt(ev *models.UsageEvent) *billing.UsageEvent {
 	out := &billing.UsageEvent{
 		ID: billing.UsageEventID(ev.ID), CustomerID: billing.CustomerID(ev.CustomerID), Invoker: ev.Invoker, Currency: ev.Currency,
 		EventType: ev.EventType, Dimensions: ev.Dimensions, Outcome: billing.UsageOutcome(ev.Outcome), Amount: ev.Amount, ForgivenAmount: ev.ForgivenAmount,
@@ -123,7 +119,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		txn := billing.BalanceTransactionID(*ev.LedgerTransferID)
 		out.BalanceTransactionID = &txn
 	}
-	return out, nil
+	return out
 }
 
 // usageCharges is the wire form of an event's meter charges.

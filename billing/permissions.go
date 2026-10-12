@@ -47,6 +47,8 @@ const (
 	MerchantCatalogManage Permission = "merchant:catalog:manage"
 	RootCatalogManage     Permission = "root:catalog:manage"
 	// The merchant-config group: PSPs, settings.
+	MerchantConfigRead   Permission = "merchant:config:read"
+	RootConfigRead       Permission = "root:config:read"
 	MerchantConfigManage Permission = "merchant:config:manage"
 	RootConfigManage     Permission = "root:config:manage"
 	// The metrics group: revenue, sales, the dashboard.
@@ -56,9 +58,12 @@ const (
 	// The programmatic routes' (/v1/app). The content gate.
 	MerchantEntitlementsRead Permission = "merchant:entitlements:read"
 	RootEntitlementsRead     Permission = "root:entitlements:read"
-	// Offers: what a customer may buy.
+	// Catalog reads: products, prices, meters and price migrations.
 	MerchantCatalogRead Permission = "merchant:catalog:read"
 	RootCatalogRead     Permission = "root:catalog:read"
+	// Read usage and running charges without recording or collecting them.
+	MerchantUsageRead Permission = "merchant:usage:read"
+	RootUsageRead     Permission = "root:usage:read"
 	// Admissions and usage events, which charge customers.
 	MerchantUsageManage Permission = "merchant:usage:manage"
 	RootUsageManage     Permission = "root:usage:manage"
@@ -78,10 +83,10 @@ const (
 func Permissions() []Permission {
 	return []Permission{
 		MerchantCustomerRead, RootCustomerRead, MerchantCustomerManage, RootCustomerManage,
-		MerchantCatalogManage, RootCatalogManage, MerchantConfigManage, RootConfigManage,
+		MerchantCatalogManage, RootCatalogManage, MerchantConfigRead, RootConfigRead, MerchantConfigManage, RootConfigManage,
 		MerchantMetricsRead, RootMetricsRead,
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,
-		MerchantUsageManage, RootUsageManage,
+		MerchantUsageRead, RootUsageRead, MerchantUsageManage, RootUsageManage,
 		MerchantEventsRead, RootEventsRead, MerchantOrdersManage, RootOrdersManage,
 		MerchantCustomersRead, RootCustomersRead,
 	}

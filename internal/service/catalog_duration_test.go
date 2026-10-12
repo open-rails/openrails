@@ -39,7 +39,7 @@ func TestCatalogAccessAndBillingAreIndependent(t *testing.T) {
 
 func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
 	product := &billing.Product{ID: billing.ProductID(uuid.New()), Key: "product"}
-	current := billing.Price{ID: billing.PriceID(uuid.New()), ProductID: product.ID, Key: "price", Currency: "USD", UnitAmount: 10_000_000,
+	current := billing.Price{ID: billing.PriceID("test:" + uuid.NewString() + ":v1"), ProductID: product.ID, Key: "price", Currency: "USD", UnitAmount: 10_000_000,
 		AccessDurationHours: intPtr(72), BillingIntervalHours: intPtr(720)}
 	byKey := map[string][]billing.Price{"price": {current}}
 	for _, tc := range []struct {

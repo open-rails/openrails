@@ -15,10 +15,10 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// The four running-charge routes over HTTP, for an application holding Usage:
+// Running-charge writes need UsageManage and reads need UsageRead:
 // a start answers 201 and then 200, a stop, a read and the list 200; a
 // refused minimum 402, an unknown reference 404, a changed term
-// idempotency_key_reused. Without Usage every one of them is 403.
+// idempotency_key_reused. Each route refuses a missing permission.
 func TestRunningChargeRoutes(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -32,6 +32,7 @@ func TestRunningChargeRoutes(t *testing.T) {
 			kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialAPIKey)})
 	}
 	usage := application("only:" + string(appUsage))
+	usageRead := application("only:" + string(billing.RootUsageRead))
 	refusal := func(status int, body map[string]any, want int, code string) map[string]any {
 		t.Helper()
 		require.Equal(t, want, status, "%v", body)
@@ -84,26 +85,26 @@ func TestRunningChargeRoutes(t *testing.T) {
 	})
 	refusal(status, body, http.StatusBadRequest, "currency_unsupported")
 
-	status, read := w.merchantJSON(usage, http.MethodGet, path, nil)
+	status, read := w.merchantJSON(usageRead, http.MethodGet, path, nil)
 	require.Equal(t, http.StatusOK, status, "%v", read)
 	require.Equal(t, started["id"], read["id"])
-	status, body = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges/never-started", nil)
+	status, body = w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges/never-started", nil)
 	refusal(status, body, http.StatusNotFound, "running_charge_not_found")
 
-	status, list := w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?state=running&customer_id="+c.id, nil)
+	status, list := w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges?state=running&customer_id="+c.id, nil)
 	require.Equal(t, http.StatusOK, status, "%v", list)
 	require.Len(t, list["data"], 1)
 	require.Equal(t, started["id"], list["data"].([]any)[0].(map[string]any)["id"])
 	require.Nil(t, list["next_cursor"])
-	status, list = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?state=stopped", nil)
+	status, list = w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges?state=stopped", nil)
 	require.Equal(t, http.StatusOK, status)
 	require.Empty(t, list["data"])
-	status, body = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?state=paused", nil)
+	status, body = w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges?state=paused", nil)
 	require.Equal(t, "state", refusal(status, body, http.StatusBadRequest, billing.CodeInvalidQuery)["param"])
-	status, list = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?depleted=true", nil)
+	status, list = w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges?depleted=true", nil)
 	require.Equal(t, http.StatusOK, status, "%v", list)
 	require.Empty(t, list["data"], "6.4 USD is left")
-	status, body = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?depleted=maybe", nil)
+	status, body = w.merchantJSON(usageRead, http.MethodGet, "/v1/app/running-charges?depleted=maybe", nil)
 	require.Equal(t, "depleted", refusal(status, body, http.StatusBadRequest, billing.CodeInvalidQuery)["param"])
 
 	// The customer's own balance shows the accrual without a posting.
@@ -138,8 +139,7 @@ func TestRunningChargeRoutes(t *testing.T) {
 	require.EqualValues(t, 8_200_000, bal.BalanceAmount)
 	require.Zero(t, bal.AccruedAmount)
 
-	// Every route needs Usage, and an application.
-	others := application("but:" + string(appUsage))
+	// Every route needs its own permission and an application.
 	person := w.auth.token(t, "staff")
 	for _, call := range []struct {
 		method, path string
@@ -150,6 +150,11 @@ func TestRunningChargeRoutes(t *testing.T) {
 		{http.MethodGet, path, nil},
 		{http.MethodGet, "/v1/app/running-charges", nil},
 	} {
+		permission := appUsage
+		if call.method == http.MethodGet {
+			permission = billing.RootUsageRead
+		}
+		others := application("but:" + string(permission))
 		status, body := w.merchantJSON(others, call.method, call.path, call.body)
 		refusal(status, body, http.StatusForbidden, billing.CodePermissionRequired)
 		status, body = w.merchantJSON(person, call.method, call.path, call.body)

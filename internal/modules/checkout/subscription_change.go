@@ -31,10 +31,9 @@ import (
 //     the old price × seats; a tier downgrade applies at the next renewal with
 //     its seats;
 //   - a change to what the subscription bills now cancels its pending change;
-//   - staff change at the customer's request the same way, charging now
-//     merchant-initiated under the card's recurring agreement, with their
-//     reason kept and the customer told; they never charge a subscription
-//     its provider bills.
+//   - staff schedule changes for the next renewal, with their reason kept
+//     and the customer told; they never initiate an immediate saved-card charge.
+//     Provider-billed upgrades still require the customer's own change.
 //
 // Seats exist only for a price sold per seat (its catalog quantity bounds),
 // on engine-owned NMI and Stripe subscriptions.
@@ -88,8 +87,11 @@ func (c *changeTarget) clears() bool {
 }
 
 // deferred reports whether a change waits for the next renewal: a tier
-// downgrade or fewer seats.
+// downgrade, fewer seats, or any staff change.
 func (c *changeTarget) deferred() bool {
+	if c.staff != nil {
+		return true
+	}
 	if c.tier {
 		return !c.upgrade
 	}
@@ -140,7 +142,7 @@ func (s *CheckoutService) ConfirmSubscriptionChange(ctx context.Context, subscri
 	if err != nil {
 		return nil, err
 	}
-	resp, err := tierChangeResponse(current)
+	resp, err := s.tierChangeResponse(ctx, current)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +254,7 @@ func (s *CheckoutService) previewSubscriptionChange(ctx context.Context, req *Su
 		return nil, err
 	}
 	sub := c.sub
-	resp := &TierChangePreviewResponse{PriceID: billing.PriceID(c.price.ID), Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
+	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
 		case c.clears():

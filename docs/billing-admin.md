@@ -25,6 +25,13 @@ The browser page is distinct from the JSON API: `GET /v1/metrics/dashboard` read
 
 The component reads `GET /v1/admin/access` for permissions and assistant availability. Hidden tabs do not grant or revoke authority: the API checks every request. The standalone server can pass `exchange: { resource, scope }`; its authenticated transport must then implement `resourceFetch`, and the selected merchant's id is the token's group.
 
+Customer support, catalog and merchant configuration each report `none`, `read`
+or `update`. Reads do not grant mutations. Optional catalog Q&A uses
+`POST /v1/console/catalog/ask`, outside the merchant Go `Client`, with catalog
+read authority, model consent and the `catalog-ask` request limit. It serves an
+embedded host's BillingAdmin as well as the standalone console. Applying a
+draft remains a separate action requiring catalog manage authority.
+
 ## Composition
 
 - `merchant` fixes the merchant, as an id or `{ id, slug, display_name? }`. `merchants` and `onMerchantChange` supply a switcher.
