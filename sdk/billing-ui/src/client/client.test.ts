@@ -181,6 +181,33 @@ describe("createBillingClient", () => {
     ])
   })
 
+  it("pages the held entitlement keys by cursor", async () => {
+    const held = {
+      customer_id: "22222222-2222-2222-2222-222222222222",
+      entitlement: "pro",
+      quantity: null,
+    }
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        json(200, { data: [held], next_cursor: "c2" })
+      )
+    const client = createBillingClient({ fetch })
+    expect(await client.getEntitlements()).toEqual({
+      data: [held],
+      next_cursor: "c2",
+    })
+    await client.getEntitlements({
+      cursor: "c2",
+      prefix: "pro",
+      at: "2026-10-01T00:00:00Z",
+    })
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/billing/v1/me/entitlements?limit=500",
+      "/billing/v1/me/entitlements?limit=500&cursor=c2&at=2026-10-01T00%3A00%3A00Z&prefix=pro",
+    ])
+  })
+
   it("rejects a drifting payload as invalid_response", async () => {
     const client = createBillingClient({
       fetch: async () => json(200, { data: [{ id: "sub_1" }] }),

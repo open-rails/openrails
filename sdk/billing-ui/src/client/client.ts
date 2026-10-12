@@ -12,6 +12,7 @@ import { isTokenSource } from "./token-source"
 import {
   accountSchema,
   customerConfigSchema,
+  customerEntitlementSchema,
   customerLinkSchema,
   lowBalanceLineSchema,
   networkLinkChallengeSchema,
@@ -29,6 +30,7 @@ import {
   usageSchema,
   type Account,
   type CustomerConfig,
+  type CustomerEntitlement,
   type CustomerLink,
   type LowBalanceLine,
   type NetworkLinkChallenge,
@@ -349,6 +351,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const methodPage = listPageSchema(paymentMethodSchema)
   const paymentPage = listPageSchema(paymentSchema)
   const orderPage = listPageSchema(orderSchema)
+  const entitlementPage = listPageSchema(customerEntitlementSchema)
   const cursorQuery = (opts: CursorOptions, limit: number) => ({
     limit: opts.limit ?? limit,
     cursor: opts.cursor ?? undefined,
@@ -722,6 +725,20 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     ): Promise<ListPage<Payment>> {
       return json(paymentPage, "/me/payments", {
         query: { ...cursorQuery(opts, 20), rail: opts.rail },
+        signal: opts.signal,
+      })
+    },
+
+    /**
+     * One page of the entitlement keys the customer holds (up to 500 by
+     * default), by key. `at` reads them as of an RFC 3339 instant; `prefix`
+     * keeps the keys that start with it.
+     */
+    getEntitlements(
+      opts: CursorOptions & { at?: string; prefix?: string } = {}
+    ): Promise<ListPage<CustomerEntitlement>> {
+      return json(entitlementPage, "/me/entitlements", {
+        query: { ...cursorQuery(opts, 500), at: opts.at, prefix: opts.prefix },
         signal: opts.signal,
       })
     },

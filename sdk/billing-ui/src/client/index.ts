@@ -43,6 +43,7 @@ export type {
   Currency,
   CurrencyScales,
   CustomerConfig,
+  CustomerEntitlement,
   CustomerLink,
   PaymentConfig,
   PaymentFailure,

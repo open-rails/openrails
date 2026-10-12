@@ -1,5 +1,10 @@
 # Changelog
 
+## Entitlements read
+
+- `getEntitlements()` lists the entitlement keys the customer holds
+  (`GET /me/entitlements`), so a host can gate access right after a purchase.
+
 ## Every payment belongs to its order
 
 - Breaking: `Payment` no longer carries `price` or `product`; `order_id` names

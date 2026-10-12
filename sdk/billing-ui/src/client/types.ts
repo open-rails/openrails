@@ -9,6 +9,8 @@ import { pspConfigSchema } from "../psp"
 import type { CardEntry } from "../lib/card-entry"
 import { isAmount } from "../lib/money"
 
+import type * as wire from "./generated/wire"
+
 const amount = z.string().refine(isAmount, "amount must be an int64 string")
 const time = z.string()
 
@@ -512,6 +514,18 @@ export const paymentSchema = z.object({
     .nullish(),
 })
 export type Payment = z.infer<typeof paymentSchema>
+
+/**
+ * An entitlement key the customer holds through a product. `quantity` is the
+ * most seats a held per-seat product grants it; null when none is per seat.
+ */
+export const customerEntitlementSchema: z.ZodType<wire.CustomerEntitlement> =
+  z.object({
+    customer_id: z.string(),
+    entitlement: z.string(),
+    quantity: z.number().int().nullable(),
+  })
+export type CustomerEntitlement = wire.CustomerEntitlement
 
 /**
  * A customer's money in one currency, as of `as_of`. `accrued_amount` is what

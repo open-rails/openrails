@@ -67,6 +67,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
       }),
     () => client.confirmOrder("ord_1"),
     () => client.getUsage({ currency: "USD" }),
+    () => client.getEntitlements(),
   ]
   for (const call of calls) await call().catch(() => undefined)
 
