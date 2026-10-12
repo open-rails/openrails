@@ -97,21 +97,8 @@ func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uu
 			return ErrConflict
 		}
 	}
-	if l.Source == "" && l.Ownership == "" {
-		p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: o.MerchantID, ID: *l.ProductID})
-		if err != nil {
-			return err
-		}
-		l.Ownership = string(catalog.DeriveOwnership(catalog.Ownership(models.DerefStr(p.Ownership)), len(p.CreditGrant) > 0 && string(p.CreditGrant) != "null", []catalog.OwnershipPrice{{Recurring: l.BillingIntervalHours != nil, AccessDuration: l.AccessDurationHours != nil}}))
-		if l.Ownership == "unique" {
-			l.ClaimKey = "product:" + p.ID.String()
-			if p.TierGroup != nil && strings.TrimSpace(*p.TierGroup) != "" {
-				l.ClaimKey = "tier_group:" + *p.TierGroup
-			}
-		}
-	}
-	if l.Source == "" && l.Ownership == "unique" && l.ClaimKey == "" {
-		return errors.New("unique provider line requires accepted claim key")
+	if err := freezeLineOwnership(ctx, q, o.MerchantID, &l, sub != nil); err != nil {
+		return err
 	}
 	quantity, err := int32Ptr(l.Quantity)
 	if err != nil {
@@ -132,6 +119,35 @@ func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uu
 	}
 	return q.CreateObservedOrderLine(ctx, gen.CreateObservedOrderLineParams{MerchantID: o.MerchantID, ID: uuidutil.NewV7(), OrderID: o.ID, CustomerID: o.CustomerID, Position: int32(position), PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: optional(l.Ownership), ClaimKey: optional(l.ClaimKey), BillingIntervalHours: interval, AccessDurationHours: access, SubscriptionID: sub, Source: optional(l.Source), Now: now})
 }
+
+// freezeLineOwnership resolves ownership once at acceptance. An accepted
+// schedule supplies recurring=true even when its cadence is calendar months.
+func freezeLineOwnership(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, l *Line, recurring bool) error {
+	if l.Source != "" {
+		return nil
+	}
+	if l.PriceID == nil || l.ProductID == nil {
+		return errors.New("accepted catalog line requires price and product")
+	}
+	if l.Source == "" && l.Ownership == "" {
+		p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: merchantID, ID: *l.ProductID})
+		if err != nil {
+			return err
+		}
+		l.Ownership = string(catalog.DeriveOwnership(catalog.Ownership(models.DerefStr(p.Ownership)), len(p.CreditGrant) > 0 && string(p.CreditGrant) != "null", []catalog.OwnershipPrice{{Recurring: recurring || l.BillingIntervalHours != nil, AccessDuration: l.AccessDurationHours != nil}}))
+		if l.Ownership == "unique" {
+			l.ClaimKey = "product:" + p.ID.String()
+			if p.TierGroup != nil && strings.TrimSpace(*p.TierGroup) != "" {
+				l.ClaimKey = "tier_group:" + *p.TierGroup
+			}
+		}
+	}
+	if l.Source == "" && l.Ownership == "unique" && l.ClaimKey == "" {
+		return errors.New("unique provider line requires accepted claim key")
+	}
+	return nil
+}
+
 func optional(s string) *string {
 	if s == "" {
 		return nil

@@ -841,7 +841,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		// start at the old subscription's mutable paid-through value.
 		subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = purchasedAt, periodEnd
 
-		if err = subscription.Validate(int64(billedAmountCents)); err != nil {
+		if err = subscription.Validate(int64(billedAmountCents), now); err != nil {
 			return fmt.Errorf("failed to validate subscription: %w", err)
 		}
 
