@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -61,6 +62,8 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	// DestructiveAdmissions owns logical command limits and persistent incidents.
+	DestructiveAdmissions *destructive.Admissions
 	// providerPosture holds the PSP credentials verified at load; Ready
 	// reports any that are disarmed or still unknown.
 	providerPosture providerposture.Tracked
