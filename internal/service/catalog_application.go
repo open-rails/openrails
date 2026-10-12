@@ -251,7 +251,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", key)
 			}
-			req := billing.CreateProductParams{Key: key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, Ownership: decl.Ownership.Value, Entitlements: decl.Entitlements.Value}
+			req := billing.CreateProductParams{Key: key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, Ownership: decl.Ownership.Value, Entitlements: decl.Entitlements.Value, RequiredEntitlements: decl.RequiredEntitlements.Value}
 			if decl.CreditGrant.Set && !decl.CreditGrant.Null {
 				req.CreditGrant = &decl.CreditGrant.Value
 			}
@@ -285,6 +285,14 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 				req.SetEntitlements = true
 				var err error
 				req.Entitlements, err = catalogwire.NormalizeEntitlements(decl.Entitlements.Value)
+				if err != nil {
+					return err
+				}
+			}
+			if decl.RequiredEntitlements.Set {
+				req.SetRequiredEntitlements = true
+				var err error
+				req.RequiredEntitlements, err = catalogwire.NormalizeRequiredEntitlements(decl.RequiredEntitlements.Value)
 				if err != nil {
 					return err
 				}
@@ -330,7 +338,7 @@ func declaredOwnership(p *billing.Product) catalogwire.Ownership {
 }
 
 func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool {
-	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.SetOwnership && r.Ownership != declaredOwnership(p) || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.Entitlements, p.Entitlements)
+	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.SetOwnership && r.Ownership != declaredOwnership(p) || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.Entitlements, p.Entitlements) || r.SetRequiredEntitlements && !slices.Equal(r.RequiredEntitlements, p.RequiredEntitlements)
 }
 
 func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations map[string]catalogwire.ApplyPrice, receipt *billing.CatalogApplicationReceipt) error {

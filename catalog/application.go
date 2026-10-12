@@ -160,11 +160,14 @@ type ApplyProduct struct {
 	TierRank    Field[int]    `json:"tier_rank,omitzero"`
 	Archived    Field[bool]   `json:"archived,omitzero"`
 	// Ownership declares the product's rule; null derives it.
-	Ownership    Field[Ownership]       `json:"ownership,omitzero"`
-	Entitlements Field[[]string]        `json:"entitlements,omitzero"`
-	CreditGrant  Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
-	Prices       map[string]ApplyPrice  `json:"prices,omitempty"`
-	RateCards    Field[[]RateCard]      `json:"rate_cards,omitzero"`
+	Ownership    Field[Ownership] `json:"ownership,omitzero"`
+	Entitlements Field[[]string]  `json:"entitlements,omitzero"`
+	// RequiredEntitlements are the keys a customer must already hold to
+	// order the product.
+	RequiredEntitlements Field[[]string]        `json:"required_entitlements,omitzero"`
+	CreditGrant          Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
+	Prices               map[string]ApplyPrice  `json:"prices,omitempty"`
+	RateCards            Field[[]RateCard]      `json:"rate_cards,omitzero"`
 }
 
 // ApplyPrice declares the price its map key names. Its money terms are its
@@ -214,6 +217,12 @@ func (a Application) Validate() error {
 			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", key)
 		}
 		if _, err := NormalizeProductEntitlements(p.Entitlements.Value); err != nil {
+			return fmt.Errorf("product %q: %w", key, err)
+		}
+		if p.RequiredEntitlements.Set && (p.RequiredEntitlements.Null || p.RequiredEntitlements.Value == nil) {
+			return fmt.Errorf("product %q: required_entitlements must be a string list, not null; use [] for none", key)
+		}
+		if _, err := NormalizeRequiredEntitlements(p.RequiredEntitlements.Value); err != nil {
 			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
@@ -299,6 +308,8 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 	for key, p := range a.Products {
 		p.Entitlements.Value = slices.Clone(p.Entitlements.Value)
 		slices.Sort(p.Entitlements.Value)
+		p.RequiredEntitlements.Value = slices.Clone(p.RequiredEntitlements.Value)
+		slices.Sort(p.RequiredEntitlements.Value)
 		prices := make(map[string]ApplyPrice, len(p.Prices))
 		for priceKey, price := range p.Prices {
 			price.PSPs.Value = slices.Clone(price.PSPs.Value)

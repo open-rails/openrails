@@ -14,6 +14,9 @@ const MaxEntitlementKeyBytes = 256
 // cannot dominate a holder's prefix reads.
 const MaxProductEntitlements = 10000
 
+// MaxRequiredEntitlements bounds the keys a product requires of its buyer.
+const MaxRequiredEntitlements = 100
+
 // NormalizeEntitlements validates opaque entitlement names and sorts a copy.
 // Names retain their exact spelling. Nil stays nil and an empty list stays an
 // explicit empty list, so callers can tell an omitted list from none.
@@ -46,4 +49,17 @@ func NormalizeProductEntitlements(entitlements []string) ([]string, error) {
 		return nil, fmt.Errorf("a product grants at most %d entitlements", MaxProductEntitlements)
 	}
 	return NormalizeEntitlements(entitlements)
+}
+
+// NormalizeRequiredEntitlements is NormalizeEntitlements for the keys a
+// product requires of its buyer, which also bounds their number.
+func NormalizeRequiredEntitlements(entitlements []string) ([]string, error) {
+	if len(entitlements) > MaxRequiredEntitlements {
+		return nil, fmt.Errorf("a product requires at most %d entitlements", MaxRequiredEntitlements)
+	}
+	keys, err := NormalizeEntitlements(entitlements)
+	if err != nil {
+		return nil, fmt.Errorf("required_entitlements: %w", err)
+	}
+	return keys, nil
 }

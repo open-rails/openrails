@@ -110,6 +110,28 @@ products:
         billing_interval: null
 ```
 
+**A members-only product** — `required_entitlements` lists keys a customer must
+already hold to buy it:
+
+```yaml
+products:
+  members-live-qa:
+    display_name: Live Q&A replay
+    entitlements: ["video:live-qa"]
+    required_entitlements: ["channel:membership"]
+    prices:
+      purchase:
+        amount: 2.99 USD
+        access_duration: null
+```
+
+A customer lacking any of them is refused `403 entitlement_required`
+(`metadata.missing` names the keys) when ordering, and again when paying an order
+or checkout opened while they held them; a preview's line carries the same
+`refusal`. Merchant orders follow the rule too: to give the product anyway, grant
+it (`POST /v1/admin/product-access`). The check is at purchase only: what a
+customer bought stays theirs if they later lose the keys. `[]` clears the list.
+
 Prepaid balance products use `credit_grant`; see the
 [prepaid catalog example](../README.md#prepaid-api-balance-catalog). Administrative
 funding uses `POST /v1/admin/credit-grants`

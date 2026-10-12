@@ -221,6 +221,9 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		} else if err := json.Unmarshal(row.Entitlements, &p.Entitlements.Value); err != nil {
 			return nil, err
 		}
+		if len(row.RequiredEntitlements) > 0 {
+			p.RequiredEntitlements = catalog.Value(row.RequiredEntitlements)
+		}
 		byID[row.ID] = &dumpedProduct{key: row.Key, ApplyProduct: p}
 	}
 	return byID, nil

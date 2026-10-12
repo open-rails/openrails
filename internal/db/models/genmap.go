@@ -184,17 +184,18 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 
 func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 	m := &Product{Revision: p.Revision,
-		ID:          p.ID,
-		MerchantID:  p.MerchantID,
-		Key:         p.Key,
-		DisplayName: p.DisplayName,
-		Description: DerefStr(p.Description),
-		TierGroup:   p.TierGroup,
-		TierRank:    int(p.TierRank),
-		Ownership:   catalog.Ownership(DerefStr(p.Ownership)),
-		Archived:    p.Archived,
-		CreatedAt:   p.CreatedAt,
-		UpdatedAt:   p.UpdatedAt,
+		ID:                   p.ID,
+		MerchantID:           p.MerchantID,
+		Key:                  p.Key,
+		DisplayName:          p.DisplayName,
+		Description:          DerefStr(p.Description),
+		TierGroup:            p.TierGroup,
+		TierRank:             int(p.TierRank),
+		Ownership:            catalog.Ownership(DerefStr(p.Ownership)),
+		Archived:             p.Archived,
+		CreatedAt:            p.CreatedAt,
+		UpdatedAt:            p.UpdatedAt,
+		RequiredEntitlements: p.RequiredEntitlements,
 	}
 	if err := FromJSONB(p.CreditGrant, &m.CreditGrant, "products.credit_grant"); err != nil {
 		return nil, err

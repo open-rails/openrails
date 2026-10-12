@@ -20,8 +20,10 @@ type Product struct {
 	Description string    `json:"description"`
 
 	// Entitlements are opaque feature names granted for the purchased access window.
-	Entitlements []string                 `json:"entitlements"`
-	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	Entitlements []string `json:"entitlements"`
+	// RequiredEntitlements are the keys a customer must hold to order it.
+	RequiredEntitlements []string                 `json:"required_entitlements"`
+	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
@@ -323,9 +325,13 @@ func (p *Product) View() billing.Product {
 	if names == nil {
 		names = []string{}
 	}
+	required := p.RequiredEntitlements
+	if required == nil {
+		required = []string{}
+	}
 	v := billing.Product{Revision: p.Revision,
 		ID: billing.ProductID(p.ID), Key: p.Key,
-		DisplayName: p.DisplayName, Description: p.Description, Entitlements: names, CreditGrant: p.CreditGrant,
+		DisplayName: p.DisplayName, Description: p.Description, Entitlements: names, RequiredEntitlements: required, CreditGrant: p.CreditGrant,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}

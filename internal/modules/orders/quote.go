@@ -237,6 +237,9 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	if err := s.refuseOwned(ctx, q, merchantID, customerID, out, exceptOrder, at); err != nil {
 		return nil, err
 	}
+	if err := refuseUnentitled(ctx, q, merchantID, customerID, out.Lines, at); err != nil {
+		return nil, err
+	}
 	for _, l := range out.Lines {
 		if l.Refusal == nil {
 			if out.Total > math.MaxInt64-l.Amount {

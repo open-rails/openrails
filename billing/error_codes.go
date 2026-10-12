@@ -44,6 +44,7 @@ const (
 	CodeUsageNotPriced = "usage_not_priced"
 	// Orders.
 	CodeAlreadyOwned             = "already_owned"
+	CodeEntitlementRequired      = "entitlement_required"
 	CodeOrderLineUnavailable     = "order_line_unavailable"
 	CodeQuantityNotAllowed       = "quantity_not_allowed"
 	CodeOrderTotalChanged        = "order_total_changed"
@@ -239,6 +240,7 @@ var errorCodes = []ErrorCode{
 
 	// Orders.
 	{CodeAlreadyOwned, 409, invalid, "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."},
+	{CodeEntitlementRequired, 403, invalid, "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks."},
 	{CodeOrderLineUnavailable, 422, invalid, "A line cannot be bought; param names it and metadata.code says why."},
 	{CodeQuantityNotAllowed, 422, invalid, "A quantity was sent for a price that is not sold per seat."},
 	{CodeOrderTotalChanged, 409, invalid, "The order's total is not expected_total; preview it again."},

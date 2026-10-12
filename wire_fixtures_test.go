@@ -65,7 +65,7 @@ func canonicalWireFixtures() map[string]any {
 		"price.json": priceFixtureValue,
 		"usage.json": billing.Usage{CustomerID: customerFixture, Currency: "USD", From: when.AddDate(0, -1, 0), To: when, GroupBy: billing.UsageByEventType,
 			Rows: []billing.UsageRow{{Key: "gpu", EventCount: 3, Amount: maxMoney, Dimensions: map[string]int64{"seconds": 90}}}, NextCursor: ptr("next-page")},
-		"product.json": billing.Product{ID: productFixture, Key: "pro", DisplayName: "Pro", Entitlements: []string{"pro"},
+		"product.json": billing.Product{ID: productFixture, Key: "pro", DisplayName: "Pro", Entitlements: []string{"pro"}, RequiredEntitlements: []string{},
 			Prices: []billing.Price{priceFixtureValue}, CreatedAt: when, UpdatedAt: when},
 		"payment.json": paymentFixtureValue(when, priceFixtureValue, card),
 		"payment_method.json": billing.PaymentMethod{

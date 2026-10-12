@@ -53,6 +53,7 @@ export type OpenRailsErrorCode =
   | "default_payment_method_required"
   | "default_rate_card_not_found"
   | "destructive_actions_held"
+  | "entitlement_required"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "finding_requires_merchant_config"
@@ -250,6 +251,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   destructive_actions_held: { status: 409, type: "invalid_request_error", meaning: "The kill switch holds changes that end access or write to a provider; the proposal stays open." },
+  entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },

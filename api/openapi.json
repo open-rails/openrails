@@ -236,6 +236,7 @@
           "checkout_embed_origins_required",
           "customer_action_required",
           "customer_session_required",
+          "entitlement_required",
           "hosted_checkout_unavailable",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -472,6 +473,7 @@
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
+          "entitlement_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -831,6 +833,7 @@
         "x-openrails-errors": [
           "already_owned",
           "checkout_embed_origins_required",
+          "entitlement_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -11553,6 +11556,7 @@
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
+          "entitlement_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -12784,6 +12788,12 @@
             ]
           },
           "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_entitlements": {
             "type": "array",
             "items": {
               "type": "string"
@@ -14648,6 +14658,12 @@
             "type": "string"
           },
           "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_entitlements": {
             "type": "array",
             "items": {
               "type": "string"
@@ -18592,6 +18608,12 @@
                 "type": "null"
               }
             ]
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -20693,6 +20715,12 @@
               "type": "string"
             }
           },
+          "required_entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "credit_grant": {
             "$ref": "#/components/schemas/CreditGrantSpec"
           },
@@ -20749,6 +20777,7 @@
           "display_name",
           "description",
           "entitlements",
+          "required_entitlements",
           "tier_group",
           "tier_rank",
           "ownership",
@@ -22749,6 +22778,12 @@
               "type": "string"
             }
           },
+          "required_entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "credit_grant": {
             "oneOf": [
               {
@@ -23599,6 +23634,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The kill switch holds changes that end access or write to a provider; the proposal stays open."
+    },
+    "entitlement_required": {
+      "status": 403,
+      "type": "invalid_request_error",
+      "meaning": "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks."
     },
     "finding_action_failed": {
       "status": 502,

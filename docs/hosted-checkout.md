@@ -193,7 +193,8 @@ POST /v1/me/orders  {"lines": [{"price_id": "…"}], "checkout": {"ui_mode": "em
   with a fresh URL, and the last one stops working; the order's expiry does not
   move. A reload, a reopened dialog or two clicks pay one order. A paid,
   canceled or expired order does not count; a product the customer already
-  owns is `409 already_owned`.
+  owns is `409 already_owned`, and one whose `required_entitlements` they do
+  not hold is `403 entitlement_required`, when asking and when paying.
 - Without registered origins it is `400 checkout_embed_origins_required`,
   without a checkout host `400 hosted_checkout_unavailable`; neither makes an
   order.

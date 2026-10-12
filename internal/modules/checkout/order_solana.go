@@ -125,7 +125,7 @@ func (s *CheckoutAttemptService) openOrderSolana(ctx context.Context, order *ord
 		case replaces != uuid.Nil && (!awaiting || current.AttemptID == nil || *current.AttemptID != replaces):
 			return orders.ErrInProgress
 		}
-		if err := s.orders.StillFree(ctx, q, order, now); err != nil {
+		if err := s.orders.StillBuyable(ctx, q, order, now); err != nil {
 			return err
 		}
 		// The expired attempt leaves first: an order has one live attempt.

@@ -352,6 +352,9 @@ func writeOrderError(r *httprequest.Request, err error) {
 		if line.Refusal.Hint != nil {
 			out.Metadata["hint"] = *line.Refusal.Hint
 		}
+		if len(line.Refusal.Missing) > 0 {
+			out.Metadata["missing"] = line.Refusal.Missing
+		}
 		r.APIError(out)
 		return
 	}

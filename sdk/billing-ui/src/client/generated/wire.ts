@@ -168,6 +168,7 @@ export type ApplyProduct = {
   archived?: boolean | null
   ownership?: "consumable" | "extend" | "unique" | null
   entitlements?: string[]
+  required_entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   prices?: Record<string, ApplyPrice>
   rate_cards?: RateCard[] | null
@@ -616,6 +617,7 @@ export type CreateProductParams = {
   display_name?: string
   description?: string
   entitlements?: string[]
+  required_entitlements?: string[]
   credit_grant?: CreditGrantSpec
   tier_group?: string
   tier_rank?: number
@@ -1467,6 +1469,7 @@ export type OrderLineRefusal = {
   message: string
   owned_by: string | null
   hint: string | null
+  missing?: string[]
 }
 
 export type OrderPayment = {
@@ -1880,6 +1883,7 @@ export type Product = {
   display_name: string
   description: string
   entitlements: string[]
+  required_entitlements: string[]
   credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
@@ -2334,6 +2338,7 @@ export type UpdateProductParams = {
   display_name?: string | null
   description?: string | null
   entitlements?: string[]
+  required_entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   tier_group?: string | null
   tier_rank?: number | null

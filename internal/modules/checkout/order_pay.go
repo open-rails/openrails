@@ -433,7 +433,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 		case !orders.Payable(current, now):
 			return orders.ErrNotPayable
 		}
-		if err := s.orders.StillFree(ctx, q, order, now); err != nil {
+		if err := s.orders.StillBuyable(ctx, q, order, now); err != nil {
 			return err
 		}
 		payload := payments.NMISalePayload{

@@ -1246,6 +1246,8 @@ type BillingProduct struct {
 	Ownership *string
 	// When the product was deleted: nothing referenced it. Reads leave it out; declaring its key again revives it.
 	DeletedAt *time.Time
+	// Entitlement keys a customer must hold when ordering the product, in byte order; empty: anyone may buy it.
+	RequiredEntitlements []string
 }
 
 // Product access windows projected from access grants: a purchase, a subscription period, a grace allowance or a free grant of one product for [starts_at, ends_at). A customer holds the keys the product grants while a window is live; windows may overlap and reads take their union. Rebuildable from the grant ledger.

@@ -76,12 +76,13 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		DisplayName:  req.DisplayName,
 		Description:  req.Description,
 		Entitlements: req.Entitlements, CreditGrant: req.CreditGrant,
-		TierGroup: req.TierGroup,
-		TierRank:  req.TierRank,
-		Ownership: req.Ownership,
-		Archived:  req.Archived,
-		CreatedAt: now,
-		UpdatedAt: now,
+		RequiredEntitlements: req.RequiredEntitlements,
+		TierGroup:            req.TierGroup,
+		TierRank:             req.TierRank,
+		Ownership:            req.Ownership,
+		Archived:             req.Archived,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	if err := products.Create(ctx, p, s.keyEdit(ctx)); err != nil {
 		return nil, catalogWrite(err)
@@ -111,6 +112,8 @@ type UpdateProductRequest struct {
 	Description                *string
 	Entitlements               []string
 	SetEntitlements            bool
+	RequiredEntitlements       []string
+	SetRequiredEntitlements    bool
 	TierGroup                  *string
 	SetTierGroup               bool
 	TierRank                   *int
@@ -123,7 +126,8 @@ type UpdateProductRequest struct {
 }
 
 // productPatch reads a merge patch: null clears description and tier_group.
-// Entitlements must be a list; [] clears it and omission leaves it unchanged.
+// Entitlements and required entitlements must be lists; [] clears one and
+// omission leaves it unchanged.
 func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	var req UpdateProductRequest
 	if p.DisplayName.Null || p.TierRank.Null || p.Archived.Null {
@@ -140,6 +144,12 @@ func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 			return req, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
 		}
 		req.SetEntitlements, req.Entitlements = true, p.Entitlements.Value
+	}
+	if p.RequiredEntitlements.Set {
+		if p.RequiredEntitlements.Null || p.RequiredEntitlements.Value == nil {
+			return req, apperr.Invalidf("required_entitlements must be a string list, not null; use [] for none")
+		}
+		req.SetRequiredEntitlements, req.RequiredEntitlements = true, p.RequiredEntitlements.Value
 	}
 	if p.CreditGrant.Set {
 		req.SetCreditGrant = true
@@ -237,6 +247,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		Description:     req.Description,
 		Entitlements:    req.Entitlements,
 		SetEntitlements: req.SetEntitlements, CreditGrant: req.CreditGrant, SetCreditGrant: req.SetCreditGrant,
+		RequiredEntitlements: req.RequiredEntitlements, SetRequiredEntitlements: req.SetRequiredEntitlements,
 		TierGroup:    req.TierGroup,
 		SetTierGroup: req.SetTierGroup,
 		TierRank:     req.TierRank,

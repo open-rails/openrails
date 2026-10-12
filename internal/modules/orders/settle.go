@@ -226,15 +226,19 @@ func (s *Service) reclaim(ctx context.Context, q *gen.Queries, order *Order, now
 	return refused == nil, err
 }
 
-// StillFree refuses paying an open order whose unique lines the customer
-// came to hold, or started buying elsewhere, since it was created. q is the
+// StillBuyable refuses paying an open order whose unique lines the customer
+// came to hold, or started buying elsewhere, since it was created, or whose
+// products require entitlements the customer no longer holds. q is the
 // caller's transaction, holding the customer lock.
-func (s *Service) StillFree(ctx context.Context, q *gen.Queries, order *Order, at time.Time) error {
+func (s *Service) StillBuyable(ctx context.Context, q *gen.Queries, order *Order, at time.Time) error {
 	refused, err := s.claimRefusal(ctx, q, order, at)
-	if err != nil || refused == nil {
+	if err != nil {
 		return err
 	}
-	return apperr.Conflictf("%s", refused.Message)
+	if refused != nil {
+		return apperr.Conflictf("%s", refused.Message)
+	}
+	return entitled(ctx, q, order.MerchantID, order.CustomerID, order.Origin, order.Lines, at)
 }
 
 // claimRefusal is why another purchase holds one of order's unique lines,

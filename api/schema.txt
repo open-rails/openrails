@@ -88,6 +88,7 @@ migration 0084_destructive_staff_counts.up.sql sha256:bc91316e0ba297ddb4b371ef49
 migration 0085_customer_orders.up.sql sha256:94bbf045913ab00e55207f571519836578cdc26264f8eb87c06dc3a1f38c6258
 migration 0086_platform_custody.up.sql sha256:d0d0c6a749137f0dfe7708ac836cad08fba959e2e1c189b3924b78a5cc17a03d
 migration 0087_provider_charge_attributions.up.sql sha256:9e3180faaa91c5f0c195fca9d2addba0386812d6fc42850ab2558d2afba0753c
+migration 0088_required_entitlements.up.sql sha256:1efbf8e5e39362a14209435df008a4d06762ec696b81cade7e4788e732f90246
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -262,7 +263,7 @@ table billing.catalog_field_owners
   column actor text NOT NULL
   column set_at timestamp with time zone NOT NULL
   constraint catalog_field_owners_actor_check CHECK (((actor <> ''::text) AND (octet_length(actor) <= 255)))
-  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'credit_grant'::text, 'rate_cards'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'psp_links'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))))
+  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'psp_links'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))))
   constraint catalog_field_owners_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 255)))
   constraint catalog_field_owners_manager_check CHECK ((manager = ANY (ARRAY['apply'::text, 'edit'::text])))
   constraint catalog_field_owners_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1935,12 +1936,14 @@ table billing.products
   column credit_grant jsonb
   column ownership text
   column deleted_at timestamp with time zone
+  column required_entitlements text[] COLLATE "C" NOT NULL DEFAULT '{}'::text[]
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
   constraint products_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_ownership_check CHECK ((ownership = ANY (ARRAY['unique'::text, 'consumable'::text, 'extend'::text])))
   constraint products_pkey PRIMARY KEY (merchant_id, id)
+  constraint products_required_entitlements_check CHECK (((cardinality(required_entitlements) <= 100) AND (array_position(required_entitlements, NULL::text) IS NULL)))
   constraint products_revision_check CHECK ((revision >= 1))
   constraint products_tier_group_check CHECK (((char_length(tier_group) >= 1) AND (char_length(tier_group) <= 100)))
   index CREATE INDEX products_archived_idx ON billing.products USING btree (archived)

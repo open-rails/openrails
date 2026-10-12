@@ -54,8 +54,9 @@ var (
 	errLateApprovalDup = errors.New("order payment contradicts the recorded one")
 )
 
-// LineError refuses a line of a create or pay: already owned (409) or not
-// buyable (422). Param is lines[i].
+// LineError refuses a line of a create or pay: already owned (409), sold
+// only to holders of entitlements the customer lacks (403) or not buyable
+// (422). Param is lines[i].
 type LineError struct {
 	Index   int
 	Refusal billing.OrderLineRefusal
@@ -72,6 +73,8 @@ func (e *LineError) Code() string {
 		return billing.CodeAlreadyOwned
 	case RefusalQuantityNotAllowed:
 		return billing.CodeQuantityNotAllowed
+	case RefusalEntitlementRequired:
+		return billing.CodeEntitlementRequired
 	}
 	return billing.CodeOrderLineUnavailable
 }
