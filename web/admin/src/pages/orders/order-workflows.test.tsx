@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-// Order support mounted against the real API client: collection retries
-// pick from the customer's saved cards, payment history walks its cursors,
+// Order support mounted against the real API client: staff cannot initiate card charges, payment history walks its cursors,
 // and a customer without an invoice profile gets one on the first save.
 import { QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -9,7 +8,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import {
   aPayment,
-  aPaymentMethod,
   aUsageOrder,
   client,
   cursorPages,
@@ -54,30 +52,11 @@ const paid = (i: number) =>
     transaction_id: `txn_${i}`,
   })
 
-it("retries collection with a card read from the customer's saved methods", async () => {
-  routes["/admin/customers/cus_1/payment-methods"] = cursorPages(
-    [aPaymentMethod("pm_1")],
-    100
-  )
-  routes["POST /admin/orders/ord_1/retry-collection"] = {
-    ...order,
-    status: "complete",
-  }
+it("does not expose immediate saved-card collection", async () => {
   await show(<OrderDetail order={order} />)
+  expect(text()).not.toContain("Retry collection")
+  expect(document.querySelector("#order-payment-method")).toBeNull()
   expect(sent("/admin/customers/cus_1/payment-methods")).toHaveLength(0)
-  await click("Retry collection")
-  await vi.waitFor(() => expect(text()).toContain("visa ••••4242 (nmi)"))
-  const select = document.querySelector<HTMLSelectElement>(
-    "#order-payment-method"
-  )!
-  await act(async () => {
-    select.value = "pm_1"
-    select.dispatchEvent(new Event("change", { bubbles: true }))
-  })
-  await click("Confirm")
-  const [retry] = sent("/admin/orders/ord_1/retry-collection")
-  expect(retry.body).toEqual({ payment_method_id: "pm_1" })
-  expect(retry.headers.get("Idempotency-Key")).toMatch(/^[\da-f-]{36}$/)
 })
 
 it("pages the payment history by cursor", async () => {

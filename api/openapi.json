@@ -1038,7 +1038,7 @@
         ]
       }
     },
-    "/v1/admin/orders/{id}/void": {
+    "/v1/admin/orders/{id}/waive-balance": {
       "post": {
         "tags": [
           "admin"
@@ -1139,85 +1139,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/orders/{id}/retry-collection": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetryOrderCollectionParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Order"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:customer:manage",
-          "root": "root:customer:manage"
-        },
-        "x-openrails-sensitive": true,
-        "x-openrails-operation-limit": "off_channel",
-        "x-openrails-errors": [
-          "card_declined",
-          "idempotency_key_required",
-          "idempotency_key_reused",
-          "invalid_param",
-          "order_action_not_allowed",
-          "order_not_payable",
-          "order_payment_in_progress",
-          "payment_failed",
-          "payment_method_stale",
-          "payment_option_unavailable",
-          "payment_provider_rejected",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
         ]
       }
     },
@@ -5978,7 +5899,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreatePaymentParams"
+                "$ref": "#/components/schemas/RecordExternalPaymentParams"
               }
             }
           }
@@ -12869,25 +12790,6 @@
           }
         }
       },
-      "CreatePaymentParams": {
-        "type": "object",
-        "properties": {
-          "order_id": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "transaction_id": {
-            "type": "string"
-          },
-          "paid_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "CreatePriceMigrationParams": {
         "type": "object",
         "properties": {
@@ -19366,6 +19268,25 @@
           "up_to"
         ]
       },
+      "RecordExternalPaymentParams": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "RecordUsageBatchParams": {
         "type": "object",
         "properties": {
@@ -19589,14 +19510,6 @@
             "type": "string"
           },
           "override_params": {}
-        }
-      },
-      "RetryOrderCollectionParams": {
-        "type": "object",
-        "properties": {
-          "payment_method_id": {
-            "type": "string"
-          }
         }
       },
       "RetrySubscriptionNowParams": {

@@ -287,11 +287,11 @@ upgrade; its buyer buys through an order.
 | `Payment` with `Object`, `Refunded`, `Captured`, string ids | `billing.Payment` with `Kind`, a typed `Status`, `Channel`, `PSPID`, `Card`, `Failure`, and `Refunds` as a slice |
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; the customer sets a default card per currency on `/v1/me` |
-| `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | Invoices are usage orders: `client.ListOrders(` with `Origin: billing.OrderOriginUsage`, `client.GetOrder(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `OrderID`, `client.CreatePayment(` with `OrderID` |
+| `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | Invoices are usage orders: `client.ListOrders(` with `Origin: billing.OrderOriginUsage`, `client.GetOrder(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `OrderID`, `client.RecordExternalPayment(` with `OrderID` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
 | `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderComplete` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
-| `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.CreatePayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
+| `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.RecordExternalPayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 | `Subscription.RailSubscriptionID`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
 | `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | A usage order's `Usage.PeriodStartsAt`, `PeriodEndsAt`; orders are listed newest first, by `Origin`, `Status` and `Overdue` |
 
