@@ -45,6 +45,7 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 				cfg.Auth.Registration.NativeUserMode = tc.mode
 				if tc.hosted {
 					cfg.MerchantCreation = &server.MerchantCreationConfig{}
+					cfg.Auth.Registration.Verification = iam.RegistrationVerificationRequired
 				}
 				if tc.mode != iam.RegistrationModeClosed {
 					deps.Engine.Email = &outbox{}
