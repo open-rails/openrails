@@ -44,15 +44,15 @@ func TestPriceIdentifierMigrationPreservesForeignKeys(t *testing.T) {
 		before[name] = &fstest.MapFile{Data: body}
 	}
 	// The read-only inspection lane can ship its independent indexes first.
-	// Applying 0073 later must not be skipped just because 0074 is recorded.
-	indexMigration := "0074_operational_read_indexes.up.sql"
+	// Applying 0074 later must not be skipped just because 0075 is recorded.
+	indexMigration := "0075_operational_read_indexes.up.sql"
 	indexes, err := fs.ReadFile(postgresmigrations.FS, indexMigration)
 	require.NoError(t, err)
 	_, indexBody, ok := strings.Cut(string(indexes), "\n")
 	require.True(t, ok)
-	parent := before["0072_capture_quantities.up.sql"]
+	parent := before["0073_notification_events.up.sql"]
 	require.NotNil(t, parent)
-	indexHeader := "-- parent: 72 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
+	indexHeader := "-- parent: 73 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
 	before[indexMigration] = &fstest.MapFile{Data: []byte(indexHeader + indexBody)}
 	require.Less(t, len(before), len(files))
 	cfg := f.config()
