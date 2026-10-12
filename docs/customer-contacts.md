@@ -16,12 +16,15 @@ Without either, OpenRails sends customers no email; in-app notices and host
 events still arrive. With `Deps.UserInfo`, the SCIM routes are not mounted: one
 source of truth.
 
-Customers get, through `Config.SMTP` or `Deps.Email`: a receipt for every
-one-off purchase (an order, a credit deposit) once its
-payment settles, naming what was bought and the amount ("12.99 USD"), once
-per payment however often the provider reports it; membership confirmations
-and renewals; and payment, usage order and dunning notices. Each is also in
-`GET /v1/me/notifications`.
+Customers get membership confirmations and payment/dunning notices through
+`Config.SMTP` or `Deps.Email`. Each is also in `GET /v1/me/notifications`.
+
+Optional successful-charge receipts are off by default. Enabling the merchant's
+`charge_receipts` setting adds receipts for ordinary renewals, automatic usage
+payments, and one-off purchases (an order or credit deposit). A purchase receipt
+names what was bought and the amount ("12.99 USD"), once per payment however
+often the provider reports it. Enabled renewal receipts also follow the
+[receipt spacing policy](merchant-notifications.md#optional-charge-receipts).
 
 ## In process
 

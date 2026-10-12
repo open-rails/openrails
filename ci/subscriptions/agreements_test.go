@@ -36,7 +36,8 @@ func TestRevokingAgreements(t *testing.T) {
 	})
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.displayName = "Host Shop"
-	w.settings = billing.MerchantSettings{Profile: &billing.MerchantProfile{BillingURL: billingURL}}
+	receipts := true // the scenario verifies cancellation instructions in receipts
+	w.settings = billing.MerchantSettings{Profile: &billing.MerchantProfile{BillingURL: billingURL}, ChargeReceipts: &receipts}
 	w.start()
 	ctx, client := t.Context(), w.client[remote]
 	mail := func(subject string) smtptest.Message {
