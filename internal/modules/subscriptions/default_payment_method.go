@@ -62,6 +62,9 @@ func PaymentMethodOf(ctx context.Context, q *gen.Queries, sub *models.Subscripti
 // its own: none when method is already the customer's default for its
 // currency, which it then follows.
 func ownCardAtPurchase(ctx context.Context, d *db.DB, sub *models.Subscription, method uuid.UUID) (*uuid.UUID, error) {
+	if method == uuid.Nil {
+		return nil, nil
+	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err

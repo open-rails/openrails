@@ -639,11 +639,15 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** Reads the provider after the customer completed `next_action`. */
-    confirmOrder(orderId: string): Promise<OrderResult> {
+    /**
+     * Reads the provider after the customer completed `next_action`. A Solana
+     * wallet's `signature` names the transaction it sent: a subscription's
+     * first payment enrolls from it at once.
+     */
+    confirmOrder(orderId: string, input?: { signature?: string }): Promise<OrderResult> {
       return orderResult(`/me/orders/${id(orderId)}/confirm`, {
         method: "POST",
-        body: {},
+        body: input?.signature ? { signature: input.signature } : {},
       })
     },
 

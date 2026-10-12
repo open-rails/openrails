@@ -3,21 +3,27 @@
 package subscriptions_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/gagliardetto/solana-go/programs/token"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/engine"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -83,44 +89,114 @@ func (s *solanaShop) buyer(t *testing.T, returning bool) *solanaBuyer {
 }
 
 type solanaCheckout struct {
+	order billing.OrderID
+	// id is the order's Solana attempt.
 	id        billing.CheckoutAttemptID
 	reference solanago.PublicKey
+	// expiresAt ends the offer: a later first payment is late.
 	expiresAt time.Time
-	// bundle is the prepared first payment: co-signed by the merchant, awaiting
-	// the wallet's signature.
+	// bundle is the subscribe transaction the order's transaction request
+	// built: co-signed by the merchant, awaiting the wallet's signature.
 	bundle *solanago.Transaction
 }
 
-// checkout opens a wallet-connected subscribe checkout for b naming wallet.
-// No checkout session offers one (a session's Solana option is a Solana Pay
-// request), so it is created straight on the engine.
-func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.PublicKey) *solanaCheckout {
+// checkout is b buying the plan on an order paid from a Solana wallet: the
+// wallet asks the order's transaction request with account and is handed
+// the subscribe transaction.
+func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, account solanago.PublicKey) *solanaCheckout {
 	t.Helper()
-	got, err := s.w.engineCheckout(b.customer, checkout.CheckoutAttemptCreateRequest{
-		PriceID: s.price, SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-		Payment: checkout.CheckoutAttemptPaymentRequest{Rail: "solana", TokenSymbol: "DUSD", Wallet: wallet.String()},
-	})
+	order := s.order(t, b)
+	status, encoded := s.request(t, order, account)
+	require.Equal(t, http.StatusOK, status, encoded)
+	bundle, err := solanago.TransactionFromBase64(encoded)
 	require.NoError(t, err)
-	require.Equal(t, "requires_action", got.Status, "%+v", got)
-	require.NotNil(t, got.NextAction, "%+v", got)
-	require.Equal(t, "solana_sign_transactions", got.NextAction.Type)
-	require.Len(t, got.NextAction.Transactions, 1)
-	bundle, err := solanago.TransactionFromBase64(got.NextAction.Transactions[0])
-	require.NoError(t, err)
-	require.NotNil(t, got.ExpiresAt)
-	var reference string
-	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT reference FROM billing.checkout_attempts WHERE id = $1`), got.ID.UUID()).Scan(&reference))
-	return &solanaCheckout{
-		id:        got.ID,
-		reference: solanago.MustPublicKeyFromBase58(reference),
-		expiresAt: *got.ExpiresAt,
-		bundle:    bundle,
-	}
+	c := s.offer(t, order)
+	c.bundle = bundle
+	return c
 }
 
-// confirm relays the signature the buyer's wallet sent.
-func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (*checkout.CheckoutAttemptResponse, error) {
-	return b.w.engineConfirm(c.id, signature)
+// order is b's order for the plan, paid from a Solana wallet: it awaits the
+// wallet.
+func (s *solanaShop) order(t *testing.T, b *solanaBuyer) billing.OrderID {
+	t.Helper()
+	created := b.order(http.MethodPost, "/orders", "sol-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": s.price}}})
+	require.Equal(t, http.StatusCreated, created.status, "%v", created.body)
+	order, err := billing.ParseOrderID(created.body["id"].(string))
+	require.NoError(t, err)
+	paid := b.order(http.MethodPost, "/orders/"+order.String()+"/pay", "sol-"+uuid.NewString(),
+		map[string]any{"payment": map[string]any{"token_symbol": "DUSD"}, "expected_total": created.body["total"]})
+	require.Equal(t, http.StatusOK, paid.status, "%v", paid.body)
+	require.Equal(t, "requires_action", paymentOf(paid)["status"], "%v", paid.body)
+	action := paymentOf(paid)["next_action"].(map[string]any)
+	require.Equal(t, "solana_pay", action["type"], "%v", action)
+	require.Equal(t, strconv.Itoa(monthHours), action["payload"].(map[string]any)["period_hours"], "%v", action)
+	return order
+}
+
+// request is the wallet's transaction request for order: its account in,
+// the transaction to sign (or the refusal) out.
+func (s *solanaShop) request(t *testing.T, order billing.OrderID, account solanago.PublicKey) (int, string) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"account": account.String()})
+	require.NoError(t, err)
+	res, err := http.Post(s.w.server.URL+mountPrefix+"/v1/orders/"+order.String()+"/solana-pay", "application/json", bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	var out struct {
+		Transaction string `json:"transaction"`
+	}
+	if json.Unmarshal(body, &out) != nil || out.Transaction == "" {
+		return res.StatusCode, string(body)
+	}
+	return res.StatusCode, out.Transaction
+}
+
+// offer is the order's current Solana attempt.
+func (s *solanaShop) offer(t *testing.T, order billing.OrderID) *solanaCheckout {
+	t.Helper()
+	var attempt uuid.UUID
+	var reference, offered string
+	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT a.id, a.reference, a.rail_state->>'quote_expires_at' FROM billing.orders o
+		JOIN billing.checkout_attempts a ON a.merchant_id = o.merchant_id AND a.id = o.attempt_id WHERE o.id = $1`), order.UUID()).Scan(&attempt, &reference, &offered))
+	expiresAt, err := time.Parse(time.RFC3339, offered)
+	require.NoError(t, err)
+	return &solanaCheckout{order: order, id: billing.CheckoutAttemptID(attempt), reference: solanago.MustPublicKeyFromBase58(reference), expiresAt: expiresAt}
+}
+
+// confirmed is the order a confirm answered.
+type confirmed struct {
+	Status         string
+	SubscriptionID *billing.SubscriptionID
+}
+
+// confirm is the customer confirming the order with the signature its
+// wallet sent. A refusal is its HTTP status and code.
+func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (*confirmed, error) {
+	call := b.order(http.MethodPost, "/orders/"+c.order.String()+"/confirm", "", map[string]any{"signature": signature})
+	if call.status != http.StatusOK {
+		return nil, &billing.StatusError{Status: call.status, ErrorDetails: billing.ErrorDetails{Code: orderError(call), Message: fmt.Sprint(call.body)}}
+	}
+	out := &confirmed{Status: paymentOf(call)["status"].(string)}
+	if lines := orderLines(call); len(lines) == 1 {
+		if id, ok := lines[0]["subscription_id"].(string); ok {
+			sub, err := billing.ParseSubscriptionID(id)
+			if err != nil {
+				return nil, err
+			}
+			out.SubscriptionID = &sub
+		}
+	}
+	return out, nil
+}
+
+// requireRefused: the confirm answered status with code.
+func requireRefused(t *testing.T, err error, status int, code string) {
+	t.Helper()
+	var refused *billing.StatusError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, []any{status, code}, []any{refused.Status, refused.Code}, "%v", err)
 }
 
 // requireNothingGranted: no subscription, payment or entitlement, and the
@@ -267,7 +343,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		}
 		sig := s.land(t, build(t, ixs, b.wallet), s.w.clock.Now())
 		_, err := b.confirm(c, sig)
-		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
+		requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		s.requireNothingGranted(t, b, c)
 
 		// Paying the amount by a plain transfer is not the merchant's pull either.
@@ -275,14 +351,14 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		ixs = append(ixs, token.NewTransferInstruction(solanaPlanAmount, from, merchantATA, b.wallet.PublicKey(), nil).Build())
 		sig = s.land(t, build(t, ixs, b.wallet), s.w.clock.Now())
 		_, err = b.confirm(c, sig)
-		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
+		requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		s.requireNothingGranted(t, b, c)
 	})
 
 	t.Run("a victim's wallet named without its signature is refused", func(t *testing.T) {
 		// The attack: the victim subscribed on-chain by itself (nothing pulled,
-		// nothing recorded); the attacker names that wallet and confirms with a
-		// made-up signature.
+		// nothing recorded); the attacker asks the order's transaction for that
+		// wallet and confirms with a made-up signature, then the victim's.
 		victim := s.buyer(t, true)
 		plan, bump, _ := subscriptions.DerivePlanPDA(s.merchant.PublicKey(), 4242)
 		sub, _, _ := subscriptions.DeriveSubscriptionPDA(plan, victim.wallet.PublicKey())
@@ -300,7 +376,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.Error(t, err, "the prepared payment cannot land without the victim's signature")
 		for _, sig := range []string{"not-a-real-signature", victimSubscribe} {
 			_, err := attacker.confirm(c, sig)
-			require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation, sig)
+			requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		}
 		s.requireNothingGranted(t, attacker, c)
 		require.Equal(t, uint64(3*solanaPlanAmount), s.fake.Balance(victim.wallet.PublicKey(), s.mint))
@@ -313,7 +389,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		b := s.buyer(t, true)
 		c := s.checkout(t, b, paid.buyer.wallet.PublicKey())
 		_, err := b.confirm(c, paid.sig)
-		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
+		requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		s.requireNothingGranted(t, b, c)
 		require.Len(t, completed(s.w.payments(embedded, paid.buyer.id)), 1)
 	})
@@ -328,7 +404,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		} {
 			sig := s.land(t, tx, s.w.clock.Now())
 			_, err := b.confirm(c, sig)
-			require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
+			requireRefused(t, err, http.StatusBadRequest, "invalid_param")
 		}
 		s.requireNothingGranted(t, b, c)
 	})
@@ -338,8 +414,30 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		c := s.checkout(t, b, b.wallet.PublicKey())
 		sig := s.land(t, signAs(t, c.bundle, b.wallet), c.expiresAt.Add(solanaint.LateSettlementWindow+time.Minute))
 		_, err := b.confirm(c, sig)
-		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptExpired)
+		requireRefused(t, err, http.StatusConflict, "resource_conflict")
 		s.requireNothingGranted(t, b, c)
+	})
+
+	t.Run("an expired offer is made again once nothing can land on it", func(t *testing.T) {
+		b := s.buyer(t, true)
+		order := s.order(t, b)
+		first := s.offer(t, order)
+		s.w.advance(first.expiresAt.Sub(s.w.clock.Now()) + time.Minute)
+		status, _ := s.request(t, order, b.wallet.PublicKey())
+		require.Equal(t, http.StatusOK, status, "no wallet took the expired offer: a fresh one is made")
+		second := s.offer(t, order)
+		require.NotEqual(t, first.id, second.id)
+		require.Equal(t, "expired", s.w.attemptStatus(first.id))
+
+		// A wallet took the second offer: until its late window closes the
+		// order waits for that payment.
+		s.w.advance(second.expiresAt.Sub(s.w.clock.Now()) + time.Minute)
+		status, body := s.request(t, order, b.wallet.PublicKey())
+		require.Equal(t, http.StatusConflict, status, body)
+		s.w.advance(solanaint.LateSettlementWindow)
+		status, _ = s.request(t, order, b.wallet.PublicKey())
+		require.Equal(t, http.StatusOK, status)
+		require.NotEqual(t, second.id, s.offer(t, order).id)
 	})
 
 	t.Run("a landed transfer settles one checkout", func(t *testing.T) {
@@ -365,4 +463,35 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.Contains(t, def, "(transaction_id)")
 		s.requireNothingGranted(t, other, c)
 	})
+}
+
+// The poller finds the first payment on the order's reference: a wallet that
+// sent it without the page learning the signature still subscribes, and
+// confirm without one reads the chain now.
+func TestSolanaSubscribeOrderCompletesFromThePoller(t *testing.T) {
+	s := openSolanaShop(t)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = engine.Graph(s.w.rt).Runtime.RunWorkers(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	b := s.buyer(t, false)
+	c := s.checkout(t, b, b.wallet.PublicKey())
+	sig := s.land(t, signAs(t, c.bundle, b.wallet), s.w.clock.Now())
+	asked := b.order(http.MethodPost, "/orders/"+c.order.String()+"/confirm", "", nil)
+	require.Equal(t, http.StatusOK, asked.status, "%v", asked.body)
+	var read orderCall
+	require.Eventually(t, func() bool {
+		s.w.clock.Advance(4 * time.Second)
+		read = b.order(http.MethodGet, "/orders/"+c.order.String(), "", nil)
+		return read.status == http.StatusOK && read.body["status"] == "complete"
+	}, 20*time.Second, 50*time.Millisecond, "the poller enrolls the landed first payment")
+	sub, err := billing.ParseSubscriptionID(orderLines(read)[0]["subscription_id"].(string))
+	require.NoError(t, err)
+	got, err := s.w.client[embedded].GetSubscription(t.Context(), sub)
+	require.NoError(t, err)
+	require.Equal(t, "solana", string(got.Rail))
+	payments := completed(s.w.payments(embedded, b.id))
+	require.Len(t, payments, 1)
+	require.Equal(t, sig, payments[0].TransactionID)
 }

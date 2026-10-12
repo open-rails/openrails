@@ -148,6 +148,12 @@ type PayOrderParams struct {
 	Reusable      *bool              `json:"reusable,omitempty"`
 }
 
+// ConfirmOrderParams confirms an order awaiting its customer. Signature is
+// the transaction a Solana wallet sent for it: OpenRails reads it at once.
+type ConfirmOrderParams struct {
+	Signature *string `json:"signature,omitempty"`
+}
+
 // Order is one purchase: frozen lines and total. It is read and paid by its
 // own customer; its id is not a credential.
 type Order struct {

@@ -491,6 +491,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmOrderParams"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -523,7 +532,8 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "request"
         ]
       }
     },
@@ -11382,6 +11392,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmOrderParams"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -11416,7 +11435,8 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:network"
+          "tier:network",
+          "request"
         ]
       }
     },
@@ -13825,6 +13845,14 @@
         "required": [
           "prefer"
         ]
+      },
+      "ConfirmOrderParams": {
+        "type": "object",
+        "properties": {
+          "signature": {
+            "type": "string"
+          }
+        }
       },
       "CreateAlertWebhookParams": {
         "type": "object",

@@ -19,10 +19,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
 // Every purchase is made as production makes it: the merchant creates an
@@ -320,48 +316,4 @@ func (w *world) latestAttemptStatus(customerID string) string {
 	var status string
 	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status FROM billing.checkout_attempts WHERE customer_id = $1 AND mode <> 'payment_method' ORDER BY created_at DESC, id DESC LIMIT 1`), customerID).Scan(&status))
 	return status
-}
-
-// The engine's own checkout entry, for inputs no order sends: a
-// wallet-connected Solana subscribe, a one-off Solana transaction request, a
-// signature relayed from the buyer's wallet, an asserted entitlement. No
-// production route reaches them; these scenarios keep them covered.
-
-func (w *world) inMerchant(run func(ctx context.Context, svc *checkout.CheckoutAttemptService) error) error {
-	rt := engine.Graph(w.rt).Runtime
-	ctx := merchant.WithID(w.t.Context(), rt.DeclaredMerchants()[0])
-	return rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error { return run(scoped, rt.CheckoutAttemptService) })
-}
-
-// engineCheckout creates an attempt for c straight on the engine.
-func (w *world) engineCheckout(c *customer, in checkout.CheckoutAttemptCreateRequest) (*checkout.CheckoutAttemptResponse, error) {
-	w.t.Helper()
-	if in.IdempotencyKey == "" {
-		in.IdempotencyKey = "engine-" + uuid.NewString()
-	}
-	// The payer accepts the price's terms in this request, as an order's pay does.
-	in.Acceptance = &billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: engine.Graph(w.rt).Runtime.DeclaredMerchants()[0], SubjectID: c.id, Issuer: "openrails:merchant-checkout"}
-	var out *checkout.CheckoutAttemptResponse
-	err := w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) (err error) {
-		out, err = svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: c.id})
-		return err
-	})
-	return out, err
-}
-
-// engineConfirm relays a Solana signature for the attempt to the engine, as
-// its buyer's wallet sent it.
-func (w *world) engineConfirm(id billing.CheckoutAttemptID, signature string) (*checkout.CheckoutAttemptResponse, error) {
-	w.t.Helper()
-	var out *checkout.CheckoutAttemptResponse
-	err := w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) error {
-		owner, err := svc.Owner(ctx, id.UUID())
-		if err != nil {
-			return err
-		}
-		in := &checkout.CheckoutAttemptConfirmRequest{Payment: checkout.CheckoutAttemptConfirmPayment{Rail: owner.Rail, Signature: signature}}
-		out, err = svc.ConfirmSession(ctx, id.UUID(), in, &checkout.UserIdentity{ID: owner.CustomerID.String()})
-		return err
-	})
-	return out, err
 }

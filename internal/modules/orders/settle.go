@@ -58,6 +58,15 @@ type Charge struct {
 	// Reuse: the charge stored the card for the customer's one-click buys,
 	// its card_on_file agreement.
 	Reuse bool
+	// Enrolled is the subscription the provider opened for the order's one
+	// recurring line with this charge: the provider collects it.
+	Enrolled *Enrolled
+}
+
+// Enrolled is a provider's subscription as its first payment opened it.
+type Enrolled struct {
+	RailSubscriptionID     string
+	PeriodStart, PeriodEnd time.Time
 }
 
 // lineage is the agreement references the charge leaves on the card.
@@ -295,16 +304,27 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
 			AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}
-		sub, _, err := s.Memberships.CreateMembershipTx(db.WithPSPID(ctx, charge.PSPID), d, &subscriptions.CreateMembershipParams{
+		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
 			PaymentMetadata: map[string]any{"order_id": order.ID.String()},
-		})
+		}
+		if e := charge.Enrolled; e != nil {
+			if len(order.Lines) != 1 {
+				return errors.New("a provider enrolls an order of one subscription")
+			}
+			terms.CollectionPolicy, terms.PeriodStart, terms.PeriodEnd = models.ProviderCollectionPolicy(charge.Rail), e.PeriodStart, e.PeriodEnd
+			params.RailSubscriptionID = &e.RailSubscriptionID
+		}
+		sub, _, err := s.Memberships.CreateMembershipTx(db.WithPSPID(ctx, charge.PSPID), d, params)
 		if err != nil {
 			return err
 		}
-		if _, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
-			Rail: charge.Rail, Kind: paycharge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: charge.lineage(), AcceptedAt: now}); err != nil {
-			return err
+		// The engine's card agreement; a provider holds its own.
+		if charge.Enrolled == nil {
+			if _, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
+				Rail: charge.Rail, Kind: paycharge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: charge.lineage(), AcceptedAt: now}); err != nil {
+				return err
+			}
 		}
 		holderType, holder = "subscription", sub.ID
 		if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: order.MerchantID, ID: line.ID, SubscriptionID: &sub.ID}); err != nil {

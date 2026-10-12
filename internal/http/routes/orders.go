@@ -33,7 +33,7 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder, IdempotencyKey: true,
 		Request: billing.PayOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: orderPayErrors, Handler: h(handlers.PayMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/confirm", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutOrder,
-		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "invalid_param", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},
+		Request: billing.ConfirmOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "invalid_param", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/cancel", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMyOrder)},
 	// A wallet's Solana Pay transaction request for an order awaiting it: the

@@ -98,8 +98,9 @@ func (o OrderOption) Accepts() []string {
 
 // OrderOptions are the PSPs that sell every line on rails OpenRails charges
 // itself: a card on NMI or Stripe, every recurring line an engine-owned
-// subscription; or a Solana wallet, for one-time lines. A Basis Theory
-// custodian's PSP sells one-time lines.
+// subscription; or a Solana wallet, for one-time lines or the one line of a
+// price with a Solana plan. A Basis Theory custodian's PSP sells one-time
+// lines.
 func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
@@ -125,7 +126,9 @@ func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*mod
 			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe && rail != models.RailSolana) {
 				continue
 			}
-			if price.IsRecurring() && (rail == models.RailSolana || rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine) {
+			// A Solana plan subscribes an order of its one line.
+			plan := rail == models.RailSolana && len(linked) == 1 && priceHasSolanaRecurring(price.ForPSP(c.PSPID))
+			if price.IsRecurring() && !plan && (rail == models.RailSolana || rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine) {
 				continue
 			}
 			if i == 0 || containsOption(out, c.PSPID) {
@@ -723,7 +726,7 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 // ConfirmOrder reads the provider for the order's live attempt after the
 // customer acted: the verifier settles it, or it stays where it is. Failed
 // reports an attempt that ended without moving money.
-func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer) (OrderCharge, error) {
+func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer, signature string) (OrderCharge, error) {
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
 		return OrderCharge{}, nil
 	}
@@ -732,7 +735,7 @@ func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders
 	case err != nil:
 		return OrderCharge{}, err
 	case solana:
-		return OrderCharge{}, s.pollSolanaOrderNow(ctx, attempt)
+		return OrderCharge{}, s.confirmOrderSolana(ctx, attempt, signature)
 	case hostedAttempt(attempt):
 		return s.confirmOrderHosted(ctx, attempt)
 	}

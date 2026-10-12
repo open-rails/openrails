@@ -403,7 +403,7 @@ func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderAct
 
 // ConfirmOrder reads the provider after the customer completed next_action;
 // an attempt that failed answers 402.
-func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing.OrderID) (OrderAnswer, error) {
+func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing.OrderID, params billing.ConfirmOrderParams) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return OrderAnswer{}, err
@@ -417,7 +417,11 @@ func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	charged, err := rt.Checkout.ConfirmOrder(ctx, order, actor.Principal)
+	var signature string
+	if params.Signature != nil {
+		signature = strings.TrimSpace(*params.Signature)
+	}
+	charged, err := rt.Checkout.ConfirmOrder(ctx, order, actor.Principal, signature)
 	return s.orderAnswer(ctx, rt, actor, order.ID, http.StatusOK, charged, false, err)
 }
 

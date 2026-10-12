@@ -215,7 +215,7 @@ sale, per the rail registry:
 | Rail | One-time | New subscription |
 |---|---|---|
 | NMI, Stripe | yes | engine-collected on a saved card (no trial phase); an NMI token is saved first |
-| Solana | yes (Solana Pay) | no |
+| Solana | yes (Solana Pay) | a price with a Solana plan, alone on its order |
 | CCBill | no | no (imported subscriptions keep working) |
 
 Each payment option carries `psp_id`, `rail` and `accepts` (`saved_card`,
@@ -332,6 +332,12 @@ with `accepts: ["solana_pay"]` takes `payment: {token_symbol, psp_id?}`
 QR code or a wallet link. The wallet fetches the transaction itself, with no
 credential: the order names its merchant. The order completes when the
 transfer lands, and `confirm` asks OpenRails to read the chain now.
+
+An order of one line of a price with a Solana plan subscribes the same way:
+`payload.period_hours` says how often the plan pulls, and the wallet's
+transaction is the subscription's delegated approval and its first period's
+pull. The order completes when that payment lands, naming the subscription on
+its line; `confirm` with `{signature}` reads that transaction at once.
 
 billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
 card, a new card in the PSP's fields, the PSP's hosted page (`returnUrl`) or a

@@ -42,7 +42,7 @@ A customer acting on its own account.
 | GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/me/orders/{id}` | customer | — | — | 200 `Order` |  |
 | POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
-| POST | `/v1/me/orders/{id}/confirm` | customer | — | — | 200 `Order` |  |
+| POST | `/v1/me/orders/{id}/confirm` | customer | — | `ConfirmOrderParams` | 200 `Order` |  |
 | POST | `/v1/me/orders/{id}/cancel` | customer | — | — | 200 `Order` |  |
 | GET | `/v1/me/cart` | customer | — | — | 200 `Cart` |  |
 | PUT | `/v1/me/cart/lines/{price_id}` | customer | — | `SetCartLineParams` | 200 `Cart` |  |
@@ -257,6 +257,6 @@ The openrails.dev account across the merchants it is linked at, where the standa
 | DELETE | `/v1/network/links/{link_id}/payment-methods/{id}` | network | — | — | 202 —<br>204 — | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/orders/{id}` | network | — | — | 200 `Order` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/orders/{id}/pay` | network | — | `PayOrderParams` | 200 `Order` | when `customer_network`; sensitive; `Idempotency-Key` |
-| POST | `/v1/network/links/{link_id}/orders/{id}/confirm` | network | — | — | 200 `Order` | when `customer_network`; sensitive |
+| POST | `/v1/network/links/{link_id}/orders/{id}/confirm` | network | — | `ConfirmOrderParams` | 200 `Order` | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/agreements` | network | — | — | 200 `ListPage<Agreement>` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/agreements/{id}/revoke` | network | — | — | 200 `AgreementRevocation` | when `customer_network`; sensitive |
