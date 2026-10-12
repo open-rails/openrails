@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
-
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -72,6 +70,10 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		return uuid.Nil, fmt.Errorf("stripe converge: prober not configured")
 	}
 	now := s.now().UTC()
+	reader, ok := s.Prober.(subscriptions.StripeBillReader)
+	if !ok {
+		return uuid.Nil, fmt.Errorf("stripe converge: verified invoice reader is required")
+	}
 
 	rec, err := s.Prober.ProbeSubscription(ctx, railSubID)
 	if err != nil {
@@ -89,10 +91,13 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 				Info("stripe converge: subscription unknown locally and gone at Stripe; nothing to do")
 			return uuid.Nil, nil
 		}
-		return s.createFromFetchedRecord(ctx, railSubID, rec, now)
+		return s.createFromFetchedRecord(ctx, railSubID, rec, reader, now)
 	}
 
 	if rec.Found {
+		if err := s.recordFetchedBills(ctx, sub, rec, reader, now); err != nil {
+			return sub.CustomerID, err
+		}
 		if err := s.applyFetchedMirrorFacts(ctx, railSubID, rec, now); err != nil {
 			return sub.CustomerID, err
 		}
@@ -103,6 +108,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 	}
 
 	snap := reconcile.StripeSnapshotFromLiveness(railSubID, rec, now)
+	snap.BillsRecorded = true
 	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("stripe converge: %w", err)
@@ -121,7 +127,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 // createFromFetchedRecord is the signup/first-invoice leg: a Stripe checkout
 // subscription has no local row until its first paid invoice. All facts come
 // from the FETCHED record (metadata stamped by checkout, latest invoice).
-func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) (uuid.UUID, error) {
+func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (uuid.UUID, error) {
 	userID := normalize.FirstNonEmpty(rec.Metadata["user_id"], rec.Metadata["userId"], rec.Metadata["uid"])
 	if userID == "" && s.RailCustomerService != nil && rec.CustomerID != "" {
 		if uid, err := s.RailCustomerService.GetUserIDByCustomerID(ctx, string(models.RailStripe), rec.CustomerID); err == nil {
@@ -137,7 +143,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), rec.CustomerID)
 	}
 
-	priceID, price, err := s.resolveFetchedPrice(ctx, rec)
+	priceID, _, err := s.resolveFetchedPrice(ctx, rec)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("stripe converge: %s: %w", railSubID, err)
 	}
@@ -151,45 +157,43 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		}).Info("stripe converge: fetched subscription has no settled paid invoice; not creating membership")
 		return uuid.Nil, nil
 	}
-	if err := validateStripeFetchedInvoicePrice(rec, price); err != nil {
-		return uuid.Nil, fmt.Errorf("stripe converge: %s: %w", railSubID, err)
+	invoice, err := reader.ReadBill(ctx, rec.LatestInvoiceID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("stripe converge: fetch initial invoice: %w", err)
 	}
-
-	transactionID := rec.LatestInvoiceTransactionID
-	if recorded, err := s.fetchedInvoicePaymentAlreadyRecorded(ctx, rec); err != nil {
-		return uuid.Nil, err
-	} else if recorded {
-		// Cross-key dedup: the payment already exists under another key
-		// (backfill/charge id vs invoice id); extend without a second row.
-		transactionID = ""
+	if invoice.SubscriptionID != railSubID || invoice.CustomerID != rec.CustomerID || invoice.Status != "paid" {
+		return uuid.Nil, fmt.Errorf("stripe converge: initial invoice identity or settlement mismatch")
 	}
-
-	var purchasedAt *time.Time
-	if !rec.LatestInvoiceCreated.IsZero() {
-		t := rec.LatestInvoiceCreated
-		purchasedAt = &t
+	// Subscription metadata holds the accepted checkout identity; invoice
+	// metadata alone need not carry it.
+	if invoice.Metadata == nil {
+		invoice.Metadata = map[string]string{}
 	}
-	paymentMetadata := map[string]any{}
-	if rec.LatestInvoiceID != "" {
-		paymentMetadata["stripe_invoice_id"] = rec.LatestInvoiceID
+	if order := rec.Metadata["order_id"]; order != "" {
+		invoice.Metadata["order_id"] = order
 	}
-
-	sub, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		UserID:                userID,
-		PriceID:               priceID,
-		Rail:                  models.RailStripe,
-		RailSubscriptionID:    &railSubID,
-		CurrentPeriodStartsAt: zeroTimePtr(rec.CurrentPeriodStart),
-		CurrentPeriodEndsAt:   zeroTimePtr(rec.CurrentPeriodEnd),
-		TransactionID:         transactionID,
-		Amount:                int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid))),
-		AmountProvided:        true,
-		Currency:              rec.LatestInvoiceCurrency,
-		PurchasedAt:           purchasedAt,
-		PaymentMetadata:       paymentMetadata,
+	var sub *models.Subscription
+	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.DB.NewWithPgxTx(tx)
+		// No transaction ID here: all cash, including multiple partial
+		// settlements, is recorded from the verified invoice payments below.
+		var err error
+		sub, _, err = s.SubscriptionLifecycleService.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{
+			UserID: userID, PriceID: priceID, Rail: models.RailStripe, RailSubscriptionID: &railSubID,
+			CurrentPeriodStartsAt: zeroTimePtr(rec.CurrentPeriodStart), CurrentPeriodEndsAt: zeroTimePtr(rec.CurrentPeriodEnd),
+			AmountProvided: true, Currency: invoice.Currency,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = subscriptions.RecordStripeBill(ctx, d, sub, invoice, now)
+		return err
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("stripe converge: create membership %s: %w", railSubID, err)
+	}
+	if err := s.recordFetchedBills(ctx, sub, rec, reader, now); err != nil {
+		return sub.CustomerID, err
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
@@ -247,42 +251,30 @@ func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, p
 	return nil
 }
 
-// fetchedInvoicePaymentAlreadyRecorded is the cross-key dedup for the fetched
-// latest invoice: a completed payment may already exist under the charge /
-// payment_intent / invoice id, or via stripe_invoice_id metadata.
-func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context.Context, rec subscriptions.StripeLivenessRecord) (bool, error) {
-	if s.PaymentService == nil {
-		return false, nil
-	}
-	for _, candidate := range []string{rec.LatestInvoiceTransactionID, rec.LatestInvoiceID} {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
+// recordFetchedBills walks the complete subscription history and fetches each
+// specific invoice. Replayed or unordered webhooks cannot replace an earlier
+// bill with latest_invoice. Each callback owns one local transaction.
+func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) error {
+	return reader.VisitSubscriptionBills(ctx, sub.RailSubscriptionID, func(invoice subscriptions.StripeBill) error {
+		if invoice.CustomerID != rec.CustomerID {
+			return fmt.Errorf("Stripe invoice %s belongs to a different customer", invoice.ID)
 		}
-		existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, candidate)
-		if err != nil {
-			if db.IsNotFound(err) {
-				continue
+		if invoice.Reason == "subscription_create" && rec.Metadata["order_id"] != "" {
+			if invoice.Metadata == nil {
+				invoice.Metadata = map[string]string{}
 			}
-			return false, fmt.Errorf("stripe converge: dedup fetched invoice payment: %w", err)
+			invoice.Metadata["order_id"] = rec.Metadata["order_id"]
 		}
-		if existing != nil && existing.Status != payments.PaymentStatusFailedValue {
-			return true, nil
-		}
-	}
-	if invoiceID := strings.TrimSpace(rec.LatestInvoiceID); invoiceID != "" {
-		existing, err := s.PaymentService.GetByStripeInvoice(ctx, invoiceID)
-		if err != nil {
-			if db.IsNotFound(err) {
-				return false, nil
+		return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := s.DB.NewWithPgxTx(tx)
+			current, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, sub.ID)
+			if err != nil {
+				return err
 			}
-			return false, fmt.Errorf("stripe converge: dedup fetched invoice payment by metadata: %w", err)
-		}
-		if existing != nil && existing.Status != payments.PaymentStatusFailedValue {
-			return true, nil
-		}
-	}
-	return false, nil
+			_, err = subscriptions.RecordStripeBill(ctx, d, current, invoice, now)
+			return err
+		})
+	})
 }
 
 // applyFetchedMirrorFacts mirrors the Stripe facts outside the decider's
@@ -325,9 +317,6 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			return nil
 		}
 		price := s.paidPriceMove(ctx, sub, rec)
-		if err := s.recordPaidProration(ctx, txdb, sub, rec, price, now); err != nil {
-			return err
-		}
 		if price == nil {
 			return nil
 		}
@@ -348,39 +337,6 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	// A product move ends the old product's grace window.
 	if updatedSub != nil && oldProduct != uuid.Nil && oldProduct != updatedSub.ProductID {
 		return s.revokeMovedGrace(ctx, updatedSub, oldProduct)
-	}
-	return nil
-}
-
-// recordPaidProration records a paid mid-period invoice (a portal plan
-// change's proration) as a payment. It moves money, never the paid period.
-func (s *StripeConvergeService) recordPaidProration(ctx context.Context, txdb *db.DB, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, moved *models.Price, now time.Time) error {
-	if !rec.LatestInvoicePaid || !strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") || rec.LatestInvoiceTransactionID == "" || rec.LatestInvoiceAmountPaid <= 0 {
-		return nil
-	}
-	if recorded, err := s.fetchedInvoicePaymentAlreadyRecorded(ctx, rec); err != nil || recorded {
-		return err
-	}
-	priceID := sub.PriceID
-	if moved != nil {
-		priceID = moved.ID
-	}
-	billedAt := rec.LatestInvoiceCreated
-	if billedAt.IsZero() {
-		billedAt = now
-	}
-	amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid)))
-	subID, pspID := sub.ID, sub.PspID
-	payment := &models.Payment{
-		ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, PriceID: priceID, SubscriptionID: &subID, Rail: models.RailStripe, PspID: &pspID,
-		TransactionID: rec.LatestInvoiceTransactionID, Amount: amount, ListAmount: amount, Currency: strings.ToUpper(rec.LatestInvoiceCurrency),
-		Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: billedAt, CreatedAt: now,
-		// A proration pays a part-period at the new price: its own period key,
-		// never a renewal's.
-		Metadata: map[string]any{"stripe_invoice_id": rec.LatestInvoiceID, "billing_reason": "subscription_update", subscriptions.PaidPeriodKey: billedAt.UTC().Format(time.RFC3339)},
-	}
-	if _, err := payments.NewPaymentService(txdb, s.Clock).CreateIfNotExists(ctx, payment); err != nil {
-		return fmt.Errorf("stripe converge: record paid proration: %w", err)
 	}
 	return nil
 }

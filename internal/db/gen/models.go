@@ -1233,6 +1233,18 @@ type BillingProviderBill struct {
 	CreatedAt         time.Time
 }
 
+type BillingProviderCycleReceipt struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	TransactionID  string
+	SubscriptionID uuid.UUID
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	OccurredAt     time.Time
+	Approved       bool
+}
+
 // Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.
 type BillingProviderIntent struct {
 	ID         uuid.UUID
@@ -1298,6 +1310,18 @@ type BillingProviderMutationLog struct {
 	CreatedAt time.Time
 	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
 	CustodianID *uuid.UUID
+}
+
+type BillingProviderSchedule struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	InitialOrderID uuid.UUID
+	FirstDueAt     time.Time
+	CadenceHours   int32
+	AcceptedBill   []byte
+	CreatedAt      time.Time
 }
 
 // Bearer tokens a merchant's directory presents at /scim/v2, stored as their SHA-256. Revoking deletes the row.
