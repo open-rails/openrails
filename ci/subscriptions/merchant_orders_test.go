@@ -10,9 +10,132 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
+
+// Reopening checkout through its create key materializes a due order's expiry:
+// the same order is returned, and a deliberate new purchase can claim its item.
+func TestMerchantOrderReplayExpiresDueOrder(t *testing.T) {
+	t.Parallel()
+	w := merchantCheckoutWorld(t)
+	life := w.lifetime("orders:replay-expiry", 5_000_000)
+	for _, tp := range []topology{embedded, remote} {
+		c := w.newCustomer()
+		client := w.client[tp]
+		params := billing.CreateOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: life.ID}},
+			IdempotencyKey: uuid.NewString(), Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://e2e.test/thanks"}}
+		order, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		require.Equal(t, order.Checkout.ExpiresAt, *order.ExpiresAt)
+		w.advance(order.ExpiresAt.Sub(w.clock.Now()) + time.Second)
+
+		// Reads and refused replays leave lifecycle writes to a valid command.
+		read, err := client.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderOpen, read.Status)
+		changed := params
+		changed.Lines = []billing.OrderLineParams{{PriceID: life.ID, Quantity: new(1)}}
+		_, err = client.CreateOrder(t.Context(), changed)
+		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
+		read, err = client.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderOpen, read.Status)
+
+		again, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		require.Equal(t, order.ID, again.ID)
+		require.Equal(t, billing.OrderExpired, again.Status)
+		require.NotNil(t, again.ExpiredAt)
+		require.Nil(t, again.Checkout.URL)
+		replayed, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err)
+		require.Equal(t, again.ExpiredAt, replayed.ExpiredAt, "replay does not expire twice")
+		params.IdempotencyKey = uuid.NewString()
+		next, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, "expiry releases the old order's ownership claim")
+		require.NotEqual(t, order.ID, next.ID)
+		require.Equal(t, billing.OrderOpen, next.Status)
+	}
+	require.Empty(t, w.nmi.saleOrders(), "reopening checkout never charges")
+}
+
+// A checkout capability can expire before its order. Replaying the creation
+// must not cancel that still-payable order or free its ownership claim.
+func TestMerchantOrderReplayKeepsFutureOrder(t *testing.T) {
+	t.Parallel()
+	w := merchantCheckoutWorld(t)
+	life := w.lifetime("orders:replay-future", 5_000_000)
+	for _, tp := range []topology{embedded, remote} {
+		c := w.newCustomer()
+		client := w.client[tp]
+		params := billing.CreateOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: life.ID}},
+			IdempotencyKey: uuid.NewString(), ExpiresAt: new(w.clock.Now().Add(48 * time.Hour)),
+			Checkout: &billing.OrderCheckoutParams{SuccessURL: "https://e2e.test/thanks"}}
+		order, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		w.advance(order.Checkout.ExpiresAt.Sub(w.clock.Now()) + time.Second)
+		require.True(t, order.ExpiresAt.After(w.clock.Now()))
+		again, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		require.Equal(t, order.ID, again.ID)
+		require.Equal(t, billing.OrderOpen, again.Status)
+		require.Nil(t, again.ExpiredAt)
+		require.Nil(t, again.Checkout.URL)
+		params.IdempotencyKey = uuid.NewString()
+		_, err = client.CreateOrder(t.Context(), params)
+		requireCode(t, err, http.StatusConflict, billing.CodeAlreadyOwned)
+	}
+}
+
+// A provider may already have charged a processing order. Expiry replay keeps
+// that order and its claim until reconciliation observes the provider result.
+func TestMerchantOrderReplayKeepsProcessingOrder(t *testing.T) {
+	t.Parallel()
+	w := orderWorld(t)
+	life := w.lifetime("orders:replay-processing", 5_000_000)
+	for _, tp := range []topology{embedded, remote} {
+		c := w.newCustomer()
+		client := w.client[tp]
+		saved := c.saveCard("nmi", visa)
+		params := billing.CreateOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: life.ID}},
+			IdempotencyKey: uuid.NewString(), ExpiresAt: new(w.clock.Now().Add(time.Hour))}
+		order, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		w.nmi.DropSaleResponses(1)
+		w.nmi.QueryUnavailable(true)
+		paid := c.order(http.MethodPost, "/orders/"+order.ID.String()+"/pay", uuid.NewString(),
+			map[string]any{"payment": map[string]any{"payment_method_id": saved}, "expected_total": micros(5_000_000)})
+		require.Equal(t, "processing", paid.body["status"], "%v", paid.body)
+		w.advance(2 * time.Hour)
+		again, err := client.CreateOrder(t.Context(), params)
+		require.NoError(t, err, tp)
+		require.Equal(t, order.ID, again.ID)
+		require.Equal(t, billing.OrderProcessing, again.Status)
+		require.Nil(t, again.ExpiredAt)
+		params.IdempotencyKey, params.ExpiresAt = uuid.NewString(), nil
+		_, err = client.CreateOrder(t.Context(), params)
+		requireCode(t, err, http.StatusConflict, billing.CodeAlreadyOwned)
+
+		w.nmi.QueryUnavailable(false)
+		confirmed := c.order(http.MethodPost, "/orders/"+order.ID.String()+"/confirm", "", nil)
+		require.Equal(t, "complete", confirmed.body["status"], "%v", confirmed.body)
+		require.True(t, c.entitled("orders:replay-processing"))
+	}
+	require.Len(t, w.nmi.saleOrders(), 2, "one charge per order, including its lost answer")
+}
+
+func merchantCheckoutWorld(t *testing.T) *world {
+	t.Helper()
+	w := prepareWorld(t, 12)
+	w.booted = func(e *openrails.Engine) {
+		_, _, err := e.HostedCheckout("https://checkout.e2e.test", nil)
+		require.NoError(t, err)
+	}
+	w.start()
+	return w
+}
 
 // A merchant order: the merchant's backend creates an unpaid order for one
 // customer, in process and through NewRemote alike; the customer pays it on
