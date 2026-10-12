@@ -34,12 +34,14 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: RemapPaymentMethodCustody :execrows
 -- The custody flip: moves the custodian, its handle (rail_method_ref),
 -- fingerprint, charge transport and network token, and clears psp_id (routing
--- picks the PSP per charge). id, rail, rail_customer_ref (the forensic link to
--- pre-flip charges) and the card's mandates stay. The WHERE on the current
--- custody is the compare-and-swap against a concurrent second flip.
+-- picks the PSP per charge) and the old vault handle, which
+-- custody_migrations.from_rail_customer_ref keeps. id, rail and the card's
+-- mandates stay. The WHERE on the current custody is the compare-and-swap
+-- against a concurrent second flip.
 UPDATE billing.payment_methods SET
     custodian = sqlc.arg(to_custodian)::text,
     custodian_id = sqlc.arg(to_custodian_id)::uuid,
+    rail_customer_ref = NULL,
     rail_method_ref = sqlc.arg(to_rail_method_ref)::text,
     fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
     charge_via = COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
