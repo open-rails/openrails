@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -27,6 +28,9 @@ func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRo
 	}
 	if in.PriceID.IsZero() {
 		return nil, apperr.Invalidf("price_id is required").WithParam("price_id")
+	}
+	if strings.TrimSpace(in.Country) != "" {
+		return nil, apperr.Invalidf("country routing is not supported").WithParam("country")
 	}
 	var decision *checkout.RoutingDecision
 	var mode models.PurchaseKind

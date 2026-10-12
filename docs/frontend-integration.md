@@ -276,9 +276,10 @@ field the route does not declare is refused (`unknown_field`).
 The chosen PSP and the reason for it are recorded on the order's attempt
 (`checkout_attempts.routing_reason`). Merchants can preview a decision without
 creating anything: `POST /v1/merchant/psps/routing-preview`
-(`Client.PreviewPSPRouting`) with `{"price_id": "...", "country": "US"}`
+(`Client.PreviewPSPRouting`) with `{"price_id": "..."}`
 returns the winner, the ranked fallbacks, and every skipped candidate with its
-reason.
+reason. Country routing is unsupported; supplying `country` to the preview is
+rejected. This does not affect the country in `billing_details.address`.
 
 ```mermaid
 sequenceDiagram

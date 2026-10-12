@@ -19,7 +19,7 @@ type CheckoutRoutingMatch struct {
 	Product  string `json:"product,omitempty"`  // product key
 	Price    string `json:"price,omitempty"`    // price key
 	Mode     string `json:"mode,omitempty"`     // one_off | subscription
-	Country  string `json:"country,omitempty"`  // customer country, ISO-3166-1 alpha-2
+	Country  string `json:"country,omitempty"`  // unsupported; nonempty values are rejected
 }
 
 // IsCatchAll reports a match with no conditions — it accepts every input, so

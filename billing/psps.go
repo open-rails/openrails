@@ -114,7 +114,7 @@ type RailDefinition struct {
 // routing picks.
 type PreviewPSPRoutingParams struct {
 	PriceID PriceID `json:"price_id"`
-	// Country is the customer's ISO-3166-1 alpha-2 country, when known.
+	// Country routing is unsupported; nonempty values are rejected.
 	Country string `json:"country"`
 	PSP     string `json:"psp"`
 }

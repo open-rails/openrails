@@ -236,7 +236,7 @@ names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is
   in the merchant's YAML or set through `PATCH /v1/merchant/configuration`. Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
-  `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the
+  `price`, `mode` — all optional, all AND-ed; a rule with no conditions is the
   catch-all and must be last.
 
 ```yaml
@@ -254,8 +254,13 @@ checkout_routing:
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
 - **Preview without charging**: `POST /v1/merchant/psps/routing-preview`
-  with `{"price_id": "...", "country": "US"}` returns the same decision a real session
+  with `{"price_id": "..."}` returns the same decision a real session
   would make, including the exact `routing_reason` it would store.
+
+Country conditions are rejected in routing configuration and previews because order
+checkout does not have a country when it chooses providers. Before deploying this
+validation, check existing merchant settings and explicitly replace any country rules.
+Billing address country is still accepted for payments; it does not control routing.
 
 ### Observability
 
