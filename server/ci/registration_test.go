@@ -20,16 +20,19 @@ import (
 )
 
 // Local staff enrollment defaults to invitation-only. Explicit closed stays
-// restrictive, open is refused, and issuer-only servers expose no enrollment.
+// restrictive, standalone open is refused, and hosted open needs its creation
+// policy and verified contact. Issuer-only servers expose no enrollment.
 func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	f := newFixture(t)
 	for _, tc := range []struct {
 		mode     iam.RegistrationMode
 		register int
+		hosted   bool
 	}{
-		{"", http.StatusForbidden},
-		{iam.RegistrationModeClosed, http.StatusNotFound},
-		{iam.RegistrationModeInviteOnly, http.StatusForbidden},
+		{"", http.StatusForbidden, false},
+		{iam.RegistrationModeClosed, http.StatusNotFound, false},
+		{iam.RegistrationModeInviteOnly, http.StatusForbidden, false},
+		{iam.RegistrationModeOpen, http.StatusAccepted, true},
 	} {
 		name := string(tc.mode)
 		if name == "" {
@@ -40,6 +43,9 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 				cfg.Auth.Token.Issuer = issuer
 				cfg.Auth.Registration.NativeUserMode = tc.mode
+				if tc.hosted {
+					cfg.MerchantCreation = &server.MerchantCreationConfig{}
+				}
 				if tc.mode != iam.RegistrationModeClosed {
 					deps.Engine.Email = &outbox{}
 				}
@@ -88,6 +94,16 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			})
 			require.ErrorContains(t, err, want, mode)
 		}
+	})
+
+	t.Run("hosted open requires verification sender", func(t *testing.T) {
+		_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
+			cfg.MerchantCreation = &server.MerchantCreationConfig{}
+			cfg.Auth.Registration.NativeUserMode = iam.RegistrationModeOpen
+			cfg.Auth.Registration.AllowMissingSenders = false
+			cfg.Auth.Registration.Verification = iam.RegistrationVerificationRequired
+		})
+		require.ErrorContains(t, err, "no email or SMS sender is configured")
 	})
 }
 

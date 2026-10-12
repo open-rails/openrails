@@ -61,7 +61,8 @@ type Options struct {
 	// Naming is the rename policy for merchant names.
 	Naming config.NamingConfig
 	// MerchantCreation is the hosted policy for merchant names users claim
-	// (or#914); nil for operator-provisioned deployments.
+	// (or#914); nil for operator-provisioned deployments. With LocalSignIn,
+	// a hosted product may explicitly enable open native registration.
 	MerchantCreation *MerchantCreationConfig
 	// Console: the server's own accounts act on a merchant through a token
 	// exchanged for it (ConsoleClientID), as its admin console does; off
@@ -227,7 +228,7 @@ func validate(auth authkit.Config, opts Options) error {
 	if (registers || auth.Registration.PasswordlessLogin) && !opts.LocalSignIn {
 		return errors.New("controlplane: registration and passwordless login need local sign-in")
 	}
-	if mode == iam.RegistrationModeOpen {
+	if mode == iam.RegistrationModeOpen && opts.MerchantCreation == nil {
 		return errors.New("controlplane: open self-registration is unavailable on the standalone server; use auth.registration.native_user_mode=invite_only (the local sign-in default), or closed")
 	}
 	return nil

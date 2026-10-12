@@ -84,6 +84,33 @@ func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
 	require.NotContains(t, got.HTTP.Groups, iam.RouteAdmin)
 }
 
+func TestHostedOpenRegistrationRequiresPolicyAndLocalSignIn(t *testing.T) {
+	engine := &config.Config{}
+	auth := authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"},
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{"standalone", Options{LocalSignIn: true}, "open self-registration"},
+		{"hosted without sign-in", Options{MerchantCreation: &MerchantCreationConfig{}}, "need local sign-in"},
+		{"hosted", Options{LocalSignIn: true, MerchantCreation: &MerchantCreationConfig{}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AuthKit(engine, auth, tc.opts)
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, iam.RegistrationModeOpen, got.Registration.NativeUserMode)
+			require.Equal(t, iam.RegistrationVerificationRequired, got.Registration.Verification)
+			require.Contains(t, got.HTTP.Groups, iam.RouteRegistration)
+		})
+	}
+}
+
 // AuthKit's routes sit beneath /auth under an origin issuer, else beneath
 // the issuer's path, which is AuthKit's base path.
 func TestAuthAPIPath(t *testing.T) {
