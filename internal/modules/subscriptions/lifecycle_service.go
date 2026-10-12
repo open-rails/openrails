@@ -900,9 +900,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		} else if bill := params.ProviderBill; bill != nil {
 			// The provider's finalized line is the paid agreement. A changed
 			// local catalog or scheduled change cannot reprice that receipt.
+			// Calendar schedules and invoice lines need no fixed hourly
+			// interval: their verified bill already supplies both boundaries.
 			var plan *observed.Line
 			for i := range bill.Lines {
-				if bill.Lines[i].PriceID != nil && bill.Lines[i].ProductID != nil && bill.Lines[i].BillingIntervalHours != nil {
+				if bill.Lines[i].PriceID != nil && bill.Lines[i].ProductID != nil {
 					if plan != nil {
 						return errors.New("provider renewal has ambiguous subscription lines")
 					}

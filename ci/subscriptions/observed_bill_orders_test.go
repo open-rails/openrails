@@ -36,8 +36,7 @@ func TestObservedBillMoneyFidelity(t *testing.T) {
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
-	quantity := 1
-	base := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(c.id), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "verified_invoice", SourceKey: "invoice-1", ProviderReference: "invoice-1", Currency: "USD", Total: 100, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted goods", Quantity: &quantity, UnitAmount: 100, Amount: 100}}}
+	base := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(c.id), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "verified_invoice", SourceKey: "invoice-1", ProviderReference: "invoice-1", Currency: "USD", Total: 100, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted goods", UnitAmount: 100, Amount: 100}}}
 	capture := func(id string, amount int64) *models.Payment {
 		return &models.Payment{ID: uuid.New(), CustomerID: base.CustomerID, Rail: models.RailNMI, PspID: &base.PSPID, TransactionID: id, Amount: amount, ListAmount: 100, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail}
 	}
@@ -79,6 +78,9 @@ func TestObservedBillMoneyFidelity(t *testing.T) {
 	}
 	require.Equal(t, 1, created)
 	require.Equal(t, 1, paymentCreated)
+	var storedQuantity int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT quantity FROM billing.order_lines WHERE order_id=$1`), order).Scan(&storedQuantity))
+	require.Equal(t, 1, storedQuantity, "a catalog line without fixed hourly cadence stores its implicit single unit")
 	second := base
 	second.Payment = capture("observed-partial-2", 40)
 	second.Settled = true
@@ -161,7 +163,7 @@ func TestObservedBillNonCashAndRollback(t *testing.T) {
 
 // Pull may commit accounting before a later webhook applies lifecycle. That
 // replay repairs the period once, even though the order is already complete.
-func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
+func TestObservedCompletedCalendarBillRepairsLifecycle(t *testing.T) {
 	w := newWorld(t)
 	l := importLegacy(t, w, "nmi", embedded)
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
@@ -169,10 +171,9 @@ func TestObservedCompletedBillRepairsLifecycle(t *testing.T) {
 	ctx := db.WithPSPID(merchant.WithID(t.Context(), w.client[embedded].MerchantID()), w.psp["nmi"].UUID())
 	before := w.subscription(embedded, l.sub)
 	start := *before.CurrentPeriodEndsAt
-	end := start.Add(monthHours * time.Hour)
+	end := start.AddDate(0, 1, 0)
 	priceID, productID, subID := w.priceStorageID(l.price.ID), l.price.ProductID.UUID(), l.sub.UUID()
-	hours := monthHours
-	b := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "paid-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "credit", NonCashAmount: l.price.UnitAmount, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount, BillingIntervalHours: &hours, AccessDurationHours: &hours}}}
+	b := observed.Bill{PSPID: w.psp["nmi"].UUID(), CustomerID: uuid.MustParse(l.c.id), SubscriptionID: &subID, Owner: observed.OwnerNMISchedule, Kind: "renewal", SourceKind: "verified_cycle", SourceKey: "paid-cycle", Currency: "USD", Total: l.price.UnitAmount, PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "credit", NonCashAmount: l.price.UnitAmount, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Accepted provider renewal", UnitAmount: l.price.UnitAmount, Amount: l.price.UnitAmount}}}
 	var done observed.Result
 	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
