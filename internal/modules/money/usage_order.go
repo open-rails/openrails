@@ -136,7 +136,8 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 			return err
 		}
 		if due > 0 {
-			data, err := json.Marshal(billing.NotificationData{OrderID: billing.OrderID(order.ID), AmountDue: &due, Currency: cur, DueAt: &u.DueAt})
+			data, err := json.Marshal(billing.NotificationData{OrderID: billing.OrderID(order.ID), AmountDue: &due, Currency: cur, DueAt: &u.DueAt,
+				CollectionMethod: billing.InvoiceCollectionMethod(u.CollectionMethod)})
 			if err != nil {
 				return err
 			}

@@ -324,6 +324,20 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
+-- name: ReconcilePSPHasExecutingOperations :one
+-- Whether one of the PSP's provider operations is executing: claimed, its
+-- lease live at now.
+SELECT EXISTS(SELECT 1 FROM billing.provider_intents
+ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+   AND status = 'in_flight' AND lease_expires_at > sqlc.arg(now)::timestamptz)::boolean;
+
+-- name: ReconcileExecutingOperations :many
+-- Of ids, the PSP's provider operations executing at now.
+SELECT id FROM billing.provider_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND id = ANY (sqlc.arg(ids)::uuid[])
+  AND status = 'in_flight' AND lease_expires_at > sqlc.arg(now)::timestamptz;
+
 -- name: ReconcileListPaymentMethodsByRails :many
 -- rail_customer_ref is the rail's handle on the stored instrument (on NMI the
 -- customer_vault_id).

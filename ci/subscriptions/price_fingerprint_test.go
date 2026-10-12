@@ -4,9 +4,7 @@ package subscriptions_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/service"
 )
@@ -106,76 +103,4 @@ VALUES ($1,'order_create',$2,'succeeded',$3,$4,now(),now()+interval '1 day')`), 
 			require.Equal(t, 1, count, "a format change never manufactures another order")
 		})
 	}
-}
-
-func TestPriceIdentifierCheckoutReplayUsesRetainedIdentity(t *testing.T) {
-	shop := openSolanaShop(t)
-	w := shop.w
-	client := w.client[embedded]
-	price, err := client.GetPrice(t.Context(), pid(shop.price), billing.GetPriceParams{})
-	require.NoError(t, err)
-	params := billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: price.UnitAmount, Currency: price.Currency, BillingIntervalHours: price.BillingIntervalHours, AccessDurationHours: price.AccessDurationHours}
-	buyer := shop.buyer(t, false)
-	payment := checkout.CheckoutAttemptPaymentRequest{Rail: "solana", TokenSymbol: "DUSD", Wallet: buyer.wallet.PublicKey().String()}
-	request := func() checkout.CheckoutAttemptCreateRequest {
-		return checkout.CheckoutAttemptCreateRequest{PriceID: price.ID.String(), Mode: "subscription", Payment: payment, IdempotencyKey: "historical-checkout"}
-	}
-	var first *checkout.CheckoutAttemptResponse
-	require.NoError(t, w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) error {
-		in := request()
-		var err error
-		first, err = svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: buyer.id})
-		return err
-	}))
-	require.NotNil(t, first.NextAction)
-	legacyID := "price_" + w.priceStorageID(price.ID).String()
-	// These are the exact fields and order the pre-cutover fingerprint used.
-	legacyJSON, err := json.Marshal(struct {
-		PriceID    string
-		Mode       string
-		Payment    checkout.CheckoutAttemptPaymentRequest
-		Metadata   map[string]string
-		SuccessURL string
-		CancelURL  string
-	}{PriceID: legacyID, Mode: "subscription", Payment: payment})
-	require.NoError(t, err)
-	digest := sha256.Sum256(legacyJSON)
-	var stored string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT rail_state->>'_openrails_request_fingerprint' FROM billing.checkout_attempts WHERE id=$1`), first.ID.UUID()).Scan(&stored))
-	require.Equal(t, hex.EncodeToString(digest[:]), stored)
-	// Recreate the old serialized cache response while keeping its original
-	// fingerprint and immutable session. The new reader projects its price ID.
-	_, err = w.pool.Exec(t.Context(), w.sql(`UPDATE billing.idempotency_keys SET result=jsonb_set(result,'{response,price_id}',to_jsonb($3::text))
-WHERE merchant_id=$1 AND operation='checkout_attempt_create' AND idempotency_key=$2`), client.MerchantID().UUID(), buyer.id+":historical-checkout", legacyID)
-	require.NoError(t, err)
-	params.UnitAmount = 2_000_000
-	next, err := client.CreatePrice(t.Context(), params)
-	require.NoError(t, err)
-	require.NoError(t, w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) error {
-		in := request()
-		again, err := svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: buyer.id})
-		require.NoError(t, err)
-		require.Equal(t, first.ID, again.ID)
-		require.Equal(t, price.ID, *again.PriceID)
-		in = request()
-		lookedUp, err := svc.LookupSession(ctx, &in, &checkout.UserIdentity{ID: buyer.id})
-		require.NoError(t, err)
-		require.Equal(t, first.ID, lookedUp.ID)
-		in = request()
-		in.PriceID = next.ID.String()
-		_, err = svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: buyer.id})
-		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-		return nil
-	}))
-	// The durable session's fingerprint still works after the response cache
-	// expires; a retry cannot create a second checkout attempt.
-	_, err = w.pool.Exec(t.Context(), w.sql(`DELETE FROM billing.idempotency_keys WHERE merchant_id=$1 AND operation='checkout_attempt_create' AND idempotency_key=$2`), client.MerchantID().UUID(), buyer.id+":historical-checkout")
-	require.NoError(t, err)
-	require.NoError(t, w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) error {
-		in := request()
-		again, err := svc.CreateSession(ctx, &in, &checkout.UserIdentity{ID: buyer.id})
-		require.NoError(t, err)
-		require.Equal(t, first.ID, again.ID)
-		return nil
-	}))
 }

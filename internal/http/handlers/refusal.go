@@ -3,8 +3,10 @@ package handlers
 import (
 	"errors"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -19,8 +21,13 @@ func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
 	r.InternalError(internalMessage, err)
 }
 
-// refusalOf is the answer to a typed refusal, nil for any other error.
+// refusalOf is the answer to a typed refusal, nil for any other error. A
+// write held until its provider account's book has caught up is a retryable
+// refusal, never an internal failure.
 func refusalOf(err error) *api.APIError {
+	if errors.Is(err, providerrecovery.ErrPending) {
+		return api.Coded(billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
+	}
 	var refusal *apperr.Error
 	if !errors.As(err, &refusal) {
 		return nil

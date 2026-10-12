@@ -496,6 +496,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			finding.RecommendedAction = "invoice receipt remains unresolved: " + err.Error()
 		}
 	}
+	findings, deferredCharges := e.deferOperationCharges(ctx, provider, binding.ID, fetcher, snap, findings)
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	bindApplyActions(findings, binding.ID, runID)
 
@@ -695,6 +696,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue
 		}
 		if !observedTransactions[rec.SubjectKey] {
+			continue
+		}
+		// An executing operation has not yet supplied local payment
+		// evidence. Keep any earlier financial finding visible until it does.
+		if rec.Type == FindingChargeMissingLocal && deferredCharges[rec.SubjectKey] {
 			continue
 		}
 		if err := e.Store.MarkFindingVanished(ctx, rec.ID); err != nil {

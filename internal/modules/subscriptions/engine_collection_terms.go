@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,7 +39,20 @@ type SubscriptionCollectionPayload struct {
 // SubscriptionCollectionDescription correlates a gateway transaction with one
 // attempt while OrderReference remains shared by every attempt of the period.
 func SubscriptionCollectionDescription(operationID uuid.UUID) string {
-	return "OpenRails renewal " + operationID.String()
+	return subscriptionCollectionDescriptionPrefix + operationID.String()
+}
+
+const subscriptionCollectionDescriptionPrefix = "OpenRails renewal "
+
+// ParseSubscriptionCollectionDescription is the operation an engine renewal's
+// provider description names.
+func ParseSubscriptionCollectionDescription(description string) (uuid.UUID, bool) {
+	rest, ok := strings.CutPrefix(description, subscriptionCollectionDescriptionPrefix)
+	if !ok {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(rest)
+	return id, err == nil && id != uuid.Nil && SubscriptionCollectionDescription(id) == description
 }
 
 func SubscriptionCollectionKey(id uuid.UUID, previousPeriodEnd time.Time, attempt int) string {

@@ -2163,6 +2163,7 @@ pkg openrails/billing, type NextAction struct, URL *string `json:"url"`
 pkg openrails/billing, type NotificationData struct
 pkg openrails/billing, type NotificationData struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, AmountDue *int64 `json:"amount_due,omitempty,string"`
+pkg openrails/billing, type NotificationData struct, CollectionMethod InvoiceCollectionMethod `json:"collection_method,omitempty"`
 pkg openrails/billing, type NotificationData struct, Currency string `json:"currency,omitempty"`
 pkg openrails/billing, type NotificationData struct, DeclineOutcome string `json:"decline_outcome,omitempty"`
 pkg openrails/billing, type NotificationData struct, DowngradeApplied bool `json:"downgrade_applied,omitempty"`

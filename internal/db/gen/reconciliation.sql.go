@@ -2187,6 +2187,46 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 	return result.RowsAffected(), nil
 }
 
+const reconcileExecutingOperations = `-- name: ReconcileExecutingOperations :many
+SELECT id FROM billing.provider_intents
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+  AND id = ANY ($3::uuid[])
+  AND status = 'in_flight' AND lease_expires_at > $4::timestamptz
+`
+
+type ReconcileExecutingOperationsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Ids        []uuid.UUID
+	Now        time.Time
+}
+
+// Of ids, the PSP's provider operations executing at now.
+func (q *Queries) ReconcileExecutingOperations(ctx context.Context, arg ReconcileExecutingOperationsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, reconcileExecutingOperations,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Ids,
+		arg.Now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
        card_exp_month, card_exp_year
@@ -2603,6 +2643,27 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		return nil, err
 	}
 	return items, nil
+}
+
+const reconcilePSPHasExecutingOperations = `-- name: ReconcilePSPHasExecutingOperations :one
+SELECT EXISTS(SELECT 1 FROM billing.provider_intents
+ WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+   AND status = 'in_flight' AND lease_expires_at > $3::timestamptz)::boolean
+`
+
+type ReconcilePSPHasExecutingOperationsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Now        time.Time
+}
+
+// Whether one of the PSP's provider operations is executing: claimed, its
+// lease live at now.
+func (q *Queries) ReconcilePSPHasExecutingOperations(ctx context.Context, arg ReconcilePSPHasExecutingOperationsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, reconcilePSPHasExecutingOperations, arg.MerchantID, arg.PspID, arg.Now)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
