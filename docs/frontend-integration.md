@@ -17,6 +17,8 @@ merchant's account on a rail, named by its key (`mobius` = an NMI account). An o
 lists its `payment_options`, one per PSP that can sell its lines, in the merchant's
 routing order; the page pays with one of them ([Orders](#orders)).
 
+Provider-managed subscription bills use the same order history. Check `collection_owner` and the server-provided payment options rather than offering an independent local retry. Payment details come from the order and its lines; see [provider-managed orders](provider-managed-orders.md).
+
 ### Authentication
 
 Every call acts on the merchant its token is bound to, and the browser names

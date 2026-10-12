@@ -23,6 +23,8 @@ Amounts are the currency registry's native units (`GET /v1/config`'s
 `currencies`): USD and EUR six decimals, JPY four. Collection converts what is
 due to the provider's minor unit at its boundary.
 
+Provider-managed subscription bills also use orders; see [provider-managed orders](provider-managed-orders.md) for collection ownership and settlement history.
+
 ## Reads
 
 Usage orders are orders: `GET /v1/admin/orders?origin=usage` (`ListOrders`),
