@@ -766,6 +766,37 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	if key == "" {
 		return nil, false, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
 	}
+	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
+		return nil, false, err
+	}
+	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
+	if err != nil {
+		return nil, false, err
+	}
+	scoped := "app:" + key
+	existing, err := rt.Orders.ByIdempotencyKey(ctx, params.CustomerID.UUID(), scoped)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		if string(existing.RequestDigest) != string(digest) {
+			return nil, false, errOrderKeyReused
+		}
+		view, err := s.merchantOrderView(ctx, existing)
+		if err != nil {
+			return nil, true, err
+		}
+		if view.Checkout != nil {
+			recovered, err := hostedcheckout.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.HostedCheckoutOrigin, existing.BillingOrder, s.now())
+			if err != nil {
+				return nil, true, err
+			}
+			if recovered != "" {
+				view.Checkout.URL = &recovered
+			}
+		}
+		return view, true, nil
+	}
 	now := s.now()
 	ttl := orders.MerchantTTL
 	if params.ExpiresAt != nil {
@@ -808,33 +839,15 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			return err
 		}
 	}
-	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
-		return nil, false, err
-	}
-	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
+	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
+		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach})
 	if err != nil {
-		return nil, false, err
-	}
-	scoped := "app:" + key
-	existing, err := rt.Orders.ByIdempotencyKey(ctx, params.CustomerID.UUID(), scoped)
-	if err != nil {
-		return nil, false, err
-	}
-	replayed := existing != nil
-	if replayed && string(existing.RequestDigest) != string(digest) {
-		return nil, false, errOrderKeyReused
-	}
-	order := existing
-	if !replayed {
-		if order, err = rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
-			IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach}); err != nil {
-			if db.IsUniqueViolation(err) {
-				return nil, false, ErrIdempotencyKeyInUse
-			}
-			return nil, false, err
+		if db.IsUniqueViolation(err) {
+			return nil, false, ErrIdempotencyKeyInUse
 		}
+		return nil, false, err
 	}
-	if params.Checkout != nil && !replayed {
+	if params.Checkout != nil {
 		// A Stripe PSP declared before the checkout host was served is
 		// registered as its payment-method domain now.
 		if mid, err := merchant.Require(ctx); err == nil {
@@ -847,10 +860,10 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	}
 	view, err := s.merchantOrderView(ctx, order)
 	if err == nil && checkoutURL != "" && view.Checkout != nil {
-		// Shown once: only the hash is kept.
+		// Only creation and its authenticated retry return the capability.
 		view.Checkout.URL = &checkoutURL
 	}
-	return view, replayed, err
+	return view, false, err
 }
 
 // embedOriginsDeclared refuses an embedded checkout the merchant registered

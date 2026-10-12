@@ -21,8 +21,8 @@ const (
 	secretLen   = len(SecretPrefix) + 43 // base64url of 32 bytes, unpadded
 )
 
-// NewSecret mints a checkout secret and the hash stored for it. The secret
-// itself is never stored.
+// NewSecret mints a checkout secret and its authentication hash. Attach stores
+// the hash on the order and retains the secret in its bounded creation receipt.
 func NewSecret() (secret string, hash []byte, err error) {
 	raw := make([]byte, secretBytes)
 	if _, err := rand.Read(raw); err != nil {
