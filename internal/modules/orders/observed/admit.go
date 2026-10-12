@@ -117,7 +117,11 @@ func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uu
 	if err != nil {
 		return err
 	}
-	return q.CreateObservedOrderLine(ctx, gen.CreateObservedOrderLineParams{MerchantID: o.MerchantID, ID: uuidutil.NewV7(), OrderID: o.ID, CustomerID: o.CustomerID, Position: int32(position), PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: optional(l.Ownership), ClaimKey: optional(l.ClaimKey), BillingIntervalHours: interval, AccessDurationHours: access, SubscriptionID: sub, Source: optional(l.Source), Now: now})
+	position32, err := int32Value(position)
+	if err != nil {
+		return err
+	}
+	return q.CreateObservedOrderLine(ctx, gen.CreateObservedOrderLineParams{MerchantID: o.MerchantID, ID: uuidutil.NewV7(), OrderID: o.ID, CustomerID: o.CustomerID, Position: position32, PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: optional(l.Ownership), ClaimKey: optional(l.ClaimKey), BillingIntervalHours: interval, AccessDurationHours: access, SubscriptionID: sub, Source: optional(l.Source), Now: now})
 }
 
 // freezeLineOwnership resolves ownership once at acceptance. An accepted
@@ -161,8 +165,18 @@ func int32Ptr(n *int) (*int32, error) {
 	if *n < 1 || *n > math.MaxInt32 {
 		return nil, errors.New("provider line integer is out of range")
 	}
-	value := int32(*n)
+	value, err := int32Value(*n)
+	if err != nil {
+		return nil, errors.New("provider line integer is out of range")
+	}
 	return &value, nil
+}
+
+func int32Value(n int) (int32, error) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, errors.New("provider integer is out of range")
+	}
+	return int32(n), nil
 }
 
 // Flat-price checkout omits quantity, while providers report one unit. These

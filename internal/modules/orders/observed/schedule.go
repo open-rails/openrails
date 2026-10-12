@@ -26,6 +26,10 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if firstDue.IsZero() || !validCadence(cadenceHours, 0) || recurringAmount <= 0 {
 		return errors.New("accepted provider schedule terms are incomplete")
 	}
+	cadenceHours32, err := int32Value(cadenceHours)
+	if err != nil {
+		return errors.New("accepted provider schedule cadence is out of range")
+	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -64,7 +68,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID,
-		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), AcceptedBill: raw, Now: now})
+		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: cadenceHours32, AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
@@ -72,7 +76,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if err != nil {
 		return err
 	}
-	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != cadenceHours32 || !sameJSON(stored.AcceptedBill, raw) {
 		return ErrConflict
 	}
 	return nil
@@ -84,6 +88,14 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	firstDue = firstDue.UTC().Truncate(time.Microsecond)
 	if bill.SubscriptionID == nil || strings.TrimSpace(bill.ProviderReference) == "" || firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || strings.TrimSpace(source) == "" || len(source) > 512 {
 		return errors.New("declared provider schedule is incomplete")
+	}
+	cadenceHours32, err := int32Value(cadenceHours)
+	if err != nil {
+		return errors.New("declared provider schedule cadence is out of range")
+	}
+	cadenceMonths32, err := int32Value(cadenceMonths)
+	if err != nil {
+		return errors.New("declared provider schedule cadence is out of range")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -126,7 +138,7 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: *bill.SubscriptionID,
-		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: int32(cadenceHours), CadenceMonths: int32(cadenceMonths), AcceptedBill: raw, Now: now})
+		CustomerID: bill.CustomerID, PspID: bill.PSPID, SourceReference: source, ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: cadenceHours32, CadenceMonths: cadenceMonths32, AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
@@ -134,7 +146,7 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	if err != nil {
 		return err
 	}
-	if stored.CadenceMonths != int32(cadenceMonths) || stored.SourceReference != source || stored.CustomerID != bill.CustomerID || stored.PspID != bill.PSPID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != int32(cadenceHours) || !sameJSON(stored.AcceptedBill, raw) {
+	if stored.CadenceMonths != cadenceMonths32 || stored.SourceReference != source || stored.CustomerID != bill.CustomerID || stored.PspID != bill.PSPID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != cadenceHours32 || !sameJSON(stored.AcceptedBill, raw) {
 		return ErrConflict
 	}
 	return nil
