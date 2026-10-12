@@ -92,7 +92,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		Desired SyncCatalogSidecarsRequest
 		Options CatalogMutationOptions
 	}{desired, opts}, "", false, sidecarPlan(desired, opts), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}, s.syncCatalogSidecarsCommand(ctx, desired, opts)
+		return struct{}{}, s.syncCatalogSidecarsCommand(ctx, desired, opts)
 	})
 	return err
 }

@@ -23,7 +23,7 @@ const (
 // EnsureUsageMeter idempotently declares a catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
 	_, err := catalogCommand(ctx, s, "meter/"+spec.Key, spec, "", false, meterEditPlan(spec, nil, false, nil), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}, s.ensureUsageMeterCommand(ctx, spec)
+		return struct{}{}, s.ensureUsageMeterCommand(ctx, spec)
 	})
 	return err
 }
@@ -57,7 +57,7 @@ func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, ca
 		Card   *UsageRateCardInput
 		Remove bool
 	}{spec, card, removeCard}, "", false, meterEditPlan(spec, card, removeCard, expectedRevision), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}, s.setUsageMeterCommand(ctx, spec, card, removeCard, expectedRevision)
+		return struct{}{}, s.setUsageMeterCommand(ctx, spec, card, removeCard, expectedRevision)
 	})
 	return err
 }

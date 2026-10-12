@@ -27,7 +27,7 @@ func (s *Service) DeleteProduct(ctx context.Context, id billing.ProductID) error
 		Operation string
 		ID        billing.ProductID
 	}{"delete", id}, "", false, deleteProductPlan(id), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}, s.deleteProductCommand(ctx, id)
+		return struct{}{}, s.deleteProductCommand(ctx, id)
 	})
 	return err
 }
