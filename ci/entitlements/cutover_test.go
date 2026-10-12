@@ -124,7 +124,17 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 		}
 		return out
 	}())
-	require.NoError(t, boot(), "New boots once every change is approved")
+	// This book predates orders: its purchase is a price-only payment, which
+	// the order-only payment schema refuses rather than reconstructs. The
+	// cutover has run; the operator rebuilds the order the payment settled.
+	require.ErrorContains(t, boot(), "price-only payment history cannot be upgraded")
+	order := uuid.New()
+	exec(`INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,number,payment_id,expires_at,completed_at)
+		VALUES($1,$2,$3,'merchant','complete','succeeded','USD',1000000,'rebuilt-1',$4,$5,$5)`, merchant, order, buyer, payment, bought)
+	exec(`INSERT INTO billing.order_lines(merchant_id,order_id,customer_id,position,price_id,product_id,ownership,description,quantity,unit_amount,amount)
+		VALUES($1,$2,$3,0,$4,$5,'consumable','Course bundle',1,1000000,1000000)`, merchant, order, buyer, price, product)
+	exec(`UPDATE billing.payments SET order_id=$2, price_id=NULL WHERE merchant_id=$1 AND id=$3`, merchant, order, payment)
+	require.NoError(t, boot(), "New boots once every change is approved and the order book is rebuilt")
 	_, err = openrails.AccessCutoverPreflight(ctx, pool, database, "")
 	require.ErrorContains(t, err, "already ran")
 

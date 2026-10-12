@@ -215,6 +215,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	third := newPayment(100_000_000)
 	thirdTerms := params
 	thirdTerms.PaymentID, thirdTerms.Amount, thirdTerms.PaidAmount = third.ID, 100_000_000, 100_000_000
+	thirdTerms.OrderLineID = orderLines[third.ID]
 	_, err = svc.Fund(ctx, thirdTerms)
 	require.NoError(t, err)
 	reserved, err = paymentService.ReserveRefund(ctx, second.ID, uuid.NewString(), 200_000_000, nil)
