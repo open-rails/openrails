@@ -869,7 +869,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				ID:         uuidutil.NewV7(),
 				CustomerID: subscription.CustomerID,
 				EventType:  models.NotificationSubscriptionChanged,
-				Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), ToPriceID: billing.PriceID(newPrice.ID)},
+				Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), ToPriceID: newPrice.PublicID},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
 				return err
