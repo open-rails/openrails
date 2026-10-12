@@ -129,7 +129,8 @@ func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {
 	}
 }
 
-func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
+// UsageEventFromRow decodes the stored usage fact shared by writes and inspections.
+func UsageEventFromRow(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 	m := &models.UsageEvent{
 		ID:               r.ID,
 		MerchantID:       r.MerchantID,

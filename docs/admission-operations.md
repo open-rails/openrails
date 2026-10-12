@@ -37,3 +37,22 @@ All spending paths use one held total: live request estimates, pending refunds o
 The separate accrual-rate policy compares observed, reported usage with the requested prospective delta. Zero-estimate requests still pass this policy. It is not a strict instantaneous concurrency quota: newly started work can be ahead of the usage meter; work billed by the hour is a [running charge](running-charges.md). Durable request spend windows do not claim to solve that separate policy.
 
 Capture, release and extension resolve the durable customer and enforce the credential's customer scope before mutation. Financial application code remains identical through the shared embedded and remote Client.
+
+## Inspecting admissions
+
+`GetAdmission(requestID)` / `GET /v1/app/admissions/{request_id}` reads the
+current hold without replaying the admission or reevaluating policy. It returns
+`admission_not_found` for a denied request (no durable reservation was made),
+an unknown request, or one past the 61-day retention period. An expired hold is
+reported immediately from its deadline, without a worker writing an expiry.
+
+`ListAdmissions` / `GET /v1/app/admissions` supports `customer_id`, `currency`,
+`state` (`open`, `expired`, `released`, `captured`), and admission-time bounds
+`from` inclusive / `to` exclusive. It lists retained admissions newest first,
+then request ID in descending byte order. Use `limit` (1–500, default 50) and
+`cursor`; keep the same filters while paging. The cursor retains the initial
+time window, but hold state remains current rather than a frozen snapshot.
+
+Both reads require an application with `merchant:usage:read` or
+`root:usage:read`. That permission grants no admission, capture, release,
+extension, or usage recording authority. A read's `replayed` is false.

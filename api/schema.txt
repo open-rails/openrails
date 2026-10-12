@@ -70,6 +70,7 @@ migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
+migration 0074_operational_read_indexes.up.sql sha256:007f87252e0bafe56f8ea84140079ff1d2c4aa0116b69b7ee99aefdffd23831c
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -158,6 +159,8 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   constraint admission_operations_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'captured'::text])))
   constraint admission_operations_state_fields_check CHECK ((((state = 'open'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NULL)) OR ((state = 'released'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NOT NULL)) OR ((state = 'captured'::text) AND (capture_terms IS NOT NULL) AND (captured_amount IS NOT NULL) AND (captured_amount >= 0) AND (captured_at IS NOT NULL))))
   constraint admission_operations_terms_check CHECK (((jsonb_typeof(terms) = 'object'::text) AND (octet_length((terms)::text) <= 65536)))
+  index CREATE INDEX admission_operations_admitted_at_request_id_idx ON ONLY billing.admission_operations USING btree (merchant_id, admitted_at DESC, request_id COLLATE "C" DESC)
+  index CREATE INDEX admission_operations_customer_admitted_at_request_id_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, admitted_at DESC, request_id COLLATE "C" DESC)
   index CREATE INDEX admission_operations_customer_id_currency_admitted_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, admitted_at) WHERE (state <> 'released'::text)
   index CREATE INDEX admission_operations_customer_id_currency_expires_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, expires_at) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX admission_operations_pkey ON ONLY billing.admission_operations USING btree (merchant_id, request_id, admitted_at)
@@ -2359,6 +2362,7 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   index CREATE UNIQUE INDEX usage_events_idem_key ON ONLY billing.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id, occurred_at)
   index CREATE INDEX usage_events_occurred_at_idx ON ONLY billing.usage_events USING btree (merchant_id, occurred_at)
   index CREATE UNIQUE INDEX usage_events_pkey ON ONLY billing.usage_events USING btree (merchant_id, id, occurred_at)
+  index CREATE INDEX usage_events_source_occurred_at_id_idx ON ONLY billing.usage_events USING btree (merchant_id, source, source_id, occurred_at DESC, id DESC)
 
 table billing.webhook_events
   column merchant_id uuid NOT NULL

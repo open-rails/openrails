@@ -35,6 +35,7 @@
       "func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
       "func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error)",
+      "func (c *Client) GetAdmission(ctx context.Context, requestID string, options ...RequestOption) (*billing.Admission, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
       "func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
       "func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.Customer, error)",
@@ -53,8 +54,10 @@
       "func (c *Client) GetRenewal(ctx context.Context, id billing.RenewalID, requestOptions ...RequestOption) (*billing.Renewal, error)",
       "func (c *Client) GetRunningCharge(ctx context.Context, reference string, requestOptions ...RequestOption) (*billing.RunningCharge, error)",
       "func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error)",
+      "func (c *Client) GetUsageEvent(ctx context.Context, id billing.UsageEventID, options ...RequestOption) (*billing.UsageEvent, error)",
       "func (c *Client) ImportBilling(ctx context.Context, book billing.DeclaredBilling, requestOptions ...RequestOption) (*billing.BillingImportResult, error)",
       "func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*billing.BillingArchiveImport, error)",
+      "func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams, options ...RequestOption) (*billing.ListPage[billing.Admission], error)",
       "func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)",
       "func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)",
       "func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)",
@@ -79,6 +82,7 @@
       "func (c *Client) ListRenewals(ctx context.Context, filter billing.RenewalListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Renewal], error)",
       "func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningChargeListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)",
       "func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error)",
+      "func (c *Client) ListUsageEvents(ctx context.Context, params billing.UsageEventListParams, options ...RequestOption) (*billing.ListPage[billing.UsageEvent], error)",
       "func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) MerchantID() billing.MerchantID",
       "func (c *Client) PreviewOrder(ctx context.Context, params billing.PreviewOrderParams, requestOptions ...RequestOption) (*billing.OrderPreview, error)",
@@ -248,7 +252,7 @@
       "const (\n\tMandateRecurring MandateKind = \"recurring\"\n\n\tMandateUnscheduled MandateKind = \"unscheduled\"\n\n\tMandateCardOnFile MandateKind = \"card_on_file\"\n)",
       "const (\n\tMaxEntitlementPrefixes  = 10\n\tDefaultHeldEntitlements = 1000\n\tMaxHeldEntitlements     = 10000\n)",
       "const (\n\tMerchantActive MerchantStatus = \"active\"\n\n\tMerchantDeleted MerchantStatus = \"deleted\"\n)",
-      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
+      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageRead Permission = \"merchant:usage:read\"\n\tRootUsageRead     Permission = \"root:usage:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tMigrationKeepGrandfathered MigrationFallback = \"keep_grandfathered\"\n\n\tMigrationCancelAtPeriodEnd MigrationFallback = \"cancel_at_period_end\"\n)",
@@ -503,6 +507,7 @@
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
       "type AdmissionBatchResult struct {\n\tItems []AdmissionResult `json:\"items\"`\n}",
       "type AdmissionBlock string",
+      "type AdmissionListParams struct {\n\tCustomerID CustomerID     `form:\"customer_id\"`\n\tCurrency   string         `form:\"currency\"`\n\tState      AdmissionState `form:\"state\"`\n\tFrom       time.Time      `form:\"from\"`\n\tTo         time.Time      `form:\"to\"`\n\tPageRequest\n}",
       "type AdmissionResult struct {\n\tStatus    int           `json:\"status\"`\n\tAdmission *Admission    `json:\"admission\"`\n\tError     *ErrorDetails `json:\"error\"`\n}",
       "type AdmissionState string",
       "type AdmissionVerdict struct {\n\tStatus    int           `json:\"status\"`\n\tAdmission *Admission    `json:\"admission\"`\n\tError     *ErrorDetails `json:\"error\"`\n}",
@@ -858,6 +863,7 @@
       "type Usage struct {\n\tCustomerID CustomerID   `json:\"customer_id\"`\n\tCurrency   string       `json:\"currency\"`\n\tFrom       time.Time    `json:\"from\"`\n\tTo         time.Time    `json:\"to\"`\n\tGroupBy    UsageGroupBy `json:\"group_by\"`\n\tRows       []UsageRow   `json:\"rows\"`\n\tNextCursor *string      `json:\"next_cursor\"`\n}",
       "type UsageEvent struct {\n\tID             UsageEventID     `json:\"id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tInvoker        string           `json:\"invoker\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tOutcome        UsageOutcome     `json:\"outcome\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tForgivenAmount int64            `json:\"forgiven_amount,string\"`\n\tResource       *string          `json:\"resource\"`\n\tMetadata       map[string]any   `json:\"metadata\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tOccurredAt           time.Time             `json:\"occurred_at\"`\n\tCreatedAt            time.Time             `json:\"created_at\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
       "type UsageEventID uuid.UUID",
+      "type UsageEventListParams struct {\n\tCustomerID CustomerID   `form:\"customer_id\"`\n\tCurrency   string       `form:\"currency\"`\n\tEventType  string       `form:\"event_type\"`\n\tSource     string       `form:\"source\"`\n\tSourceID   string       `form:\"source_id\"`\n\tOutcome    UsageOutcome `form:\"outcome\"`\n\tFrom       time.Time    `form:\"from\"`\n\tTo         time.Time    `form:\"to\"`\n\tPageRequest\n}",
       "type UsageEventResult struct {\n\tStatus int           `json:\"status\"`\n\tEvent  *UsageEvent   `json:\"event\"`\n\tError  *ErrorDetails `json:\"error\"`\n}",
       "type UsageGroupBy string",
       "type UsageOutcome string",
@@ -1647,6 +1653,7 @@
       "type ProductReconcileResult struct {\n\tSyncStatus billing.SyncStatus `json:\"sync_status\"`\n\n\tDrift []billing.DriftField `json:\"drift,omitempty\"`\n\n\tAction string `json:\"action\"`\n}",
       "type ReconcileResult struct {\n\tProviders map[string]billing.PSPLinkState `json:\"providers,omitempty\"`\n\n\tActions map[string]string `json:\"actions,omitempty\"`\n}",
       "type SyncCatalogSidecarsRequest struct {\n\tMeters    []CatalogMeterSpec    `json:\"meters,omitempty\"`\n\tRateCards []CatalogRateCardSpec `json:\"rate_cards,omitempty\"`\n}",
+      "type inspectionCursor struct {\n\tKind string    `json:\"kind\"`\n\tAt   time.Time `json:\"at\"`\n\tKey  string    `json:\"key\"`\n\tFrom time.Time `json:\"from\"`\n\tTo   time.Time `json:\"to\"`\n}",
       "type orderKeyResult struct {\n\tOrderID uuid.UUID      `json:\"order_id\"`\n\tDigest  []byte         `json:\"digest\"`\n\tStatus  int            `json:\"status,omitempty\"`\n\tCode    string         `json:\"code,omitempty\"`\n\tOrder   *billing.Order `json:\"order,omitempty\"`\n}",
       "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
       "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
@@ -1830,6 +1837,9 @@
       "time": "time"
     },
     "billing/notifications.go": {
+      "time": "time"
+    },
+    "billing/operational_reads.go": {
       "time": "time"
     },
     "billing/order_checkout.go": {
@@ -4273,6 +4283,22 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/service/operational_reads.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "money": "github.com/open-rails/openrails/internal/modules/money",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "retention": "github.com/open-rails/openrails/internal/retention",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/service/orders.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4400,6 +4426,12 @@
       "strings": "strings",
       "sync": "sync",
       "userinfo": "github.com/open-rails/helpers/userinfo"
+    },
+    "operational_reads.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "http": "net/http",
+      "time": "time"
     },
     "operations.go": {
       "billing": "github.com/open-rails/openrails/billing",

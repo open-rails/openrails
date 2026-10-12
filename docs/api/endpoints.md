@@ -110,6 +110,15 @@ Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route
 sends no CORS headers.
 
+## Operational inspection
+
+`GET /v1/app/admissions/{request_id}` and `GET /v1/app/admissions` read current
+admission state without replaying or extending a hold ([admission operations](../admission-operations.md#inspecting-admissions)).
+`GET /v1/app/usage-events/{id}` and `GET /v1/app/usage-events` inspect recorded
+usage facts and source identities ([usage event inspection](../usage-event-inspection.md)).
+Both pairs require `merchant:usage:read` (or its root equivalent) and paginate
+through existing retained records; inspection cannot create charges.
+
 ## Checkout
 
 A browser buys through an order its customer pays with their own credential;
