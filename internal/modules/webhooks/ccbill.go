@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -784,6 +785,18 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		recurringDays, err := strconv.Atoi(strings.TrimSpace(string(data.RecurringPeriod)))
+		if err != nil || recurringDays <= 0 || recurringDays > 36500 {
+			return errors.New("CCBill upgrade requires its accepted recurring period")
+		}
+		recurringCents, err := parseCCBillPositiveAmountCents(currencyValue, data.BilledRecurringPrice, "billedRecurringPrice", "billedRecurringPrice")
+		if err != nil {
+			return err
+		}
+		recurringAmount, err := moneyutil.RailMinorToNative(currencyValue, recurringCents)
+		if err != nil {
+			return err
+		}
 		payment := &models.Payment{
 			ID:             uuidutil.NewV7(),
 			CustomerID:     subscription.CustomerID,
@@ -814,11 +827,19 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			return nil
 		}
 
+		if _, terminal := subscriptions.TerminalCancelReason(subscription); terminal {
+			// Record retained money and its review finding without restoring
+			// canceled access or adopting the replacement collection agreement.
+			return nil
+		}
 		if err = subscription.ActivateWithPrice(newPrice); err != nil {
 			return fmt.Errorf("failed to activate subscription: %w", err)
 		}
 
 		subscription.RailSubscriptionID = ccBillSubID
+		// The provider's accepted upgrade period is authoritative; it need not
+		// start at the old subscription's mutable paid-through value.
+		subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = purchasedAt, periodEnd
 
 		if err = subscription.Validate(int64(billedAmountCents)); err != nil {
 			return fmt.Errorf("failed to validate subscription: %w", err)
@@ -826,6 +847,17 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 		if err = subService.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+
+		schedule := bill
+		schedule.Payment, schedule.Settled, schedule.SettlementSource = nil, false, ""
+		schedule.Total = recurringAmount
+		schedule.Lines = append([]observed.Line(nil), bill.Lines...)
+		cadenceHours := recurringDays * 24
+		schedule.Lines[0].Amount, schedule.Lines[0].UnitAmount = recurringAmount, recurringAmount
+		schedule.Lines[0].BillingIntervalHours = &cadenceHours
+		if err := observed.DeclareSchedule(ctx, txdb, "ccbill_upgrade:"+ccBillSubID, schedule, *periodEnd, cadenceHours, 0, now); err != nil {
+			return fmt.Errorf("record accepted CCBill upgrade schedule: %w", err)
 		}
 
 		if err := s.updateAccessForUpgrade(ctx, entitlementService, priceService, subscription, oldPriceID, newPrice.ID); err != nil {
