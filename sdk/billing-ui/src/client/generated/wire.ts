@@ -303,7 +303,7 @@ export type CaptureAdmissionBatchParams = {
 
 export type CaptureAdmissionParams = {
   request_id?: string
-  usage?: CaptureUsage
+  usage: CaptureUsage
   amount?: string
 }
 
@@ -447,6 +447,14 @@ export type CheckoutRoutingMatch = {
 export type CheckoutRoutingRule = {
   match?: CheckoutRoutingMatch
   prefer: string[]
+}
+
+export type ConfirmOrderParams = {
+  signature?: string
+}
+
+export type ConfirmPaymentMethodParams = {
+  capture?: CustodianCaptureReference
 }
 
 export type CreateAlertWebhookParams = {
@@ -625,6 +633,12 @@ export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
+}
+
+export type CustodianCaptureReference = {
+  custodian_id?: string
+  session_id?: string
+  token?: string
 }
 
 export type Customer = {
@@ -1779,7 +1793,7 @@ export type RateCard = {
 }
 
 export type RatePrice = {
-  model: "flat" | "package" | "per_unit" | "tiered"
+  model: "dynamic" | "flat" | "package" | "per_unit" | "tiered"
   currency?: string
   flat?: FlatPrice
   per_unit?: PerUnitPrice
@@ -1936,7 +1950,7 @@ export type SolanaPayGetResponse = {
 }
 
 export type SolanaPayPostRequest = {
-  account?: string
+  account: string
 }
 
 export type SolanaPayPostResponse = {
@@ -2149,12 +2163,14 @@ export type Usage = {
 
 export type UsageCharge = {
   meter_key: string
+  model: "dynamic" | "flat" | "package" | "per_unit" | "tiered"
   cell: string | null
   quantity: number
   amount: string
 }
 
 export type UsageEstimate = {
+  amount?: string
   event_type?: string
   dimensions?: Record<string, number>
   metadata?: Record<string, unknown>

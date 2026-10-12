@@ -13,7 +13,7 @@ import (
 )
 
 const getUsageEventByID = `-- name: GetUsageEventByID :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at, outcome, forgiven_amount, charges, stated_amount FROM billing.usage_events
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND occurred_at >= $3::timestamptz
   AND occurred_at <= $4::timestamptz
@@ -49,13 +49,13 @@ func (q *Queries) GetUsageEventByID(ctx context.Context, arg GetUsageEventByIDPa
 		&i.Source,
 		&i.SourceID,
 		&i.LedgerTransferID,
-		&i.PricingAuthority,
 		&i.Metadata,
 		&i.OccurredAt,
 		&i.CreatedAt,
 		&i.Outcome,
 		&i.ForgivenAmount,
 		&i.Charges,
+		&i.StatedAmount,
 	)
 	return i, err
 }
@@ -142,7 +142,7 @@ func (q *Queries) ListAdmissionOperations(ctx context.Context, arg ListAdmission
 }
 
 const listUsageEvents = `-- name: ListUsageEvents :many
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at, outcome, forgiven_amount, charges, stated_amount FROM billing.usage_events
 WHERE merchant_id = $1::uuid
   AND occurred_at >= $2::timestamptz
   AND occurred_at < $3::timestamptz
@@ -208,13 +208,13 @@ func (q *Queries) ListUsageEvents(ctx context.Context, arg ListUsageEventsParams
 			&i.Source,
 			&i.SourceID,
 			&i.LedgerTransferID,
-			&i.PricingAuthority,
 			&i.Metadata,
 			&i.OccurredAt,
 			&i.CreatedAt,
 			&i.Outcome,
 			&i.ForgivenAmount,
 			&i.Charges,
+			&i.StatedAmount,
 		); err != nil {
 			return nil, err
 		}

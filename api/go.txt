@@ -1363,7 +1363,7 @@ pkg openrails/billing, type CaptureAdmissionBatchParams struct, Items []CaptureA
 pkg openrails/billing, type CaptureAdmissionParams struct
 pkg openrails/billing, type CaptureAdmissionParams struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type CaptureAdmissionParams struct, RequestID string `json:"request_id"`
-pkg openrails/billing, type CaptureAdmissionParams struct, Usage *CaptureUsage `json:"usage,omitempty"`
+pkg openrails/billing, type CaptureAdmissionParams struct, Usage CaptureUsage `json:"usage" binding:"required"`
 pkg openrails/billing, type CaptureBatchResult struct
 pkg openrails/billing, type CaptureBatchResult struct, Items []CaptureResult `json:"items"`
 pkg openrails/billing, type CaptureReceipt struct
@@ -2782,7 +2782,7 @@ pkg openrails/billing, type RecordUsageBatchParams struct, Items []RecordUsagePa
 pkg openrails/billing, type RecordUsageBatchResult struct
 pkg openrails/billing, type RecordUsageBatchResult struct, Items []UsageEventResult `json:"items"`
 pkg openrails/billing, type RecordUsageParams struct
-pkg openrails/billing, type RecordUsageParams struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type RecordUsageParams struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type RecordUsageParams struct, Currency string `json:"currency"`
 pkg openrails/billing, type RecordUsageParams struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type RecordUsageParams struct, Dimensions map[string]int64 `json:"dimensions,omitempty"`
@@ -3078,8 +3078,10 @@ pkg openrails/billing, type UsageCharge struct
 pkg openrails/billing, type UsageCharge struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type UsageCharge struct, Cell *string `json:"cell"`
 pkg openrails/billing, type UsageCharge struct, MeterKey string `json:"meter_key"`
+pkg openrails/billing, type UsageCharge struct, Model catalog.Model `json:"model"`
 pkg openrails/billing, type UsageCharge struct, Quantity int64 `json:"quantity"`
 pkg openrails/billing, type UsageEstimate struct
+pkg openrails/billing, type UsageEstimate struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type UsageEstimate struct, Dimensions map[string]int64 `json:"dimensions,omitempty"`
 pkg openrails/billing, type UsageEstimate struct, EventType string `json:"event_type"`
 pkg openrails/billing, type UsageEstimate struct, Metadata map[string]any `json:"metadata,omitempty"`
@@ -3187,6 +3189,7 @@ pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
 pkg openrails/catalog, const MaxEntitlementReplacements untyped int = 100
 pkg openrails/catalog, const MaxProductEntitlements untyped int = 10000
 pkg openrails/catalog, const MaxQuantity untyped int = 10000
+pkg openrails/catalog, const ModelDynamic Model = "dynamic"
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
 pkg openrails/catalog, const ModelPerUnit Model = "per_unit"

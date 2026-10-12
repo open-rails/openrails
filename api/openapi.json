@@ -13246,7 +13246,10 @@
             "type": "string",
             "description": "A number as a decimal string."
           }
-        }
+        },
+        "required": [
+          "usage"
+        ]
       },
       "CaptureBatchResult": {
         "type": "object",
@@ -20273,6 +20276,7 @@
           "model": {
             "type": "string",
             "enum": [
+              "dynamic",
               "flat",
               "package",
               "per_unit",
@@ -20860,7 +20864,10 @@
           "account": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "account"
+        ]
       },
       "SolanaPayPostResponse": {
         "type": "object",
@@ -21898,6 +21905,16 @@
           "meter_key": {
             "type": "string"
           },
+          "model": {
+            "type": "string",
+            "enum": [
+              "dynamic",
+              "flat",
+              "package",
+              "per_unit",
+              "tiered"
+            ]
+          },
           "cell": {
             "oneOf": [
               {
@@ -21918,6 +21935,7 @@
         },
         "required": [
           "meter_key",
+          "model",
           "cell",
           "quantity",
           "amount"
@@ -21926,6 +21944,10 @@
       "UsageEstimate": {
         "type": "object",
         "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "event_type": {
             "type": "string"
           },
