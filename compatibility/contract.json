@@ -570,7 +570,7 @@
       "type CheckoutRoutingRule struct {\n\tMatch CheckoutRoutingMatch `json:\"match,omitempty\"`\n\n\tPrefer []string `json:\"prefer\"`\n}",
       "type CheckoutUIMode string",
       "type ConfirmOrderParams struct {\n\tSignature *string `json:\"signature,omitempty\"`\n}",
-      "type ConfirmPaymentMethodParams struct {\n\tCapture *CustodianCaptureReference `json:\"capture\"`\n}",
+      "type ConfirmPaymentMethodParams struct {\n\tCapture *CustodianCaptureReference `json:\"capture,omitempty\"`\n}",
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
       "type CreateCreditGrantBatchParams struct {\n\tItems []CreateCreditGrantParams `json:\"items\"`\n}",
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",

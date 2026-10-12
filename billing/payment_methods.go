@@ -187,7 +187,7 @@ type DefaultPaymentMethod struct {
 // ConfirmPaymentMethodParams finishes a pending card save. Capture is required
 // for custodian-owned fields; Stripe confirms the bank's setup without it.
 type ConfirmPaymentMethodParams struct {
-	Capture *CustodianCaptureReference `json:"capture"`
+	Capture *CustodianCaptureReference `json:"capture,omitempty"`
 }
 
 // CustodianCaptureReference binds a vendor token to the owned pending method.

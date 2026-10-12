@@ -33,5 +33,5 @@ $$;
 ALTER TABLE billing.checkout_attempts DROP COLUMN price_id, DROP COLUMN mode;
 ALTER TABLE billing.checkout_attempts ADD CONSTRAINT checkout_attempts_order_terms_check
     CHECK (order_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL) NOT VALID;
-COMMENT ON TABLE billing.checkout_attempts IS 'An order payment attempt: provider execution and any customer action are tied to the order.';
+COMMENT ON TABLE billing.checkout_attempts IS 'An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.';
 COMMENT ON COLUMN billing.checkout_attempts.order_id IS 'The order this payment attempt pays.';

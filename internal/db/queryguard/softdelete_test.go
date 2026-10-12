@@ -36,7 +36,6 @@ var allow = map[string]string{
 	"GetInitialMembershipForUpdate":           "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",
 	"GetInitialMembershipForArchive":          "archive validates retained membership identity including later tombstones",
 	"ListObservedInitialMembershipPayments":   "archive validates observed first-payment history including tombstones",
-	"PermanentBenefitsCovered":                "unresolved checkout reservations survive tombstones until the provider outcome resolves",
 	"MerchantHasActivity":                     "retirement is only for never-used merchants; tombstoned rows disqualify",
 	"ProductHoldsReferences":                  "a tombstoned subscription or access still referred to the product, which therefore is never deleted",
 	"PricesHoldReferences":                    "a tombstoned payment, subscription or order line still referred to the price, which therefore is never deleted",

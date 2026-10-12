@@ -12687,14 +12687,7 @@
         "type": "object",
         "properties": {
           "capture": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CustodianCaptureReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/CustodianCaptureReference"
           }
         }
       },

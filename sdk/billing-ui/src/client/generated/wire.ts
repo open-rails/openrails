@@ -117,7 +117,7 @@ export type ConfirmOrderParams = {
 }
 
 export type ConfirmPaymentMethodParams = {
-  capture?: CustodianCaptureReference | null
+  capture?: CustodianCaptureReference
 }
 
 export type CreateMyOrderParams = {

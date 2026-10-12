@@ -181,7 +181,7 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
-// An order payment attempt: provider execution and any customer action are tied to the order.
+// An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
 	Rail           string

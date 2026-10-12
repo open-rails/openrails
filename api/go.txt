@@ -1333,7 +1333,7 @@ pkg openrails/billing, type CheckoutUIMode string
 pkg openrails/billing, type ConfirmOrderParams struct
 pkg openrails/billing, type ConfirmOrderParams struct, Signature *string `json:"signature,omitempty"`
 pkg openrails/billing, type ConfirmPaymentMethodParams struct
-pkg openrails/billing, type ConfirmPaymentMethodParams struct, Capture *CustodianCaptureReference `json:"capture"`
+pkg openrails/billing, type ConfirmPaymentMethodParams struct, Capture *CustodianCaptureReference `json:"capture,omitempty"`
 pkg openrails/billing, type CreateAlertWebhookParams struct
 pkg openrails/billing, type CreateAlertWebhookParams struct, Enabled *bool `json:"enabled"`
 pkg openrails/billing, type CreateAlertWebhookParams struct, Format AlertWebhookFormat `json:"format"`

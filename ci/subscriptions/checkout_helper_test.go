@@ -309,11 +309,10 @@ func (w *world) attemptStatus(id billing.CheckoutAttemptID) string {
 	return status
 }
 
-// latestAttemptStatus is the status of the customer's newest purchase attempt
-// (card setups excluded: they share the frozen clock's timestamp).
+// latestAttemptStatus is the status of the customer's newest order payment attempt.
 func (w *world) latestAttemptStatus(customerID string) string {
 	w.t.Helper()
 	var status string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status FROM billing.checkout_attempts WHERE customer_id = $1 AND mode <> 'payment_method' ORDER BY created_at DESC, id DESC LIMIT 1`), customerID).Scan(&status))
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status FROM billing.checkout_attempts WHERE customer_id = $1 AND order_id IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1`), customerID).Scan(&status))
 	return status
 }
