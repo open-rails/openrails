@@ -51,7 +51,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			}))
 			for _, path := range []string{
 				"/v1/metrics/ask",
-				"/v1/catalog/ask",
+				"/v1/console/catalog/ask",
 				"/v1/metrics/dashboard/widgets/generate",
 			} {
 				before := calls

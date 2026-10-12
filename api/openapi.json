@@ -1773,11 +1773,12 @@
         ]
       }
     },
-    "/v1/catalog/ask": {
+    "/v1/console/catalog/ask": {
       "post": {
         "tags": [
           "catalog"
         ],
+        "x-openrails-console-only": true,
         "requestBody": {
           "content": {
             "application/json": {

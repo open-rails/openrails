@@ -293,9 +293,13 @@ type Route struct {
 	Group Group
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
-	// Name is the route's Go client method: every staff, programmatic and
-	// access route has one, and a public route may (ClientMethod).
+	// Name is the route's Go client method. ConsoleOnly is the explicit
+	// exception for optional console assistance, not a merchant operation.
 	Name string
+	// ConsoleOnly marks optional catalog assistance owned by the console UI.
+	// It keeps its ordinary merchant auth, feature and rate-limit gates but
+	// is not a Go Client method; it does not require the bundled console UI.
+	ConsoleOnly bool
 	// Level is an admin route's: read or write.
 	Level Level
 	// Permission is a programmatic route's: the pair its caller holds one
@@ -346,7 +350,21 @@ func (r Route) Staff() bool {
 // ClientMethod reports a route the Go Client calls: the staff, programmatic
 // and access routes.
 func (r Route) ClientMethod() bool {
+	if r.ConsoleOnly {
+		return false
+	}
 	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn
+}
+
+// consoleOwnership refuses exemptions that could hide ordinary SDK routes.
+func (r Route) consoleOwnership() error {
+	if r.ConsoleOnly != strings.HasPrefix(r.Path, "/v1/console/") {
+		return fmt.Errorf("console-owned routes use /v1/console and declare ConsoleOnly")
+	}
+	if r.ConsoleOnly && (r.Group != CatalogAdmin || r.Auth != AuthMerchant || r.When != FeatureCatalogCopilot || r.Level != LevelRead || r.Name != "") {
+		return fmt.Errorf("ConsoleOnly is optional, read-only catalog assistance behind merchant auth, without a Client name")
+	}
+	return nil
 }
 
 // CatalogUpdate reports a catalog edit or document application.
@@ -385,6 +403,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, r := range all {
 		if _, dup := byKey[r.Key()]; dup {
 			panic("routes: declared twice: " + r.Key())
+		}
+		if err := r.consoleOwnership(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		if (r.Handler == nil) == (r.Bind == nil) {
 			panic("routes: " + r.Key() + " needs exactly one of Handler and Bind")

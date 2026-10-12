@@ -110,6 +110,15 @@ Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route
 sends no CORS headers.
 
+## Optional console assistance
+
+`POST /v1/console/catalog/ask` is the catalog console's optional Q&A and draft
+proposal API. It uses the ordinary catalog authorization and is mounted only
+with catalog routes and the opt-in `catalog_copilot` capability. The
+`catalog-ask` request limit still applies. It changes no catalog rows and is
+explicitly outside the merchant Go `Client` surface; see
+[console assistance](../admin-console.md).
+
 ## Checkout
 
 A browser buys through an order its customer pays with their own credential;

@@ -71,10 +71,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 			_, err := client.AskMetrics(t.Context(), billing.AskMetricsParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
-			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
-			return err
-		}},
+		{"/v1/console/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, nil},
 		{"/v1/metrics/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
 			_, err := client.GenerateDashboardWidget(t.Context(), billing.GenerateDashboardWidgetParams{Prompt: "Cancellations per day"})
 			return err
@@ -101,6 +98,9 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 					require.Empty(t, rec.Header().Get("X-Captcha-Required"))
 					require.Equal(t, 2, *feature.calls, "a refusal never calls the model")
 				}
+			}
+			if feature.trusted == nil {
+				return // Console assistance has no merchant Client operation.
 			}
 			// Direct Client calls remain trusted host operations, as for other
 			// merchant features, without a separate AI-only usage quota.
