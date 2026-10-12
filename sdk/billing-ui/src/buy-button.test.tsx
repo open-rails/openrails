@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import { BuyButton } from "./buy-button"
 import { createBillingClient } from "./client/client"
 import type { Order, Price } from "./client/types"
-import type { EmbeddedCheckoutModalProps, OrderModalProps } from "./modal"
+import type { EmbeddedModalProps, OrderModalProps } from "./modal"
 import { BillingProvider } from "./react/provider"
 import {
   apiError,
@@ -20,13 +20,13 @@ import {
 // Paying is OrderCheckout's (order-checkout.test.tsx) and the checkout host's
 // (EmbeddedCheckout); here the dialogs record what BuyButton hands them.
 const modals = vi.hoisted(() => [] as OrderModalProps[])
-const frames = vi.hoisted(() => [] as EmbeddedCheckoutModalProps[])
+const frames = vi.hoisted(() => [] as EmbeddedModalProps[])
 vi.mock("./modal", () => ({
   OrderModal: (props: OrderModalProps) => {
     modals.push(props)
     return <div role="dialog" />
   },
-  EmbeddedCheckoutModal: (props: EmbeddedCheckoutModalProps) => {
+  EmbeddedModal: (props: EmbeddedModalProps) => {
     frames.push(props)
     return <div role="dialog" />
   },

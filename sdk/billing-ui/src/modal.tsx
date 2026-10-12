@@ -1,5 +1,5 @@
-// The checkout dialogs — hosts, not flows: one Dialog around OrderCheckout, or
-// around the embedded checkout on the checkout host. Closing is always
+// The payment dialogs — hosts, not flows: one Dialog around OrderCheckout, or
+// around the order's embedded checkout on the checkout host. Closing is always
 // possible; an accepted payment settles on the server whether or not the
 // dialog stays open, and the order stays the customer's to pay.
 import type { ReactNode } from "react"
@@ -26,7 +26,7 @@ interface DialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-function CheckoutDialog({
+function PayDialog({
   open,
   onOpenChange,
   appearance,
@@ -60,34 +60,29 @@ export function OrderModal({
   ...checkout
 }: OrderModalProps) {
   return (
-    <CheckoutDialog
+    <PayDialog
       open={open}
       onOpenChange={onOpenChange}
       appearance={checkout.appearance}
     >
       <OrderCheckout {...checkout} />
-    </CheckoutDialog>
+    </PayDialog>
   )
 }
 
-export interface EmbeddedCheckoutModalProps
-  extends EmbeddedCheckoutProps, DialogProps {
+export interface EmbeddedModalProps extends EmbeddedCheckoutProps, DialogProps {
   appearance?: CheckoutAppearance
 }
 
-export function EmbeddedCheckoutModal({
+export function EmbeddedModal({
   open,
   onOpenChange,
   appearance,
   ...checkout
-}: EmbeddedCheckoutModalProps) {
+}: EmbeddedModalProps) {
   return (
-    <CheckoutDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      appearance={appearance}
-    >
+    <PayDialog open={open} onOpenChange={onOpenChange} appearance={appearance}>
       <EmbeddedCheckout {...checkout} />
-    </CheckoutDialog>
+    </PayDialog>
   )
 }

@@ -11,7 +11,7 @@ import type { Order, Price } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
 import { priceLabel } from "#orck/lib/price-label"
-import { EmbeddedCheckoutModal, OrderModal } from "#orck/modal"
+import { EmbeddedModal, OrderModal } from "#orck/modal"
 import { useCurrencyScales } from "#orck/react/config"
 import { useBillingContext } from "#orck/react/context"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
@@ -59,13 +59,13 @@ function heldBy(err: unknown): string | undefined {
 }
 
 // Where the order is paid: on this page, or framed from the checkout host.
-type Checkout =
+type Paying =
   | { kind: "inline"; orderId: string }
   | { kind: "embedded"; orderId: string; url: string }
 
 // A page on an origin the merchant registered to frame its checkout pays
 // there; any other pays on the page.
-const framesCheckout = (origins: string[]) =>
+const framesPayment = (origins: string[]) =>
   typeof window !== "undefined" && origins.includes(window.location.origin)
 
 /** One price's button and its order. Requires `BillingProvider`. */
@@ -85,7 +85,7 @@ export function BuyButton({
   const scales = useCurrencyScales()
   const scope = useScopeProps(appearance)
   const { client } = useBillingContext()
-  const [checkout, setCheckout] = React.useState<Checkout>()
+  const [paying, setPaying] = React.useState<Paying>()
   const [starting, setStarting] = React.useState(false)
   const [failure, setFailure] = React.useState<string>()
   // One key per purchase: a second click before it is paid answers the same
@@ -94,7 +94,7 @@ export function BuyButton({
 
   const paid = (order: Order) => {
     if (order.status !== "complete") return
-    setCheckout(undefined)
+    setPaying(undefined)
     setKey(crypto.randomUUID())
     onPaid(order)
   }
@@ -105,7 +105,7 @@ export function BuyButton({
     setStarting(true)
     try {
       const { merchant } = await client.getCustomerConfig()
-      const embedded = framesCheckout(merchant.embed_origins)
+      const embedded = framesPayment(merchant.embed_origins)
       let order: Order
       try {
         ;({ order } = await client.createOrder({
@@ -117,12 +117,12 @@ export function BuyButton({
         const held = heldBy(err)
         // Only an order made with a checkout answers its URL.
         if (!held || embedded) throw err
-        setCheckout({ kind: "inline", orderId: held })
+        setPaying({ kind: "inline", orderId: held })
         return
       }
       if (order.status === "complete") return paid(order)
       if (!embedded) {
-        setCheckout({ kind: "inline", orderId: order.id })
+        setPaying({ kind: "inline", orderId: order.id })
         return
       }
       const url = order.checkout?.url
@@ -131,7 +131,7 @@ export function BuyButton({
           "invalid_response",
           "the order answered no checkout URL"
         )
-      setCheckout({ kind: "embedded", orderId: order.id, url })
+      setPaying({ kind: "embedded", orderId: order.id, url })
     } catch (err) {
       if (isBillingError(err) && err.status === 401) onSignInRequired()
       else setFailure(m.error(toBillingError(err)))
@@ -140,7 +140,7 @@ export function BuyButton({
     }
   }
 
-  const close = (open: boolean) => !open && setCheckout(undefined)
+  const close = (open: boolean) => !open && setPaying(undefined)
   return (
     <span
       className={cn(scope.className, "inline-flex flex-col gap-1", className)}
@@ -156,25 +156,25 @@ export function BuyButton({
           {failure}
         </span>
       ) : null}
-      {checkout?.kind === "inline" ? (
+      {paying?.kind === "inline" ? (
         <OrderModal
           open
           onOpenChange={close}
-          orderId={checkout.orderId}
+          orderId={paying.orderId}
           returnUrl={returnUrl}
           appearance={appearance}
           onSettled={paid}
         />
       ) : null}
-      {checkout?.kind === "embedded" ? (
-        <EmbeddedCheckoutModal
+      {paying?.kind === "embedded" ? (
+        <EmbeddedModal
           open
           onOpenChange={close}
-          url={checkout.url}
+          url={paying.url}
           appearance={appearance}
           // The frame's word is a hint: the order says whether it is paid.
           onComplete={() =>
-            void client.getOrder(checkout.orderId).then(paid, () => undefined)
+            void client.getOrder(paying.orderId).then(paid, () => undefined)
           }
         />
       ) : null}

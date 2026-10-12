@@ -59,7 +59,8 @@ export interface BillingClientOptions {
   fetch?: (input: string, init: RequestInit) => Promise<Response>
   /**
    * The customer's access token, sent as the bearer of every request but
-   * the public read (`getConfig`); omit when `fetch` authenticates. A `tokenSource` keeps it fresh: a call answered 401
+   * the public read (`getConfig`); omit when `fetch` authenticates. A
+   * `tokenSource` keeps it fresh: a call answered 401
    * `credential_expired` is then retried once with a new token.
    */
   getToken?: () =>

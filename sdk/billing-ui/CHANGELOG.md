@@ -15,7 +15,7 @@
   answers the same order with a fresh URL.
 - On a site the merchant registered to frame its checkout, `BuyButton` creates
   the order that way and frames it (`<EmbeddedCheckout>`); elsewhere it pays on
-  the page as before. The client exports the `OrderCheckout` type.
+  the page as before.
 
 ## Entitlements read
 
