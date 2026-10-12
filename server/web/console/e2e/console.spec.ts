@@ -270,6 +270,9 @@ test("a group invitation reaches enrollment through the shipped console", async 
   try {
     const newcomer = await guest.newPage()
     await newcomer.goto(link)
+    await expect(
+      newcomer.getByRole("tab", { name: "Create account", exact: true })
+    ).toHaveAttribute("aria-selected", "true")
     await newcomer
       .getByRole("textbox", { name: /Email|Identifier/ })
       .first()
