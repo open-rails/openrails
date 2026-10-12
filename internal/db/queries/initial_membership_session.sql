@@ -7,7 +7,7 @@ SET status=sqlc.arg(status)::text,payment_id=sqlc.narg(payment_id)::uuid,
     expires_at=NULL,updated_at=sqlc.arg(now)
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND customer_id=sqlc.arg(customer_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-  AND price_id=sqlc.arg(price_id)::uuid AND rail=sqlc.arg(rail)::text
-  AND mode='subscription' AND deleted_at IS NULL
+  AND (rail_state#>>'{accepted_offer,price_id}')::uuid=sqlc.arg(price_id)::uuid AND rail=sqlc.arg(rail)::text
+  AND rail_state#>>'{accepted_offer,subscription}'='true' AND deleted_at IS NULL
   AND rail_state ? 'initial_membership_quote'
   AND (status NOT IN ('succeeded','failed') OR status=sqlc.arg(status)::text);

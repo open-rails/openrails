@@ -62,7 +62,7 @@ func (s *CheckoutAttemptService) SettleSolanaTransfer(ctx context.Context, refer
 			ReceivedAmount: t.Amount, Payer: t.Payer, LandedAt: t.LandedAt,
 		}
 		open := session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusRequiresAction || session.Status == models.CheckoutAttemptStatusExpired
-		if open && session.Mode == models.CheckoutAttemptModeOrder {
+		if open && session.OrderID != nil {
 			// A transfer pays the order only on its current attempt while it
 			// takes payment; any other is money to review.
 			if open, err = solanaOrderLive(ctx, d, session); err != nil {
@@ -112,7 +112,7 @@ func (s *CheckoutAttemptService) creditSolanaTransfer(ctx context.Context, d *db
 			return err
 		}
 		credit := s.creditSolanaPurchase
-		if session.Mode == models.CheckoutAttemptModeOrder {
+		if session.OrderID != nil {
 			credit = s.creditSolanaOrder
 		}
 		paymentID, err := credit(ctx, inner, session, receipt.Reference, t)
@@ -145,7 +145,7 @@ func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db
 	result, err := purchase.RegisterPurchase(db.WithPSPID(ctx, session.PspID), &payments.RegisterPurchaseRequest{
 		CheckoutAttemptID: session.ID,
 		UserID:            session.CustomerID.String(),
-		PriceID:           *session.PriceID,
+		PriceID:           *session.AcceptedPriceID,
 		Rail:              string(models.RailSolana),
 		TransactionID:     t.Signature,
 		Amount:            *session.Amount,

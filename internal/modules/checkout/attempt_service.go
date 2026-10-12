@@ -2,14 +2,9 @@ package checkout
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,35 +19,21 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/shared/cardholdername"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
-	checkoutAttemptIdempotencyOp  = "checkout_attempt_create"
-	checkoutAttemptFingerprintKey = "_openrails_request_fingerprint"
-	// checkoutAttemptPSPFieldKey persists the resolved PSP key on the session's
-	// rail_fields when it differs from the rail kind, so execution (including
-	// idempotent resume) lands on the requested PSP, not a re-resolved one (#848).
-	checkoutAttemptPSPFieldKey = "psp"
-	defaultCheckoutAttemptTTL  = 15 * time.Minute
+	defaultCheckoutAttemptTTL = 15 * time.Minute
 	// solanaFinalizeWait bounds how long a page confirm waits for a transfer
 	// to finalize (~13 s normally) before answering "processing".
 	solanaFinalizeWait = 60 * time.Second
@@ -67,16 +47,6 @@ const (
 	IdempotencyLease = 30 * time.Second
 	IdempotencyTTL   = 24 * time.Hour
 )
-
-type checkoutAttemptIdempotencyResult struct {
-	RequestFingerprint string                   `json:"request_fingerprint"`
-	Response           *CheckoutAttemptResponse `json:"response"`
-}
-
-type checkoutAttemptExecutor interface {
-	checkoutRailTargets
-	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
-}
 
 // checkoutRailTargets is the multi-PSP resolution capability the session
 // service REQUIRES of its executor (or#893, #704, #848): resolve a wire
@@ -114,8 +84,7 @@ type CheckoutAttemptService struct {
 	priceService             *catalog.PriceService
 	productService           *catalog.ProductService
 	paymentMethodService     *paymentmethods.PaymentMethodService
-	idempotencyService       idempotencyStore
-	checkoutService          checkoutAttemptExecutor
+	checkoutService          checkoutRailTargets
 	solanaPayService         solanaPaymentService
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
@@ -161,8 +130,7 @@ func NewCheckoutAttemptService(
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
-	idempotencyService idempotencyStore,
-	checkoutService checkoutAttemptExecutor,
+	checkoutService checkoutRailTargets,
 	solanaPayService solanaPaymentService,
 	solanaTransactionService solanaTransactionService,
 	fxProvider fx.Provider,
@@ -177,7 +145,6 @@ func NewCheckoutAttemptService(
 		priceService:             priceService,
 		productService:           productService,
 		paymentMethodService:     paymentMethodService,
-		idempotencyService:       idempotencyService,
 		checkoutService:          checkoutService,
 		solanaPayService:         solanaPayService,
 		solanaTransactionService: solanaTransactionService,
@@ -225,490 +192,6 @@ func (s *CheckoutAttemptService) requireProviderWrites(ctx context.Context) erro
 	if (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return fmt.Errorf("%w: provider writes are disabled", ErrCheckoutAttemptValidation)
 	}
-	return nil
-}
-
-func canonicalizeCheckoutPaymentName(payment *CheckoutAttemptPaymentRequest) {
-	if payment == nil {
-		return
-	}
-	full := strings.TrimSpace(payment.NameOnCard)
-	if full != "" {
-		payment.NameOnCard = full
-		payment.FirstName, payment.LastName = cardholdername.Parts(full, "", "")
-		return
-	}
-	payment.FirstName = strings.TrimSpace(payment.FirstName)
-	payment.LastName = strings.TrimSpace(payment.LastName)
-	payment.NameOnCard = cardholdername.Canonical("", payment.FirstName, payment.LastName)
-}
-
-// checkoutAttemptRequestFingerprint hashes the inputs a session executes: its
-// durable replay identity.
-func checkoutAttemptRequestFingerprint(req *CheckoutAttemptCreateRequest) string {
-	if req == nil {
-		return ""
-	}
-	payment := req.Payment
-	payload, _ := json.Marshal(struct {
-		PriceID    string
-		PriceKey   string `json:",omitempty"`
-		ProductKey string `json:",omitempty"`
-		Amount     *int64 `json:",omitempty"`
-		Mode       string
-		Payment    CheckoutAttemptPaymentRequest
-		Metadata   map[string]string
-		SuccessURL string
-		CancelURL  string
-	}{
-		PriceID:  strings.TrimSpace(req.PriceID),
-		PriceKey: req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
-		Mode:       strings.TrimSpace(req.Mode),
-		Payment:    payment,
-		Metadata:   normalizeMetadata(req.Metadata),
-		SuccessURL: strings.TrimSpace(req.SuccessURL),
-		CancelURL:  strings.TrimSpace(req.CancelURL),
-	})
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:])
-}
-
-func decodeCheckoutAttemptIdempotencyResult(payload json.RawMessage, req *CheckoutAttemptCreateRequest) (*CheckoutAttemptResponse, error) {
-	var cached checkoutAttemptIdempotencyResult
-	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
-		fingerprint := checkoutAttemptRequestFingerprint(req)
-		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: %w", ErrCheckoutAttemptConflict, billing.ErrIdempotencyKeyReused)
-		}
-		return cached.Response, nil
-	}
-	return nil, fmt.Errorf("failed to decode cached checkout attempt response")
-}
-
-// requireSessionPurchase admits what the session path still sells: a Solana
-// purchase or subscription, or a purchase with a custodian-held card. A card
-// on a PSP's own vault buys through an order.
-func (s *CheckoutAttemptService) requireSessionPurchase(ctx context.Context, rail string, target railTarget, payment *CheckoutAttemptPaymentRequest) error {
-	if rail == string(models.RailSolana) || custodianHeld(target) {
-		return nil
-	}
-	refused := fmt.Errorf("%w: a card purchase is an order (POST /v1/me/orders)", ErrCheckoutAttemptValidation)
-	if strings.TrimSpace(payment.PaymentMethodID) == "" || s.db == nil {
-		return refused
-	}
-	id, err := billing.ParsePaymentMethodID(payment.PaymentMethodID)
-	if err != nil {
-		return refused
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: id.UUID()})
-	if err != nil || method.Custodian == models.CustodianPSP {
-		return refused
-	}
-	return nil
-}
-
-func idempotentCheckoutAttemptID(merchantID uuid.UUID, key string) uuid.UUID {
-	name := "openrails:checkout-session:" + merchantID.String() + ":" + strings.TrimSpace(key)
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(name))
-}
-
-// The offer uses the shared commercial terms type, not a second membership
-// payload. A JSON string preserves integer benefit caps through RailState's
-// map[string]any database roundtrip. No quote is financial authority.
-const initialMembershipQuoteKey = "initial_membership_quote"
-
-func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt, price *models.Price, product *models.Product, method gen.BillingPaymentMethod, now time.Time) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutAttemptModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || !charge.ChargeableOn(method, session.PspID) || !((method.Custodian == models.CustodianHyperSwitch && method.CustodianID != nil && method.Rail == "nmi") || (method.Custodian == models.CustodianPSP && method.CustodianID == nil)) || method.RailCustomerRef == nil || method.RailMethodRef == nil || !paymentmethods.Chargeable(method) || method.Rail != string(session.Rail) {
-		return ErrCheckoutAttemptConflict
-	}
-	if _, exists := session.RailState[initialMembershipQuoteKey]; exists {
-		return ErrCheckoutAttemptConflict
-	}
-	if !price.IsPurchasable() || !product.IsPurchasable() || price.Amount <= 0 || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
-		return ErrCheckoutAttemptValidation
-	}
-	hours := price.RecurringCycleHours()
-	if hours == nil || *hours <= 0 || int64(*hours) > math.MaxInt64/int64(time.Hour) || now.IsZero() {
-		return ErrCheckoutAttemptValidation
-	}
-	now = now.UTC().Truncate(time.Microsecond)
-	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
-		return ErrCheckoutAttemptExpired
-	}
-	// A session buys one seat of a per-seat price; more seats are an order's.
-	var quantity *int
-	if price.Quantity != nil {
-		if price.Quantity.Min != 1 {
-			return ErrCheckoutAttemptValidation
-		}
-		quantity = new(1)
-	}
-	terms := subscriptions.InitialMembershipTerms{Quantity: quantity, CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour)}
-	if err := terms.Validate(); err != nil {
-		return err
-	}
-	raw, err := json.Marshal(terms)
-	if err != nil {
-		return err
-	}
-	if session.RailState == nil {
-		session.RailState = map[string]any{}
-	}
-	session.RailState[initialMembershipQuoteKey] = string(raw)
-	return nil
-}
-
-func readInitialMembershipQuote(session *models.CheckoutAttempt) (subscriptions.InitialMembershipTerms, error) {
-	var terms subscriptions.InitialMembershipTerms
-	if session == nil {
-		return terms, ErrCheckoutAttemptNotFound
-	}
-	raw, ok := session.RailState[initialMembershipQuoteKey].(string)
-	if !ok || raw == "" {
-		return terms, ErrCheckoutAttemptConflict
-	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&terms); err != nil {
-		return terms, ErrCheckoutAttemptConflict
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return terms, ErrCheckoutAttemptConflict
-	}
-	if err := terms.Validate(); err != nil {
-		return terms, err
-	}
-	if session.Mode != models.CheckoutAttemptModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Pending || terms.Amount <= 0 || terms.Amount != terms.RecurringAmount || terms.CustomerID != session.CustomerID || terms.PSPID != session.PspID || session.PriceID == nil || terms.PriceID != *session.PriceID || session.Amount == nil || terms.Amount != *session.Amount || session.Currency == nil || terms.Currency != *session.Currency {
-		return terms, ErrCheckoutAttemptConflict
-	}
-	duration := terms.PeriodEnd.Sub(terms.PeriodStart)
-	if !terms.AcceptedAt.Equal(terms.PeriodStart) || duration%time.Hour != 0 || !terms.PeriodStart.Add(duration).Equal(terms.PeriodEnd) {
-		return terms, ErrCheckoutAttemptConflict
-	}
-	return terms, nil
-}
-
-func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.Payer) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != session.CustomerID.String() {
-		return ErrCheckoutAttemptForbidden
-	}
-	return nil
-}
-
-// acceptedInitialMembershipQuote prepares the FIRST confirmation only. The
-// real integration resolves an existing canonical operation before calling it,
-// so a repeated/uncertain confirmation cannot shift accepted period bounds.
-// It does not enqueue, charge, create membership, or return a checkout success.
-func acceptedInitialMembershipQuote(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.Payer, now time.Time) (subscriptions.InitialMembershipTerms, error) {
-	if err := validateInitialMembershipPrincipal(ctx, session, principal); err != nil {
-		return subscriptions.InitialMembershipTerms{}, err
-	}
-	terms, err := readInitialMembershipQuote(session)
-	if err != nil {
-		return terms, err
-	}
-	if now.IsZero() || session.Status != models.CheckoutAttemptStatusRequiresAction || session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
-		return terms, ErrCheckoutAttemptExpired
-	}
-	duration := terms.PeriodEnd.Sub(terms.PeriodStart)
-	terms.AcceptedAt = now.UTC().Truncate(time.Microsecond)
-	terms.PeriodStart = terms.AcceptedAt
-	terms.PeriodEnd = terms.PeriodStart.Add(duration)
-	return terms, terms.Validate()
-}
-
-// initialMembershipSessionResponse is a read-only projection of the accepted
-// operation. Session expiry is an offer deadline, never a payment outcome.
-func (s *CheckoutAttemptService) initialMembershipSessionResponse(ctx context.Context, session *models.CheckoutAttempt) (*CheckoutAttemptResponse, bool, error) {
-	if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
-		return nil, false, nil
-	}
-	terms, err := readInitialMembershipQuote(session)
-	if err != nil {
-		return nil, false, err
-	}
-	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey("checkout_attempt:"+session.ID.String()))
-	if db.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if err := ownsInitialMembership(operation, session.CustomerID.String(), terms.PriceID, initialMembershipQuoteFingerprint(terms), &session.ID); err != nil {
-		return nil, true, err
-	}
-	projection := *session
-	projection.PaymentID, projection.SubscriptionID, projection.TransactionID = nil, nil, nil
-	projection.ExpiresAt = nil
-	switch operation.Status {
-	case intents.StatusSucceeded:
-		result, err := initialMembershipResponseFromIntent(operation)
-		if err != nil {
-			return nil, true, err
-		}
-		if err := s.applyCheckoutResponse(&projection, result); err != nil {
-			return nil, true, err
-		}
-	case intents.StatusFailedTerminal:
-		if err := intents.ValidateInitialMembershipTerminal(operation); err != nil {
-			return nil, true, err
-		}
-		projection.Status = models.CheckoutAttemptStatusFailed
-	case intents.StatusExpired:
-		projection.Status = models.CheckoutAttemptStatusExpired
-	case intents.StatusSuperseded:
-		projection.Status = models.CheckoutAttemptStatusCanceled
-	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
-		// This response-only state is not a second persisted operation status.
-		projection.Status = models.CheckoutAttemptStatus("processing")
-		if authenticationRequired(operation) {
-			projection.Status = models.CheckoutAttemptStatusRequiresAction
-		}
-	default:
-		return nil, true, fmt.Errorf("unrecognized initial membership operation status %q", operation.Status)
-	}
-	response := s.sessionToResponse(&projection)
-	response.NextAction = nil
-	if operation.Status == intents.StatusFailedTerminal {
-		response.Failure = operationFailure(operation)
-	}
-	return response, true, nil
-}
-
-// ConfirmCustomerSession is the self-service boundary. The operation ledger,
-// rather than the session projection or quote expiry, owns accepted replay.
-// AttemptOwner is who an attempt charges and on which rail.
-type AttemptOwner struct {
-	CustomerID uuid.UUID
-	Rail       string
-}
-
-func (s *CheckoutAttemptService) resolveMode(mode string, rail string, price *models.Price) (models.CheckoutAttemptMode, error) {
-	if rail == "" {
-		return "", fmt.Errorf("%w: rail is required", ErrCheckoutAttemptValidation)
-	}
-
-	trimmedMode := strings.TrimSpace(mode)
-	if rail == "solana" {
-		hasRecurring := priceHasSolanaRecurring(price)
-		if trimmedMode == string(models.CheckoutAttemptModeSubscription) {
-			if !hasRecurring {
-				return "", fmt.Errorf("%w: price is not configured for Solana recurring billing", ErrCheckoutAttemptValidation)
-			}
-			return models.CheckoutAttemptModeSubscription, nil
-		}
-		if trimmedMode == string(models.CheckoutAttemptModeOneOff) {
-			return models.CheckoutAttemptModeOneOff, nil
-		}
-		// Mode unspecified: a price with a published Solana recurring plan defaults
-		// to subscription (Solana = subscription by default); otherwise one-off.
-		if hasRecurring {
-			return models.CheckoutAttemptModeSubscription, nil
-		}
-		return models.CheckoutAttemptModeOneOff, nil
-	}
-
-	expected := models.CheckoutAttemptModeOneOff
-	if price.IsRecurring() {
-		expected = models.CheckoutAttemptModeSubscription
-	}
-	if trimmedMode == "" {
-		return expected, nil
-	}
-	if trimmedMode != string(expected) {
-		return "", fmt.Errorf("%w: mode does not match price configuration", ErrCheckoutAttemptValidation)
-	}
-	return models.CheckoutAttemptMode(trimmedMode), nil
-}
-
-// validatePayment dispatches checkout-input validation to the per-rail
-// validator that owns that rail's required-input contract. Keeping each
-// rail's rules in its own method (rather than a shared switch body) is what
-// keeps the validation contract from drifting out of sync with what the
-// rail's executor actually consumes — the drift that previously made Stripe
-// demand billing fields its hosted-checkout path never reads.
-func (s *CheckoutAttemptService) validatePayment(ctx context.Context, rail string, payment *CheckoutAttemptPaymentRequest, user *UserIdentity) error {
-	switch {
-	case rails.IsNMI(models.Rail(rail)):
-		return s.validateNMIInput(ctx, payment, user)
-	case rail == "solana":
-		return s.validateSolanaInput(payment)
-	default:
-		return fmt.Errorf("%w: unsupported rail", ErrCheckoutAttemptValidation)
-	}
-}
-
-func rejectCheckoutAttemptPAN(req *CheckoutAttemptCreateRequest) error {
-	if req == nil {
-		return nil
-	}
-	payment := req.Payment
-	if err := RejectPANShapedFields(&CheckoutRequest{
-		PaymentMethodID: payment.PaymentMethodID,
-		PaymentToken:    payment.PaymentToken,
-		Email:           payment.Email,
-		NameOnCard:      payment.NameOnCard,
-		FirstName:       payment.FirstName,
-		LastName:        payment.LastName,
-		Address1:        payment.Address1,
-		Address2:        payment.Address2,
-		Phone:           payment.Phone,
-		City:            payment.City,
-		State:           payment.State,
-		Zip:             payment.Zip,
-		Country:         payment.Country,
-		LastFour:        payment.LastFour,
-		CardType:        payment.CardType,
-		ExpiryDate:      payment.ExpiryDate,
-		Metadata:        req.Metadata,
-	}); err != nil {
-		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutAttemptValidation, err)
-	}
-	extraFields := map[string]string{
-		"payment.rail":         payment.Rail,
-		"payment.token_symbol": payment.TokenSymbol,
-		"payment.wallet":       payment.Wallet,
-		"success_url":          req.SuccessURL,
-		"cancel_url":           req.CancelURL,
-		"mode":                 req.Mode,
-		"price_id":             req.PriceID,
-		"price_key":            req.PriceKey,
-		"product_key":          req.ProductKey,
-	}
-	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
-		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutAttemptValidation, err)
-	}
-	return nil
-}
-
-// validateNMIInput requires exactly one of payment_token, card or
-// payment_method_id; a saved method must belong to the caller. The NMI
-// executor charges with the token, card or vaulted method, so each input is
-// genuinely consumed downstream.
-func (s *CheckoutAttemptService) validateNMIInput(ctx context.Context, payment *CheckoutAttemptPaymentRequest, user *UserIdentity) error {
-	hasToken := strings.TrimSpace(payment.PaymentToken) != ""
-	hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
-	hasCard := payment.Card != nil
-	if !hasToken && !hasMethod && !hasCard {
-		return ErrPaymentMethodRequired
-	}
-	if hasCard && hasToken {
-		return fmt.Errorf("%w: %w", ErrCheckoutAttemptValidation, paymentmethods.ErrCardWithToken)
-	}
-	if hasCard && hasMethod {
-		return fmt.Errorf("%w: provide either card or payment_method_id, not both", ErrCheckoutAttemptValidation)
-	}
-	if hasToken && hasMethod {
-		return fmt.Errorf("%w: provide either payment_token or payment_method_id, not both", ErrCheckoutAttemptValidation)
-	}
-	if hasMethod {
-		pmID, err := billing.ParsePaymentMethodID(payment.PaymentMethodID)
-		if err != nil || pmID.IsZero() {
-			return fmt.Errorf("%w: invalid payment_method_id", ErrCheckoutAttemptValidation)
-		}
-		if s.paymentMethodService == nil {
-			return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutAttemptValidation)
-		}
-		if err := s.paymentMethodService.ValidateOwnership(ctx, pmID.UUID(), user.ID); err != nil {
-			if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) || errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied) {
-				return fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)
-			}
-			return fmt.Errorf("validate payment method ownership: %w", err)
-		}
-	}
-	return nil
-}
-
-// validateSolanaInput requires a token symbol so the executor can resolve which
-// SPL mint to charge.
-func (s *CheckoutAttemptService) validateSolanaInput(payment *CheckoutAttemptPaymentRequest) error {
-	if strings.TrimSpace(payment.TokenSymbol) == "" {
-		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutAttemptValidation)
-	}
-	return nil
-}
-
-func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, session *models.CheckoutAttempt, payment *CheckoutAttemptPaymentRequest) error {
-	if session.Mode == models.CheckoutAttemptModeSubscription {
-		return fmt.Errorf("%w: a Solana subscription is bought on an order", ErrCheckoutAttemptValidation)
-	}
-
-	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrCheckoutAttemptValidation, err)
-	}
-
-	tokenSymbol := strings.ToUpper(strings.TrimSpace(payment.TokenSymbol))
-	if tokenSymbol == "" {
-		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutAttemptValidation)
-	}
-
-	if solanaProc.Solana == nil {
-		return fmt.Errorf("%w: solana rail is not configured", ErrCheckoutAttemptValidation)
-	}
-	tokenCfg, ok := solanaProc.Solana.Tokens[tokenSymbol]
-	if !ok {
-		return fmt.Errorf("%w: unsupported token", ErrCheckoutAttemptValidation)
-	}
-	tokenMint := tokenCfg.Mint
-	if err := solanamodule.ValidateQuoteCurrency(*session.Currency, tokenSymbol, tokenMint); err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	}
-	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
-		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutAttemptValidation)
-	}
-
-	// A Solana Pay transaction request: the wallet POSTs its account to
-	// /v1/checkout-attempts/:id/solana-pay and OpenRails builds the transfer.
-	if s.solanaTransactionService == nil {
-		return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutAttemptValidation)
-	}
-	decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMints, tokenCfg.Mint)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	}
-	// OpenRails builds this transfer itself and does not resolve a
-	// Token-2022 transfer hook's extra accounts: such a mint is refused
-	// here rather than offered a transaction that cannot land.
-	if !strings.EqualFold(tokenSymbol, "SOL") {
-		info, err := solanamodule.RequireMintInfo(ctx, s.solanaMintInfo, tokenMint)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-		}
-		if !info.Hook.IsZero() {
-			return fmt.Errorf("%w: %s has a transfer hook OpenRails cannot build for", ErrCheckoutAttemptValidation, tokenSymbol)
-		}
-	}
-	quotedAt := s.now().UTC()
-	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider, quotedAt)
-	if err != nil {
-		return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutAttemptValidation, err)
-	}
-	session.Status = models.CheckoutAttemptStatusRequiresAction
-	expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
-	open := solanaSettleDeadline(expiresAt)
-	session.ExpiresAt = &open
-	if session.RailState == nil {
-		session.RailState = map[string]any{}
-	}
-	session.RailState["flow"] = "transaction_request"
-	session.RailState["token_symbol"] = tokenSymbol
-	session.RailState["token_mint"] = tokenMint
-	if err := setSolanaQuoteState(session.RailState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
-		return err
-	}
-	recipient, err := solanamodule.ResolveRecipientWallet(ctx, s.db, s.config)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	}
-	session.RailState["recipient"] = recipient
-
 	return nil
 }
 
@@ -765,207 +248,6 @@ func (s *CheckoutAttemptService) solanaSignerAvailable(ctx context.Context) erro
 	return nil
 }
 
-func (s *CheckoutAttemptService) applyCheckoutResponse(session *models.CheckoutAttempt, resp *CheckoutResponse) error {
-	if session == nil {
-		return fmt.Errorf("%w: session is required", ErrCheckoutAttemptValidation)
-	}
-	if resp == nil {
-		return fmt.Errorf("%w: checkout response is required", ErrCheckoutAttemptValidation)
-	}
-
-	switch resp.Status {
-	case "success", "pending":
-		session.Status = models.CheckoutAttemptStatusSucceeded
-		if resp.PaymentID != nil {
-			session.PaymentID = resp.PaymentID
-		}
-		if resp.SubscriptionID != nil {
-			session.SubscriptionID = resp.SubscriptionID
-		}
-		if strings.TrimSpace(resp.TransactionID) != "" {
-			session.TransactionID = normalize.OptionalString(resp.TransactionID)
-		}
-	case "redirect_required":
-		redirectURL := strings.TrimSpace(resp.RedirectURL)
-		if redirectURL == "" {
-			return fmt.Errorf("%w: redirect url missing", ErrCheckoutAttemptValidation)
-		}
-		session.Status = models.CheckoutAttemptStatusRequiresAction
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["redirect_url"] = redirectURL
-	case "blocked":
-		msg := strings.TrimSpace(resp.Message)
-		if msg == "" {
-			msg = "checkout blocked"
-		}
-		return fmt.Errorf("%w: %s", ErrCheckoutAttemptConflict, msg)
-	default:
-		return fmt.Errorf("%w: unsupported checkout status", ErrCheckoutAttemptConflict)
-	}
-
-	return nil
-}
-
-func (s *CheckoutAttemptService) buildRailFields(rail string, payment *CheckoutAttemptPaymentRequest, user *UserIdentity) map[string]any {
-	fields := map[string]any{
-		"rail": rail,
-	}
-	if payment == nil {
-		return fields
-	}
-	email := payment.Email
-	addField(fields, "payment_method_id", payment.PaymentMethodID)
-	addField(fields, "token_symbol", payment.TokenSymbol)
-	addField(fields, "wallet", payment.Wallet)
-	addField(fields, "email", email)
-	addField(fields, "name_on_card", payment.NameOnCard)
-	addField(fields, "first_name", payment.FirstName)
-	addField(fields, "last_name", payment.LastName)
-	addField(fields, "address1", payment.Address1)
-	addField(fields, "city", payment.City)
-	addField(fields, "state", payment.State)
-	addField(fields, "zip", payment.Zip)
-	addField(fields, "country", payment.Country)
-
-	return fields
-}
-
-func addField(fields map[string]any, key, value string) {
-	if strings.TrimSpace(value) == "" {
-		return
-	}
-	fields[key] = strings.TrimSpace(value)
-}
-
-func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttempt) *CheckoutAttemptResponse {
-	resp := &CheckoutAttemptResponse{
-		Object:   "checkout_attempt",
-		ID:       billing.CheckoutAttemptID(session.ID),
-		Status:   string(session.Status),
-		Mode:     string(session.Mode),
-		Amount:   session.Amount,
-		Currency: session.Currency,
-		Payment: CheckoutAttemptPaymentResponse{
-			Rail: string(session.Rail),
-		},
-		ExpiresAt: session.ExpiresAt,
-		CreatedAt: session.CreatedAt,
-	}
-	if session.PriceID != nil {
-		id := billing.PriceID(*session.PriceID)
-		resp.PriceID = &id
-	}
-	if len(session.Metadata) > 0 {
-		resp.Metadata = session.Metadata
-	}
-
-	if session.Reference != nil {
-		resp.Payment.Reference = *session.Reference
-	}
-	if session.TransactionID != nil {
-		resp.Payment.TransactionID = *session.TransactionID
-	}
-
-	if session.PaymentID != nil {
-		paymentID := billing.PaymentID(*session.PaymentID)
-		resp.PaymentID = &paymentID
-	}
-	if session.SubscriptionID != nil {
-		subID := billing.SubscriptionID(*session.SubscriptionID)
-		resp.SubscriptionID = &subID
-	}
-
-	payable := session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusRequiresAction
-	if session.RailState != nil {
-		// Build solana_pay_url for every Solana-Pay-capable session. The wallet POSTs
-		// its account to this URL and the matching BuildSolanaPayTransaction branch
-		// returns the right tx:
-		//   - transaction_request flow → one-off transfer OR recurring subscribe
-		//     (price-driven: BuildSolanaPayTransaction reads the session mode).
-		if payable && solanaSessionUsesPayURL(session) {
-			// Construct the Solana Pay URL:
-			// - standalone: solana:{public_billing_base_url}/v1/checkout-attempts/:id/solana-pay
-			// - embedded:   solana:{public_billing_base_url}/v1/checkout-attempts/:id/solana-pay (public_billing_base_url typically ends with /billing)
-			baseURL := s.getAPIBaseURL()
-			if baseURL != "" {
-				resp.Payment.SolanaPayURL = fmt.Sprintf(
-					"solana:%s/v1/checkout-attempts/%s/solana-pay",
-					baseURL,
-					billing.CheckoutAttemptID(session.ID),
-				)
-			}
-		}
-		if val, ok := session.RailState["redirect_url"].(string); ok && strings.TrimSpace(val) != "" {
-			resp.URL = strings.TrimSpace(val)
-			resp.Payment.RedirectURL = resp.URL
-		}
-		if val, ok := session.RailState["message"].(string); ok && strings.TrimSpace(val) != "" {
-			resp.Message = strings.TrimSpace(val)
-		} else if val, ok := session.RailState["failure_reason"].(string); ok && strings.TrimSpace(val) != "" {
-			resp.Message = strings.TrimSpace(val)
-		}
-	}
-
-	if terms, err := readInitialMembershipQuote(session); err == nil {
-		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours}
-	}
-	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
-	// purchase financially failed. Keep callers polling the accepted attempt
-	// until payment or authoritative provider closure resolves it.
-	if _, accepted := session.RailState[acceptedPurchaseTermsKey]; accepted && session.Rail == models.RailStripe && session.RailState["purchase_submitted"] == true && session.RailState["provider_closed"] != true {
-		if session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusFailed || session.Status == models.CheckoutAttemptStatusExpired || session.Status == models.CheckoutAttemptStatusCanceled || session.Status == models.CheckoutAttemptStatusRequiresAction && s.isExpired(session) {
-			resp.Status = "processing"
-			resp.ExpiresAt = nil
-			resp.Message = "The original payment outcome is being verified. Keep this checkout attempt."
-		}
-	}
-
-	// A one-off Solana quote that expired unpaid offers nothing more, but its
-	// reference still credits a transfer already sent: the buyer waits rather
-	// than paying again.
-	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Rail == models.RailSolana && session.Mode != models.CheckoutAttemptModeSubscription &&
-		session.Status == models.CheckoutAttemptStatusRequiresAction && s.now().After(quote) {
-		resp.Status = "processing"
-		resp.Message = "Waiting for a transfer that may still arrive. Do not pay again."
-		return resp
-	}
-
-	if action := s.buildNextAction(resp); action != nil {
-		resp.NextAction = action
-	}
-
-	return resp
-}
-
-func normalizeMetadata(input map[string]string) map[string]string {
-	if len(input) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(input))
-	for key, value := range input {
-		k := strings.TrimSpace(key)
-		if k == "" {
-			continue
-		}
-		out[k] = strings.TrimSpace(value)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func scopeIdempotencyKey(userID, key string) string {
-	trimmedKey := strings.TrimSpace(key)
-	if strings.TrimSpace(userID) == "" || trimmedKey == "" {
-		return trimmedKey
-	}
-	sum := sha256.Sum256([]byte(trimmedKey))
-	return fmt.Sprintf("%s:%s", strings.TrimSpace(userID), hex.EncodeToString(sum[:]))
-}
-
 func (s *CheckoutAttemptService) isTerminal(status models.CheckoutAttemptStatus) bool {
 	switch status {
 	case models.CheckoutAttemptStatusSucceeded,
@@ -985,44 +267,6 @@ func (s *CheckoutAttemptService) isExpired(session *models.CheckoutAttempt) bool
 	return session.ExpiresAt.Before(s.now())
 }
 
-func (s *CheckoutAttemptService) buildNextAction(resp *CheckoutAttemptResponse) *CheckoutAttemptNextAction {
-	if resp == nil {
-		return nil
-	}
-	if resp.Status != string(models.CheckoutAttemptStatusRequiresAction) {
-		return nil
-	}
-	if resp.Payment.RedirectURL != "" {
-		return &CheckoutAttemptNextAction{
-			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutAttemptRedirectToURL{
-				URL: resp.Payment.RedirectURL,
-			},
-		}
-	}
-	if resp.Payment.SolanaPayURL != "" {
-		return &CheckoutAttemptNextAction{
-			Type: "solana_pay",
-		}
-	}
-	return nil
-}
-
-// solanaSessionUsesPayURL reports whether a session should surface a
-// solana_pay_url (i.e. the wallet completes it by scanning a QR / POSTing its
-// account to the solana-pay endpoint). True for the transaction_request flow
-// (one-off transfer OR recurring subscribe — the build endpoint picks based on
-// the session mode/price).
-func solanaSessionUsesPayURL(session *models.CheckoutAttempt) bool {
-	if session == nil || session.Rail != models.RailSolana {
-		return false
-	}
-	if flow, ok := session.RailState["flow"].(string); ok && flow == "transaction_request" {
-		return true
-	}
-	return false
-}
-
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
 // Uses config.PublicBillingBaseURL which should be set to the full base URL where billing routes are mounted.
 //
@@ -1040,110 +284,6 @@ func (s *CheckoutAttemptService) getAPIBaseURL() string {
 	}
 	// Ensure it doesn't end with a slash (we add the version path later)
 	return strings.TrimSuffix(apiURL, "/")
-}
-
-func (s *CheckoutAttemptService) confirmSolanaSession(ctx context.Context, session *models.CheckoutAttempt, req *CheckoutAttemptConfirmRequest, user *UserIdentity) (*CheckoutAttemptResponse, error) {
-	if strings.TrimSpace(req.Payment.Signature) == "" {
-		return nil, fmt.Errorf("%w: signature is required", ErrCheckoutAttemptValidation)
-	}
-	if s.solanaTransactionService == nil {
-		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutAttemptValidation)
-	}
-	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	}
-
-	// Get token symbol from RailState (where initializeSolanaSession stores it)
-	tokenSymbol := strings.ToUpper(strings.TrimSpace(getStringField(session.RailState, "token_symbol")))
-	if tokenSymbol == "" {
-		return nil, fmt.Errorf("%w: token_symbol missing", ErrCheckoutAttemptValidation)
-	}
-
-	if solanaProc.Solana == nil {
-		return nil, fmt.Errorf("%w: solana rail is not configured", ErrCheckoutAttemptValidation)
-	}
-	tokenCfg, ok := solanaProc.Solana.Tokens[tokenSymbol]
-	if !ok {
-		return nil, fmt.Errorf("%w: unsupported token", ErrCheckoutAttemptValidation)
-	}
-	tokenMint := tokenCfg.Mint
-	storedTokenMint := getStringField(session.RailState, "token_mint")
-	if storedTokenMint == "" {
-		return nil, fmt.Errorf("%w: token_mint missing", ErrCheckoutAttemptValidation)
-	}
-	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(storedTokenMint) {
-		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutAttemptValidation)
-	}
-	if strings.TrimSpace(storedTokenMint) != strings.TrimSpace(tokenMint) {
-		return nil, fmt.Errorf("%w: token_mint mismatch", ErrCheckoutAttemptValidation)
-	}
-
-	expectedAmount := getUint64Field(session.RailState, "token_amount")
-	if expectedAmount == 0 {
-		return nil, fmt.Errorf("%w: token_amount missing or invalid", ErrCheckoutAttemptValidation)
-	}
-	expectedRecipient := getStringField(session.RailState, "recipient")
-	if expectedRecipient == "" {
-		return nil, fmt.Errorf("%w: recipient missing", ErrCheckoutAttemptValidation)
-	}
-	// A client naming a wallet must name the one the session is bound to.
-	if payer, wallet := strings.TrimSpace(getStringField(session.RailState, "payer")), strings.TrimSpace(req.Payment.Wallet); payer != "" && wallet != "" && payer != wallet {
-		return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutAttemptValidation)
-	}
-	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
-		return nil, fmt.Errorf("%w: reference missing", ErrCheckoutAttemptValidation)
-	}
-	referenceValue := strings.TrimSpace(*session.Reference)
-
-	// OpenRails builds and stamps every transaction: one without its memo is
-	// not ours.
-	memoPolicy := solana.MemoRequired
-	signature := strings.TrimSpace(req.Payment.Signature)
-	// The page waits a bounded time for finalization; past it the transfer is
-	// still being confirmed and the poller credits it, so the page is told to
-	// wait (it polls the session) rather than handed an error.
-	wctx, cancel := context.WithTimeout(ctx, solanaFinalizeWait)
-	defer cancel()
-	obs, err := s.solanaTransactionService.ObserveTransfer(wctx, solana.ObserveTransferRequest{
-		Signature: signature, Recipient: expectedRecipient, TokenMint: storedTokenMint, Reference: referenceValue,
-		MemoLocalID: session.ID, MemoPolicy: memoPolicy,
-	})
-	// The page learns the outcome once the transfer is finalized, the only
-	// commitment money is credited at; the poller records anything it refuses.
-	switch {
-	case errors.Is(err, solana.ErrForeignTransfer), errors.Is(err, solana.ErrFailedOnChain):
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	case errors.Is(err, solana.ErrUnreadableTransfer):
-		return nil, fmt.Errorf("%w: the transaction cannot be read; it is recorded for review", ErrCheckoutAttemptConflict)
-	case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
-		resp := s.sessionToResponse(session)
-		resp.Status = "processing"
-		resp.Message = "Confirming your payment on Solana. You can close this page; it is credited once final."
-		return resp, nil
-	case err != nil:
-		return nil, err
-	}
-	receipt, err := s.SettleSolanaTransfer(ctx, referenceValue, solanamodule.ObservedTransfer{Signature: signature, Amount: obs.Amount, Other: obs.Other, Payer: obs.Payer, LandedAt: obs.LandedAt})
-	if err != nil {
-		return nil, err
-	}
-	switch receipt.Disposition {
-	case solanamodule.Ignored:
-		return nil, fmt.Errorf("%w: transaction paid nothing to the merchant", ErrCheckoutAttemptValidation)
-	case solanamodule.Duplicate:
-		return nil, fmt.Errorf("%w: this transfer already settled a different checkout", ErrCheckoutAttemptConflict)
-	case solanamodule.Review:
-		if receipt.ReviewReason == solanamodule.ReasonLate {
-			return nil, fmt.Errorf("%w: payment landed after the quote expired; recorded for refund review", ErrCheckoutAttemptExpired)
-		}
-		return nil, fmt.Errorf("%w: transfer recorded for refund review (%s)", ErrCheckoutAttemptConflict, receipt.ReviewReason)
-	}
-	updated, err := s.repo.GetByID(ctx, session.ID)
-	if err != nil {
-		return nil, err
-	}
-	return s.sessionToResponse(updated), nil
 }
 
 func (s *CheckoutAttemptService) MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error {
@@ -1221,7 +361,7 @@ func (s *CheckoutAttemptService) MarkExpired(ctx context.Context, sessionID uuid
 		return nil
 	}
 
-	if session.Mode == models.CheckoutAttemptModePaymentMethod {
+	if session.RailState["capture"] != nil || session.RailState["kind"] == "stripe_engine_setup" {
 		owner, err := merchant.Require(ctx)
 		if err != nil {
 			return err
@@ -1332,7 +472,7 @@ func (s *CheckoutAttemptService) FindOpenCCBillReservation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if session.CustomerID.String() != userID || session.Rail != models.RailCCBill || session.PriceID == nil || *session.PriceID != priceID {
+	if session.CustomerID.String() != userID || session.Rail != models.RailCCBill || session.AcceptedPriceID == nil || *session.AcceptedPriceID != priceID {
 		return nil, ErrCheckoutAttemptConflict
 	}
 	if s.isTerminal(session.Status) || s.isExpired(session) {
@@ -1608,7 +748,7 @@ func solanaBuildRequestFromSession(session *models.CheckoutAttempt, account, tok
 
 	return &solanamodule.PaymentTransactionBuildRequest{
 		UserID:      session.CustomerID.String(),
-		PriceID:     uuidOrNil(session.PriceID),
+		PriceID:     uuidOrNil(session.AcceptedPriceID),
 		TokenSymbol: tokenSymbol,
 		UserWallet:  account,
 		Reference:   session.Reference,

@@ -169,7 +169,7 @@ func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (
 // SaveCustodianCard opens hosted card fields for this customer's pending
 // payment method. Only the first accepted vendor session is exposed. Competing
 // vendor preparations may expire unused; none can charge a card.
-func (s *CheckoutAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity) (SavedCard, error) {
+func (s *CheckoutAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
 	if strings.TrimSpace(key) == "" || cardguard.ContainsPAN(key) || req.Token != "" || req.Card != nil || req.PSPID.IsZero() {
 		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrCheckoutAttemptValidation)
 	}
@@ -231,10 +231,11 @@ func (s *CheckoutAttemptService) SaveCustodianCard(ctx context.Context, req bill
 		return SavedCard{}, err
 	}
 	raw, _ := json.Marshal(state)
+	details, _ := json.Marshal(metadata)
 	if err = db.EnsureCustomerRow(ctx, s.db.Qx(ctx), owner.UUID(), customer); err != nil {
 		return SavedCard{}, err
 	}
-	_, err = s.db.Gen(ctx).CreateCapturedPaymentMethod(ctx, gen.CreateCapturedPaymentMethodParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, CustodianID: state.CustodianID, SetupRef: state.VendorSessionID, Capture: raw, Now: now})
+	_, err = s.db.Gen(ctx).CreateCapturedPaymentMethod(ctx, gen.CreateCapturedPaymentMethodParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, CustodianID: state.CustodianID, SetupRef: state.VendorSessionID, Capture: raw, Metadata: details, Now: now})
 	if err != nil {
 		return SavedCard{}, err
 	}
@@ -405,6 +406,9 @@ func (s *CheckoutAttemptService) ConfirmCustodianCard(ctx context.Context, id uu
 		if err == nil {
 			if existing.CustomerID != method.CustomerID {
 				return ErrCheckoutAttemptConflict
+			}
+			if existing.Status != "active" || existing.ParkReason != nil {
+				return ErrPaymentMethodStale
 			}
 			canonical.PaymentMethodID = existing.ID
 			replacement = &existing.ID

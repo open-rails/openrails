@@ -32,17 +32,6 @@ func cardEntryFor(target railTarget) string {
 	return entry
 }
 
-// describeCard stamps a request's card onto the display fields it names
-// (nothing the caller says about the card is used) and returns its wipe.
-func describeCard(req *CheckoutAttemptCreateRequest) func() {
-	if req == nil || req.Payment.Card == nil {
-		return func() {}
-	}
-	card := req.Payment.Card
-	req.Payment.LastFour, req.Payment.CardType, req.Payment.ExpiryDate = card.LastFour(), card.Brand(), card.Expiry()
-	return card.Zero
-}
-
 // RejectPANShapedFields errors when any string field of the checkout request
 // contains a card number.
 func RejectPANShapedFields(req *CheckoutRequest) error {

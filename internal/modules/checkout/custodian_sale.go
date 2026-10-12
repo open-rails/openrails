@@ -71,7 +71,6 @@ type CheckoutCustodianSaleService struct {
 	DB                   *db.DB
 	PurchaseService      *CheckoutPurchaseService
 	PaymentMethodService custodianInstrumentStore
-	IdempotencyStore     idempotencyStore
 	Rails                railresolve.Source
 	Config               *config.Config
 	Intents              intentExecutor

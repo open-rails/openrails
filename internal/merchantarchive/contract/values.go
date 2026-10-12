@@ -238,6 +238,28 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 	}
+	if p.Name == "payment_methods" {
+		if raw := value(p, values, "capture"); raw != nil && *raw != "null" {
+			var capture models.CheckoutCapture
+			if json.Unmarshal([]byte(*raw), &capture) != nil {
+				return fmt.Errorf("invalid card capture binding")
+			}
+			owner, customer := uuid.Nil, uuid.Nil
+			if v := value(p, values, "merchant_id"); v != nil {
+				owner, _ = uuid.Parse(*v)
+			}
+			if v := value(p, values, "customer_id"); v != nil {
+				customer, _ = uuid.Parse(*v)
+			}
+			status := models.CheckoutAttemptStatusExpired
+			if capture.PaymentMethodID != uuid.Nil {
+				status = models.CheckoutAttemptStatusSucceeded
+			}
+			if _, err := models.DecodeCheckoutCapture([]byte(*raw), owner, customer, capture.PSPID, status, &capture.ExpiresAt); err != nil {
+				return err
+			}
+		}
+	}
 	if p.Name == "checkout_attempts" {
 		field := func(name string) string {
 			if v := value(p, values, name); v != nil {
@@ -246,6 +268,10 @@ func ValidateValues(p Profile, values []*string) error {
 			return ""
 		}
 		var state struct {
+			AcceptedOffer struct {
+				PriceID      string `json:"price_id"`
+				Subscription bool   `json:"subscription"`
+			} `json:"accepted_offer"`
 			Purchase        json.RawMessage `json:"accepted_purchase"`
 			Submitted       bool            `json:"purchase_submitted"`
 			Closed          bool            `json:"provider_closed"`
@@ -272,7 +298,7 @@ func ValidateValues(p Profile, values []*string) error {
 				CreditGrant      *models.CreditGrantSnapshot `json:"credit_grant"`
 			}
 
-			if json.Unmarshal(state.Purchase, &terms) != nil || terms.PriceID.String() != field("price_id") || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || terms.Amount < 0 || strconv.FormatInt(terms.Amount, 10) != field("amount") || terms.Currency != field("currency") || field("mode") != "one_off" || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.Duration != nil && *terms.Duration <= 0 {
+			if json.Unmarshal(state.Purchase, &terms) != nil || terms.PriceID.String() != state.AcceptedOffer.PriceID || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || terms.Amount < 0 || strconv.FormatInt(terms.Amount, 10) != field("amount") || terms.Currency != field("currency") || state.AcceptedOffer.Subscription || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.Duration != nil && *terms.Duration <= 0 {
 				return fmt.Errorf("invalid retained purchase checkout terms")
 			}
 			if terms.CreditGrant != nil && (terms.CreditGrant.Validate() != nil || terms.CreditGrant.Currency != terms.Currency) {
@@ -284,12 +310,12 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 		if state.Quote != "" {
 			var quote subscriptions.InitialMembershipTerms
-			if json.Unmarshal([]byte(state.Quote), &quote) != nil || quote.Validate() != nil || quote.CollectionPolicy != models.CollectionPolicyEngine || quote.CustomerID.String() != field("customer_id") || quote.PSPID.String() != field("psp_id") || quote.PriceID.String() != field("price_id") || strconv.FormatInt(quote.Amount, 10) != field("amount") || quote.Currency != field("currency") || field("mode") != "subscription" || (field("rail") != "nmi" && field("rail") != "stripe") {
+			if json.Unmarshal([]byte(state.Quote), &quote) != nil || quote.Validate() != nil || quote.CollectionPolicy != models.CollectionPolicyEngine || quote.CustomerID.String() != field("customer_id") || quote.PSPID.String() != field("psp_id") || quote.PriceID.String() != state.AcceptedOffer.PriceID || strconv.FormatInt(quote.Amount, 10) != field("amount") || quote.Currency != field("currency") || !state.AcceptedOffer.Subscription || (field("rail") != "nmi" && field("rail") != "stripe") {
 				return fmt.Errorf("invalid retained engine checkout quote")
 			}
 		}
-		if field("mode") == string(models.CheckoutAttemptModePaymentMethod) && field("rail") == "stripe" {
-			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
+		if state.Kind == "stripe_engine_setup" && field("rail") == "stripe" {
+			for _, name := range []string{"amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("Stripe setup contains monetary terms")
 				}
@@ -303,8 +329,8 @@ func ValidateValues(p Profile, values []*string) error {
 			if field("status") == "succeeded" && (field("reference") == "" || !uuidPattern.MatchString(state.PaymentMethodID)) {
 				return fmt.Errorf("completed Stripe setup lacks retained method")
 			}
-		} else if field("mode") == string(models.CheckoutAttemptModePaymentMethod) {
-			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
+		} else if len(state.Capture) != 0 {
+			for _, name := range []string{"amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("capture setup contains monetary/provider payment terms")
 				}

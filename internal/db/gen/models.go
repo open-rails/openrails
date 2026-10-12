@@ -181,11 +181,9 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
-// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
+// An order payment attempt, or retained provider recovery evidence accepted before order-based checkout. New creation requires an order.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
-	PriceID        *uuid.UUID
-	Mode           string
 	Rail           string
 	Status         string
 	Amount         *int64
@@ -210,7 +208,7 @@ type BillingCheckoutAttempt struct {
 	DestructiveRunClass *string
 	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
-	// The order this attempt pays (mode order).
+	// The order this attempt pays; null only on recovery evidence accepted before order-based checkout.
 	OrderID *uuid.UUID
 }
 
@@ -1002,6 +1000,8 @@ type BillingPaymentMethod struct {
 	ContactCardholderAt *time.Time
 	// The provider's setup awaiting the customer (a Stripe SetupIntent) while status is requires_action.
 	SetupRef *string
+	// Private accepted custodian card-save binding, encrypted SDK authorization until completion, then token hash and canonical method identity. Never payment authority.
+	Capture []byte
 }
 
 // Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.

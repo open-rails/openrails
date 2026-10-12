@@ -1,7 +1,7 @@
 -- name: CreateCapturedPaymentMethod :execrows
 INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,rail,custodian,custodian_id,charge_via,status,setup_ref,capture,created_at,updated_at)
-VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uuid,'nmi','hyperswitch',sqlc.arg(custodian_id)::uuid,'pan_proxy','requires_action',sqlc.arg(setup_ref)::text,sqlc.arg(capture)::jsonb,sqlc.arg(now)::timestamptz,sqlc.arg(now)::timestamptz)
+(id,merchant_id,customer_id,rail,custodian,custodian_id,charge_via,status,setup_ref,capture,metadata,created_at,updated_at)
+VALUES(sqlc.arg(id)::uuid,sqlc.arg(merchant_id)::uuid,sqlc.arg(customer_id)::uuid,'nmi','hyperswitch',sqlc.arg(custodian_id)::uuid,'pan_proxy','requires_action',sqlc.arg(setup_ref)::text,sqlc.arg(capture)::jsonb,sqlc.arg(metadata)::jsonb,sqlc.arg(now)::timestamptz,sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id,id) DO NOTHING;
 
 -- name: GetCapturedPaymentMethodForUpdate :one
@@ -45,3 +45,11 @@ UPDATE billing.payment_methods SET status='removed',setup_ref=NULL,
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 AND status='requires_action' AND capture IS NOT NULL
 AND (capture->>'expires_at')::timestamptz<=sqlc.arg(now)::timestamptz;
+
+-- name: CountInvalidPaymentMethodCaptureReferences :one
+SELECT count(*) FROM billing.payment_methods pm
+WHERE pm.merchant_id=sqlc.arg(merchant_id)::uuid AND pm.capture IS NOT NULL
+AND (
+ NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=pm.merchant_id AND c.id::text=pm.capture->>'custodian_id' AND c.kind='hyperswitch' AND c.account_id=pm.capture->>'account_id')
+ OR EXISTS(SELECT 1 FROM billing.payment_methods target WHERE target.merchant_id=pm.merchant_id AND target.customer_id<>pm.customer_id AND target.id::text=pm.capture->>'payment_method_id')
+);

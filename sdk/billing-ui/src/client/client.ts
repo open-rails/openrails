@@ -34,6 +34,7 @@ import {
   type CurrencyScales,
   type ListPage,
   type NewCard,
+  type CardCaptureReference,
   type NextAction,
   type Cart,
   type Order,
@@ -523,12 +524,14 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     /**
      * Saves a card entered in the page with the PSP `psp_id` in one call: the
      * token of its own fields, or the card itself ("card"). A Stripe card the
-     * bank wants authenticated answers `requires_action`.
+     * bank wants authenticated answers `requires_action`. HyperSwitch capture
+     * starts without token/card and requires a stable `idempotencyKey`.
      */
-    addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
+    addPaymentMethod(card: NewCard, idempotencyKey?: string): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
         body: card,
+        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
       })
     },
 
@@ -655,11 +658,11 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * Finishes saving a card the bank asked to authenticate, after the PSP's
      * script answered its `next_action`.
      */
-    confirmPaymentMethod(paymentMethodId: string): Promise<PaymentMethod> {
+    confirmPaymentMethod(paymentMethodId: string, capture?: CardCaptureReference): Promise<PaymentMethod> {
       return json(
         paymentMethodSchema,
         `/me/payment-methods/${id(paymentMethodId)}/confirm`,
-        { method: "POST", body: {} }
+        { method: "POST", body: capture ? { capture } : {} }
       )
     },
 

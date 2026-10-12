@@ -133,3 +133,25 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 		})
 	}
 }
+
+// A pre-order attempt remains a catalog reference after its old price_id
+// column is retired. Deleting its product cannot strand provider settlement.
+func TestRetainedCheckoutEvidencePreventsCatalogDeletion(t *testing.T) {
+	w := newWorld(t)
+	client := w.client[remote]
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "retained-" + uuid.NewString()[:8], DisplayName: "Accepted product"})
+	require.NoError(t, err)
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "buy", UnitAmount: 1000000, Currency: "USD"})
+	require.NoError(t, err)
+	customer := w.newCustomer()
+	var mid uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT merchant_id FROM billing.customers WHERE id=$1`), customer.cid().UUID()).Scan(&mid))
+	// This is the exact identity envelope migration 75 adds to old accepted
+	// attempts. No order, payment or provider intent supplies another reference.
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.checkout_attempts(merchant_id,id,customer_id,psp_id,rail,status,amount,currency,rail_state)
+        VALUES($1,$2,$3,$4,'nmi','requires_action',1000000,'USD',jsonb_build_object('accepted_offer',jsonb_build_object('price_id',$5::uuid,'subscription',false)))`), mid, uuid.New(), customer.cid().UUID(), w.psp["nmi"].UUID(), price.ID.UUID())
+	require.NoError(t, err)
+	requireCode(t, client.DeleteProduct(t.Context(), product.ID), http.StatusConflict, billing.CodeProductInUse)
+	_, err = client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+	require.NoError(t, err)
+}

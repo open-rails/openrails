@@ -44,8 +44,8 @@ func (s *CheckoutAttemptService) guardCardAttempt(ctx context.Context, user *Use
 
 // noteCardAttempt counts a declined card against the customer, their client
 // address and the merchant.
-func (s *CheckoutAttemptService) noteCardAttempt(ctx context.Context, user *UserIdentity, resp *CheckoutAttemptResponse, err error) {
-	if s == nil || s.cardFailures == nil || user == nil || !CardAttemptFailed(resp, err) {
+func (s *CheckoutAttemptService) noteCardAttempt(ctx context.Context, user *UserIdentity) {
+	if s == nil || s.cardFailures == nil || user == nil {
 		return
 	}
 	id, ok := merchant.FromContext(ctx)
@@ -55,13 +55,13 @@ func (s *CheckoutAttemptService) noteCardAttempt(ctx context.Context, user *User
 	s.cardFailures.Record(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP), abuse.MerchantSubject)
 }
 
-// CardAttemptFailed reports whether a checkout outcome is a refused card.
-func CardAttemptFailed(resp *CheckoutAttemptResponse, err error) bool {
+// cardAttemptFailed reports a provider refusal, never a transport ambiguity.
+func cardAttemptFailed(err error) bool {
 	var pmErr *paymentmethods.PaymentMethodError
 	if errors.As(err, &pmErr) {
 		return true
 	}
-	return err == nil && resp != nil && resp.Status == "failed"
+	return false
 }
 
 // validateReturnURLs refuses redirect targets outside the host's allowed

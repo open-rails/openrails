@@ -136,7 +136,9 @@ export type PaymentRecovery = z.infer<typeof paymentRecoverySchema>
  * `handleNextAction` with `client_secret`), then the payable is confirmed;
  * `redirect_to_url` leaves for `url`; with `solana_sign_transactions` the
  * wallet signs and sends `transactions` in order and the action is repeated
- * with the last signature.
+ * with the last signature. `capture` initializes vendor-owned card fields
+ * from the scoped payload, then confirms the pending payment method with
+ * the vendor session token. Capturing never charges the card.
  */
 export const nextActionSchema = z.object({
   type: z.string(),
@@ -759,7 +761,15 @@ interface NewCardFields {
  * A card to save: the single-use token of the PSP's own fields (a Collect.js
  * token, a Stripe `pm_`), or, for a PSP whose card_entry is server
  * (`cardSetupDriver` "card"), the card itself, posted to OpenRails and never
- * kept by this package.
+ * kept by this package. A HyperSwitch capture starts without either; reuse an
+ * Idempotency-Key and confirm the pending method with its vendor session token.
  */
 export type NewCard = NewCardFields &
-  ({ token: string; card?: never } | { card: CardEntry; token?: never })
+  ({ token: string; card?: never } | { card: CardEntry; token?: never } | { token?: never; card?: never })
+
+/** A token issued by the vendor session of an owned pending payment method. */
+export interface CardCaptureReference {
+  custodian_id: string
+  session_id: string
+  token: string
+}

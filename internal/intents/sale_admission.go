@@ -65,35 +65,11 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		// An order's claims, taken when it was created, keep its lines from
-		// being bought twice.
-		if !order && terms.AccessDurationHours == nil {
-			covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutAttemptID})
-			if err != nil {
-				return err
-			}
-			if covered != nil && *covered {
-				return apperr.Conflictf("all permanent benefits are already owned or reserved")
-			}
-			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, ExceptSessionID: terms.CheckoutAttemptID})
-			if err != nil {
-				return err
-			}
-			if pending {
-				return apperr.Conflictf("another checkout of this product is unresolved")
-			}
-		}
 		if !order {
-			_, err = d.Gen(ctx).GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.ProductID.String()})
-			if err == nil {
-				return apperr.Conflictf("another purchase of this product is unresolved")
-			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
+			return apperr.Conflictf("priced checkout creation is retired; an accepted operation must already exist")
 		}
 		// An order's new card is saved by the sale itself: no method exists yet.
-		if !order || !terms.NewCard {
+		if !terms.NewCard {
 			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
 			if err != nil {
 				return err

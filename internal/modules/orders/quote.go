@@ -397,7 +397,7 @@ func pendingPurchase(ctx context.Context, q *gen.Queries, merchantID, customerID
 	if err != nil || reason != "" {
 		return reason != "", err
 	}
-	checkout, err := q.HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: merchantID, CustomerID: customerID, ProductID: productID, ExceptSessionID: uuid.Nil})
+	checkout, err := q.HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: merchantID, CustomerID: customerID, ProductID: productID})
 	if err != nil || checkout {
 		return checkout, err
 	}

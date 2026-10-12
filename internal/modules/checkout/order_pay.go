@@ -257,8 +257,8 @@ func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput)
 		return OrderCharge{}, err
 	}
 	out, err := s.payOrder(ctx, in)
-	if out.Declined || err != nil && CardAttemptFailed(nil, err) {
-		s.noteCardAttempt(ctx, in.User, &CheckoutAttemptResponse{Status: "failed"}, nil)
+	if out.Declined || err != nil && cardAttemptFailed(err) {
+		s.noteCardAttempt(ctx, in.User)
 	}
 	return out, err
 }

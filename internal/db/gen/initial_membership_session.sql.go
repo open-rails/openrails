@@ -19,8 +19,8 @@ SET status=$1::text,payment_id=$2::uuid,
     expires_at=NULL,updated_at=$5
 WHERE merchant_id=$6::uuid AND id=$7::uuid
   AND customer_id=$8::uuid AND psp_id=$9::uuid
-  AND price_id=$10::uuid AND rail=$11::text
-  AND mode='subscription' AND deleted_at IS NULL
+  AND (rail_state#>>'{accepted_offer,price_id}')::uuid=$10::uuid AND rail=$11::text
+  AND rail_state#>>'{accepted_offer,subscription}'='true' AND deleted_at IS NULL
   AND rail_state ? 'initial_membership_quote'
   AND (status NOT IN ('succeeded','failed') OR status=$1::text)
 `

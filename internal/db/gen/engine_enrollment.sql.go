@@ -152,11 +152,11 @@ func (q *Queries) GetConflictingOrderClaim(ctx context.Context, arg GetConflicti
 
 const getConflictingSubscribeAttempt = `-- name: GetConflictingSubscribeAttempt :one
 SELECT ca.id FROM billing.checkout_attempts ca
-JOIN billing.prices pr ON pr.merchant_id=ca.merchant_id AND pr.id=ca.price_id
+JOIN billing.prices pr ON pr.merchant_id=ca.merchant_id AND pr.id=(ca.rail_state#>>'{accepted_offer,price_id}')::uuid
 JOIN billing.products existing ON existing.merchant_id=pr.merchant_id AND existing.id=pr.product_id
 JOIN billing.products accepted ON accepted.merchant_id=ca.merchant_id AND accepted.id=$1::uuid
 WHERE ca.merchant_id=$2::uuid AND ca.customer_id=$3::uuid
- AND ca.mode='subscription' AND ca.rail='solana' AND ca.status IN ('created','requires_action')
+ AND ca.rail_state#>>'{accepted_offer,subscription}'='true' AND ca.rail='solana' AND ca.status IN ('created','requires_action')
  AND ca.expires_at > $4::timestamptz AND ca.id <> $5::uuid AND ca.deleted_at IS NULL
  AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
 ORDER BY ca.id LIMIT 1

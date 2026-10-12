@@ -115,7 +115,7 @@ WITH wanted AS (
     FROM billing.checkout_attempts s
     WHERE sqlc.arg(include_pending)::boolean
       AND s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
-      AND s.id <> sqlc.arg(except_session_id)::uuid AND s.mode = 'one_off' AND s.status <> 'succeeded'
+      AND s.order_id IS NULL AND COALESCE(s.rail_state#>>'{accepted_offer,subscription}','false')='false' AND s.status <> 'succeeded'
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
       AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
       AND s.rail_state->'accepted_purchase'->>'product_id' IS NOT NULL

@@ -139,7 +139,10 @@ type CardDetails struct {
 // card itself (Card). OpenRails reads the saved card's display facts from the
 // provider. When the bank asks for 3-D Secure the method answers
 // requires_action with a next_action; POST
-// /v1/me/payment-methods/{id}/confirm finishes it.
+// /v1/me/payment-methods/{id}/confirm finishes it. For HyperSwitch custody,
+// omit Token and Card and supply Idempotency-Key: the pending method returns
+// a capture next_action for vendor-owned fields. Confirm with the vendor
+// session token; saving the method never charges it.
 type CreatePaymentMethodParams struct {
 	PSPID          PSPID           `json:"psp_id"`
 	Token          string          `json:"token,omitempty"`

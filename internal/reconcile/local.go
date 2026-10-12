@@ -440,14 +440,14 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 			if err != nil {
 				return nil, err
 			}
-			if session.PriceID == nil {
+			if session.AcceptedPriceID == nil {
 				return nil, nil
 			} // setup is not a Solana payment obligation
 			rec := &SolanaLocalRecord{
 				Kind:                SolanaLocalKindCheckoutAttempt,
 				Rail:                string(session.Rail),
 				CustomerID:          session.CustomerID,
-				PriceID:             *session.PriceID,
+				PriceID:             *session.AcceptedPriceID,
 				SessionStatus:       string(session.Status),
 				ExpectedRecipient:   solanaStateStr(session.RailState, "recipient"),
 				ExpectedMint:        solanaStateStr(session.RailState, "token_mint"),

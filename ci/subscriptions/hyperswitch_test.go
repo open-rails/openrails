@@ -23,13 +23,17 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
+type hsCaptureSession struct{ Customer, Token, Method string }
+
 // hsFake is a HyperSwitch deployment: the persistent cards it holds and the
 // proxy that sends each NMI sale to the gateway with the card filled in.
 type hsFake struct {
-	mu      sync.Mutex
-	account string
-	methods map[string]string // method id -> HyperSwitch customer id
-	proxied []url.Values
+	mu             sync.Mutex
+	account        string
+	methods        map[string]string // method id -> HyperSwitch customer id
+	captures       map[string]hsCaptureSession
+	captureMethods map[string]string // temporary token -> permanent instrument
+	proxied        []url.Values
 	// gateway charges the filled-in card and answers its transaction id.
 	gateway func(form url.Values) string
 	// decline is the issuer's answer to the next sale; reissue is the card
@@ -61,6 +65,35 @@ func (f *hsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(body)
 	}
 	switch {
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v2/customers/reference/"):
+		reference := strings.TrimPrefix(r.URL.Path, "/v2/customers/reference/")
+		reply(http.StatusOK, map[string]any{"id": "cus_" + reference, "merchant_reference_id": reference})
+	case r.Method == http.MethodPost && r.URL.Path == "/v2/payment-method-sessions":
+		var body struct {
+			Customer string `json:"customer_id"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Customer == "" {
+			reply(http.StatusBadRequest, nil)
+			return
+		}
+		if f.captures == nil {
+			f.captures = map[string]hsCaptureSession{}
+			f.captureMethods = map[string]string{}
+		}
+		id := "session_" + uuid.NewString()
+		capture := hsCaptureSession{Customer: body.Customer, Token: "token_" + id, Method: "method_" + body.Customer}
+		f.captures[id] = capture
+		f.captureMethods[capture.Token] = capture.Method
+		f.methods[capture.Token], f.methods[capture.Method] = body.Customer, body.Customer
+		reply(http.StatusOK, map[string]any{"id": id, "customer_id": body.Customer, "storage_type": "persistent", "expires_at": "2035-01-01T00:00:00Z", "client_secret": "private-client-secret", "sdk_authorization": "private-sdk-authorization"})
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v2/payment-method-sessions/"):
+		id := strings.TrimPrefix(r.URL.Path, "/v2/payment-method-sessions/")
+		capture, ok := f.captures[id]
+		if !ok {
+			reply(http.StatusNotFound, nil)
+			return
+		}
+		reply(http.StatusOK, map[string]any{"id": id, "customer_id": capture.Customer, "storage_type": "persistent", "expires_at": "2035-01-01T00:00:00Z", "associated_payment_methods": []any{map[string]any{"payment_method_token": map[string]string{"type": "payment_method_session_token", "data": capture.Token}}}})
 	case r.Method == http.MethodGet && r.URL.Path == "/v2/proxy":
 		var routes []map[string]string
 		for _, destination := range []string{nmi.DefaultDirectPostURL, nmi.GatewayDirectPostURL, nmi.SandboxDirectPostURL} {
@@ -106,6 +139,9 @@ func (f *hsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		card := f.card
 		if card == nil {
 			card = map[string]string{"last4_digits": "1111", "expiry_month": "12", "expiry_year": "2035", "card_network": "Visa"}
+		}
+		if permanent := f.captureMethods[id]; permanent != "" {
+			id = permanent
 		}
 		reply(http.StatusOK, map[string]any{"id": id, "merchant_id": f.account, "customer_id": customer, "storage_type": "persistent",
 			"payment_method_data": map[string]any{"card": card}})

@@ -30,10 +30,10 @@ func TestAcceptedPurchaseMustMatchCheckoutAndBeResolved(t *testing.T) {
 		{"changed amount", "succeeded", "101", "stripe", true, false, false},
 		{"negative amount", "succeeded", "-100", "stripe", true, false, false},
 	} {
-		state := fmt.Sprintf(`{"accepted_purchase":{"price_id":%q,"product_id":%q,"payment_id":%q,"product_key":"post","product_name":"Post","amount":%q,"currency":"USD","access_duration_hours":null,"entitlements":{"post:one":null},"accepted_at":"2026-09-23T00:00:00Z","entitlement_start":"2026-09-23T00:00:00Z"},"purchase_submitted":%t,"provider_closed":%t}`,
-			testMerchant, testMerchant, testMerchant, tc.amount, tc.submitted, tc.closed)
+		state := fmt.Sprintf(`{"accepted_offer":{"price_id":%q,"subscription":false},"accepted_purchase":{"price_id":%q,"product_id":%q,"payment_id":%q,"product_key":"post","product_name":"Post","amount":%q,"currency":"USD","access_duration_hours":null,"entitlements":{"post:one":null},"accepted_at":"2026-09-23T00:00:00Z","entitlement_start":"2026-09-23T00:00:00Z"},"purchase_submitted":%t,"provider_closed":%t}`,
+			testMerchant, testMerchant, testMerchant, testMerchant, tc.amount, tc.submitted, tc.closed)
 		cases = append(cases, rowCase{tc.name, "checkout_attempts", map[string]string{
-			"mode": "one_off", "rail": tc.rail, "status": tc.status, "price_id": testMerchant, "amount": "100", "currency": "USD", "rail_state": state,
+			"rail": tc.rail, "status": tc.status, "amount": "100", "currency": "USD", "rail_state": state,
 		}, tc.valid})
 	}
 	checkRows(t, cases)

@@ -194,7 +194,7 @@ var instrumentJSON = object(map[string]jsonRule{
 // nonsecret binding/history has a portable shape; semantic validation below
 // uses the same decoder as the checkout service.
 var captureJSON = object(map[string]jsonRule{
-	"merchant_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "custodian_id": uuidValue,
+	"request_fingerprint": sha256Value, "merchant_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "custodian_id": uuidValue,
 	"account_id": textValue, "environment": textValue, "profile_id": textValue, "public_api_key": textValue, "api_base_url": textValue, "sdk_url": textValue,
 	"vendor_customer_id": textValue, "vendor_session_id": textValue, "expires_at": textValue, "payment_method_id": uuidValue, "vendor_method_id": textValue, "accepted_token_hash": sha256Value,
 })
@@ -266,6 +266,7 @@ var jsonRules = map[string]jsonRule{
 	})),
 	"payments.metadata":          metadataJSON,
 	"payments.discount_metadata": metadataJSON,
+	"payment_methods.capture":    nullable(captureJSON),
 	"payment_methods.metadata":   metadataJSON,
 	"usage_events.metadata":      metadataJSON,
 	"owed_items.metadata":        metadataJSON,
@@ -330,7 +331,7 @@ var jsonRules = map[string]jsonRule{
 	"usage_events.charges":          array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
 	"checkout_attempts.metadata":    metadataJSON,
 	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {
+	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"retired_setup": booleanValue, "accepted_offer": object(map[string]jsonRule{"price_id": uuidValue, "subscription": booleanValue}), "initial_membership_quote": func(v any) bool {
 		raw, ok := v.(string)
 		if !ok {
 			return false

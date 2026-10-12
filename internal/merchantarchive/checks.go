@@ -360,6 +360,13 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	if stripeInvalid != 0 {
 		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: stripeInvalid}
 	}
+	cardCaptureInvalid, err := gen.New(tx).CountInvalidPaymentMethodCaptureReferences(ctx, id.UUID())
+	if err != nil {
+		return err
+	}
+	if cardCaptureInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "payment_methods", Count: cardCaptureInvalid}
+	}
 	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
 	if err != nil {
 		return err

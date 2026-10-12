@@ -34,3 +34,28 @@ SELECT id, merchant_id, customer_id, 'nmi', 'hyperswitch',
     rail_state#>>'{capture,vendor_session_id}', rail_state->'capture', created_at, updated_at
 FROM billing.checkout_attempts
 WHERE mode='payment_method' AND rail='nmi' AND status='requires_action' AND deleted_at IS NULL;
+
+-- The migrated pending resource now owns the authorization. The historical
+-- attempt retains only nonsecret evidence, so there is one live secret owner.
+UPDATE billing.checkout_attempts SET status='canceled',rail_state=rail_state #- '{capture,secret_ciphertext}'
+WHERE mode='payment_method' AND rail='nmi' AND status IN ('created','requires_action') AND deleted_at IS NULL;
+
+UPDATE billing.checkout_attempts SET status='canceled',rail_state=COALESCE(rail_state,'{}'::jsonb)||'{"retired_setup":true}'::jsonb
+WHERE mode='payment_method' AND NOT COALESCE(rail_state ? 'capture',false) AND COALESCE(rail_state->>'kind','')<>'stripe_engine_setup';
+
+-- Freeze identity before dropping the old producer's selector columns. Every
+-- retained pending operation continues from its accepted terms and PSP.
+UPDATE billing.checkout_attempts SET rail_state=COALESCE(rail_state,'{}'::jsonb)
+    || jsonb_build_object('accepted_offer',jsonb_build_object('price_id',price_id,'subscription',mode='subscription'))
+WHERE price_id IS NOT NULL;
+ALTER TABLE billing.checkout_attempts DROP COLUMN price_id, DROP COLUMN mode;
+COMMENT ON TABLE billing.checkout_attempts IS 'An order payment attempt, or retained provider recovery evidence accepted before order-based checkout. New creation requires an order.';
+
+ALTER TABLE billing.checkout_attempts ADD CONSTRAINT checkout_attempts_retained_terms_check CHECK (COALESCE(
+    (order_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL AND NOT (COALESCE(rail_state,'{}'::jsonb) ? 'accepted_offer'))
+    OR (order_id IS NULL AND rail_state ? 'accepted_offer' AND amount IS NOT NULL AND currency IS NOT NULL)
+    OR (order_id IS NULL AND amount IS NULL AND currency IS NULL AND payment_id IS NULL AND subscription_id IS NULL
+        AND (rail_state ? 'capture' OR rail_state->>'kind'='stripe_engine_setup' OR rail_state->>'retired_setup'='true')), false));
+CREATE INDEX checkout_attempts_accepted_offer_idx ON billing.checkout_attempts
+    (merchant_id, ((rail_state#>>'{accepted_offer,price_id}')::uuid)) WHERE rail_state ? 'accepted_offer';
+COMMENT ON COLUMN billing.checkout_attempts.order_id IS 'The order this attempt pays; null only on recovery evidence accepted before order-based checkout.';

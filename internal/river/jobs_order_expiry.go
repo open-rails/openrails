@@ -56,7 +56,7 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 	}
 	now := workerNow(w.Clock)
 	before := now.Add(-checkout.SetupAbandonAfter)
-	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, MerchantLimit: orderExpiryBatch})
+	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, Now: now, MerchantLimit: orderExpiryBatch})
 	if err != nil {
 		return fmt.Errorf("card save expiry: list merchants: %w", err)
 	}

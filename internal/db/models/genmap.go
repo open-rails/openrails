@@ -307,9 +307,7 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 	m := &CheckoutAttempt{
 		ID:             c.ID,
 		CustomerID:     c.CustomerID,
-		PriceID:        c.PriceID,
 		OrderID:        c.OrderID,
-		Mode:           CheckoutAttemptMode(c.Mode),
 		Rail:           Rail(c.Rail),
 		Status:         CheckoutAttemptStatus(c.Status),
 		Amount:         c.Amount,
@@ -323,9 +321,6 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
-	if err := m.ValidateTerms(); err != nil {
-		return nil, err
-	}
 	if err := FromJSONB(c.Metadata, &m.Metadata, "checkout_attempts.metadata"); err != nil {
 		return nil, err
 	}
@@ -333,6 +328,23 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 		return nil, err
 	}
 	if err := FromJSONB(c.RailState, &m.RailState, "checkout_attempts.rail_state"); err != nil {
+		return nil, err
+	}
+	if raw, ok := m.RailState["accepted_offer"]; ok {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return nil, err
+		}
+		var accepted struct {
+			PriceID      *uuid.UUID `json:"price_id"`
+			Subscription bool       `json:"subscription"`
+		}
+		if err = json.Unmarshal(encoded, &accepted); err != nil {
+			return nil, err
+		}
+		m.AcceptedPriceID, m.AcceptedSubscription = accepted.PriceID, accepted.Subscription
+	}
+	if err := m.ValidateTerms(); err != nil {
 		return nil, err
 	}
 	if len(c.RoutingReason) > 0 {

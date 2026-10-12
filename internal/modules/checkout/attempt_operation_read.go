@@ -1,80 +1,10 @@
 package checkout
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/payments"
 )
-
-// acceptedOperationSessionResponse reads existing financial authority, never
-// current catalog state, provider state, or a token-bearing creation request.
-func (s *CheckoutAttemptService) acceptedOperationSessionResponse(ctx context.Context, session *models.CheckoutAttempt) (*CheckoutAttemptResponse, bool, error) {
-	if (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.Mode != models.CheckoutAttemptModeOneOff || s.db == nil {
-		return s.initialMembershipSessionResponse(ctx, session)
-	}
-	native := "checkout_native_session:" + session.ID.String()
-	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(native))
-	custodian := false
-	if db.IsNotFound(err) {
-		// A custodian-held card's sale is keyed under its own type: read it
-		// too, so its in-flight charge never reads as no operation.
-		operation, err = intents.NewStore(s.db).GetByIdempotencyKey(ctx, CustodianSaleIdempotencyKey(native))
-		custodian = true
-	}
-	if db.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, true, err
-	}
-	if err := saleOwnedBySession(operation, session, custodian); err != nil {
-		return nil, true, err
-	}
-	projection := *session
-	projection.PaymentID, projection.SubscriptionID, projection.TransactionID = nil, nil, nil
-	projection.ExpiresAt = nil
-	switch operation.Status {
-	case intents.StatusSucceeded:
-		if err := validateSaleTerminal(operation, custodian); err != nil {
-			return nil, true, err
-		}
-		result, err := renderSaleOperation(operation)
-		if err != nil {
-			return nil, true, err
-		}
-		if err := s.applyCheckoutResponse(&projection, result); err != nil {
-			return nil, true, err
-		}
-	case intents.StatusFailedTerminal:
-		if err := validateSaleTerminal(operation, custodian); err != nil {
-			return nil, true, err
-		}
-		projection.Status = models.CheckoutAttemptStatusFailed
-	case intents.StatusExpired:
-		projection.Status = models.CheckoutAttemptStatusExpired
-	case intents.StatusSuperseded:
-		projection.Status = models.CheckoutAttemptStatusCanceled
-	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
-		projection.Status = models.CheckoutAttemptStatus("processing")
-		if authenticationRequired(operation) {
-			projection.Status = models.CheckoutAttemptStatusRequiresAction
-		}
-	default:
-		return nil, true, fmt.Errorf("unrecognized sale operation status %q", operation.Status)
-	}
-	response := s.sessionToResponse(&projection)
-	response.NextAction = nil
-	if operation.Status == intents.StatusFailedTerminal {
-		response.Failure = operationFailure(operation)
-	}
-	return response, true, nil
-}
 
 // authenticationRequired reports a card payment waiting on the customer's
 // provider challenge (3-D Secure); the browser completes it in the page.
@@ -83,32 +13,4 @@ func authenticationRequired(operation gen.BillingProviderIntent) bool {
 		AuthenticationRequired bool `json:"authentication_required"`
 	}
 	return json.Unmarshal(operation.ResultEvidence, &evidence) == nil && evidence.AuthenticationRequired
-}
-
-func saleOwnedBySession(operation gen.BillingProviderIntent, session *models.CheckoutAttempt, custodian bool) error {
-	if custodian {
-		var p CustodianSalePayload
-		if err := json.Unmarshal(operation.Payload, &p); err != nil {
-			return err
-		}
-		if p.UserID != session.CustomerID.String() || session.PriceID == nil || p.PriceID != *session.PriceID {
-			return fmt.Errorf("sale receipt contradicts checkout identity")
-		}
-		return nil
-	}
-	terms, err := payments.DecodeNMISalePayload(operation)
-	if err != nil {
-		return err
-	}
-	if terms.CheckoutAttemptID != session.ID || terms.UserID != session.CustomerID.String() || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.Instrument.PSPID != session.PspID {
-		return fmt.Errorf("sale receipt contradicts checkout identity")
-	}
-	return nil
-}
-
-func validateSaleTerminal(operation gen.BillingProviderIntent, custodian bool) error {
-	if custodian {
-		return nil
-	}
-	return intents.ValidateNMISaleTerminal(operation)
 }

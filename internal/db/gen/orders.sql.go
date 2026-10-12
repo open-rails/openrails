@@ -116,11 +116,11 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error 
 
 const createOrderAttempt = `-- name: CreateOrderAttempt :exec
 INSERT INTO billing.checkout_attempts (
-    id, merchant_id, customer_id, order_id, mode, rail, status, reference, amount, currency,
+    id, merchant_id, customer_id, order_id, rail, status, reference, amount, currency,
     expires_at, rail_state, psp_id, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
-    'order', $5::text, $6::text, $7::text, $8::bigint, $9::text,
+    $5::text, $6::text, $7::text, $8::bigint, $9::text,
     $10::timestamptz, $11::jsonb, $12::uuid,
     $13::timestamptz, $13::timestamptz
 )
@@ -520,7 +520,7 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 }
 
 const getOrderAttempt = `-- name: GetOrderAttempt :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts
+SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND order_id IS NOT NULL AND deleted_at IS NULL
 `
 
@@ -534,8 +534,6 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 	var i BillingCheckoutAttempt
 	err := row.Scan(
 		&i.ID,
-		&i.PriceID,
-		&i.Mode,
 		&i.Rail,
 		&i.Status,
 		&i.Amount,

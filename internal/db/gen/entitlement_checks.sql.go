@@ -316,7 +316,7 @@ WITH wanted AS (
     FROM billing.checkout_attempts s
     WHERE $5::boolean
       AND s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
-      AND s.id <> $6::uuid AND s.mode = 'one_off' AND s.status <> 'succeeded'
+      AND s.order_id IS NULL AND COALESCE(s.rail_state#>>'{accepted_offer,subscription}','false')='false' AND s.status <> 'succeeded'
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
       AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
       AND s.rail_state->'accepted_purchase'->>'product_id' IS NOT NULL
@@ -354,12 +354,11 @@ SELECT EXISTS (SELECT 1 FROM wanted) AND NOT EXISTS (
 `
 
 type PermanentBenefitsCoveredParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	AtTime          time.Time
-	ProductID       uuid.UUID
-	IncludePending  bool
-	ExceptSessionID uuid.UUID
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	AtTime         time.Time
+	ProductID      uuid.UUID
+	IncludePending bool
 }
 
 // A partial bundle remains useful; refuse only when every key of the product
@@ -373,7 +372,6 @@ func (q *Queries) PermanentBenefitsCovered(ctx context.Context, arg PermanentBen
 		arg.AtTime,
 		arg.ProductID,
 		arg.IncludePending,
-		arg.ExceptSessionID,
 	)
 	var covered *bool
 	err := row.Scan(&covered)

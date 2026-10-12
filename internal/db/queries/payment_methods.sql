@@ -275,20 +275,20 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 -- name: CompletePaymentMethodSetup :execrows
 -- The customer completed the bank's authentication: the card is saved.
 UPDATE billing.payment_methods SET status = 'active', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'requires_action';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'requires_action' AND capture IS NULL;
 
 -- name: AbandonPaymentMethodSetup :execrows
 -- The bank refused the card, or its authentication was never completed.
-UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
+UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, capture = capture - 'secret_ciphertext', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'requires_action';
 
 -- name: AbandonStalePaymentMethodSetups :execrows
 -- Card saves that waited for the customer past the cutoff are removed.
-UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'requires_action' AND created_at < sqlc.arg(before)::timestamptz;
+UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, capture = capture - 'secret_ciphertext', updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz);
 
 -- name: ListStaleSetupMerchants :many
 -- The sweep's work queue: merchants with a card save waiting past the cutoff.
 SELECT DISTINCT merchant_id FROM billing.payment_methods
-WHERE status = 'requires_action' AND created_at < sqlc.arg(before)::timestamptz
+WHERE status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz)
 LIMIT sqlc.arg(merchant_limit)::int;

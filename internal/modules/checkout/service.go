@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -123,7 +122,6 @@ func NewCheckoutService(
 	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	railPMService *paymentmethods.RailPaymentMethodService,
-	idempotencyService idempotencyStore,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
 	railSet railresolve.Source,
@@ -153,7 +151,6 @@ func NewCheckoutService(
 	service.CustodianSaleService = &CheckoutCustodianSaleService{
 		PurchaseService:      service.PurchaseService,
 		PaymentMethodService: paymentMethodService,
-		IdempotencyStore:     idempotencyService,
 		Rails:                railSet,
 		Config:               cfg,
 	}
@@ -164,26 +161,6 @@ func NewCheckoutService(
 	return service
 }
 
-// getIdempotencyKey returns the idempotency key to use for a checkout operation.
-// If the request contains a client-provided key, use it. Otherwise generate one.
-func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string, priceID uuid.UUID, operation string) string {
-	if req.IdempotencyKey != "" {
-		return req.IdempotencyKey
-	}
-	// Fall back to generated key based on operation type
-	switch operation {
-	case "nmi_sale":
-		return GenerateKeyForSale(userID, priceID)
-	case "nmi_subscription":
-		return GenerateKeyForSubscription(userID, priceID)
-	default:
-		return GenerateKeyForSale(userID, priceID)
-	}
-}
-
-// CheckPurchaseEligibility reports whether a user may buy a price (allowed,
-// blocked as already owned, or an upgrade or downgrade within a tier group).
-// Call it before generating payment URLs or charging cards.
 func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -339,18 +316,6 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Che
 	return resp, nil
 }
 
-// processSolanaPurchase handles Solana one-time purchases
-func (s *CheckoutService) processSolanaPurchase(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
-	return nil, errors.New("solana checkout is handled via /v1/checkout attempts")
-}
-
 // railCustomerStore is the slice of RailCustomerService used for
 // Stripe customer resolution. Defined as an interface so the resolution logic
 // is unit-testable without a database.
@@ -443,17 +408,12 @@ type stripeCheckoutInlinePrice struct {
 }
 
 type stripeCheckoutParams struct {
-	AcceptedPurchase  bool
-	InlinePrice       *stripeCheckoutInlinePrice
-	Mode              string
-	PriceID           string
+	InlinePrice       stripeCheckoutInlinePrice
 	SuccessURL        string
 	CancelURL         string
 	UserID            string
 	CustomerID        string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
 	CustomerEmail     string
-	InternalPriceID   string
-	TrialEnd          int64
 	CheckoutAttemptID string
 	// OrderID names the order a payment-mode session pays.
 	OrderID        string
@@ -472,17 +432,15 @@ type stripeCheckoutSession struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (stripeCheckoutSession, error) {
-	if params.InlinePrice != nil {
-		if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
-			return stripeCheckoutSession{}, err
-		}
+	if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
+		return stripeCheckoutSession{}, err
 	}
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}
 	values := url.Values{}
-	values.Set("mode", params.Mode)
+	values.Set("mode", "payment")
 	values.Set("success_url", params.SuccessURL)
 	values.Set("cancel_url", params.CancelURL)
 	values.Set("client_reference_id", params.UserID)
@@ -494,36 +452,19 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
 		values.Set("customer_email", email)
 	}
-	if params.InlinePrice != nil {
-		if params.Mode != "payment" || params.PriceID != "" || params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" {
-			return stripeCheckoutSession{}, errors.New("invalid inline checkout price")
-		}
-		values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
-		values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
-		values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
-	} else {
-		values.Set("line_items[0][price]", params.PriceID)
+	if params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" || params.OrderID == "" {
+		return stripeCheckoutSession{}, errors.New("invalid order checkout price")
 	}
+	values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
+	values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
+	values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
-	if params.InternalPriceID != "" {
-		values.Set("metadata[internal_price_id]", params.InternalPriceID)
-	}
 	if strings.TrimSpace(params.CheckoutAttemptID) != "" {
 		values.Set("metadata[checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
 	}
 	if params.OrderID != "" {
 		values.Set("metadata[order_id]", params.OrderID)
-	}
-	if params.Mode == "subscription" {
-		values.Set("subscription_data[metadata][user_id]", params.UserID)
-		values.Set("subscription_data[metadata][internal_price_id]", params.InternalPriceID)
-		if strings.TrimSpace(params.CheckoutAttemptID) != "" {
-			values.Set("subscription_data[metadata][checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
-		}
-		if params.TrialEnd > 0 {
-			values.Set("subscription_data[trial_end]", strconv.FormatInt(params.TrialEnd, 10))
-		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
@@ -535,26 +476,6 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
 	client := s.StripeClients.Client(s.Config, 0)
-	if params.AcceptedPurchase {
-		if s.PurchaseService == nil || s.PurchaseService.database == nil {
-			return stripeCheckoutSession{}, errors.New("accepted checkout dispatch database unavailable")
-		}
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		id, err := billing.ParseCheckoutAttemptID(params.CheckoutAttemptID)
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		claimed, err := s.PurchaseService.database.Gen(ctx).ClaimHostedPurchaseDispatch(ctx, gen.ClaimHostedPurchaseDispatchParams{MerchantID: mid.UUID(), ID: id.UUID()})
-		if err != nil {
-			return stripeCheckoutSession{}, err
-		}
-		if claimed == 0 {
-			return stripeCheckoutSession{}, ErrCheckoutAttemptPending
-		}
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout failed: %w", err)
