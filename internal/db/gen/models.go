@@ -1321,6 +1321,7 @@ type BillingProviderSchedule struct {
 	SourceReference string
 	FirstDueAt      time.Time
 	CadenceHours    int32
+	CadenceMonths   int32
 	AcceptedBill    []byte
 	CreatedAt       time.Time
 }

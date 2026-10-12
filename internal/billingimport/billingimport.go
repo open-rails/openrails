@@ -229,6 +229,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				AmountCents:    int64(minor),
 				Currency:       t.Currency,
 				OccurredAt:     t.OccurredAt.UTC(),
+				NextBillingAt:  t.NextBillingAt,
 			})
 		}
 
