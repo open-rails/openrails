@@ -9241,10 +9241,12 @@
             }
           },
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9270,8 +9272,7 @@
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:application",
-          "app_write"
+          "tier:application"
         ]
       },
       "delete": {
@@ -9288,10 +9289,12 @@
             }
           },
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9317,8 +9320,7 @@
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:application",
-          "app_write"
+          "tier:application"
         ]
       }
     },
@@ -9341,6 +9343,15 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9394,10 +9405,12 @@
             }
           },
           {
-            "name": "Idempotency-Key",
+            "name": "OpenRails-Expected-Merchant",
             "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9434,8 +9447,7 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request",
-          "app_write"
+          "request"
         ]
       }
     },

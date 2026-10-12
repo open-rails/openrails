@@ -6,6 +6,85 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type AcknowledgeHostEventsParams = {
+  host_event_ids?: string[]
+}
+
+export type AcknowledgeNotificationEventsParams = {
+  notification_ids?: string[]
+}
+
+export type AdminAccess = {
+  admin: "none" | "read" | "update"
+  catalog: "none" | "read" | "update"
+  merchant_config: "none" | "read" | "update"
+  metrics: boolean
+  scope_id: string
+  assistants: AdminAssistants
+  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:customers:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:metrics:read" | "merchant:orders:manage" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:customers:read" | "root:entitlements:read" | "root:events:read" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:orders:manage" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
+}
+
+export type AdminAssistants = {
+  catalog_copilot: boolean
+  catalog_drafting: boolean
+}
+
+export type Admission = {
+  request_id: string
+  customer_id: string
+  allowed: boolean
+  blocked_by: "abuse" | "budget" | "money" | null
+  deny_code: string | null
+  retry_after_seconds: number | null
+  currency: string
+  estimated_amount: string
+  start_capacity_amount: string
+  state: "captured" | "expired" | "open" | "released" | null
+  expires_at: string | null
+  captured_amount: string | null
+  replayed: boolean
+}
+
+export type AdmissionBatchResult = {
+  items: AdmissionResult[]
+}
+
+export type AdmissionResult = {
+  status: number
+  admission: Admission | null
+  error: ErrorDetails | null
+}
+
+export type AdmissionVerdict = {
+  status: number
+  admission: Admission | null
+  error: ErrorDetails | null
+}
+
+export type AdmitBatchParams = {
+  items?: AdmitParams[]
+}
+
+export type AdmitBatchResult = {
+  items: AdmissionVerdict[]
+}
+
+export type AdmitParams = {
+  request_id?: string
+  customer_id?: string
+  invoker?: string
+  invoker_type?: "customer" | "delegated"
+  trust_level?: string
+  resource?: string
+  currency?: string
+  estimated_amount?: string
+  usage?: UsageEstimate
+  accrual_rate_delta_per_hour?: string
+  source?: string
+  expires_at?: string
+  roles?: string[]
+}
+
 export type Agreement = {
   id: string
   kind: "card_on_file" | "recurring" | "unscheduled"
@@ -32,6 +111,72 @@ export type AgreementSubscription = {
   next_charge_at: string | null
 }
 
+export type AlertWebhook = {
+  id: string
+  name: string | null
+  destination_host: string
+  format: "discord" | "generic" | "slack"
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type Allowance = {
+  included?: number
+}
+
+export type Application = {
+  schema_version?: number
+  prune?: boolean
+  entitlement_replacements?: EntitlementReplacement[]
+  products?: Record<string, ApplyProduct>
+  meters?: Record<string, ApplyMeter>
+}
+
+export type ApplyMeter = {
+  event_type?: string | null
+  value_property?: string | null
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count" | null
+  unit?: string | null
+  group_by?: Record<string, string> | null
+}
+
+export type ApplyPrice = {
+  id?: string
+  currency?: string | null
+  unit_amount?: string | null
+  access_duration_hours?: number | null
+  billing_interval_hours?: number | null
+  archived?: boolean | null
+  trial_unit_amount?: string | null
+  trial_duration_hours?: number | null
+  customer_amount?: CustomerAmount | null
+  quantity?: Quantity | null
+  psps?: string[] | null
+  psp_links?: Record<string, Record<string, string>> | null
+  amount?: string
+  access_duration?: string | null
+  billing_interval?: string | null
+  trial_duration?: string | null
+}
+
+export type ApplyProduct = {
+  display_name?: string | null
+  description?: string | null
+  tier_group?: string | null
+  tier_rank?: number | null
+  archived?: boolean | null
+  ownership?: "consumable" | "extend" | "unique" | null
+  entitlements?: string[]
+  credit_grant?: CreditGrantSpec | null
+  prices?: Record<string, ApplyPrice>
+  rate_cards?: RateCard[] | null
+}
+
+export type AskCatalogParams = {
+  question?: string
+}
+
 export type Balance = {
   customer_id: string
   currency: string
@@ -44,6 +189,16 @@ export type Balance = {
   accrual_rate_per_hour: string
   as_of: string
   depletes_at: string | null
+}
+
+export type BalanceHostEvent = {
+  customer_id: string
+  currency: string
+  available_amount: string
+  owed_amount: string
+  accrual_rate_per_hour: string
+  as_of: string
+  depletes_at: string
 }
 
 export type BalanceTransaction = {
@@ -69,11 +224,64 @@ export type BillingAddress = {
   country: string | null
 }
 
+export type BillingArchiveImport = {
+  merchant_id: string
+  digest: string
+  rows: string
+  already_imported: boolean
+}
+
 export type BillingDetails = {
   name: string | null
   email: string | null
   phone: string | null
   address: BillingAddress | null
+}
+
+export type BillingImportResult = {
+  imported: string[]
+  skipped: string[]
+  blocked: string[]
+  reasons: Record<string, string> | null
+}
+
+export type BillingPolicy = {
+  name: string
+  kind: string
+  outstanding_cap_amount?: string
+  spend_windows?: BudgetWindow[]
+  accrual_rate_cap_per_hour?: string
+  accrual_rate_window_seconds?: number
+  collection_threshold_amount?: string
+  delinquency_grace_days?: number
+  delinquency_amount_floor?: string
+  collection_cycle_boundary?: string
+  bad_spend_windows?: BudgetWindow[]
+  policy_currency?: string
+}
+
+export type BillingPolicyBinding = {
+  policy: string
+  tier?: string
+}
+
+export type BudgetWindow = {
+  key: string
+  window_seconds: number
+  limit: string
+  currency?: string
+}
+
+export type CancelEvidence = {
+  kind?: string
+  at?: string
+  schedule_live?: boolean
+}
+
+export type CancelSubscriptionParams = {
+  reason?: string
+  revoke_access?: boolean
+  account_deletion?: boolean
 }
 
 export type Capabilities = {
@@ -87,6 +295,47 @@ export type CaptchaConfig = {
   script_url: string
   action: string
   token_header: string
+}
+
+export type CaptureAdmissionBatchParams = {
+  items?: CaptureAdmissionParams[]
+}
+
+export type CaptureAdmissionParams = {
+  request_id?: string
+  usage?: CaptureUsage
+  amount?: string
+}
+
+export type CaptureBatchResult = {
+  items: CaptureResult[]
+}
+
+export type CaptureReceipt = {
+  request_id: string
+  customer_id: string
+  currency: string
+  estimated_amount: string
+  amount: string
+  charges: UsageCharge[]
+  usage_event_id: string | null
+  balance_transaction_id: string | null
+  replayed: boolean
+}
+
+export type CaptureResult = {
+  status: number
+  receipt: CaptureReceipt | null
+  error: ErrorDetails | null
+}
+
+export type CaptureUsage = {
+  event_type?: string
+  resource?: string
+  metadata?: Record<string, unknown>
+  source?: string
+  source_id?: string
+  dimensions?: Record<string, number>
 }
 
 export type CardDetails = {
@@ -112,6 +361,120 @@ export type Cart = {
   expires_at: string | null
 }
 
+export type CatalogAnswer = {
+  answer: string
+  evidence: CatalogEvidence[]
+  drafts: CatalogDraft[]
+}
+
+export type CatalogApplicationReceipt = {
+  application_id: string
+  base_revision: number
+  applied_revision: number
+  replayed: boolean
+  products_changed: number
+  prices_changed: number
+  entitlement_changes: EntitlementChange[]
+  changes: CatalogChange[]
+  conflicts: CatalogConflict[]
+}
+
+export type CatalogChange = {
+  object: "meter" | "price" | "product"
+  key: string
+  product_key: string | null
+  fields: string[]
+  revision: number
+}
+
+export type CatalogConflict = {
+  object: "meter" | "price" | "product"
+  key: string
+  product_key: string | null
+  currency: string | null
+  fields: CatalogFieldConflict[]
+}
+
+export type CatalogDraft = {
+  kind: "new_price" | "price_change" | "refused"
+  price_change: PriceChangeDraft | null
+  new_price: NewPriceDraft | null
+  refusal: CatalogDraftRefusal | null
+}
+
+export type CatalogDraftRefusal = {
+  code: string
+  reason: string
+  workaround: string
+}
+
+export type CatalogEvidence = {
+  tool: string
+  args: string
+  summary: string
+}
+
+export type CatalogFieldConflict = {
+  field: string
+  file_value: unknown | null
+  live_value: unknown | null
+  set_by: string
+  set_at: string
+}
+
+export type ChangeSubscriptionParams = {
+  price_id?: string
+  quantity?: number
+  reason?: string
+}
+
+export type CheckEntitlementsParams = {
+  customer_id?: string
+  entitlements?: string[]
+  prefixes?: string[]
+  prefix_limit?: number
+  at?: string
+}
+
+export type CheckoutRoutingMatch = {
+  currency?: string
+  product?: string
+  price?: string
+  mode?: string
+  country?: string
+}
+
+export type CheckoutRoutingRule = {
+  match?: CheckoutRoutingMatch
+  prefer: string[]
+}
+
+export type CreateAlertWebhookParams = {
+  name?: string
+  url?: string
+  format?: "discord" | "generic" | "slack"
+  enabled?: boolean | null
+}
+
+export type CreateCreditGrantBatchParams = {
+  items?: CreateCreditGrantParams[]
+}
+
+export type CreateCreditGrantBatchResult = {
+  items: CreditGrant[]
+}
+
+export type CreateCreditGrantParams = {
+  customer_id?: string
+  currency?: string
+  amount?: string
+  source_id?: string
+  source?: string
+  invoker?: string
+  expires_at?: string
+  description?: string
+}
+
 export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
   cart?: boolean
@@ -125,11 +488,125 @@ export type CreateNetworkLinkParams = {
   id_token?: string
 }
 
+export type CreateOrderParams = {
+  customer_id?: string
+  lines?: OrderLineParams[]
+  expires_at?: string
+  checkout?: OrderCheckoutParams
+}
+
+export type CreatePSPParams = {
+  key?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
+  account_id?: string
+  settings?: Record<string, unknown> | null
+  credentials?: Record<string, string> | null
+}
+
 export type CreatePaymentMethodParams = {
   psp_id?: string
   token?: string
   card?: CardEntry
   billing_details?: BillingDetails
+}
+
+export type CreatePriceMigrationParams = {
+  from_price_id?: string
+  product_key?: string
+  price_key?: string
+  to_price_id?: string
+  effective_at?: string
+  acknowledge_short_notice?: boolean
+  fallback_policy?: "cancel_at_period_end" | "keep_grandfathered"
+  archive_source?: boolean
+}
+
+export type CreatePriceParams = {
+  customer_amount?: CustomerAmount
+  quantity?: Quantity
+  product_id?: string
+  product_key?: string
+  product_data?: CreatePriceProduct
+  key?: string
+  unit_amount: string
+  currency: string
+  access_duration_hours?: number
+  billing_interval_hours?: number
+  trial_unit_amount?: string
+  trial_duration_hours?: number
+  psps?: string[]
+  psp_links?: Record<string, Record<string, string>>
+  archived?: boolean
+  expected_revision?: number
+}
+
+export type CreatePriceProduct = {
+  key: string
+  display_name: string
+  description?: string
+}
+
+export type CreateProductAccessBatchParams = {
+  items?: CreateProductAccessParams[]
+}
+
+export type CreateProductAccessBatchResult = {
+  items: ProductAccessGrant[]
+}
+
+export type CreateProductAccessParams = {
+  customer_id?: string
+  product_id?: string
+  hours?: number | null
+  ends_at?: string | null
+  reason?: "comp" | "import" | "migration" | "staff"
+  note?: string | null
+}
+
+export type CreateProductParams = {
+  key?: string
+  display_name?: string
+  description?: string
+  entitlements?: string[]
+  credit_grant?: CreditGrantSpec
+  tier_group?: string
+  tier_rank?: number
+  ownership?: "consumable" | "extend" | "unique"
+  archived?: boolean
+}
+
+export type CreateProvisioningTokenParams = {
+  name?: string
+}
+
+export type CreatedProvisioningToken = {
+  id: string
+  name: string
+  declared: boolean
+  created_at: string
+  last_used_at: string | null
+  token: string
+}
+
+export type CreditGrant = {
+  id: string
+  customer_id: string
+  currency: string
+  amount: string
+  spent_amount: string
+  remaining_amount: string
+  revoked_amount: string
+  expired_amount: string
+  state: "active" | "expired" | "revoked" | "scheduled" | "spent" | "terminated"
+  source_type: string
+  source_id: string | null
+  description: string | null
+  starts_at: string
+  expires_at: string | null
+  created_at: string
+  terminated_at: string | null
+  termination_reason: string | null
+  replayed: boolean
 }
 
 export type CreditGrantSpec = {
@@ -139,10 +616,26 @@ export type CreditGrantSpec = {
   expires_after_days?: number
 }
 
+export type CreditLimit = {
+  currency: string
+  amount: string
+}
+
 export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
+}
+
+export type Customer = {
+  id: string
+  contact: CustomerContact | null
+  created_at: string
+  last_seen_at: string
+  settings: CustomerSettings
+  balances: Balance[]
+  default_payment_methods: DefaultPaymentMethod[]
+  network: CustomerNetwork | null
 }
 
 export type CustomerAccount = {
@@ -172,6 +665,14 @@ export type CustomerConfig = {
   merchant: PublicMerchant
 }
 
+export type CustomerContact = {
+  email: string | null
+  name: string | null
+  username: string | null
+  active: boolean | null
+  synced_at: string | null
+}
+
 export type CustomerEntitlement = {
   customer_id: string
   entitlement: string
@@ -190,9 +691,124 @@ export type CustomerLink = {
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
+export type CustomerNetwork = {
+  account_id: string
+  linked_at: string
+  method: "checkout" | "connect" | "sign_in"
+}
+
+export type CustomerNetworkHostEvent = {
+  customer_id: string
+  account_id: string
+  method: "checkout" | "connect" | "sign_in" | null
+  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
+}
+
+export type CustomerSettings = {
+  credit_limits: CreditLimit[]
+  trust_levels: TrustLevel[]
+  billing_policy: string | null
+  invoice_profile: InvoiceProfile | null
+}
+
+export type Dashboard = {
+  widgets: DashboardWidget[]
+  is_default: boolean
+  updated_at: string | null
+  updated_by: string | null
+}
+
+export type DashboardGrid = {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export type DashboardWidget = {
+  id: string
+  title: string
+  viz: string
+  query: MetricsQuery
+  grid: DashboardGrid
+  fixed_range: boolean
+}
+
+export type DeclaredAdminGrant = {
+  customer?: string
+  product?: string
+  source_id?: string
+  starts_at?: string
+  ends_at?: string
+}
+
+export type DeclaredBilling = {
+  as_of?: string
+  subscriptions_exhaustive?: boolean
+  expected_subscriptions?: number
+  default_psp?: PSPRef
+  customers?: DeclaredCustomer[]
+  payment_methods?: DeclaredPaymentMethod[]
+  subscriptions?: DeclaredSubscription[]
+  transactions?: DeclaredTransaction[]
+  admin_grants?: DeclaredAdminGrant[]
+}
+
+export type DeclaredCustomer = {
+  customer?: string
+}
+
+export type DeclaredPaymentMethod = {
+  customer?: string
+  rail?: string
+  psp?: PSPRef
+  rail_customer_ref?: string
+  rail_method_ref?: string
+  recurring_transaction_id?: string
+  card?: CardDetails
+  created_at?: string
+}
+
+export type DeclaredSubscription = {
+  source_id?: string
+  customer?: string
+  price?: string
+  rail?: string
+  rail_subscription_id?: string
+  psp?: PSPRef
+  started_at?: string
+  paid_through?: string
+  cancel?: CancelEvidence
+  dunning?: DunningEvidence
+  payment_method?: PaymentMethodRef
+  evidence?: unknown
+}
+
+export type DeclaredTransaction = {
+  rail_subscription_id?: string
+  transaction_id?: string
+  type?: string
+  success?: boolean
+  amount?: string
+  currency?: string
+  occurred_at?: string
+}
+
 export type DefaultPaymentMethod = {
   currency: string
   payment_method_id: string
+}
+
+export type DelinquencyHostEvent = {
+  customer_id: string
+  currency: string
+  from_state: string
+  to_state: string
+  overdue_started_at?: string
+  overdue_amount: string
+  overdue_orders: number
+  grace_days: number
+  amount_floor: string
 }
 
 export type DriftField = {
@@ -201,13 +817,144 @@ export type DriftField = {
   remote_value: string
 }
 
+export type DunningEvidence = {
+  retries?: number
+  last_retry_at?: string
+  next_retry_at?: string
+  schedule_live?: boolean
+}
+
+export type DunningPolicy = {
+  tiers: DunningTier[]
+  transient_retry_minutes?: number[]
+  access_during_dunning?: string
+  access_while_renewal_held?: string
+}
+
+export type DunningTier = {
+  max_cycle_hours?: number
+  retry_after_hours?: number[]
+}
+
+export type EntitlementChange = {
+  product_id: string
+  product_key: string
+  added: string[]
+  removed: string[]
+  holders: number
+}
+
+export type EntitlementCheck = {
+  entitlements: Record<string, boolean> | null
+  quantities: Record<string, number | null> | null
+  held: Record<string, HeldEntitlements> | null
+}
+
+export type EntitlementReplacement = {
+  from?: string
+  to?: string
+}
+
+export type ErrorDetails = {
+  type: string
+  code: string
+  message: string
+  request_id?: string
+  param?: string
+  metadata?: Record<string, unknown>
+  order?: Order
+}
+
+export type ExtendAdmissionBatchParams = {
+  items?: ExtendAdmissionParams[]
+}
+
+export type ExtendAdmissionParams = {
+  request_id?: string
+  expires_at?: string
+}
+
+export type Finding = {
+  id: string
+  finding_type: string
+  provider: string | null
+  psp_id: string | null
+  resource_type: string | null
+  resource_id: string | null
+  external_resource_id: string | null
+  field: string | null
+  openrails_value: string | null
+  external_value: string | null
+  subject_key: string
+  severity: string
+  status: string
+  recommended_action: string | null
+  evidence: Record<string, unknown> | null
+  recommendation: FindingRecommendation | null
+  last_seen_at: string
+  resolved_at: string | null
+  resolution: string | null
+  resolved_by: string | null
+  operator_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type FindingRecommendation = {
+  action: string
+  params: Record<string, unknown> | null
+  alternatives: FindingRecommendation[]
+}
+
+export type FindingResolution = {
+  finding: Finding
+  execution: Record<string, unknown> | null
+}
+
+export type FlatPrice = {
+  amount?: string
+}
+
 export type Health = {
   status: "ok" | "ready"
+}
+
+export type HeldEntitlements = {
+  keys: string[]
+  truncated: boolean
+}
+
+export type HostEvent = {
+  id: string
+  merchant_id: string
+  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  occurred_at: string
+  acknowledged_at: string | null
+  payment: PaymentSettledEvent | null
+  delinquency: DelinquencyHostEvent | null
+  product_entitlements: ProductEntitlementsChangedEvent | null
+  order: OrderHostEvent | null
+  customer_network: CustomerNetworkHostEvent | null
+  mandate: MandateHostEvent | null
+  balance: BalanceHostEvent | null
+}
+
+export type HostEventLookup = {
+  host_events: Record<string, HostEvent | null> | null
 }
 
 export type InvoiceContact = {
   name: string
   email: string
+}
+
+export type InvoiceProfile = {
+  net_terms_days: number
+  collection_method: "charge_automatically" | "send_invoice"
+  po_number: string
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[]
+  memo: string
 }
 
 export type Mandate = {
@@ -230,10 +977,201 @@ export type Mandate = {
   created_at: string
 }
 
+export type MandateHostEvent = {
+  mandate_id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  customer_id: string
+  currency: string
+  subscription_id: string | null
+  revoked_at: string
+}
+
+export type Matrix = {
+  dimension: string
+  cells: Record<string, MatrixCell> | null
+}
+
+export type MatrixCell = {
+  unit_amount: string
+  maximum_amount?: string
+}
+
+export type MerchantCheckoutSettings = {
+  embed_origins?: string[]
+}
+
+export type MerchantConfigurationState = {
+  revision: number
+  display_name: string
+  settings: MerchantSettings
+}
+
+export type MerchantProfile = {
+  logo_url?: string
+  from_email?: string
+  support_url?: string
+  signup_url?: string
+  billing_url?: string
+}
+
+export type MerchantSettings = {
+  profile?: MerchantProfile
+  collection_threshold?: string
+  monthly_floor?: string
+  billing_period_boundary?: string
+  alert_email?: string
+  reprice_notice_window_days?: number
+  provider_refund_access?: string
+  arrears_grace_days?: number
+  arrears_delinquency_floor?: string
+  checkout_routing?: CheckoutRoutingRule[]
+  dunning_policy?: DunningPolicy
+  checkout?: MerchantCheckoutSettings
+  billing_policies?: BillingPolicy[]
+  billing_policy_bindings?: BillingPolicyBinding[]
+  delegated_invoker_wasted_spend_limits?: BudgetWindow[]
+}
+
+export type Meter = {
+  key: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  unit: string
+  group_by: Record<string, string> | null
+  billing_supported: boolean
+  rate_card: MeterRateCard | null
+  revision: number
+  has_activity: boolean
+  last_event_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MeterRateCard = {
+  product_id: string
+  product_key: string
+  filter: Record<string, string[]> | null
+  price: RatePrice
+  allowance: Allowance | null
+  created_at: string
+  updated_at: string
+}
+
+export type MeterRateCardParams = {
+  product_id?: string
+  filter?: Record<string, string[]>
+  price?: RatePrice
+  allowance?: Allowance
+}
+
+export type MetricsColumn = {
+  name: string
+  kind: string
+  unit?: string
+}
+
+export type MetricsDimension = {
+  name: string
+  description: string
+  values?: string[]
+}
+
+export type MetricsExample = {
+  intent: string
+  query: MetricsQuery
+}
+
+export type MetricsLimits = {
+  max_buckets: number
+  max_limit: number
+}
+
+export type MetricsMeasure = {
+  name: string
+  class: string
+  unit: string
+  description: string
+  formula: string
+  dims: string[]
+  money?: boolean
+}
+
+export type MetricsOrder = {
+  measure?: string
+  dimension?: string
+  dir?: string
+}
+
+export type MetricsQuery = {
+  measures: string[]
+  by: string[]
+  grain: string
+  range: MetricsRange | null
+  filters: Record<string, string[]> | null
+  order: MetricsOrder[]
+  limit: number | null
+  compare: string
+}
+
+export type MetricsRange = {
+  from?: string
+  to?: string
+  last?: string
+}
+
+export type MetricsResult = {
+  grain?: string
+  range: MetricsResultRange
+  columns: MetricsColumn[]
+  rows: unknown[][]
+  compare_range?: MetricsResultRange
+  compare_rows?: unknown[][]
+}
+
+export type MetricsResultRange = {
+  from: string
+  to: string
+}
+
+export type MetricsSchema = {
+  measures: MetricsMeasure[]
+  dimensions: MetricsDimension[]
+  grains: string[]
+  deferred: string[]
+  caveats: string[]
+  examples: MetricsExample[]
+  limits: MetricsLimits
+  query_shape: string
+}
+
+export type NetworkLink = {
+  link: CustomerLink
+  merchant: PublicMerchant
+}
+
 export type NetworkLinkChallenge = {
   id: string
   nonce: string
   expires_at: string
+}
+
+export type NetworkOrder = {
+  link_id: string
+  merchant_id: string
+  order: Order
+}
+
+export type NetworkSubscription = {
+  link_id: string
+  merchant_id: string
+  subscription: Subscription
+}
+
+export type NewPriceDraft = {
+  product_key: string
+  review_text: string
+  create_price: CreatePriceParams
 }
 
 export type NextAction = {
@@ -242,6 +1180,21 @@ export type NextAction = {
   transactions: string[]
   psp_id: string | null
   payload: Record<string, string> | null
+}
+
+export type NotificationEvent = {
+  id: string
+  merchant_id: string
+  customer_id: string
+  event_type: string
+  data: unknown | null
+  created_at: string
+  action_requested?: boolean
+  optional?: boolean
+}
+
+export type NotificationEvents = {
+  data: NotificationEvent[]
 }
 
 export type Order = {
@@ -274,6 +1227,25 @@ export type OrderCheckout = {
   success_url: string
   cancel_url: string | null
   saved_payment_methods: boolean
+}
+
+export type OrderCheckoutParams = {
+  ui_mode?: "embedded" | "hosted"
+  success_url?: string
+  cancel_url?: string
+  expires_at?: string
+  saved_payment_methods?: boolean
+}
+
+export type OrderHostEvent = {
+  order_id: string
+  customer_id: string
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
+  payment_status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
+  total: string
+  currency: string
+  number: string | null
+  payment_id: string | null
 }
 
 export type OrderLine = {
@@ -370,6 +1342,26 @@ export type OrderUsage = {
   delinquent: boolean
 }
 
+export type PSP = {
+  id: string
+  key: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  environment: string
+  account_id: string
+  archived: boolean
+  open_obligations: number
+  settings: Record<string, unknown> | null
+  credentials: Record<string, PSPCredential> | null
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export type PSPCredential = {
+  configured: boolean
+  validated_at: string | null
+}
+
 export type PSPLinkState = {
   status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
   ids: Record<string, string> | null
@@ -390,6 +1382,37 @@ export type PSPPaymentConfig = {
   config?: Record<string, string>
   status?: string
   retry_after?: number
+}
+
+export type PSPRef = {
+  id?: string
+  key?: string
+}
+
+export type PSPRefresh = {
+  status: string
+  job_id: string
+}
+
+export type PSPRoutingCandidate = {
+  psp: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  skip: string | null
+}
+
+export type PSPRoutingPreview = {
+  policy: string
+  rule: number | null
+  psp: string | null
+  rail: "ccbill" | "nmi" | "solana" | "stripe" | null
+  mode: string | null
+  candidates: PSPRoutingCandidate[]
+}
+
+export type PackagePrice = {
+  amount?: string
+  package_size?: number
+  free_units?: number
 }
 
 export type PayOrderParams = {
@@ -422,6 +1445,42 @@ export type Payment = {
   reason: string | null
   refunds: Payment[]
   created_at: string
+}
+
+export type PaymentAttempt = {
+  id: string
+  kind: string
+  owner: string
+  card_entry: string
+  source: string
+  observed_via: string
+  category: string
+  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  action: string
+  response_code: string
+  response_text: string
+  issuer_code: string
+  issuer_text: string
+  avs_result: string
+  cvv_result: string
+  card: CardDetails | null
+  card_bin: string
+  token_type: string
+  transaction_id: string
+  rail: string
+  psp_id: string
+  customer_id: string
+  amount: string
+  currency: string
+  attempted_at: string
+  order_id: string | null
+  cycle_id: string | null
+  subscription_id: string | null
+  payment_method_id: string | null
+  payment_id: string | null
+  enriched_at: string | null
+  mandate_id: string | null
+  sent_initial_transaction_id: string
 }
 
 export type PaymentConfig = {
@@ -461,6 +1520,12 @@ export type PaymentMethodHealth = {
   active: boolean
 }
 
+export type PaymentMethodRef = {
+  rail?: string
+  rail_customer_ref?: string
+  rail_method_ref?: string
+}
+
 export type PaymentMethodSubscription = {
   id: string
   display_name: string
@@ -474,6 +1539,16 @@ export type PaymentRecovery = {
   order_id?: string
 }
 
+export type PaymentSettledEvent = {
+  payment_id: string
+  customer_id: string
+  order_id?: string
+  price_id?: string
+  subscription_id?: string
+  amount: string
+  currency: string
+}
+
 export type PendingAction = {
   psp: string
   action: string
@@ -481,9 +1556,28 @@ export type PendingAction = {
   patch_required: Record<string, Record<string, Record<string, string>>> | null
 }
 
+export type PerUnitPrice = {
+  unit_amount?: string
+  divide_by?: number
+  round?: "down" | "half_up" | "up"
+  maximum_amount?: string
+  matrix?: Matrix
+}
+
 export type PreviewMyOrderParams = {
   lines?: OrderLineParams[]
   cart?: boolean
+}
+
+export type PreviewOrderParams = {
+  customer_id?: string
+  lines?: OrderLineParams[]
+}
+
+export type PreviewPSPRoutingParams = {
+  price_id?: string
+  country?: string
+  psp?: string
 }
 
 export type PreviewSubscriptionChangeParams = {
@@ -512,6 +1606,72 @@ export type Price = {
   updated_at: string
 }
 
+export type PriceChangeDraft = {
+  product_key: string
+  price_key: string
+  current_amount: string
+  new_amount: string
+  currency: string
+  affected_count: number
+  review_text: string
+  create_price: CreatePriceParams
+  migration: CreatePriceMigrationParams | null
+}
+
+export type PriceKeyMovement = {
+  effective_at: string
+  archived: boolean
+  price: Price
+}
+
+export type PriceMigration = {
+  id: string
+  from_price_id: string | null
+  product_key: string | null
+  price_key: string | null
+  to_price_id: string
+  effective_at: string
+  fallback_policy: "cancel_at_period_end" | "keep_grandfathered"
+  matched: number
+  skipped: number
+  scheduled: number
+  applied: number
+  canceled: number
+  blocked: number
+  created_at: string
+  canceled_at: string | null
+}
+
+export type PriceMigrationCancel = {
+  price_migration: PriceMigration
+  canceled: number
+  rail_release_required: string[]
+}
+
+export type PriceMigrationOutcome = {
+  subscription_id: string
+  rail: string
+  disposition: "applied" | "blocked" | "scheduled" | "skipped"
+  reason: string | null
+}
+
+export type PriceMigrationPreview = {
+  to_price_id: string | null
+  effective_at: string
+  matched: number
+  scheduled: number
+  skipped: number
+  blocked: number
+  by_rail: Record<string, PriceMigrationRailCounts | null> | null
+  outcomes: PriceMigrationOutcome[]
+}
+
+export type PriceMigrationRailCounts = {
+  auto: number
+  requires_action: number
+  skipped: number
+}
+
 export type Product = {
   revision: number
   id: string
@@ -529,6 +1689,36 @@ export type Product = {
   updated_at: string
 }
 
+export type ProductAccessGrant = {
+  id: string
+  customer_id: string
+  product_id: string
+  product_key: string
+  product_name: string
+  source_type: "grace" | "grant" | "purchase" | "subscription"
+  source_id: string
+  payment_id: string | null
+  quantity: number | null
+  grant_reason: "comp" | "import" | "migration" | "staff" | null
+  granted_by: string | null
+  note: string | null
+  status: string
+  starts_at: string
+  ends_at: string | null
+  revoked_at: string | null
+  revoke_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProductEntitlementsChangedEvent = {
+  product_id: string
+  product_key: string
+  added: string[]
+  removed: string[]
+  holders: number
+}
+
 export type ProductSummary = {
   id: string
   key: string
@@ -537,6 +1727,14 @@ export type ProductSummary = {
   tier_group: string | null
   tier_rank: number
   archived: boolean
+}
+
+export type ProvisioningToken = {
+  id: string
+  name: string
+  declared: boolean
+  created_at: string
+  last_used_at: string | null
 }
 
 export type PublicConfig = {
@@ -571,8 +1769,127 @@ export type RailDefinition = {
   setting_keys: string[]
 }
 
+export type RateCard = {
+  ordinal?: number
+  meter?: string
+  filter?: Record<string, string[]>
+  allowance?: Allowance
+  payment_term?: "in_advance" | "in_arrears"
+  price?: RatePrice
+}
+
+export type RatePrice = {
+  model: "flat" | "package" | "per_unit" | "tiered"
+  currency?: string
+  flat?: FlatPrice
+  per_unit?: PerUnitPrice
+  tiered?: TieredPrice
+  package?: PackagePrice
+}
+
+export type RateTier = {
+  up_to: number | null
+  unit_amount?: string
+  flat_amount?: string
+}
+
+export type RecordExternalPaymentParams = {
+  order_id?: string
+  amount?: string
+  transaction_id?: string
+  paid_at?: string
+}
+
+export type RecordUsageBatchParams = {
+  items?: RecordUsageParams[]
+}
+
+export type RecordUsageBatchResult = {
+  items: UsageEventResult[]
+}
+
+export type RecordUsageParams = {
+  customer_id?: string
+  invoker?: string
+  invoker_type?: "customer" | "delegated"
+  currency?: string
+  event_type?: string
+  dimensions?: Record<string, number>
+  amount?: string
+  outcome?: "failed" | "succeeded"
+  resource?: string
+  metadata?: Record<string, unknown>
+  source?: string
+  source_id?: string
+  occurred_at?: string
+}
+
+export type RefundPaymentParams = {
+  amount?: string
+  full?: boolean
+  reason?: string
+  revoke_access?: boolean
+}
+
+export type ReleaseAdmissionBatchParams = {
+  request_ids?: string[]
+}
+
+export type Renewal = {
+  id: string
+  subscription_id: string
+  customer_id: string
+  psp_id: string
+  rail: string
+  owner: string
+  due_at: string
+  amount: string
+  currency: string
+  first_outcome: string
+  outcome: string
+  missed_at: string | null
+  miss_reason: string
+  collected_at: string | null
+  recovered_by: string
+  closes_at: string
+  attempts: PaymentAttempt[]
+}
+
+export type ResolveFindingParams = {
+  outcome?: "approve" | "ignore"
+  notes?: string
+  override_params?: unknown
+}
+
 export type RetrySubscriptionNowParams = {
   payment_method_id?: string
+}
+
+export type RevokeCreditGrantParams = {
+  reason?: string
+}
+
+export type RevokeProductAccessParams = {
+  reason?: string
+}
+
+export type RunningCharge = {
+  id: string
+  reference: string
+  customer_id: string
+  currency: string
+  rate_per_hour: string
+  state: "running" | "stopped"
+  started_at: string
+  stopped_at: string | null
+  charged_amount: string
+  posted_amount: string
+  as_of: string
+  overdraft_amount: string
+  low_balance_amount: string
+  resource: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type ScheduledChange = {
@@ -591,8 +1908,22 @@ export type SetCartLineParams = {
   amount?: string
 }
 
+export type SetDashboardParams = {
+  widgets?: DashboardWidget[]
+}
+
 export type SetDefaultPaymentMethodParams = {
   payment_method_id?: string
+}
+
+export type SetMeterParams = {
+  event_type?: string
+  value_property?: string
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  unit?: string
+  group_by?: Record<string, string>
+  rate_card?: MeterRateCardParams | null
+  expected_revision?: number
 }
 
 export type SetSubscriptionPaymentMethodParams = {
@@ -627,6 +1958,22 @@ export type SolanaPaymentToken = {
   decimals: number
   preferred: boolean
   recurring_eligible: boolean
+}
+
+export type StartRunningChargeParams = {
+  reference?: string
+  customer_id?: string
+  currency?: string
+  rate_per_hour?: string
+  started_at?: string
+  minimum_amount?: string
+  overdraft_amount?: string
+  low_balance_amount?: string
+  resource?: string
+}
+
+export type StopRunningChargeParams = {
+  stopped_at?: string
 }
 
 export type StripePortalSession = {
@@ -726,11 +2073,68 @@ export type SubscriptionRetryNowResult = {
   replayed: boolean
 }
 
+export type TieredPrice = {
+  mode?: "graduated" | "volume"
+  tiers?: RateTier[]
+}
+
+export type TrustLevel = {
+  currency: string
+  trust_level: string
+}
+
+export type UpdateAlertWebhookParams = {
+  name?: string | null
+  url?: string | null
+  format?: "discord" | "generic" | "slack" | null
+  enabled?: boolean | null
+}
+
+export type UpdateCustomerParams = {
+  credit_limits?: CreditLimit[]
+  trust_levels?: TrustLevel[]
+  billing_policy?: string | null
+  invoice_profile?: InvoiceProfile | null
+}
+
+export type UpdateMerchantConfigurationParams = {
+  expected_revision?: number | null
+  settings?: MerchantSettings
+  display_name?: string
+}
+
+export type UpdatePSPParams = {
+  expected_revision?: number | null
+  settings?: Record<string, unknown> | null
+  credentials?: Record<string, string> | null
+  retire_webhook_overlap?: boolean
+  archived?: boolean
+  allow_last?: boolean
+}
+
 export type UpdatePaymentMethodParams = {
   exp_month?: number
   exp_year?: number
   billing_details?: BillingDetails
   reusable?: boolean
+}
+
+export type UpdatePriceParams = {
+  archived?: boolean | null
+  psp_links?: Record<string, Record<string, string>>
+  expected_revision?: number
+}
+
+export type UpdateProductParams = {
+  display_name?: string | null
+  description?: string | null
+  entitlements?: string[]
+  credit_grant?: CreditGrantSpec | null
+  tier_group?: string | null
+  tier_rank?: number | null
+  ownership?: "consumable" | "extend" | "unique" | null
+  archived?: boolean | null
+  expected_revision?: number
 }
 
 export type Usage = {
@@ -743,6 +2147,46 @@ export type Usage = {
   next_cursor: string | null
 }
 
+export type UsageCharge = {
+  meter_key: string
+  cell: string | null
+  quantity: number
+  amount: string
+}
+
+export type UsageEstimate = {
+  event_type?: string
+  dimensions?: Record<string, number>
+  metadata?: Record<string, unknown>
+}
+
+export type UsageEvent = {
+  id: string
+  customer_id: string
+  invoker: string
+  currency: string
+  event_type: string
+  dimensions: Record<string, number> | null
+  outcome: "failed" | "succeeded"
+  amount: string
+  forgiven_amount: string
+  resource: string | null
+  metadata: Record<string, unknown> | null
+  source: string
+  source_id: string
+  charges: UsageCharge[]
+  balance_transaction_id: string | null
+  occurred_at: string
+  created_at: string
+  replayed: boolean
+}
+
+export type UsageEventResult = {
+  status: number
+  event: UsageEvent | null
+  error: ErrorDetails | null
+}
+
 export type UsageRow = {
   key: string
   cell: string | null
@@ -750,4 +2194,9 @@ export type UsageRow = {
   amount: string
   quantity: number | null
   dimensions: Record<string, number> | null
+}
+
+export type WebhookReceipt = {
+  status: string
+  code: string | null
 }

@@ -2,13 +2,13 @@
 
 # Routes
 
-Every route of the HTTP API (172), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (174), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
 **Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.
 
-**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer-network route that also needs a recent sign-in; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
+**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer-network route that also needs a recent sign-in; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.
 
 ## Process
 
@@ -22,7 +22,7 @@ Health and capability discovery. Only the standalone server serves the root path
 
 ## Checkout (public)
 
-What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions.
+Public product lookup and an order's Solana Pay transaction requests.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -81,9 +81,8 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 |---|---|---|---|---|---|---|
 | GET | `/v1/admin/orders` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/void` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | limit `destructive` |
+| POST | `/v1/admin/orders/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | limit `destructive` |
 | POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | limit `destructive` |
-| POST | `/v1/admin/orders/{id}/retry-collection` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RetryOrderCollectionParams` | 200 `Order` | limit `off_channel`; `Idempotency-Key` |
 | GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` | limit `destructive` |
@@ -104,7 +103,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | limit `destructive` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
-| POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
+| POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
 | POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | limit `destructive`; `Idempotency-Key` |
@@ -121,24 +120,24 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | catalog update |
-| GET | `/v1/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
+| GET | `/v1/catalog/meters` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Meter` |  |
 | PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | catalog update |
-| POST | `/v1/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| POST | `/v1/console/catalog/ask` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | console only; when `catalog_copilot` |
 | POST | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | catalog update |
-| GET | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
+| GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Product` |  |
 | PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | catalog update |
 | DELETE | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 204 — | catalog update; limit `destructive` |
 | POST | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | catalog update |
-| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
-| GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |
+| GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | catalog update |
 | POST | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | catalog update |
-| POST | `/v1/catalog/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
-| GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
-| GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
+| POST | `/v1/catalog/price-migrations/preview` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `PriceMigration` |  |
 | POST | `/v1/catalog/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | catalog update |
 
 ## Merchant configuration
@@ -147,15 +146,15 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
+| GET | `/v1/merchant/psps` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<PSP>` |  |
 | POST | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits` |
-| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
+| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `PSP` |  |
 | PATCH | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits` |
-| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | POST | `/v1/merchant/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` |  |
-| GET | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
+| GET | `/v1/merchant/configuration` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits` |
-| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
+| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits` |
 | DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits` |
 | PATCH | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits` |
@@ -163,12 +162,12 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` |  |
 | POST | `/v1/merchant/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` |  |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/merchant/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
+| GET | `/v1/merchant/findings` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `Finding` |  |
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
-| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` |  |
-| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — |  |
+| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProvisioningToken>` | when `customer_provisioning` |
+| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | when `customer_provisioning` |
+| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `customer_provisioning` |
 
 ## Business metrics
 
@@ -182,7 +181,7 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 
 ## Access
 
-What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group.
+The caller's none/read/update access to staff areas and effective application permissions for mounted programmatic routes; any authenticated person or application, mounted with any staff or programmatic group.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -190,42 +189,45 @@ What the signed-in caller may use of each staff route group that is on: any pers
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, usage uses source identity and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group; they name no permission.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/app/orders/preview` | application | `merchant:orders:manage`<br>`root:orders:manage` | `PreviewOrderParams` | 200 `OrderPreview` |  |
 | POST | `/v1/app/orders` | application | `merchant:orders:manage`<br>`root:orders:manage` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
-| POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` | `Idempotency-Key` |
-| GET | `/v1/app/catalog/products` | application | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
+| POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
-| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionBatchParams` | 200 `CaptureBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` | `Idempotency-Key` |
-| POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
-| GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
-| GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
-| POST | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — | `Idempotency-Key` |
+| GET | `/v1/app/admissions/{request_id}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `Admission` |  |
+| GET | `/v1/app/admissions` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<Admission>` |  |
+| GET | `/v1/app/usage-events/{id}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `UsageEvent` |  |
+| GET | `/v1/app/usage-events` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<UsageEvent>` |  |
+| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` |  |
+| POST | `/v1/app/admissions/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionBatchParams` | 200 `CaptureBatchResult` |  |
+| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
+| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
+| POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` |  |
+| POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` |  |
+| POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` |  |
+| GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `RunningCharge` |  |
+| GET | `/v1/app/running-charges` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<RunningCharge>` |  |
+| POST | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — |  |
 | GET | `/v1/app/notification-consumers/{name}/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `NotificationEvents` |  |
-| POST | `/v1/app/notification-consumers/{name}/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeNotificationEventsParams` | 204 — | `Idempotency-Key` |
-| DELETE | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — | `Idempotency-Key` |
+| POST | `/v1/app/notification-consumers/{name}/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeNotificationEventsParams` | 204 — |  |
+| DELETE | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — |  |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
-| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — |  |
-| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
+| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/customers` | application | `merchant:customers:read`<br>`root:customers:read` | — | 200 `ListPage<Customer>` | when `customer_network` |
 
 ## Provider webhooks
