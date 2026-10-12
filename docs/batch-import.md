@@ -132,7 +132,7 @@ billing data over this seam:
    Apply your application schemas separately, then validate the target shape
    before writing anything.
 2. **Declare the merchant, PSPs, and catalog.** Upsert the merchant + its
-   operator-declared PSP rows through `Config.Merchants` (or `Client.DeclarePSP`)
+   operator-declared PSP rows through `Config.Merchants` (or `LocalClient.DeclarePSP` from `Engine.LocalMerchant`)
    (or manifest boot), then push the catalog — including *retired* historical
    price points, so every legacy subscription resolves a price. Resolve the
    `psps` row ids to stamp on imported rows. A PSP declared without

@@ -276,8 +276,8 @@ and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
 with the rest of the merchant's configuration; the edits mount only with
 Vault. Imported billing facts attributed to a PSP without credentials need its
-identity first: `client.DeclarePSP(ctx, billing.PSPDeclaration{...})`
-during setup.
+identity first through `LocalClient.DeclarePSP(ctx, billing.PSPDeclaration{...})`
+during setup. Obtain that local extension from `engine.LocalMerchant(merchantID)`.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
 and set it as `MerchantDeclaration.Catalog`; `New` applies it on every start, like calling
@@ -506,8 +506,18 @@ Orders and their previews use the shared client too. See
 [checkout](api/commerce.md).
 
 A host that must start or stop a running charge in the same commit as its own
-rows uses its engine handle's `StartRunningChargeTx` and `StopRunningChargeTx`
-with a transaction from its pool. See [running charges](running-charges.md).
+rows obtains a `LocalClient` from `engine.LocalMerchant(merchantID)` and uses its
+`StartRunningChargeTx` and `StopRunningChargeTx` with a transaction from its pool.
+See [running charges](running-charges.md).
+
+`Engine.Merchant` returns the shared `*Client`, whose methods work both in process
+and over HTTP. `Engine.LocalMerchant` is the explicit extension for operations
+that require the local engine: `DeclarePSP`, `SCIMHandler`,
+`StartRunningChargeTx` and `StopRunningChargeTx`. `LocalClient` embeds `*Client`,
+so ordinary operations remain available; pass `local.Client` to a consumer
+accepting the shared client. The factory does no I/O, and every operation retains
+its merchant binding and live-merchant check. These local methods are absent
+from remote clients rather than failing at runtime.
 
 One engine serves every live merchant in its directory, each through its own
 handle. `Merchant` reads nothing and refuses only the zero ID; each call reads
@@ -584,7 +594,7 @@ host that keeps a pushed copy instead leaves `UserInfo` out, turns on
 `RouteGroups.Programmatic` and points its directory at
 `{Prefix}/v1/app/scim/v2` with an application credential or a provisioning
 token (`client.CreateProvisioningToken`); a directory in the same binary pushes to
-`client.SCIMHandler()` with no token. In tests, `openrailstest.UserInfo` is an
+`local.SCIMHandler()` with no token, after `engine.LocalMerchant(merchantID)`. In tests, `openrailstest.UserInfo` is an
 in-memory `openrails.UserInfo`. See [customer contacts](customer-contacts.md).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,

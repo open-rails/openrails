@@ -28,7 +28,6 @@
       "func (c *Client) CreateProvisioningToken(ctx context.Context, req billing.CreateProvisioningTokenParams, options ...RequestOption) (*billing.CreatedProvisioningToken, error)",
       "func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error)",
       "func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error)",
-      "func (c *Client) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error)",
       "func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID, options ...RequestOption) error",
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID, options ...RequestOption) error",
       "func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error",
@@ -95,14 +94,11 @@
       "func (c *Client) RetryOrderCollection(ctx context.Context, id billing.OrderID, params billing.RetryOrderCollectionParams, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
       "func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams, requestOptions ...RequestOption) error",
-      "func (c *Client) SCIMHandler() (http.Handler, error)",
       "func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParams, options ...RequestOption) (*billing.Dashboard, error)",
       "func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMeterParams, requestOptions ...RequestOption) (*billing.Meter, error)",
       "func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error)",
       "func (c *Client) StartRunningCharge(ctx context.Context, params billing.StartRunningChargeParams, requestOptions ...RequestOption) (*billing.RunningCharge, error)",
-      "func (c *Client) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *Client) StopRunningCharge(ctx context.Context, reference string, params billing.StopRunningChargeParams, requestOptions ...RequestOption) (*billing.RunningCharge, error)",
-      "func (c *Client) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
       "func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error)",
       "func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationState, error)",
@@ -110,8 +106,13 @@
       "func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams, requestOptions ...RequestOption) (*billing.Price, error)",
       "func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams, requestOptions ...RequestOption) (*billing.Product, error)",
       "func (c *Client) VoidOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
+      "func (c *LocalClient) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error)",
+      "func (c *LocalClient) SCIMHandler() (http.Handler, error)",
+      "func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
+      "func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
       "func (e *BoundMerchantError) Error() string",
       "func (e *Engine) Close(ctx context.Context) error",
+      "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
       "func (e *Engine) MerchantBySlug(slug string) (*Client, error)",
       "func (e *Engine) Probes() []Probe",
@@ -157,6 +158,7 @@
       "type Identity = billingauth.Identity",
       "type Invoker = billingauth.Invoker",
       "type LLMConfig = config.LLMConfig",
+      "type LocalClient struct{ *Client }",
       "type LoggerConfig = config.LoggerConfig",
       "type MerchantDeclaration = config.MerchantDeclaration",
       "type MerchantSecrets = config.MerchantSecrets",
@@ -186,7 +188,6 @@
       "type VaultConfig = config.VaultConfig",
       "type requestOptions struct {\n}",
       "type startOptions struct {\n}",
-      "var ErrRemoteClient = errors.New(\"openrails: not available on a remote client\")",
       "var ErrUnauthenticated = billingauth.ErrUnauthenticated"
     ],
     "adapters/fiber": [
@@ -1991,7 +1992,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "engine": "github.com/open-rails/openrails/internal/engine",
-      "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
       "river": "github.com/riverqueue/river",
@@ -4354,6 +4354,13 @@
       "time": "time",
       "url": "net/url"
     },
+    "local_client.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "fmt": "fmt",
+      "http": "net/http",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "merchant_archive.go": {
       "archivewire": "github.com/open-rails/openrails/internal/archivewire",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4507,8 +4514,7 @@
       "context": "context",
       "http": "net/http",
       "strings": "strings",
-      "url": "net/url",
-      "v5": "github.com/jackc/pgx/v5"
+      "url": "net/url"
     },
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",

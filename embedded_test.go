@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -43,6 +44,21 @@ func TestLocalMerchantRequiresAnEngine(t *testing.T) {
 	local, err := (&Engine{}).LocalMerchant(billing.MerchantID{})
 	require.Error(t, err)
 	require.Nil(t, local)
+}
+
+// Constructing a local extension does no I/O and keeps the shared handle and
+// internal tooling bound to the same engine and merchant.
+func TestLocalMerchantPreservesEngineAndMerchant(t *testing.T) {
+	core := &engine.Engine{}
+	bill := &Engine{engine: core}
+	local, err := bill.LocalMerchant(testMerchant)
+	require.NoError(t, err)
+	require.Equal(t, testMerchant, local.MerchantID())
+	require.Same(t, core, engine.Of(local))
+	require.Same(t, core, engine.Of(local.Client))
+	require.Nil(t, engine.Of(&LocalClient{}))
+	_, err = bill.LocalMerchant(billing.MerchantID{})
+	require.ErrorIs(t, err, billing.ErrInvalid)
 }
 
 // Merchant refuses the zero ID before anything is read.
