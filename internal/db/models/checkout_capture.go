@@ -19,23 +19,24 @@ var ErrCheckoutCaptureBinding = errors.New("checkout capture binding is invalid"
 // Completion keeps token hash + permanent method identity, never the token or
 // SDK authorization. Archive validation shares this exact decoder.
 type CheckoutCapture struct {
-	MerchantID        uuid.UUID `json:"merchant_id"`
-	CustomerID        uuid.UUID `json:"customer_id"`
-	PSPID             uuid.UUID `json:"psp_id"`
-	CustodianID       uuid.UUID `json:"custodian_id"`
-	Environment       string    `json:"environment"`
-	AccountID         string    `json:"account_id"`
-	ProfileID         string    `json:"profile_id"`
-	PublicAPIKey      string    `json:"public_api_key"`
-	APIBaseURL        string    `json:"api_base_url"`
-	SDKURL            string    `json:"sdk_url"`
-	VendorCustomerID  string    `json:"vendor_customer_id,omitempty"`
-	VendorSessionID   string    `json:"vendor_session_id,omitempty"`
-	ExpiresAt         time.Time `json:"expires_at"`
-	SecretCiphertext  string    `json:"secret_ciphertext,omitempty"`
-	PaymentMethodID   uuid.UUID `json:"payment_method_id,omitzero"`
-	VendorMethodID    string    `json:"vendor_method_id,omitempty"`
-	AcceptedTokenHash string    `json:"accepted_token_hash,omitempty"`
+	RequestFingerprint string    `json:"request_fingerprint,omitempty"`
+	MerchantID         uuid.UUID `json:"merchant_id"`
+	CustomerID         uuid.UUID `json:"customer_id"`
+	PSPID              uuid.UUID `json:"psp_id"`
+	CustodianID        uuid.UUID `json:"custodian_id"`
+	Environment        string    `json:"environment"`
+	AccountID          string    `json:"account_id"`
+	ProfileID          string    `json:"profile_id"`
+	PublicAPIKey       string    `json:"public_api_key"`
+	APIBaseURL         string    `json:"api_base_url"`
+	SDKURL             string    `json:"sdk_url"`
+	VendorCustomerID   string    `json:"vendor_customer_id,omitempty"`
+	VendorSessionID    string    `json:"vendor_session_id,omitempty"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	SecretCiphertext   string    `json:"secret_ciphertext,omitempty"`
+	PaymentMethodID    uuid.UUID `json:"payment_method_id,omitzero"`
+	VendorMethodID     string    `json:"vendor_method_id,omitempty"`
+	AcceptedTokenHash  string    `json:"accepted_token_hash,omitempty"`
 }
 
 func DecodeCheckoutCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUID, status CheckoutAttemptStatus, expiry *time.Time) (CheckoutCapture, error) {

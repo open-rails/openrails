@@ -180,3 +180,20 @@ type DefaultPaymentMethod struct {
 	Currency        string          `json:"currency"`
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
+
+// ConfirmPaymentMethodParams finishes a pending card save. Capture is required
+// for custodian-owned fields; Stripe confirms the bank's setup without it.
+type ConfirmPaymentMethodParams struct {
+	Capture *CustodianCaptureReference `json:"capture"`
+}
+
+// CustodianCaptureReference binds a vendor token to the owned pending method.
+// It is not payment authority and never contains card details.
+type CustodianCaptureReference struct {
+	CustodianID string `json:"custodian_id"`
+	SessionID   string `json:"session_id"`
+	Token       string `json:"token"`
+}
+
+func (CustodianCaptureReference) String() string   { return "[private custodian capture reference]" }
+func (CustodianCaptureReference) GoString() string { return "[private custodian capture reference]" }

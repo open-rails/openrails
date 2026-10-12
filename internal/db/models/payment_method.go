@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode"
@@ -53,6 +54,8 @@ type PaymentMethod struct {
 	// SetupRef is the provider's setup awaiting the customer while Status is
 	// requires_action.
 	SetupRef string `json:"-"`
+	// Capture retains the private, encrypted authority of a custodian card save.
+	Capture json.RawMessage `json:"-"`
 	// ContactCardholderAt is when the issuer last asked for the cardholder.
 	ContactCardholderAt *time.Time `json:"-"`
 

@@ -7,7 +7,10 @@ package billing
 // signs and sends Transactions (base64, unsigned) in order, then the attempt is
 // confirmed with each signature. authenticate: the PSP's own script completes
 // Payload on the host page (Stripe.js handleNextAction with client_secret),
-// then the payable is confirmed.
+// then the payable is confirmed. capture: vendor-owned card fields consume
+// Payload (custodian_id, session_id, customer_id, sdk_url, api_base_url,
+// public_api_key, sdk_authorization, expires_at); confirm the payment method
+// with that session and its returned token. Capture never charges a card.
 type NextAction struct {
 	Type         string            `json:"type"`
 	URL          *string           `json:"url"`
