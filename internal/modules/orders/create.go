@@ -352,6 +352,12 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		if customerID != uuid.Nil && order.CustomerID != customerID {
 			return ErrNotFound
 		}
+		if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+			if status == billing.OrderExpired {
+				return nil
+			}
+			return ErrNotCancelable
+		}
 		if order.Origin == string(billing.OrderOriginSubscription) {
 			if status == billing.OrderExpired {
 				return nil

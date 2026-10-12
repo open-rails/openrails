@@ -250,6 +250,9 @@ func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput)
 	if in.Order.CollectionOwner != string(billing.OrderCollectionEngine) {
 		return OrderCharge{}, orders.ErrNotPayable
 	}
+	if err := s.requireEngineOrder(ctx, in.Order); err != nil {
+		return OrderCharge{}, err
+	}
 	switch {
 	case in.Solana != nil:
 		return s.payOrderSolana(ctx, in)
@@ -264,6 +267,26 @@ func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput)
 		s.noteCardAttempt(ctx, in.User)
 	}
 	return out, err
+}
+
+// requireEngineOrder rechecks a cached read before entering a generic pay or
+// confirm path, including an existing intent's replay. New attempt admission
+// checks again in the transaction that binds that attempt.
+func (s *CheckoutAttemptService) requireEngineOrder(ctx context.Context, order *orders.Order) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := s.db.NewWithPgxTx(tx).Gen(ctx).LockOrder(ctx, gen.LockOrderParams{MerchantID: mid.UUID(), ID: order.ID})
+		if err != nil {
+			return err
+		}
+		if current.CustomerID != order.CustomerID || current.CollectionOwner != string(billing.OrderCollectionEngine) {
+			return orders.ErrNotPayable
+		}
+		return nil
+	})
 }
 
 // newCard is a card just entered, as the order's charge saves it.
@@ -734,6 +757,9 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer, signature string) (OrderCharge, error) {
 	if order.CollectionOwner != string(billing.OrderCollectionEngine) {
 		return OrderCharge{}, orders.ErrNotPayable
+	}
+	if err := s.requireEngineOrder(ctx, order); err != nil {
+		return OrderCharge{}, err
 	}
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
 		return OrderCharge{}, nil

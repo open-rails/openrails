@@ -185,24 +185,24 @@ SET status = sqlc.arg(status)::text, payment_status = 'requires_payment_method',
     expired_at = CASE WHEN sqlc.arg(status)::text = 'expired' THEN sqlc.arg(now)::timestamptz ELSE expired_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');
+  AND collection_owner = 'engine' AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');
 
 -- name: ListOrderSweepMerchants :many
 -- The sweep's work queue: merchants with a live order past its expiry, or an
 -- unpaid closed order past retention.
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
-    WHERE status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
+    WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
     UNION
     SELECT merchant_id FROM billing.orders
-    WHERE status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
+    WHERE collection_owner = 'engine' AND status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
       AND COALESCE(canceled_at, expired_at) < sqlc.arg(purge_before)::timestamptz
 ) due
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListExpiredOrders :many
 SELECT id FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'open'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= sqlc.arg(now)::timestamptz
 ORDER BY expires_at
 LIMIT sqlc.arg(row_limit)::int;
@@ -213,7 +213,7 @@ LIMIT sqlc.arg(row_limit)::int;
 DELETE FROM billing.orders o
 WHERE o.ctid IN (
     SELECT c.ctid FROM billing.orders c
-    WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.status IN ('canceled', 'expired')
+    WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.collection_owner = 'engine' AND c.status IN ('canceled', 'expired')
       AND c.payment_id IS NULL AND c.attempt_id IS NULL
       AND COALESCE(c.canceled_at, c.expired_at) < sqlc.arg(before)::timestamptz
       AND NOT EXISTS (SELECT 1 FROM billing.checkout_attempts a WHERE a.merchant_id = c.merchant_id AND a.order_id = c.id)
