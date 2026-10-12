@@ -1652,7 +1652,7 @@
     "server/internal/adminconsole": [
       "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tLocalSignIn bool     `json:\"local_sign_in\"`\n\tIssuers     []Issuer `json:\"issuers\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
-      "type Issuer struct {\n\tKey      string    `json:\"key\"`\n\tMerchant *Merchant `json:\"merchant,omitempty\"`\n\tURL      string    `json:\"url\"`\n\tClientID string    `json:\"client_id\"`\n\tName     string    `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
+      "type Issuer struct {\n\tKey      string `json:\"key\"`\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tRole        string `json:\"role,omitempty\"`\n}"
     ],
     "server/internal/hostconfig": [

@@ -380,6 +380,6 @@ server/ci	TestMerchantRenameRoute	11.7
 server/ci	TestMerchantRolePermissionsInTheRunningCatalog	13.3
 server/ci	TestSecurityOwnerOperationsNeedNoRecentSignIn	13.0
 server/ci	TestSecurityTeamEmailGrantsOnlyAVerifiedAccount	13.9
-server/ci	TestStandaloneAdminConsolePath	8.9
+server/ci	TestServerConsoleIsOnByDefault	8.9
 server/ci	TestStandaloneBootNeverWaitsOnVaultAndFailsClosedOnKeyChange	7.5
 server/ci	TestUserMerchantsListing	11.9

@@ -167,14 +167,12 @@ function LocalWorkspace(
     group,
   })
   return (
-    <StepUpProvider>
-      <Workspace
-        {...props}
-        access={access}
-        group={group}
-        setGroup={(value) => setRootGroup(value === "root")}
-      />
-    </StepUpProvider>
+    <Workspace
+      {...props}
+      access={access}
+      group={group}
+      setGroup={(value) => setRootGroup(value === "root")}
+    />
   )
 }
 
@@ -205,159 +203,171 @@ function Workspace({
   const hasAccess = session.kind === "issuer" || !!access?.any
   const initial = billing ? "/billing" : hasAccess ? "/access" : "/account"
   return (
-    <AuthUiProvider appearance={{ theme: "inherit" }}>
-      <div
-        className={`console-shell ${theme === "dark" ? "dark" : ""}`}
-        data-theme={theme}
-      >
-        <header className="console-header">
-          <Link to="/">OpenRails</Link>
-          {merchants.length > 0 && (
-            <label>
-              Merchant{" "}
-              <select
-                value={merchant?.id ?? ""}
-                onChange={(event) => selectMerchant(event.target.value)}
-              >
-                {merchants.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.display_name || item.slug}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button
-            onClick={() =>
-              setTheme((value) => (value === "light" ? "dark" : "light"))
-            }
-          >
-            {theme === "light" ? "Dark" : "Light"} theme
-          </button>
-          <button onClick={() => void identity.signOut()}>Sign out</button>
-        </header>
-        <nav className="console-tabs" aria-label="Console">
-          {billing && <Link to="/billing">Billing</Link>}
-          {hasAccess && <Link to="/access">Access</Link>}
-          <Link to="/account">Account</Link>
-        </nav>
-        <Routes>
-          <Route
-            index
-            element={
-              loading || access?.status === "loading" ? (
-                <p role="status" className="console-empty">
-                  Loading console access…
-                </p>
-              ) : (
-                <Navigate to={initial} replace />
-              )
-            }
-          />
-          <Route
-            path="billing/*"
-            element={
-              billing && merchant ? (
-                <BillingAdmin
-                  baseUrl={config.api_base_url}
-                  auth={session.client}
-                  merchant={merchant}
-                  merchants={merchants}
-                  onMerchantChange={(item) => selectMerchant(item.id)}
-                  basePath="/admin/billing"
-                  navigation={navigation}
-                  exchange={
-                    session.kind === "local"
-                      ? (config.exchange ?? undefined)
-                      : undefined
-                  }
-                  appearance={{ theme: "inherit" }}
-                />
-              ) : (
-                <p className="console-empty">
-                  No billing access. Choose a merchant where you hold a billing
-                  role.
-                </p>
-              )
-            }
-          />
-          <Route
-            path="access/*"
-            element={
-              session.kind === "issuer" ? (
-                <section className="console-section">
-                  <h1>Access</h1>
-                  <p>
-                    People and roles are managed in {session.issuer.name}. Local
-                    owners or the operator manage this server's API keys and
-                    signing keys.
+    <AuthUiProvider appearance={{ theme }}>
+      <NativeStepUp enabled={session.kind === "local"}>
+        <div
+          className={`console-shell ${theme === "dark" ? "dark" : ""}`}
+          data-theme={theme}
+        >
+          <header className="console-header">
+            <Link to="/">OpenRails</Link>
+            {merchants.length > 0 && (
+              <label>
+                Merchant{" "}
+                <select
+                  value={merchant?.id ?? ""}
+                  onChange={(event) => selectMerchant(event.target.value)}
+                >
+                  {merchants.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.display_name || item.slug}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              onClick={() =>
+                setTheme((value) => (value === "light" ? "dark" : "light"))
+              }
+            >
+              {theme === "light" ? "Dark" : "Light"} theme
+            </button>
+            <button onClick={() => void identity.signOut()}>Sign out</button>
+          </header>
+          <nav className="console-tabs" aria-label="Console">
+            {billing && <Link to="/billing">Billing</Link>}
+            {hasAccess && <Link to="/access">Access</Link>}
+            <Link to="/account">Account</Link>
+          </nav>
+          <Routes>
+            <Route
+              index
+              element={
+                loading || access?.status === "loading" ? (
+                  <p role="status" className="console-empty">
+                    Loading console access…
                   </p>
-                </section>
-              ) : (
-                <>
-                  {root && (
-                    <label className="console-scope">
-                      Manage access for{" "}
-                      <select
-                        value={group}
-                        onChange={(event) => setGroup?.(event.target.value)}
-                      >
-                        {merchant && (
-                          <option value={merchant.id}>
-                            {merchant.display_name || merchant.slug}
-                          </option>
-                        )}
-                        <option value="root">All-merchants staff</option>
-                      </select>
-                    </label>
-                  )}
-                  {access && group && (
-                    <AccessPage
-                      auth={session.client}
-                      baseUrl={config.auth_base_url}
-                      group={group}
-                      access={access}
-                      navigation={navigation}
-                    />
-                  )}
-                </>
-              )
-            }
-          />
-          <Route
-            path="account"
-            element={
-              <section className="console-section">
-                <h1>Account security</h1>
-                {session.kind === "local" ? (
-                  <AccountSecurity
-                    sections={[
-                      "password",
-                      "twoFactor",
-                      "signInKeys",
-                      "sessions",
-                    ]}
+                ) : (
+                  <Navigate to={initial} replace />
+                )
+              }
+            />
+            <Route
+              path="billing/*"
+              element={
+                billing && merchant ? (
+                  <BillingAdmin
+                    baseUrl={config.api_base_url}
+                    auth={session.client}
+                    merchant={merchant}
+                    merchants={merchants}
+                    onMerchantChange={(item) => selectMerchant(item.id)}
+                    basePath="/admin/billing"
+                    navigation={navigation}
+                    exchange={
+                      session.kind === "local"
+                        ? (config.exchange ?? undefined)
+                        : undefined
+                    }
+                    appearance={{ theme: "inherit" }}
                   />
                 ) : (
-                  <p>
-                    Your account and sign-in security are managed in{" "}
-                    {session.issuer.name}.
+                  <p className="console-empty">
+                    No billing access. Choose a merchant where you hold a
+                    billing role.
                   </p>
-                )}
-              </section>
-            }
-          />
-          <Route
-            path="*"
-            element={
-              <p className="console-empty">
-                That console page does not exist.{" "}
-                <Link to="/">Open the console</Link>
-              </p>
-            }
-          />
-        </Routes>
-      </div>
+                )
+              }
+            />
+            <Route
+              path="access/*"
+              element={
+                session.kind === "issuer" ? (
+                  <section className="console-section">
+                    <h1>Access</h1>
+                    <p>
+                      People and roles are managed in {session.issuer.name}.
+                      Local owners or the operator manage this server's API keys
+                      and signing keys.
+                    </p>
+                  </section>
+                ) : (
+                  <>
+                    {root && (
+                      <label className="console-scope">
+                        Manage access for{" "}
+                        <select
+                          value={group}
+                          onChange={(event) => setGroup?.(event.target.value)}
+                        >
+                          {merchant && (
+                            <option value={merchant.id}>
+                              {merchant.display_name || merchant.slug}
+                            </option>
+                          )}
+                          <option value="root">All-merchants staff</option>
+                        </select>
+                      </label>
+                    )}
+                    {access && group && (
+                      <AccessPage
+                        auth={session.client}
+                        baseUrl={config.auth_base_url}
+                        group={group}
+                        access={access}
+                        navigation={navigation}
+                      />
+                    )}
+                  </>
+                )
+              }
+            />
+            <Route
+              path="account"
+              element={
+                <section className="console-section">
+                  <h1>Account security</h1>
+                  {session.kind === "local" ? (
+                    <AccountSecurity
+                      sections={[
+                        "password",
+                        "twoFactor",
+                        "signInKeys",
+                        "sessions",
+                      ]}
+                    />
+                  ) : (
+                    <p>
+                      Your account and sign-in security are managed in{" "}
+                      {session.issuer.name}.
+                    </p>
+                  )}
+                </section>
+              }
+            />
+            <Route
+              path="*"
+              element={
+                <p className="console-empty">
+                  That console page does not exist.{" "}
+                  <Link to="/">Open the console</Link>
+                </p>
+              }
+            />
+          </Routes>
+        </div>
+      </NativeStepUp>
     </AuthUiProvider>
   )
+}
+
+function NativeStepUp({
+  enabled,
+  children,
+}: {
+  enabled: boolean
+  children: ReactNode
+}) {
+  return enabled ? <StepUpProvider>{children}</StepUpProvider> : children
 }

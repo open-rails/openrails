@@ -132,6 +132,7 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
                 path={`/${kind}`}
                 element={
                   <AccountLinkPage
+                    auth={session.client}
                     kind={kind}
                     navigate={(to) => void navigate(to)}
                     onDone={(to) => choose("local", to ?? "/")}

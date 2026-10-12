@@ -193,24 +193,61 @@ test("a native AuthKit credential write asks for fresh sign-in and retries once"
   await expect(page.getByText("Browser proof", { exact: true })).toBeVisible()
 })
 
+test("an emailed passwordless link uses its native confirmation endpoint once", async ({
+  page,
+  request,
+}) => {
+  const operator = await staff(request, "support")
+  const started = await request.post("/auth/v1/passwordless/start", {
+    data: { identifier: operator.email, mode: "link" },
+  })
+  expect(started.status(), await started.text()).toBe(202)
+  const letter = await request.get(
+    `/__test/mail?kind=login_code&to=${encodeURIComponent(operator.email)}`
+  )
+  expect(letter.status()).toBe(200)
+  const { link } = (await letter.json()) as { link: string }
+  expect(new URL(link).pathname).toBe("/admin/passwordless")
+  let confirmations = 0
+  page.on("request", (request) => {
+    if (request.url().endsWith("/auth/v1/passwordless/confirm"))
+      confirmations += 1
+  })
+  await page.goto(link)
+  await expect(
+    page.getByRole("navigation", { name: "Console", exact: true })
+  ).toBeVisible()
+  expect(confirmations).toBe(1)
+  expect(new URL(page.url()).hash).toBe("")
+})
+
 test("a group invitation reaches enrollment through the shipped console", async ({
   page,
   request,
   browser,
 }) => {
   const operator = await staff(request)
-  const token = await login(page, operator.email)
+  await login(page, operator.email)
   const health = (await (await request.get("/__test/health")).json()) as {
     merchants: string[]
   }
   const email = `invited-${Date.now()}@console.test`
-  const invitation = await request.post(
-    `/auth/v1/groups/${health.merchants[0]}/invitations`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      data: { email, role: "merchant:viewer" },
-    }
+  await page
+    .getByRole("navigation", { name: "Console", exact: true })
+    .getByRole("link", { name: "Access", exact: true })
+    .click()
+  await page
+    .getByLabel("Manage access for", { exact: true })
+    .selectOption(health.merchants[0])
+  await page.getByRole("link", { name: "Invitations", exact: true }).click()
+  await page.getByRole("textbox", { name: /Email/i }).fill(email)
+  await page.getByRole("combobox", { name: "Role", exact: true }).selectOption("merchant:viewer")
+  const invited = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    response.url().endsWith(`/groups/${health.merchants[0]}/invitations`)
   )
+  await page.getByRole("button", { name: /Send invitation|Invite/, exact: true }).click()
+  const invitation = await invited
   expect(invitation.status(), await invitation.text()).toBe(202)
   const letter = await request.get(
     `/__test/mail?kind=invite&to=${encodeURIComponent(email)}`
