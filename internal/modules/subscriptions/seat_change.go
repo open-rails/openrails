@@ -111,7 +111,7 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 		Payment: payment, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &terms.PriceID, ProductID: &terms.ProductID, Description: description,
 			Quantity: &added, UnitAmount: terms.Amount / int64(added), Amount: terms.Amount,
-			AccessDurationHours: terms.AccessDurationHours}},
+			BillingIntervalHours: terms.RecurringIntervalHours, AccessDurationHours: terms.AccessDurationHours}},
 	}, s.now()); err != nil {
 		return fmt.Errorf("record seat increase order: %w", err)
 	}
