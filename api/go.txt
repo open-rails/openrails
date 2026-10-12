@@ -1219,7 +1219,7 @@ pkg openrails/billing, type CaptureAdmissionBatchParams struct, Items []CaptureA
 pkg openrails/billing, type CaptureAdmissionParams struct
 pkg openrails/billing, type CaptureAdmissionParams struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type CaptureAdmissionParams struct, RequestID string `json:"request_id"`
-pkg openrails/billing, type CaptureAdmissionParams struct, Usage CaptureUsage `json:"usage"`
+pkg openrails/billing, type CaptureAdmissionParams struct, Usage CaptureUsage `json:"usage" binding:"required"`
 pkg openrails/billing, type CaptureBatchResult struct
 pkg openrails/billing, type CaptureBatchResult struct, Items []CaptureResult `json:"items"`
 pkg openrails/billing, type CaptureReceipt struct

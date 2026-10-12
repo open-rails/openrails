@@ -11993,7 +11993,10 @@
             "type": "string",
             "description": "A number as a decimal string."
           }
-        }
+        },
+        "required": [
+          "usage"
+        ]
       },
       "CaptureBatchResult": {
         "type": "object",
@@ -19747,7 +19750,10 @@
           "account": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "account"
+        ]
       },
       "SolanaPayPostResponse": {
         "type": "object",

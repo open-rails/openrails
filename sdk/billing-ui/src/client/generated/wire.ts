@@ -667,7 +667,7 @@ export type SolanaPayGetResponse = {
 }
 
 export type SolanaPayPostRequest = {
-  account?: string
+  account: string
 }
 
 export type SolanaPayPostResponse = {

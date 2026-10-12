@@ -292,7 +292,7 @@ export type CaptureAdmissionBatchParams = {
 
 export type CaptureAdmissionParams = {
   request_id?: string
-  usage?: CaptureUsage
+  usage: CaptureUsage
   amount?: string
 }
 
@@ -1977,7 +1977,7 @@ export type SolanaPayGetResponse = {
 }
 
 export type SolanaPayPostRequest = {
-  account?: string
+  account: string
 }
 
 export type SolanaPayPostResponse = {
