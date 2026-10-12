@@ -33,10 +33,9 @@ import (
 //     the old price × seats; a tier downgrade applies at the next renewal with
 //     its seats;
 //   - a change to what the subscription bills now cancels its pending change;
-//   - staff change at the customer's request the same way, charging now
-//     merchant-initiated under the card's recurring agreement, with their
-//     reason kept and the customer told; they never charge a subscription
-//     its provider bills.
+//   - staff schedule changes for the next renewal, with their reason kept
+//     and the customer told; they never initiate an immediate saved-card charge.
+//     Provider-billed upgrades still require the customer's own change.
 //
 // Seats exist only for a price sold per seat (its catalog quantity bounds),
 // on engine-owned NMI and Stripe subscriptions.
@@ -90,8 +89,11 @@ func (c *changeTarget) clears() bool {
 }
 
 // deferred reports whether a change waits for the next renewal: a tier
-// downgrade or fewer seats.
+// downgrade, fewer seats, or any staff change.
 func (c *changeTarget) deferred() bool {
+	if c.staff != nil {
+		return true
+	}
 	if c.tier {
 		return !c.upgrade
 	}
@@ -190,8 +192,7 @@ func (s *CheckoutService) changeSubscription(ctx context.Context, req *Subscript
 		return nil, err
 	}
 	resp, err := s.routeChange(ctx, req, user, c)
-	// A staff change charged now is told from its completion; one scheduled
-	// or canceled here is told now.
+	// Staff schedules and cancellations are reported immediately without a charge.
 	if err == nil && c.staff != nil && resp.Status == "succeeded" && (resp.Effective != "now" || c.clears()) {
 		s.notifyStaffChange(ctx, c, resp)
 	}

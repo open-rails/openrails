@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -47,10 +46,10 @@ import (
 // recovery); on refusal nothing changes.
 
 var (
-	errTierChangeRenewalDue     = &TierChangeError{Code: billing.CodeSubscriptionChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change after the renewal settles"}
-	errTierChangeScheduled      = &TierChangeError{Code: billing.CodeSubscriptionChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
-	errTierChangeMoved          = &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription changed since the change was requested; preview again"}
-	errStoredCredentialRequired = &TierChangeError{Code: billing.CodeStoredCredentialRequired, Message: "the card has no active recurring agreement for a staff charge; the customer makes this change"}
+	errTierChangeRenewalDue = &TierChangeError{Code: billing.CodeSubscriptionChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change after the renewal settles"}
+	errTierChangeScheduled  = &TierChangeError{Code: billing.CodeSubscriptionChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
+	errTierChangeMoved      = &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription changed since the change was requested; preview again"}
+	errStaffImmediateCharge = &TierChangeError{Code: billing.CodeCustomerActionRequired, Message: "staff changes take effect at renewal; the customer makes an immediate change"}
 )
 
 // engineUpgradeQuote prices an engine upgrade to target at quantity seats at
@@ -174,6 +173,9 @@ func (s *CheckoutService) addEngineSeats(ctx context.Context, req *SubscriptionC
 // enqueueEngineChange runs an accepted engine charge as the durable operation
 // the request's Idempotency-Key names.
 func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, sub *models.Subscription, terms subscriptions.InitialMembershipTerms) (*TierChangeResponse, error) {
+	if req.Staff {
+		return nil, errStaffImmediateCharge
+	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -188,13 +190,9 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	requested := strings.TrimSpace(req.PriceID)
 	fingerprint := sha256.Sum256([]byte(strings.Join([]string{terms.CustomerID.String(), sub.ID.String(), terms.PriceID.String(), strconv.Itoa(subscriptions.SeatCount(terms.Quantity)), key}, "\x00")))
-	origin, actor, reason := intents.OriginUser, terms.CustomerID.String(), "customer tier upgrade"
+	reason := "customer tier upgrade"
 	if terms.Adds != nil {
 		reason = "customer seat increase"
-	}
-	staff := staffChange(req)
-	if staff != nil {
-		origin, actor, reason = intents.OriginAdmin, staff.Invoker, strings.Replace(reason, "customer", "staff", 1)+": "+staff.Reason
 	}
 	database := s.SubscriptionService.Database()
 	var operation gen.BillingProviderIntent
@@ -238,21 +236,12 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		if err != nil {
 			return err
 		}
-		// Staff charge merchant-initiated, under the subscription's recurring
-		// agreement on this card; without one the customer makes the change.
-		if staff != nil {
-			if instrument.Mandate, err = mandates.ForSubscription(ctx, d.Gen(ctx), mid.UUID(), terms.CustomerID, sub.ID, method.ID, terms.PSPID); errors.Is(err, mandates.ErrMissing) || errors.Is(err, mandates.ErrNotActive) {
-				return errStoredCredentialRequired
-			} else if err != nil {
-				return err
-			}
-		}
 		email := ""
 		if user.Email != nil {
 			email = strings.TrimSpace(*user.Email)
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: psp.Key, Email: email, RequestedPrice: requested, Staff: staff}
-		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: origin, Actor: actor, OriginReason: reason})
+		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: psp.Key, Email: email, RequestedPrice: requested}
+		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: reason})
 		return err
 	})
 	var conflict *pgconn.PgError
