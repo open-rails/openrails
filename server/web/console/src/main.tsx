@@ -1,13 +1,10 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { BrowserRouter, Route, Routes } from "react-router-dom"
-import { Billing } from "./billing"
+import { BrowserRouter } from "react-router-dom"
 import "@openrails/billing-ui/admin.css"
 import "./style.css"
-import { ConsoleSession, createConsoleSession } from "./lib/session"
-import { bootstrapURL, routerBasename } from "./lib/mount"
-import { LoginPage } from "./pages/login"
-import { CallbackPage } from "./pages/callback"
+import { bootstrapURL } from "./lib/mount"
+import { ConsoleApp } from "./app"
 import type { BootstrapConfig } from "./config"
 
 const root = createRoot(document.getElementById("root")!)
@@ -16,21 +13,11 @@ fetch(bootstrapURL(), { cache: "no-store" })
     if (!response.ok)
       throw new Error(`Console configuration failed (${response.status})`)
     const config = (await response.json()) as BootstrapConfig
-    const session = createConsoleSession(config)
-    const billing = <Billing config={config} session={session} />
     root.render(
       <StrictMode>
-        <ConsoleSession session={session}>
-          <BrowserRouter basename={routerBasename()}>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              {session.kind === "issuer" && (
-                <Route path="/callback" element={<CallbackPage />} />
-              )}
-              <Route path="*" element={billing} />
-            </Routes>
-          </BrowserRouter>
-        </ConsoleSession>
+        <BrowserRouter basename="/admin">
+          <ConsoleApp config={config} />
+        </BrowserRouter>
       </StrictMode>
     )
   })

@@ -44,10 +44,36 @@ The customer entry (`@openrails/billing-ui`) imports no admin modules or admin s
 
 ## Standalone server console
 
-The default browser URL is `https://billing.example.com/admin`; JSON requests use that origin's `/v1` routes.
+The standalone browser entry is `/admin`. For a server at `https://billing.doujins.com`, open `https://billing.doujins.com/admin`; its JSON APIs remain under `/v1`. An embedded host chooses the component's `basePath` itself.
 
-The standalone server's app is in `server/web/console`. It owns local or trusted-issuer sign-in and renders `BillingAdmin` from the public package. `admin_console.enabled`, `admin_console.path`, and the existing sign-in settings configure its mount. No host extension bundle is built into it; a host composes its own app with the component.
+The app in `server/web/console` composes three tabs from the public packages:
 
-`task admin-build` builds billing-ui and the standalone app into `server/web/console/dist`. `task build` embeds that output into the server binary. Release archives and Docker images build it before compiling Go. A Go build without frontend output still compiles, and attempting to enable a console without assets refuses startup.
+| Tab | Surface | Authority |
+| --- | --- | --- |
+| Billing | `BillingAdmin` | The selected merchant's billing access |
+| Access | AuthKit's `MembersAdmin`, `RolesAdmin`, `ApiKeysAdmin`, and `RemoteApplicationsAdmin` | The selected merchant's group or the root group; each panel checks its own permissions |
+| Account | AuthKit's password, second-factor, passkey and session panels | The locally signed-in person's own account |
 
-For a supplied build, pass an `fs.FS` rooted at `index.html` as `server.Deps.ConsoleAssets`. Its generated index contains the mount placeholder `<base href="/admin/">`, rewritten by the server when serving a different console path.
+App-signed-in staff manage people, roles and account security in their app. The console explains this instead of sending their remote tokens to the server's local AuthKit account API. Local owners and operators manage API keys and backend signing keys. There is no site-wide user browser or merchant registration page.
+
+The authenticated `GET /admin/merchants` directory supplies the merchant selector. Root staff see live merchants; other staff see the merchants their verified credential permits. A name in a query or browser state grants nothing, and token exchange refuses an unauthorized merchant.
+
+Declare app sign-in with `admin_console.issuers`, keyed by a merchant id or name (`root` for operators):
+
+```yaml
+admin_console:
+  issuers:
+    example-merchant:
+      url: https://app.example.com/auth
+      client_id: billing-console
+      name: Example app
+# local_sign_in: true
+```
+
+Register that public client at the app's authorization server with the callback `https://billing.example.com/admin/callback`. The app must already be trusted in the merchant's AuthKit group, and its role bounds the permissions or mapped roles in each token. AuthKit verifies resource, issuer, scope, claims and sender proof. The browser uses authorization code with PKCE.
+
+`local_sign_in` separately offers local accounts. The authority manifest seeds the first operator; `openrails push-auth-bootstrap -f …` reapplies it. Everyone else joins by invitation. AuthKit credential creation and role grants retain native recent-sign-in challenges; billing operations use their permissions directly.
+
+The console is always served at `/admin`. `admin_console.enabled` and `admin_console.path` are refused with migration instructions; singular `admin_console.issuer` is replaced by the keyed map. With neither app nor local sign-in configured, the page explains how to declare one and the server still boots.
+
+`task admin-build` builds billing-ui and the standalone app into `server/web/console/dist`; release archives and Docker images embed it. A source-only Go build without frontend assets still starts, and the console answers 503 with the build instruction. A malformed supplied build remains a startup error. Pass a supplied build as `server.Deps.ConsoleAssets`, rooted at `index.html` with the build's `<base href="/admin/">` placeholder.

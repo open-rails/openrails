@@ -25,3 +25,123 @@ input {
 #root > [role="alert"] {
   padding: 2rem;
 }
+
+.console-shell {
+  --background: #fafafa;
+  --foreground: #202124;
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --popover: #ffffff;
+  --popover-foreground: #202124;
+  --primary: #303134;
+  --primary-foreground: #ffffff;
+  --secondary: #eeeeef;
+  --secondary-foreground: #202124;
+  --muted: #f2f2f3;
+  --muted-foreground: #62646a;
+  --accent: #e7e7ea;
+  --accent-foreground: #202124;
+  --border: #d7d8db;
+  --input: #d7d8db;
+  --ring: #62646a;
+  --destructive: #b42318;
+  --radius: 0.625rem;
+  --chart-1: #4373bd;
+  --chart-2: #358579;
+  --chart-3: #a9548a;
+  --chart-4: #a47c29;
+  --chart-5: #638a36;
+  --settled: #267b58;
+  --settled-surface: #e7f5ed;
+  --held: #8e671a;
+  --held-surface: #fcf3df;
+  --failed: #b42318;
+  --failed-surface: #feeeeb;
+  --refunded: #336ea8;
+  --refunded-surface: #eaf2fa;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  color-scheme: light;
+}
+.console-shell[data-theme="dark"] {
+  --background: #16181c;
+  --foreground: #f0f1f3;
+  --card: #202328;
+  --card-foreground: #f0f1f3;
+  --popover: #202328;
+  --popover-foreground: #f0f1f3;
+  --primary: #e7e8eb;
+  --primary-foreground: #202124;
+  --secondary: #2b2e34;
+  --secondary-foreground: #f0f1f3;
+  --muted: #1c1f24;
+  --muted-foreground: #aeb3bc;
+  --accent: #32363e;
+  --accent-foreground: #f0f1f3;
+  --border: #444951;
+  --input: #444951;
+  --ring: #ced1d7;
+  --destructive: #f58d84;
+  --settled: #79d4a8;
+  --settled-surface: #153d2d;
+  --held: #e5c479;
+  --held-surface: #42351b;
+  --failed: #f58d84;
+  --failed-surface: #482822;
+  --refunded: #83bbed;
+  --refunded-surface: #24374b;
+  color-scheme: dark;
+}
+.console-header,
+.console-tabs {
+  border-color: var(--border, #ddd);
+}
+.console-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--border, #ddd);
+  padding: 1rem;
+}
+.console-tabs a,
+.console-header a {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+}
+.console-tabs a:hover,
+.console-tabs a:focus-visible {
+  text-decoration: underline;
+}
+.console-section {
+  margin: 0 auto;
+  max-width: 80rem;
+  padding: 1.5rem;
+}
+.console-scope {
+  display: block;
+  padding: 1rem;
+}
+.console-sign-in {
+  display: grid;
+  gap: 1rem;
+  max-width: 32rem;
+  margin: 10vh auto;
+  padding: 1.5rem;
+}
+.console-other-sign-in {
+  display: block;
+  margin: 1rem auto;
+}
+.console-description {
+  color: #62646a;
+  line-height: 1.5;
+}
+.console-sign-in-action {
+  margin-top: 1.5rem;
+}
+select {
+  max-width: min(24rem, 80vw);
+  font: inherit;
+}

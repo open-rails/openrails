@@ -45,11 +45,8 @@ type Config struct {
 	// RouteGroups turns the server's route groups on (route_groups); each is
 	// off by default.
 	RouteGroups billing.RouteGroups
-	// AdminConsole serves the merchant admin console; nil, the default,
-	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
-	// at a trusted issuer.
-	AdminConsole  *ConsoleMount
-	ConsoleIssuer *ConsoleIssuer
+	// AdminConsole declares app sign-in. The console is always served at /admin.
+	AdminConsole *ConsoleConfig
 	// HostedCheckoutURL is the hosted checkout host's origin
 	// (hosted_checkout.url); empty serves none.
 	HostedCheckoutURL string
@@ -98,7 +95,7 @@ type fileConfig struct {
 	RateLimitsDisabled bool                      `koanf:"rate_limits_disabled"`
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
 	Vault              *billing.VaultConfig      `koanf:"vault"`
-	AdminConsole       *adminConsoleFile         `koanf:"admin_console"`
+	AdminConsole       *ConsoleConfig            `koanf:"admin_console"`
 	HostedCheckout     *hostedCheckoutFile       `koanf:"hosted_checkout"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
 	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
@@ -210,28 +207,6 @@ func (s *smtpFile) config() (*billing.SMTPConfig, error) {
 	return &billing.SMTPConfig{Host: s.Host, Port: s.Port, Username: s.Username, Password: s.Password, From: from}, nil
 }
 
-// adminConsoleFile is the admin_console section: the server serves the
-// console at path only while enabled.
-type adminConsoleFile struct {
-	Enabled bool           `koanf:"enabled"`
-	Path    string         `koanf:"path"`
-	Issuer  *ConsoleIssuer `koanf:"issuer"`
-}
-
-func (a *adminConsoleFile) mount() *ConsoleMount {
-	if a == nil || !a.Enabled {
-		return nil
-	}
-	return &ConsoleMount{Path: a.Path}
-}
-
-func (a *adminConsoleFile) issuer() *ConsoleIssuer {
-	if a == nil || !a.Enabled {
-		return nil
-	}
-	return a.Issuer
-}
-
 // hostedCheckoutFile is the hosted_checkout section: the origin the server
 // serves the checkout page on, apart from its API's.
 type hostedCheckoutFile struct {
@@ -296,8 +271,7 @@ func (f *fileConfig) config() (*Config, error) {
 		ShutdownTimeout:          f.ShutdownTimeout,
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
-		AdminConsole:             f.AdminConsole.mount(),
-		ConsoleIssuer:            f.AdminConsole.issuer(),
+		AdminConsole:             f.AdminConsole,
 		HostedCheckoutURL:        f.HostedCheckout.url(),
 	}, nil
 }
@@ -353,10 +327,6 @@ func Validate(cfg *Config) error {
 	if err := billing.Validate(cfg.Config); err != nil {
 		return err
 	}
-	if cfg.AdminConsole != nil {
-		if err := billing.ValidateMountPath("admin_console.path", AdminConsolePath(cfg.AdminConsole)); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }

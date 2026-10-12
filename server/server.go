@@ -42,11 +42,9 @@ type (
 	// MerchantCreationConfig is Config.MerchantCreation: the policy for
 	// merchants and names users claim.
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
-	// AdminConsole is Config.AdminConsole: where the merchant admin console
-	// is served and how staff sign in.
-	AdminConsole = hostconfig.ConsoleMount
-	// ConsoleIssuer is Config.ConsoleIssuer: the trusted issuer staff sign in
-	// to the admin console at.
+	// AdminConsole declares the apps staff sign in through at /admin.
+	AdminConsole = hostconfig.ConsoleConfig
+	// ConsoleIssuer is one merchant or operator authorization server.
 	ConsoleIssuer = hostconfig.ConsoleIssuer
 	// NamingConfig is Config.Naming: the rename policy for merchant names.
 	NamingConfig = config.NamingConfig
@@ -107,13 +105,9 @@ type Config struct {
 	// route behind the server's own merchant permission (the Merchant*
 	// permissions).
 	RouteGroups openrails.RouteGroups
-	// AdminConsole serves the merchant admin console; nil serves none. It
-	// needs a staff route group on. Its AuthBaseURL defaults to this server's
-	// AuthKit with LocalSignIn.
+	// AdminConsole declares app sign-in methods. The console is always on at
+	// /admin; LocalSignIn separately enables local accounts.
 	AdminConsole *AdminConsole
-	// ConsoleIssuer signs staff in to the console at a trusted issuer
-	// instead of the server's own accounts.
-	ConsoleIssuer *ConsoleIssuer
 	// HostedCheckoutURL is the origin (https://checkout.example.com) the
 	// server serves its hosted checkout on, by Host; merchant orders then
 	// take a checkout. It must be an origin of its own. Empty serves none.
@@ -216,7 +210,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.ConsoleIssuer == nil}
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.LocalSignIn}
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {
@@ -280,7 +274,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		consoleAssets = admin.FS()
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer, Resource: akCfg.Resource.ID,
+		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
 		CheckoutOrigin: origin, CheckoutAssets: checkoutAssets(deps.CheckoutAssets), ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))

@@ -15,15 +15,14 @@ import (
 	admin "github.com/open-rails/openrails/server/web/console"
 )
 
-// One console build serves any mount path: index.html references its assets
-// relative to the <base href> the handler rewrites. Skips without a build;
+// The built console serves its entry and hashed assets at /admin. Skips without a build;
 // scripts/check.sh builds the console first.
-func TestBuiltConsoleServesAtAnyPath(t *testing.T) {
+func TestBuiltConsoleServesItsAssets(t *testing.T) {
 	assets := admin.FS()
 	if assets == nil {
 		t.Skip("server/web/console/dist holds no console build (scripts/build-admin-console.sh)")
 	}
-	const mount = "/billing/admin"
+	const mount = "/admin"
 	console, err := adminconsole.Handler(mount, adminconsole.Config{}, assets)
 	require.NoError(t, err)
 	get := func(path string) *httptest.ResponseRecorder {
@@ -34,7 +33,7 @@ func TestBuiltConsoleServesAtAnyPath(t *testing.T) {
 
 	index := get(mount + "/customers/42")
 	require.Equal(t, http.StatusOK, index.Code)
-	require.Contains(t, index.Body.String(), `<base href="/billing/admin/">`)
+	require.Contains(t, index.Body.String(), `<base href="/admin/">`)
 	base, err := url.Parse("http://console.test" + mount + "/")
 	require.NoError(t, err)
 	served := 0

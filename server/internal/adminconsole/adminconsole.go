@@ -22,12 +22,9 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// Issuer is the trusted issuer the console signs staff in at; null signs
-	// in to AuthBaseURL's own accounts.
-	Issuer *Issuer `json:"issuer"`
-	// Merchant is the merchant the mount serves; null where staff choose one
-	// (staff open one by id).
-	Merchant *Merchant `json:"merchant"`
+	// LocalSignIn offers this server's own accounts alongside app sign-in.
+	LocalSignIn bool     `json:"local_sign_in"`
+	Issuers     []Issuer `json:"issuers"`
 	// Exchange is where the console trades the session's token for one bound
 	// to the merchant staff choose (RFC 8693, the merchant's id as group_id);
 	// null where the session's token is bound already (an issuer's, or the
@@ -49,13 +46,16 @@ type Merchant struct {
 	ID          string `json:"id"`
 	Slug        string `json:"slug"`
 	DisplayName string `json:"display_name,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 // Issuer is the console's OAuth 2.0 public client at a trusted issuer.
 type Issuer struct {
-	URL      string `json:"url"`
-	ClientID string `json:"client_id"`
-	Name     string `json:"name"`
+	Key      string    `json:"key"`
+	Merchant *Merchant `json:"merchant,omitempty"`
+	URL      string    `json:"url"`
+	ClientID string    `json:"client_id"`
+	Name     string    `json:"name"`
 	// Resource is this deployment's resource identifier, Scope what the
 	// console asks for.
 	Resource string `json:"resource"`
@@ -64,7 +64,7 @@ type Issuer struct {
 
 // Present reports whether assets hold a servable console build: a non-nil
 // fs.FS with index.html at its root. The mount rule (#754) keys on this —
-// enabled + !Present is a boot error, not a degraded mount.
+// A source-only build without assets answers an explicit 503 at the console.
 func Present(assets fs.FS) bool {
 	if assets == nil {
 		return false
@@ -84,14 +84,17 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 // redirects to path/. Mount it at path without stripping the prefix (ServeMux
 // "path/", gin "path/*any" and chi Mount all keep it): the build's URLs resolve
 // against path, so a request outside it is a mount mistake, answered 500 and
-// logged. Callers should gate mounting on Present(assets); without a build
+// logged. Without a build
 // every request answers 503 naming the build step.
 func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
-	if cfg.AuthBaseURL == "" && cfg.Issuer == nil {
+	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "/v1"
+	}
+	if cfg.Issuers == nil {
+		cfg.Issuers = []Issuer{}
 	}
 	configJSON, err := json.Marshal(cfg)
 	if err != nil {

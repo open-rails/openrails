@@ -1,0 +1,137 @@
+import { useMemo, useState } from "react"
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom"
+import {
+  ConsoleSession,
+  createConsoleSession,
+  type ConsoleClient,
+} from "./lib/session"
+import { ISSUER_REDIRECT_KEY, useIdentity } from "./lib/identity"
+import { LoginPage } from "./pages/login"
+import { CallbackPage } from "./pages/callback"
+import { MerchantWorkspace } from "./workspace"
+import type { BootstrapConfig } from "./config"
+
+const METHOD_KEY = "openrails.console.sign-in"
+
+function SignInChoices({
+  config,
+  choose,
+}: {
+  config: BootstrapConfig
+  choose: (key: string) => void
+}) {
+  return (
+    <main className="console-sign-in">
+      <h1>Sign in to OpenRails</h1>
+      {config.issuers.map((issuer) => (
+        <button key={issuer.key} onClick={() => choose(issuer.key)}>
+          Sign in with {issuer.name}
+        </button>
+      ))}
+      {config.local_sign_in && (
+        <button onClick={() => choose("local")}>
+          Sign in with a local account
+        </button>
+      )}
+      {!config.local_sign_in && config.issuers.length === 0 && (
+        <div role="status">
+          <h2>Declare a sign-in method</h2>
+          <p>
+            Configure <code>admin_console.issuers</code> to sign in through a
+            merchant's app, or enable <code>local_sign_in</code> and seed the
+            first operator through the authority manifest.
+          </p>
+        </div>
+      )}
+    </main>
+  )
+}
+
+export function ConsoleApp({ config }: { config: BootstrapConfig }) {
+  const [method, setMethod] = useState(
+    () =>
+      sessionStorage.getItem(METHOD_KEY) ??
+      (config.issuers.length === 0 && config.local_sign_in ? "local" : "")
+  )
+  const issuer = config.issuers.find((item) => item.key === method)
+  const session = useMemo(
+    () =>
+      issuer || (method === "local" && config.local_sign_in)
+        ? createConsoleSession(config, issuer)
+        : null,
+    [config, issuer, method]
+  )
+  const navigate = useNavigate()
+  const choose = (key: string) => {
+    sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
+    sessionStorage.setItem(METHOD_KEY, key)
+    setMethod(key)
+    void navigate("/login")
+  }
+  if (!session) return <SignInChoices config={config} choose={choose} />
+  return (
+    <ConsoleSession key={method} session={session}>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <>
+              <LoginPage />
+              <button
+                className="console-other-sign-in"
+                onClick={() => choose("")}
+              >
+                Other sign-in options
+              </button>
+            </>
+          }
+        />
+        {session.kind === "issuer" && (
+          <Route path="/callback" element={<CallbackPage />} />
+        )}
+        <Route
+          path="*"
+          element={<SignedIn config={config} session={session} />}
+        />
+      </Routes>
+    </ConsoleSession>
+  )
+}
+
+function SignedIn({
+  config,
+  session,
+}: {
+  config: BootstrapConfig
+  session: ConsoleClient
+}) {
+  const identity = useIdentity()
+  const location = useLocation()
+  if (identity.status === "loading" || identity.status === "restoring")
+    return (
+      <p role="status" className="console-empty">
+        Restoring your session…
+      </p>
+    )
+  if (identity.status !== "signed_in")
+    return (
+      <Navigate
+        to={`/login?return_to=${encodeURIComponent(location.pathname + location.search)}`}
+        replace
+      />
+    )
+  return (
+    <MerchantWorkspace
+      key={identity.user?.id}
+      config={config}
+      session={session}
+      subject={identity.user!.id}
+    />
+  )
+}

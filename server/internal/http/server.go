@@ -32,19 +32,16 @@ type Dependencies struct {
 	// server selectively mounts the intentional AuthKit route groups (never
 	// DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
-	// Resource is AuthKit's resource identifier, and ConsoleIssuer the
-	// trusted issuer the admin console signs staff in at.
-	Resource      string
-	ConsoleIssuer *hostconfig.ConsoleIssuer
+	// Resource is AuthKit's resource identifier.
+	Resource string
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
-	// The console mounts only when this is present AND admin_console.enabled;
-	// enabled without assets is a boot error.
+	// Without assets the console answers 503 with its build instruction.
 	ConsoleAssets fs.FS
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
-	// AdminConsole serves the merchant admin console; nil serves none.
-	AdminConsole *hostconfig.ConsoleMount
+	// AdminConsole declares app sign-in methods; the console is always on.
+	AdminConsole *hostconfig.ConsoleConfig
 	// CheckoutOrigin serves the hosted checkout there (by Host), from
 	// CheckoutAssets; empty serves none.
 	CheckoutOrigin string
@@ -59,14 +56,13 @@ type Server struct {
 	// auth is AuthKit's Authenticator: who every request is.
 	auth         billingauth.Authenticator
 	controlPlane *controlplane.ControlPlane
-	// resource and consoleIssuer are Dependencies'.
-	resource      string
-	consoleIssuer *hostconfig.ConsoleIssuer
-	captchaStore  *captcha.ChallengeStore
-	adminLimiter  *middleware.AdminOperationLimiter
+	// resource is Dependencies'.
+	resource     string
+	captchaStore *captcha.ChallengeStore
+	adminLimiter *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
-	adminConsole  *hostconfig.ConsoleMount
+	adminConsole  *hostconfig.ConsoleConfig
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 
@@ -195,7 +191,6 @@ func New(deps Dependencies) (*Server, error) {
 		auth:              deps.ControlPlane.Core().Authenticator(),
 		controlPlane:      deps.ControlPlane,
 		resource:          deps.Resource,
-		consoleIssuer:     deps.ConsoleIssuer,
 		captchaStore:      deps.Runtime.CaptchaStore,
 		adminLimiter:      middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
 		consoleAssets:     deps.ConsoleAssets,

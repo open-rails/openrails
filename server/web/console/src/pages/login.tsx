@@ -1,6 +1,6 @@
 import * as React from "react"
 import { LoginForm } from "@openrails/auth-ui"
-import { Navigate, useNavigate } from "react-router-dom"
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 
 import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
 
@@ -12,45 +12,47 @@ export function LoginPage() {
   const signedIn = status === "signed_in"
   const ready = status === "signed_out" || signedIn
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const requested = params.get("return_to") ?? "/"
+  const returnTo =
+    requested.startsWith("/") &&
+    !requested.startsWith("//") &&
+    !requested.includes("\\")
+      ? requested
+      : "/"
   const signInAtIssuer = issuer?.signIn
   React.useEffect(() => {
     if (!ready || signedIn || !signInAtIssuer) return
     if (sessionStorage.getItem(ISSUER_REDIRECT_KEY)) return
     sessionStorage.setItem(ISSUER_REDIRECT_KEY, "1")
-    void signInAtIssuer("/", true)
-  }, [ready, signedIn, signInAtIssuer])
+    void signInAtIssuer(returnTo, true)
+  }, [ready, signedIn, signInAtIssuer, returnTo])
   if (!ready) {
-    return (
-      <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
-        Loading…
-      </div>
-    )
+    return <div className="console-sign-in">Loading…</div>
   }
   if (signedIn) {
     sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
-    return <Navigate to="/" replace />
+    return <Navigate to={returnTo} replace />
   }
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background px-6 py-12">
-      <div className="w-full max-w-sm">
-        <h1 className="mt-8 text-2xl font-semibold tracking-tight text-balance">
-          Sign in to your console
-        </h1>
-        <p className="mt-2 text-sm text-pretty text-muted-foreground">
+    <div className="console-sign-in">
+      <div className="console-sign-in-content">
+        <h1 className="console-heading">Sign in to your console</h1>
+        <p className="console-description">
           The merchant console for your OpenRails deployment.
         </p>
         {issuer ? (
           <button
             type="button"
-            className="mt-8 w-full"
-            onClick={() => void issuer.signIn("/")}
+            className="console-sign-in-action"
+            onClick={() => void issuer.signIn(returnTo)}
           >
             Sign in with {issuer.name}
           </button>
         ) : (
           <LoginForm
-            className="mt-8"
-            onSignedIn={() => navigate("/", { replace: true })}
+            className="console-sign-in-action"
+            onSignedIn={() => navigate(returnTo, { replace: true })}
           />
         )}
       </div>

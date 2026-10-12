@@ -56,8 +56,8 @@ console() {
     echo "console: server/web/console/dist/index.html missing — the embed gate would prove nothing" >&2
     exit 1
   }
-  # One build serves any admin_console.path (#1127).
-  bash scripts/go-test-gate.sh -C server ./internal/adminconsole TestBuiltConsoleServesAtAnyPath
+  # The standalone product serves its built console at /admin.
+  bash scripts/go-test-gate.sh -C server ./internal/adminconsole TestBuiltConsoleServesItsAssets
   git diff --quiet -- server/web/console/dist || {
     echo "console: the build removed server/web/console/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1

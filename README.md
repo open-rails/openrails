@@ -604,15 +604,15 @@ ends after its 3 days; a canceled membership keeps access until its paid term en
 
 #### Admin dashboard
 
-The standalone server ships a staff dashboard covering customer support,
-the catalog, merchant configuration and business metrics. Enable it with
-`admin_console.enabled` and the staff `route_groups` it uses; see the
-[standalone admin console](docs/billing-admin.md).
+The standalone server's console is at `/admin`, with Billing, Access and
+Account tabs. Configure app sign-in with `admin_console.issuers`, or offer
+local accounts with `local_sign_in`; see the [standalone console](docs/billing-admin.md).
 
-The browser console opens at `/admin` by default (or `admin_console.path`).
-`GET /v1/metrics/dashboard` is a JSON API: it reads the saved dashboard layout
-and widget definitions. Chart data comes from `POST /v1/metrics/query`.
-An embedded host renders `BillingAdmin` under its own `basePath`.
+The browser entry and JSON API have separate URLs. For a server hosted at
+`https://billing.doujins.com`, open `https://billing.doujins.com/admin`.
+`GET /v1/metrics/dashboard` returns the saved JSON layout and widget definitions;
+`POST /v1/metrics/query` returns chart data. A host embedding `BillingAdmin`
+chooses its own `basePath`.
 
 An embedded engine serves the billing API. The host owns its admin pages
 and authenticates their calls through `Routes.Auth`. `GET /v1/admin/access`

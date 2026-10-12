@@ -51,10 +51,9 @@ func TestFileReachesConfig(t *testing.T) {
 			t.Fatalf("%s: unhandled kind %s", v.Type().Field(i).Name, field.Kind())
 		}
 	}
-	f.AdminConsole.Enabled = true
 	f.EmailSMTP.Host = "smtp.example"
 	f.Redis.Addr = "redis:6379"
-	f.AdminConsole.Issuer = &ConsoleIssuer{}
+	f.AdminConsole.Issuers = map[string]ConsoleIssuer{"merchant": {URL: "https://issuer.example", ClientID: "console"}}
 	f.HostedCheckout.URL = "https://checkout.example"
 	cfg, err := f.config()
 	require.NoError(t, err)

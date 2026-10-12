@@ -116,11 +116,13 @@ func TestConsoleSwitchesMerchantByExchange(t *testing.T) {
 	h, err := standaloneHandler(defaulted)
 	require.NoError(t, err)
 	require.Contains(t, get(h, "/admin/config.json").Body.String(), `"resource":"https://api.console.e2e.test"`, "the public API base is the resource")
-	_, err = f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
-		standaloneConsole("http://127.0.0.1/"+f.schema, &server.AdminConsole{})(cfg, deps)
+	unbound := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1/"+f.schema, nil)(cfg, deps)
 		cfg.Auth.Resource = authkit.ResourceConfig{}
 	})
-	require.ErrorContains(t, err, "needs the server's resource")
+	unboundHandler, err := standaloneHandler(unbound)
+	require.NoError(t, err)
+	require.Contains(t, get(unboundHandler, "/admin/config.json").Body.String(), `"exchange":null`)
 }
 
 // The console's bootstrap document names the path AuthKit's JSON API is
@@ -149,47 +151,60 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 	}
 }
 
-// admin_console.path moves the standalone console (#1127): the server's
-// handler and its routes on a host router both serve it there and nothing at
-// /admin, and a path over OpenRails' own routes refuses to build the server.
-// Without a console selected no console route exists.
-func TestStandaloneAdminConsolePath(t *testing.T) {
+// The standalone product always owns /admin, including a server whose staff
+// use only AuthKit's account and access surfaces.
+func TestServerConsoleIsOnByDefault(t *testing.T) {
 	f := newFixture(t)
-	moved := f.newServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Path: "/billing/admin"}))
-	handler, err := standaloneHandler(moved)
+	srv := f.newServer(t, standaloneConsole("http://127.0.0.1", nil))
+	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	routes, err := moved.Routes()
+	requireConsoleAt(t, handler, "/admin", "standalone")
+	routes, err := srv.Routes()
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	for _, r := range routes {
-		mux.Handle(r.Method+" "+r.Path, r.Handler)
+	for _, route := range routes {
+		mux.Handle(route.Method+" "+route.Path, route.Handler)
 	}
-	for _, h := range []http.Handler{handler, mux} {
-		requireConsoleAt(t, h, "/billing/admin", "standalone")
-		require.Equal(t, http.StatusNotFound, get(h, "/admin/").Code)
-	}
-	off, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", nil)))
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
-
-	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Path: "/v1"}))
-	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
-	_, err = f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
-		standaloneConsole("http://127.0.0.1", &server.AdminConsole{})(cfg, deps)
+	requireConsoleAt(t, mux, "/admin", "standalone")
+	accountOnly := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1", nil)(cfg, deps)
 		cfg.RouteGroups = openrails.RouteGroups{Programmatic: true}
 	})
-	require.ErrorContains(t, err, "turn on at least one of route_groups.admin")
+	accountHandler, err := standaloneHandler(accountOnly)
+	require.NoError(t, err)
+	requireConsoleAt(t, accountHandler, "/admin", "standalone")
+}
+
+func TestServerConsoleBootsWithoutSignIn(t *testing.T) {
+	f := newFixture(t)
+	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1", nil)(cfg, deps)
+		cfg.LocalSignIn = false
+	})
+	handler, err := standaloneHandler(srv)
+	require.NoError(t, err)
+	requireConsoleAt(t, handler, "/admin", "standalone")
+	boot := get(handler, "/admin/config.json")
+	require.Contains(t, boot.Body.String(), `"local_sign_in":false`)
+	require.Contains(t, boot.Body.String(), `"issuers":[]`)
+	require.Equal(t, http.StatusUnauthorized, get(handler, "/admin/merchants").Code)
 }
 
 // An explicitly supplied build is owned by the server, validated before serving.
 func TestStandaloneConsoleRequiresValidAssets(t *testing.T) {
 	f := newFixture(t)
+	missing := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1", nil)(cfg, deps)
+		deps.ConsoleAssets = fstest.MapFS{}
+	})
+	handler, err := standaloneHandler(missing)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, get(handler, "/admin/").Code)
 	for _, tc := range []struct {
 		name   string
 		assets fstest.MapFS
 		want   string
 	}{
-		{"missing", fstest.MapFS{}, "holds no console build"},
 		{"invalid index", fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}, `<base href="/admin/">`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

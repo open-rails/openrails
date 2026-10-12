@@ -10,7 +10,7 @@ import {
 import { AuthUiProvider } from "@openrails/auth-ui/provider"
 import { AuthProvider, IssuerAuthProvider } from "@openrails/auth-ui/react"
 
-import type { BootstrapConfig } from "../config"
+import type { BootstrapConfig, ConsoleIssuer } from "../config"
 import { IssuerIdentity, LocalIdentity } from "@/lib/identity"
 import { routerBasename } from "@/lib/mount"
 
@@ -20,7 +20,7 @@ const REFRESH_KEY = "openrails.admin.refresh"
 
 export type ConsoleClient =
   | { kind: "local"; client: AuthClient }
-  | { kind: "issuer"; client: IssuerClient; name: string }
+  | { kind: "issuer"; client: IssuerClient; issuer: ConsoleIssuer }
 
 // consoleURL is path beneath the console's mount, absolute.
 export function consoleURL(path: string): string {
@@ -29,17 +29,20 @@ export function consoleURL(path: string): string {
     .href
 }
 
-export function createConsoleSession(config: BootstrapConfig): ConsoleClient {
-  if (config.issuer) {
+export function createConsoleSession(
+  config: BootstrapConfig,
+  issuer?: ConsoleIssuer
+): ConsoleClient {
+  if (issuer) {
     const client = createIssuerClient({
-      issuer: config.issuer.url,
-      clientId: config.issuer.client_id,
+      issuer: issuer.url,
+      clientId: issuer.client_id,
       redirectUri: consoleURL("/callback"),
-      resource: config.issuer.resource,
-      scope: config.issuer.scope,
+      resource: issuer.resource,
+      scope: issuer.scope,
       postLogoutRedirectUri: consoleURL("/login"),
     })
-    return { kind: "issuer", client, name: config.issuer.name }
+    return { kind: "issuer", client, issuer }
   }
   // A merchant's token is exchanged through the console's own client, bound
   // to this browser's key (a public client proves one), and kept in memory.
@@ -75,7 +78,7 @@ export function ConsoleSession({
   if (session.kind === "issuer") {
     return (
       <IssuerAuthProvider client={session.client}>
-        <IssuerIdentity name={session.name}>{children}</IssuerIdentity>
+        <IssuerIdentity name={session.issuer.name}>{children}</IssuerIdentity>
       </IssuerAuthProvider>
     )
   }

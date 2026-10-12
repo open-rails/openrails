@@ -43,24 +43,22 @@ export function CallbackPage() {
     }
   }, [client, navigate])
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background px-6 py-12">
-      <div className="w-full max-w-sm">
+    <div className="console-sign-in">
+      <div className="console-sign-in-content">
         {error ? (
           <>
-            <h1 className="mt-8 text-2xl font-semibold tracking-tight">
-              Sign-in did not complete
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+            <h1 className="console-heading">Sign-in did not complete</h1>
+            <p className="console-description">{error}</p>
             <button
               type="button"
-              className="mt-8"
+              className="console-sign-in-action"
               onClick={() => navigate("/login")}
             >
               Try again
             </button>
           </>
         ) : (
-          <p role="status" className="mt-8 text-sm text-muted-foreground">
+          <p role="status" className="console-description">
             Signing in…
           </p>
         )}
