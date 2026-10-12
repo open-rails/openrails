@@ -87,6 +87,9 @@ func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingPr
 	if !ok || action.ID != *in.DestructiveActionID {
 		return ctx, errors.New("destructive effect has no original action")
 	}
+	if database == nil || clock == nil {
+		return ctx, errors.New("destructive send fence has no database or clock")
+	}
 	var evidence struct {
 		BeforeEffect bool `json:"destructive_before_effect"`
 	}
@@ -101,12 +104,6 @@ func startProtectedEffect(ctx context.Context, database *db.DB, in gen.BillingPr
 	}
 	if err != nil {
 		return ctx, err
-	}
-	if database == nil {
-		return ctx, errors.New("destructive send fence has no database")
-	}
-	if clock == nil {
-		clock = clockwork.NewRealClock()
 	}
 	n, err := database.Gen(ctx).FenceDestructiveProviderSend(ctx, gen.FenceDestructiveProviderSendParams{MerchantID: in.MerchantID, ID: in.ID, DestructiveActionID: *in.DestructiveActionID, Attempts: in.Attempts, Now: clock.Now()})
 	if err != nil {
