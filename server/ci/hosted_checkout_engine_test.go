@@ -72,7 +72,7 @@ func TestEmbeddedEngineHostedCheckout(t *testing.T) {
 	res = call("/v1/me/orders/"+order.ID.String(), secret)
 	require.Equal(t, 200, res.Code, res.Body.String())
 	res = call("/v1/me/orders/"+order.ID.String(), "")
-	require.Equal(t, 401, res.Code)
+	require.Equal(t, 404, res.Code, "an absent capability reveals no order")
 	res = call("/v1/me/orders/"+billing.OrderID(uuid.New()).String(), secret)
 	require.NotEqual(t, 200, res.Code)
 	for _, path := range []string{"/admin/", "/auth/v1/me", "/v1/catalog/products", "/v1/me/payment-methods"} {

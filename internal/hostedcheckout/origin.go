@@ -18,7 +18,7 @@ func Origin(raw string, forbidden ...string) (string, error) {
 	for _, other := range forbidden {
 		parsed, err := url.Parse(strings.TrimSpace(other))
 		if err == nil && parsed.Host != "" && strings.ToLower(parsed.Scheme+"://"+parsed.Host) == origin {
-			return "", fmt.Errorf("hosted checkout must use an origin separate from billing and sign-in")
+			return "", fmt.Errorf("hosted checkout must use its own origin, separate from billing and sign-in")
 		}
 	}
 	return origin, nil
