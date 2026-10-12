@@ -167,8 +167,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `usage_events` and `admission_operations` are partitioned by month, so every read of
   them names a time range.
 - External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
-  `psp_customers` and `psp_refresh_watermarks`. Every purchase is an `orders` row (`ord_`)
-  with its `order_lines`; a `checkout_attempts` row (`chk_`) is a provider attempt; a host
+  `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
+  with its `order_lines`, provider-run renewals included (`docs/provider-managed-orders.md`);
+  a `checkout_attempts` row (`chk_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
