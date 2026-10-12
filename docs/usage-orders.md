@@ -79,3 +79,8 @@ payment; with other terms it is 422 `idempotency_key_reused`. More than is due
 is 409 `payment_exceeds_due`.
 
 Staff cannot initiate an immediate saved-card charge. The customer pays an outstanding order explicitly; automatic collection and dunning run under the customer's active agreement and configured retry policy. `WaiveOrderBalance` forgives the remaining debt; it does not refund earlier payments. `RecordExternalPayment` records money already received. Marking a balance uncollectible stops scheduled collection while retaining what is owed.
+
+Staff subscription changes also perform no immediate saved-card charge:
+engine-billed upgrades and seat increases take effect at renewal, while the
+customer's own subscription-change flow retains immediate proration. A staff
+retry of an older pending provider operation only reads its status.

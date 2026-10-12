@@ -152,25 +152,23 @@ func TestSeats(t *testing.T) {
 		require.Equal(t, seats(2), next.Quantity)
 		require.Equal(t, business.ID, next.PriceID)
 
-		// Staff add seats now at the customer's request, merchant-initiated
-		// under the card's agreement; fewer seats wait for the renewal.
+		// Staff schedule both seat increases and decreases at the next renewal.
 		w.advance(next.CurrentPeriodEndsAt.Sub(w.clock.Now()) - 360*time.Hour)
 		charges = len(w.railLedger(rail))
 		staffPreview, err := w.client[remote].PreviewSubscriptionChange(t.Context(), successor, billing.ChangeSubscriptionParams{Quantity: seats(5)})
 		require.NoError(t, err)
-		require.Equal(t, "now", staffPreview.Effective)
-		require.Equal(t, int64(3000*10_000), staffPreview.AmountDueNow, "3 added seats of 2000 for half the period")
+		require.Equal(t, "period_end", staffPreview.Effective)
+		require.Zero(t, staffPreview.AmountDueNow)
 		staff, err := w.client[embedded].ChangeSubscription(t.Context(), successor, billing.ChangeSubscriptionParams{Reason: "five seats by phone", Quantity: seats(5), IdempotencyKey: "staff-" + uuid.NewString()})
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", staff.Status, "%+v", staff)
-		require.Equal(t, int64(3000*10_000), staff.AmountDueNow)
+		require.Zero(t, staff.AmountDueNow)
 		require.Equal(t, int64(10000*10_000), staff.NextChargeAmount)
-		ledger = w.railLedger(rail)
-		require.Len(t, ledger, charges+1)
-		require.Equal(t, int64(3000), ledger[len(ledger)-1].Amount)
-		w.requireMerchantInitiated(rail, ledger[len(ledger)-1])
-		w.requireStaffCharge(c, successor, 3000, "five seats by phone")
-		require.Equal(t, seats(5), w.subscription(remote, successor).Quantity)
+		require.Len(t, w.railLedger(rail), charges, "a staff seat increase never charges now")
+		require.Equal(t, seats(2), w.subscription(remote, successor).Quantity)
+		require.Equal(t, seats(5), w.subscription(remote, successor).ScheduledChange.Quantity)
+		w.requireStaffSchedule(c, successor, "five seats by phone")
+
 		fewer, err := w.client[remote].ChangeSubscription(t.Context(), successor, billing.ChangeSubscriptionParams{Reason: "four seats by email", Quantity: seats(4), IdempotencyKey: "staff-" + uuid.NewString()})
 		require.NoError(t, err)
 		require.Equal(t, "period_end", fewer.Effective)
@@ -181,7 +179,7 @@ func TestSeats(t *testing.T) {
 		w.advanceHealthyTo(next.CurrentPeriodEndsAt.Add(time.Second))
 		w.runRenewals()
 		ledger = w.railLedger(rail)
-		require.Len(t, ledger, charges+2)
+		require.Len(t, ledger, charges+1)
 		require.Equal(t, int64(8000), ledger[len(ledger)-1].Amount, "the renewal bills the staff's seats")
 		require.Equal(t, seats(4), w.subscription(embedded, successor).Quantity)
 
