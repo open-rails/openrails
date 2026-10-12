@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -127,7 +128,11 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	for i, l := range lines {
 		ids[i] = l.PriceID.String()
 	}
-	rows, err := q.ListPricesWithProductByPublicIDs(ctx, gen.ListPricesWithProductByPublicIDsParams{MerchantID: merchantID, Ids: ids})
+	stored, err := db.ResolvePriceIDs(ctx, q, merchantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: merchantID, Ids: stored})
 	if err != nil {
 		return nil, err
 	}

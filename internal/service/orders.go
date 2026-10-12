@@ -177,7 +177,10 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
 		return OrderAnswer{}, err
 	}
-	digest := orderDigest(params)
+	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
 	customer := actor.Customer.UUID()
 	scoped := customer.String() + ":" + key
 	claim, rec, err := rt.Idempotency.Begin(ctx, orderCreateOperation, scoped)
@@ -808,7 +811,11 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
 		return nil, false, err
 	}
-	digest, scoped := orderDigest(params), "app:"+key
+	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
+	if err != nil {
+		return nil, false, err
+	}
+	scoped := "app:" + key
 	existing, err := rt.Orders.ByIdempotencyKey(ctx, params.CustomerID.UUID(), scoped)
 	if err != nil {
 		return nil, false, err

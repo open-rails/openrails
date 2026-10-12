@@ -62,6 +62,9 @@ func (s *CheckoutAttemptService) LookupSession(ctx context.Context, req *Checkou
 		response = s.sessionToResponse(session)
 	}
 	canonicalizeCheckoutPaymentName(&req.Payment)
+	if err := s.setFingerprintPrice(ctx, req); err != nil {
+		return nil, err
+	}
 	stored, _ := session.RailState[checkoutAttemptFingerprintKey].(string)
 	fingerprint := checkoutAttemptRequestFingerprint(req)
 	if stored == "" || stored != fingerprint {
