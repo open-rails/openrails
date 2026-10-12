@@ -36,6 +36,10 @@ ALTER TABLE billing.prices ALTER COLUMN public_id SET NOT NULL;
 -- uniqueness already makes the canonical public ID unique per merchant.
 CREATE INDEX prices_public_id_idx ON billing.prices (merchant_id, sha256(public_id::bytea));
 
+-- Archived-price pages must not scan the merchant's live catalog to find a
+-- small historical subset; this also preserves their keyset ordering.
+CREATE INDEX prices_archived_created_at_id_idx ON billing.prices (merchant_id, archived, created_at DESC, id DESC);
+
 CREATE FUNCTION billing.assign_price_public_id() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO pg_catalog, billing AS $$
 DECLARE product_key text;

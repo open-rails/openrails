@@ -768,6 +768,7 @@ const listPriceStorageIDs = `-- name: ListPriceStorageIDs :many
 SELECT id, public_id FROM billing.prices
 WHERE merchant_id = $1::uuid AND public_id = ANY($2::text[])
   AND sha256(public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest($2::text[]) AS id)
+LIMIT COALESCE(cardinality($2::text[]), 0)
 `
 
 type ListPriceStorageIDsParams struct {
@@ -780,6 +781,8 @@ type ListPriceStorageIDsRow struct {
 	PublicID string
 }
 
+// Canonical IDs identify at most one row per merchant. Make the input-sized
+// result bound explicit, including empty/NULL batches, without a text-key cap.
 func (q *Queries) ListPriceStorageIDs(ctx context.Context, arg ListPriceStorageIDsParams) ([]ListPriceStorageIDsRow, error) {
 	rows, err := q.db.Query(ctx, listPriceStorageIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
