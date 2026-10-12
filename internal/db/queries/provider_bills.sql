@@ -63,9 +63,11 @@ SELECT EXISTS (SELECT 1 FROM billing.payments p JOIN billing.order_lines l ON l.
  WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid AND l.price_id = sqlc.arg(price_id)::uuid)::boolean;
 
 -- name: ListProviderBillsForOrders :many
-SELECT b.* FROM unnest(sqlc.arg(order_ids)::uuid[]) AS orders(id)
+SELECT b.order_id, b.psp_id, b.source_kind, b.provider_reference, b.settlement_source, b.non_cash_amount, b.settled_at
+FROM unnest(sqlc.arg(order_ids)::uuid[]) AS orders(id)
 CROSS JOIN LATERAL (
-    SELECT * FROM billing.provider_bills
+    SELECT order_id, psp_id, source_kind, source_key, provider_reference, settlement_source, non_cash_amount, settled_at, created_at
+    FROM billing.provider_bills
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = orders.id
     ORDER BY created_at, source_kind, source_key LIMIT 100
 ) b;

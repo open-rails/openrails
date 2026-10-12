@@ -278,9 +278,12 @@ func (s *Service) attachLines(ctx context.Context, q *gen.Queries, merchantID uu
 	if err != nil {
 		return nil, err
 	}
-	billsByOrder := map[uuid.UUID][]gen.BillingProviderBill{}
+	billsByOrder := map[uuid.UUID][]billing.OrderProviderBill{}
 	for _, bill := range bills {
-		billsByOrder[bill.OrderID] = append(billsByOrder[bill.OrderID], bill)
+		billsByOrder[bill.OrderID] = append(billsByOrder[bill.OrderID], billing.OrderProviderBill{
+			PSPID: billing.PSPID(bill.PspID), Kind: bill.SourceKind, Reference: bill.ProviderReference,
+			SettlementSource: bill.SettlementSource, NonCashAmount: bill.NonCashAmount, SettledAt: bill.SettledAt,
+		})
 	}
 	out := make([]*Order, len(rows))
 	for i, r := range rows {
