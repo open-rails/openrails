@@ -46,9 +46,10 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
+  const canRead = useMerchantConfig()
   const canUpdate = useMerchantConfigUpdates()
   const metrics = useMetrics()
-  const { data, isPending: loading } = useQuery(adminQueries.findings(canUpdate))
+  const { data, isPending: loading } = useQuery(adminQueries.findings(canRead))
   const { data: gauges } = useQuery({
     ...adminQueries.findingSummary(),
     enabled: metrics,
