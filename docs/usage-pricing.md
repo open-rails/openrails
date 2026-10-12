@@ -107,4 +107,4 @@ products:
 ```
 
 A meter is declared in the catalog document or with
-`PUT /v1/admin/catalog/meters/{key}` (`SetMeter`, with its rate card).
+`PUT /v1/catalog/meters/{key}` (`SetMeter`, with its rate card).
