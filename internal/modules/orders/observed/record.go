@@ -109,8 +109,25 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	if err != nil {
 		return result, err
 	}
-	if captured > bill.Total {
-		evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "billed_amount": bill.Total, "captured_amount": captured})
+	noncash := bill.NonCashAmount
+	if accepted.SettledAt != nil {
+		noncash = accepted.NonCashAmount
+		if bill.Settled {
+			if bill.NonCashAmount != accepted.NonCashAmount {
+				evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "accepted_non_cash_amount": accepted.NonCashAmount, "observed_non_cash_amount": bill.NonCashAmount})
+				action := "Review changed provider settlement evidence; the original settlement and every verified cash movement were retained."
+				if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.bill.settlement_conflict", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+					return result, err
+				}
+			}
+			// A later receipt cannot rewrite how this obligation was first
+			// settled, nor roll back new verified cash merely because its
+			// provider now reports different non-cash evidence.
+			bill.NonCashAmount, bill.SettlementSource = accepted.NonCashAmount, models.DerefStr(accepted.SettlementSource)
+		}
+	}
+	if captured > bill.Total || noncash > bill.Total-captured {
+		evidence, _ := json.Marshal(map[string]any{"order_id": result.Order.ID, "billed_amount": bill.Total, "captured_amount": captured, "non_cash_amount": noncash})
 		action := "Review the distinct captured payments and refund any excess; do not collect this order again."
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), PspID: &bill.PSPID, FindingType: "pull.bill.overpaid", SubjectKey: "order:" + result.Order.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return result, err
@@ -132,9 +149,6 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	}
 	if !bill.Settled {
 		return result, nil
-	}
-	if accepted.SettledAt != nil && (models.DerefStr(accepted.SettlementSource) != bill.SettlementSource || accepted.NonCashAmount != bill.NonCashAmount) {
-		return result, ErrConflict
 	}
 	if captured < bill.Total && bill.NonCashAmount < bill.Total-captured {
 		return result, errors.New("settled provider bill lacks verified cash or non-cash settlement")

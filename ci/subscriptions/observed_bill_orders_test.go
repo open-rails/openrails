@@ -299,3 +299,63 @@ func TestObservedBillReusesFlatCheckoutOrder(t *testing.T) {
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.provider_bills WHERE order_id=$1`), orderID).Scan(&aliases))
 	require.Equal(t, 2, aliases, "only matching verified aliases were retained")
 }
+
+func TestObservedMixedSettlementRetainsExtraCash(t *testing.T) {
+	w := newWorld(t)
+	w.waive("evidenced", "normalized verified receipts test mixed settlement and extra cash without provider collection")
+	c := w.newCustomer()
+	d, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+	bill := observed.Bill{PSPID: w.psp["stripe"].UUID(), CustomerID: uuid.MustParse(c.id), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "invoice", SourceKey: "mixed-credit-invoice", Currency: "USD", Total: 100,
+		Settled: true, SettlementSource: "mixed", NonCashAmount: 60,
+		Lines: []observed.Line{{Source: "provider_adjustment", Description: "Verified invoice", UnitAmount: 100, Amount: 100}},
+	}
+	payment := func(id string, amount int64) *models.Payment {
+		return &models.Payment{ID: uuid.New(), CustomerID: bill.CustomerID, PspID: &bill.PSPID, Rail: models.RailStripe, TransactionID: id, Amount: amount, ListAmount: amount, Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail}
+	}
+	record := func(b observed.Bill) (out observed.Result, err error) {
+		err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var e error
+			out, e = observed.Record(ctx, d.NewWithPgxTx(tx), b, w.clock.Now())
+			return e
+		})
+		return
+	}
+	bill.Payment = payment("mixed-first", 40)
+	first, err := record(bill)
+	require.NoError(t, err)
+	require.True(t, first.Completed)
+	bill.Payment = payment("mixed-extra", 25)
+	extra, err := record(bill)
+	require.NoError(t, err)
+	require.True(t, extra.PaymentCreated)
+	require.False(t, extra.Completed)
+	require.Equal(t, first.Order.ID, extra.Order.ID)
+	replay, err := record(bill)
+	require.NoError(t, err)
+	require.False(t, replay.PaymentCreated)
+	var cash, noncash int64
+	var payments, findings, completions int
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*), sum(amount) FROM billing.payments WHERE order_id=$1`), first.Order.ID).Scan(&payments, &cash))
+	require.Equal(t, 2, payments)
+	require.EqualValues(t, 65, cash)
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT non_cash_amount FROM billing.provider_bills WHERE order_id=$1`), first.Order.ID).Scan(&noncash))
+	require.EqualValues(t, 60, noncash)
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='pull.bill.overpaid' AND subject_key=$1`), "order:"+first.Order.ID.String()).Scan(&findings))
+	require.Equal(t, 1, findings, "cash plus retained credit exceeds the invoice by 25")
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.host_outbox WHERE event_type='order.completed' AND subject_id=$1`), first.Order.ID).Scan(&completions))
+	require.Equal(t, 1, completions)
+
+	// Changed non-cash evidence needs review, but cannot erase a newly
+	// verified real payment or rewrite the original settled allocation.
+	bill.NonCashAmount, bill.Payment = 35, payment("mixed-later", 5)
+	later, err := record(bill)
+	require.NoError(t, err)
+	require.True(t, later.PaymentCreated)
+	require.False(t, later.Completed)
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT non_cash_amount FROM billing.provider_bills WHERE order_id=$1`), first.Order.ID).Scan(&noncash))
+	require.EqualValues(t, 60, noncash)
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type='pull.bill.settlement_conflict' AND subject_key=$1`), "order:"+first.Order.ID.String()).Scan(&findings))
+	require.Equal(t, 1, findings)
+}

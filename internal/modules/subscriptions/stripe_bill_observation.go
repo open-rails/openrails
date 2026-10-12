@@ -150,11 +150,15 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 		if invoice.AmountOffStripe > math.MaxInt64-credit || invoice.AmountOffStripe+credit < remaining {
 			return bill, nil, errors.New("Stripe invoice total is not covered by verified settlement")
 		}
-		if bill.NonCashAmount, err = moneyutil.RailMinorToNative(invoice.Currency, moneyutil.Cents(remaining)); err != nil {
+		// Preserve the explicitly applied credit/out-of-band allocation.
+		// Later cash is another real movement, not evidence that this
+		// historical non-cash settlement shrank by the same amount.
+		noncash := min(invoice.Total, invoice.AmountOffStripe+credit)
+		if bill.NonCashAmount, err = moneyutil.RailMinorToNative(invoice.Currency, moneyutil.Cents(noncash)); err != nil {
 			return bill, nil, err
 		}
 		switch {
-		case remaining == 0:
+		case noncash == 0:
 			bill.SettlementSource = "cash"
 			if bill.Total == 0 {
 				bill.SettlementSource = "cash"
