@@ -128,6 +128,10 @@ func validateProviderBillValues(p Profile, values []*string) error {
 		}
 		months, monthErr := strconv.ParseInt(*monthsValue, 10, 32)
 		reference := value(p, values, "source_reference")
+		providerReference := value(p, values, "provider_reference")
+		if providerReference == nil || strings.TrimSpace(*providerReference) == "" || len(*providerReference) > 512 {
+			return fmt.Errorf("provider schedule lacks provider reference")
+		}
 		if err != nil || monthErr != nil || hours < 0 || hours > math.MaxInt64/int64(time.Hour) || hours%24 != 0 || months < 0 || months > 1200 || (hours > 0) == (months > 0) || reference == nil || strings.TrimSpace(*reference) == "" || len(*reference) > 512 || len(bill.Lines) != 1 || hours > 0 && (bill.Lines[0].BillingIntervalHours == nil || int64(*bill.Lines[0].BillingIntervalHours) != hours) || months > 0 && bill.Lines[0].BillingIntervalHours != nil {
 			return fmt.Errorf("provider schedule cadence differs from its accepted terms")
 		}

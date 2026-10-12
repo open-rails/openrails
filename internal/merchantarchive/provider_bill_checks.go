@@ -53,6 +53,7 @@ var providerBillReferenceChecks = []rowCheck{
  WHERE p.merchant_id=$1 AND p.id::text=x.line->>'PriceID' AND pr.id::text=x.line->>'ProductID'))`},
 	{"provider_cycle_receipts", `NOT EXISTS (SELECT 1 FROM billing.provider_schedules s WHERE s.merchant_id=$1
  AND s.subscription_id=provider_cycle_receipts.subscription_id AND s.psp_id=provider_cycle_receipts.psp_id
+ AND s.source_reference=provider_cycle_receipts.schedule_source_reference
  AND s.accepted_bill->>'Currency'=provider_cycle_receipts.currency
  AND s.accepted_bill->>'Total'=provider_cycle_receipts.amount::text
  AND provider_cycle_receipts.due_at>=s.first_due_at

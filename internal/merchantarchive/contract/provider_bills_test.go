@@ -74,9 +74,13 @@ func TestProviderArchiveIdentityAndSchedule(t *testing.T) {
 	raw, err = json.Marshal(bill)
 	require.NoError(t, err)
 	fields = map[string]string{"merchant_id": testMerchant, "psp_id": bill.PSPID.String(), "customer_id": bill.CustomerID.String(), "subscription_id": bill.SubscriptionID.String(), "initial_order_id": testMerchant,
-		"cadence_hours": "720", "cadence_months": "0", "source_reference": "accepted_enrollment", "accepted_bill": string(raw)}
+		"cadence_hours": "720", "cadence_months": "0", "source_reference": "accepted_enrollment", "provider_reference": "provider-subscription-1", "accepted_bill": string(raw)}
 	p, values = row(t, "provider_schedules", fields)
 	require.NoError(t, ValidateValues(p, values))
+	fields["provider_reference"] = " "
+	p, values = row(t, "provider_schedules", fields)
+	require.ErrorContains(t, ValidateValues(p, values), "provider reference")
+	fields["provider_reference"] = "provider-subscription-1"
 	fields["cadence_hours"] = "24"
 	p, values = row(t, "provider_schedules", fields)
 	require.ErrorContains(t, ValidateValues(p, values), "cadence")
