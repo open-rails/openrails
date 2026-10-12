@@ -26,8 +26,9 @@ func notificationConsumer(r *httprequest.Request) (*notificationevents.Consumer,
 	}
 	owner := "host:merchant"
 	if _, host := requestauth.HostPrincipalFromContext(ctx); !host {
-		who, ok := billingauth.IdentityFromContext(ctx)
-		if !ok || who.SubjectKind != billingauth.SubjectApplication || !billingauth.SelfActing(who) {
+		staff, ok := billingauth.StaffFromContext(ctx)
+		who := staff.Identity
+		if !ok || staff.Merchant != mid || who.SubjectKind != billingauth.SubjectApplication || !billingauth.SelfActing(who) {
 			r.ErrorCode(billing.CodeApplicationRequired, "")
 			return nil, mid, false
 		}

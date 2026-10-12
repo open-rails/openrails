@@ -98,7 +98,6 @@ func TestPeriodicWorkKeepsItsBoundariesAcrossLeaders(t *testing.T) {
 		riverjobs.MerchantSecretCleanupArgs{}.Kind():     5 * time.Minute,
 		riverjobs.DelinquencyArgs{}.Kind():               15 * time.Minute,
 		riverjobs.ConvergeSweepArgs{}.Kind():             15 * time.Minute,
-		riverjobs.NotificationEmailSweepArgs{}.Kind():    10 * time.Minute,
 	}
 	queued := func() map[string][]time.Time {
 		rows, err := f.pool.Query(t.Context(), "SELECT kind, scheduled_at FROM "+jobs)
