@@ -82,7 +82,7 @@ SET status = 'in_flight',
     updated_at = now()
 FROM due
 WHERE pi.merchant_id = $2::uuid AND pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential, pi.destructive_action_id
 `
 
 type ClaimDueProviderIntentsParams struct {
@@ -139,6 +139,7 @@ func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProvi
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -165,7 +166,7 @@ SET lease_expires_at = $1::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.merchant_id = $2::uuid AND pi.id = due.id
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential, pi.destructive_action_id
 `
 
 type ClaimDueVerifyProviderIntentsParams struct {
@@ -221,6 +222,7 @@ func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDu
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -244,7 +246,7 @@ WHERE pi.merchant_id = $2::uuid AND pi.id = $3
         OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= $4::timestamptz)
       )
   AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $4::timestamptz)
-RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential
+RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential, pi.destructive_action_id
 `
 
 type ClaimProviderIntentByIDParams struct {
@@ -294,6 +296,7 @@ func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProvider
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -305,7 +308,7 @@ SET lease_expires_at = $1::timestamptz,
 WHERE provider_intents.merchant_id = $2::uuid AND id = $3
   AND status = 'unknown_needs_verify'
   AND (lease_expires_at IS NULL OR lease_expires_at <= $4::timestamptz)
-RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id
 `
 
 type ClaimUnknownProviderIntentByIDParams struct {
@@ -355,6 +358,7 @@ func (q *Queries) ClaimUnknownProviderIntentByID(ctx context.Context, arg ClaimU
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -640,14 +644,14 @@ const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, subject, credential, expires_at, psp_id, custodian_id
+    actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id
 ) VALUES (
     COALESCE($1::uuid, uuidv7()), $2, $3, $4,
     $5, $6, $7,
     $8, $9, 'pending',
     $10::timestamptz, $11,
     $12, $13, $14, $15, $16,
-    $17::uuid, $18::uuid
+    $17::uuid, $18::uuid, $19::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -674,6 +678,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE billing.provider_intents.origin_reason
     END,
+    destructive_action_id = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.destructive_action_id
+        ELSE billing.provider_intents.destructive_action_id
+    END,
     actor = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'order_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE billing.provider_intents.actor
@@ -699,28 +707,29 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         ELSE billing.provider_intents.last_failure_reason
     END,
     updated_at = now()
-RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id
 `
 
 type EnqueueProviderIntentParams struct {
-	ID             *uuid.UUID
-	MerchantID     uuid.UUID
-	Rail           string
-	IntentType     string
-	SubscriptionID *uuid.UUID
-	PaymentID      *uuid.UUID
-	PriceID        *uuid.UUID
-	Payload        []byte
-	IdempotencyKey string
-	NextAttemptAt  time.Time
-	Origin         string
-	OriginReason   *string
-	Actor          *string
-	Subject        *string
-	Credential     *string
-	ExpiresAt      *time.Time
-	PspID          *uuid.UUID
-	CustodianID    *uuid.UUID
+	ID                  *uuid.UUID
+	MerchantID          uuid.UUID
+	Rail                string
+	IntentType          string
+	SubscriptionID      *uuid.UUID
+	PaymentID           *uuid.UUID
+	PriceID             *uuid.UUID
+	Payload             []byte
+	IdempotencyKey      string
+	NextAttemptAt       time.Time
+	Origin              string
+	OriginReason        *string
+	Actor               *string
+	Subject             *string
+	Credential          *string
+	ExpiresAt           *time.Time
+	PspID               *uuid.UUID
+	CustodianID         *uuid.UUID
+	DestructiveActionID *uuid.UUID
 }
 
 // Financial operation ledger, always merchant-scoped. Production dispatch is one
@@ -752,6 +761,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		arg.ExpiresAt,
 		arg.PspID,
 		arg.CustodianID,
+		arg.DestructiveActionID,
 	)
 	var i BillingProviderIntent
 	err := row.Scan(
@@ -783,6 +793,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -872,8 +883,41 @@ func (q *Queries) ExpireProviderIntentByID(ctx context.Context, arg ExpireProvid
 	return result.RowsAffected(), nil
 }
 
+const fenceDestructiveProviderSend = `-- name: FenceDestructiveProviderSend :execrows
+UPDATE billing.provider_intents
+SET result_evidence=coalesce(result_evidence,'{}'::jsonb)-'destructive_before_effect',updated_at=$1::timestamptz
+WHERE merchant_id=$2::uuid AND id=$3::uuid
+ AND destructive_action_id=$4::uuid
+ AND status='in_flight' AND attempts=$5::int
+ AND lease_expires_at>$1::timestamptz
+`
+
+type FenceDestructiveProviderSendParams struct {
+	Now                 time.Time
+	MerchantID          uuid.UUID
+	ID                  uuid.UUID
+	DestructiveActionID uuid.UUID
+	Attempts            int32
+}
+
+// The current claim clears a prior proven-unsent marker before any new wire
+// call. A crash after this fence is uncertain and must verify before retrying.
+func (q *Queries) FenceDestructiveProviderSend(ctx context.Context, arg FenceDestructiveProviderSendParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fenceDestructiveProviderSend,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.DestructiveActionID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getLatestManualRebillForPeriod = `-- name: GetLatestManualRebillForPeriod :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND subscription_id = $2::uuid
   AND intent_type = 'manual_rebill'
@@ -922,6 +966,7 @@ func (q *Queries) GetLatestManualRebillForPeriod(ctx context.Context, arg GetLat
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -948,7 +993,7 @@ func (q *Queries) GetLatestProviderIntentIDForSubscription(ctx context.Context, 
 }
 
 const getLatestSubscriptionCollectionForPeriod = `-- name: GetLatestSubscriptionCollectionForPeriod :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND subscription_id = $2::uuid
   AND intent_type = 'subscription_collection'
@@ -994,12 +1039,13 @@ func (q *Queries) GetLatestSubscriptionCollectionForPeriod(ctx context.Context, 
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getLiveTierChangeProviderIntent = `-- name: GetLiveTierChangeProviderIntent :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
   AND intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
@@ -1044,12 +1090,13 @@ func (q *Queries) GetLiveTierChangeProviderIntent(ctx context.Context, arg GetLi
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getProviderIntent = `-- name: GetProviderIntent :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents WHERE provider_intents.merchant_id = $2::uuid AND id = $1
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents WHERE provider_intents.merchant_id = $2::uuid AND id = $1
 `
 
 type GetProviderIntentParams struct {
@@ -1089,12 +1136,13 @@ func (q *Queries) GetProviderIntent(ctx context.Context, arg GetProviderIntentPa
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getProviderIntentByIdempotencyKey = `-- name: GetProviderIntentByIdempotencyKey :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND idempotency_key = $2::text
 `
 
@@ -1135,6 +1183,7 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -1191,7 +1240,7 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 }
 
 const getUnresolvedInitialEnrollmentForCustomerProduct = `-- name: GetUnresolvedInitialEnrollmentForCustomerProduct :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
   AND payload->'terms'->>'customer_id'=$2::text
   AND payload->'terms'->>'product_id'=$3::text
@@ -1237,12 +1286,13 @@ func (q *Queries) GetUnresolvedInitialEnrollmentForCustomerProduct(ctx context.C
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getUnresolvedManualRebill = `-- name: GetUnresolvedManualRebill :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND subscription_id = $2::uuid
   AND intent_type = 'manual_rebill'
@@ -1290,12 +1340,13 @@ func (q *Queries) GetUnresolvedManualRebill(ctx context.Context, arg GetUnresolv
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getUnresolvedSaleForCustomerProduct = `-- name: GetUnresolvedSaleForCustomerProduct :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
   AND payload->>'user_id'=$2::text
   AND payload->>'product_id'=$3::text
@@ -1341,12 +1392,13 @@ func (q *Queries) GetUnresolvedSaleForCustomerProduct(ctx context.Context, arg G
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const getUnresolvedSubscriptionCollection = `-- name: GetUnresolvedSubscriptionCollection :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND subscription_id = $2::uuid
   AND intent_type = 'subscription_collection'
@@ -1391,6 +1443,7 @@ func (q *Queries) GetUnresolvedSubscriptionCollection(ctx context.Context, arg G
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -1436,7 +1489,7 @@ func (q *Queries) HasUnattributedPaymentAfterRebillBoundary(ctx context.Context,
 }
 
 const listCompletedManualRebillPaymentCoverage = `-- name: ListCompletedManualRebillPaymentCoverage :many
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
        p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
        p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
@@ -1510,6 +1563,7 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 			&i.BillingProviderIntent.CustodianID,
 			&i.BillingProviderIntent.Subject,
 			&i.BillingProviderIntent.Credential,
+			&i.BillingProviderIntent.DestructiveActionID,
 			&i.CoveredPaymentID,
 			&i.PaidCustomerID,
 			&i.PaidPspID,
@@ -1531,7 +1585,7 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 }
 
 const listInitialEnrollmentsForMembership = `-- name: ListInitialEnrollmentsForMembership :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
   AND payload->'terms'->>'subscription_id'=$2::uuid::text
 ORDER BY id LIMIT 2
@@ -1580,6 +1634,7 @@ func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg L
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1592,7 +1647,7 @@ func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg L
 }
 
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND status='succeeded'
   AND ((intent_type='initial_membership'
         AND payload->'terms'->>'subscription_id'=$2::uuid::text
@@ -1658,6 +1713,7 @@ func (q *Queries) ListPaidEngineAgreementsAtBoundary(ctx context.Context, arg Li
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1670,7 +1726,7 @@ func (q *Queries) ListPaidEngineAgreementsAtBoundary(ctx context.Context, arg Li
 }
 
 const listProviderIntents = `-- name: ListProviderIntents :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE provider_intents.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
   AND ($3::text IS NULL OR rail = $3::text)
   AND ($4::text IS NULL OR intent_type = $4::text)
@@ -1735,6 +1791,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1747,7 +1804,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 }
 
 const listRebillTermOwners = `-- name: ListRebillTermOwners :many
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id
 FROM billing.provider_intents i
 JOIN billing.subscriptions s ON s.id=i.subscription_id AND s.merchant_id=i.merchant_id
 WHERE i.merchant_id=$1::uuid
@@ -1812,6 +1869,7 @@ func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOw
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1824,7 +1882,7 @@ func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOw
 }
 
 const listRetainedInitialEnrollmentsForArchive = `-- name: ListRetainedInitialEnrollmentsForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
   AND ($2::uuid IS NULL OR id>$2::uuid)
 ORDER BY id LIMIT $3::int
@@ -1874,6 +1932,7 @@ func (q *Queries) ListRetainedInitialEnrollmentsForArchive(ctx context.Context, 
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1886,7 +1945,7 @@ func (q *Queries) ListRetainedInitialEnrollmentsForArchive(ctx context.Context, 
 }
 
 const listRetainedSalesForArchive = `-- name: ListRetainedSalesForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
   AND ($2::uuid IS NULL OR id>$2::uuid)
 ORDER BY id LIMIT $3::int
@@ -1936,6 +1995,7 @@ func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetai
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1948,7 +2008,7 @@ func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetai
 }
 
 const listRetainedSubscriptionCollectionsForArchive = `-- name: ListRetainedSubscriptionCollectionsForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND intent_type='subscription_collection'
   AND ($2::uuid IS NULL OR id>$2::uuid)
 ORDER BY id LIMIT $3::int
@@ -1998,6 +2058,7 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -2010,7 +2071,7 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 }
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
 ) ORDER BY created_at, id
@@ -2063,6 +2124,7 @@ func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckPro
 			&i.CustodianID,
 			&i.Subject,
 			&i.Credential,
+			&i.DestructiveActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -2086,7 +2148,7 @@ func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UU
 }
 
 const lockProviderIntentForCollectionCompletion = `-- name: LockProviderIntentForCollectionCompletion :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE id = $1::uuid AND merchant_id = $2::uuid
   AND intent_type IN ('order_collection', 'manual_rebill', 'subscription_collection')
 FOR UPDATE
@@ -2131,12 +2193,13 @@ func (q *Queries) LockProviderIntentForCollectionCompletion(ctx context.Context,
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const lockProviderIntentForInitialEnrollmentCompletion = `-- name: LockProviderIntentForInitialEnrollmentCompletion :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE id=$1::uuid AND merchant_id=$2::uuid AND intent_type='initial_membership'
 FOR UPDATE
 `
@@ -2178,12 +2241,13 @@ func (q *Queries) LockProviderIntentForInitialEnrollmentCompletion(ctx context.C
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const lockProviderIntentForSaleCompletion = `-- name: LockProviderIntentForSaleCompletion :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE id=$1::uuid AND merchant_id=$2::uuid AND intent_type='nmi_sale'
 FOR UPDATE
 `
@@ -2225,12 +2289,13 @@ func (q *Queries) LockProviderIntentForSaleCompletion(ctx context.Context, arg L
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
 
 const lockProviderIntentForTierCompletion = `-- name: LockProviderIntentForTierCompletion :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE id=$1::uuid AND merchant_id=$2::uuid
   AND intent_type IN ('nmi_upgrade','stripe_tier_change')
 FOR UPDATE
@@ -2274,6 +2339,7 @@ func (q *Queries) LockProviderIntentForTierCompletion(ctx context.Context, arg L
 		&i.CustodianID,
 		&i.Subject,
 		&i.Credential,
+		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -2919,7 +2985,8 @@ const supersedePendingNMIDelete = `-- name: SupersedePendingNMIDelete :execrows
 UPDATE billing.provider_intents
 SET status='superseded', last_failure_reason=$1, updated_at=now()
 WHERE merchant_id=$2::uuid
-  AND idempotency_key=$3::text
+  AND (idempotency_key=$3::text
+       OR idempotency_key=$3::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
   AND (status='failed_retryable' OR (status='pending' AND attempts=0))
 `
@@ -2938,6 +3005,72 @@ func (q *Queries) SupersedePendingNMIDelete(ctx context.Context, arg SupersedePe
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const supersedePendingNMIDeleteActions = `-- name: SupersedePendingNMIDeleteActions :many
+UPDATE billing.provider_intents
+SET status='superseded', last_failure_reason=$1, updated_at=now()
+WHERE merchant_id=$2::uuid
+  AND (idempotency_key=$3::text
+       OR idempotency_key=$3::text || ':action:' || destructive_action_id::text)
+  AND intent_type='nmi_delete_subscription'
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id
+`
+
+type SupersedePendingNMIDeleteActionsParams struct {
+	Reason         *string
+	MerchantID     uuid.UUID
+	IdempotencyKey string
+}
+
+func (q *Queries) SupersedePendingNMIDeleteActions(ctx context.Context, arg SupersedePendingNMIDeleteActionsParams) ([]BillingProviderIntent, error) {
+	rows, err := q.db.Query(ctx, supersedePendingNMIDeleteActions, arg.Reason, arg.MerchantID, arg.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderIntent
+	for rows.Next() {
+		var i BillingProviderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LeaseExpiresAt,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+			&i.Subject,
+			&i.Credential,
+			&i.DestructiveActionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const supersedeProviderIntentsBySubject = `-- name: SupersedeProviderIntentsBySubject :execrows
