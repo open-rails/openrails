@@ -90,6 +90,8 @@ type Env struct {
 	// checkout scopes customer routes to the order a checkout URL's secret
 	// opened (the hosted checkout host).
 	checkout bool
+	// applicationPermissions are the mounted application routes' permission pairs.
+	applicationPermissions []Pair
 }
 
 // scimServer is the assembly's SCIM server, acting for the merchant its
@@ -117,6 +119,13 @@ func newEnv(rt *app.Runtime, opts Options) *Env {
 	}
 	if opts.ProviderRoutes != nil {
 		env.providers = *opts.ProviderRoutes
+	}
+	seen := map[Pair]bool{}
+	for _, route := range Catalog() {
+		if route.Auth == AuthApplication && env.on(route) && env.enabled(route.When) && !seen[route.Needs()] {
+			seen[route.Needs()] = true
+			env.applicationPermissions = append(env.applicationPermissions, route.Needs())
+		}
 	}
 	return env
 }
@@ -158,6 +167,8 @@ func (e *Env) enabled(f Feature) bool {
 		return rt != nil && rt.DashboardService.AskConfigured()
 	case FeatureDashboardGeneration:
 		return rt != nil && rt.DashboardService.NLConfigured()
+	case FeatureCustomerProvisioning:
+		return rt != nil && !rt.HostUserInfo && (e.Groups.Programmatic || !e.SCIMMerchant.IsZero())
 	case FeatureCustomerNetwork:
 		return rt != nil && rt.Network != nil
 	}
@@ -355,14 +366,14 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 }
 
 // RegisterStaffRoutes mounts the staff groups opts.Groups turns on, each
-// route behind its permission, and with any of them the access read, on a
-// router rooted at /v1.
+// route behind its permission. Any staff or programmatic group also mounts
+// the access read, on a router rooted at /v1.
 func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.AbuseState)
 	}
 	env := newEnv(rt, opts)
-	any := StaffGroups(opts.Groups)
+	any := StaffGroups(opts.Groups) || opts.Groups.Programmatic
 	env.mount(rr, "/v1", func(r Route) bool { return r.Staff() && env.on(r) || any && r.Group == Access })
 }
 
@@ -410,10 +421,9 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // at /v1: SCIM provisioning too, unless the runtime reads the host's user
 // directory instead of keeping a pushed copy.
 func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	scim := rt != nil && !rt.HostUserInfo
 	env := newEnv(rt, opts)
 	env.mount(rr, "/v1", in(App, func(r Route) bool {
-		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning && scim)
+		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning)
 	}))
 }
 

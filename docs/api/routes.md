@@ -147,15 +147,15 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
+| GET | `/v1/merchant/psps` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<PSP>` |  |
 | POST | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
+| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `PSP` |  |
 | PATCH | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
-| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | POST | `/v1/merchant/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` | sensitive |
-| GET | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
+| GET | `/v1/merchant/configuration` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
+| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
 | DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits`; sensitive |
 | PATCH | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
@@ -163,12 +163,12 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
 | POST | `/v1/merchant/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/merchant/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
+| GET | `/v1/merchant/findings` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `Finding` |  |
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
-| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
-| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |
+| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProvisioningToken>` | when `customer_provisioning` |
+| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | when `customer_provisioning`; sensitive |
+| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `customer_provisioning`; sensitive |
 
 ## Business metrics
 
@@ -184,7 +184,7 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 
 ## Access
 
-What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group.
+The caller's none/read/update access to staff areas and effective application permissions for mounted programmatic routes; any authenticated person or application, mounted with any staff or programmatic group.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -192,7 +192,7 @@ What the signed-in caller may use of each staff route group that is on: any pers
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group; they name no permission.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -207,22 +207,22 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` | `Idempotency-Key` |
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
-| GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
-| GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
+| GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `RunningCharge` |  |
+| GET | `/v1/app/running-charges` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<RunningCharge>` |  |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
-| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — |  |
-| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
+| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/customers` | application | `merchant:customers:read`<br>`root:customers:read` | — | 200 `ListPage<Customer>` | when `customer_network` |
 
 ## Provider webhooks

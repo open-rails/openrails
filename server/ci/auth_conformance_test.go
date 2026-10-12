@@ -252,7 +252,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 		access := func(mux http.Handler, token string) billing.AdminAccess {
 			return decode[billing.AdminAccess](t, call(t, mux, token, http.MethodGet, "/billing/v1/admin/access", nil))
 		}
-		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: client.MerchantID().String()}, access(here, staff))
+		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: billing.AccessNone, MerchantConfig: billing.AccessNone, ScopeID: client.MerchantID().String(), ApplicationPermissions: []billing.Permission{}}, access(here, staff))
 		require.Equal(t, access(here, staff), access(here, h.support), "the access read answers the same levels for either name")
 		require.Equal(t, billing.AccessNone, access(there, staff).Admin)
 	})

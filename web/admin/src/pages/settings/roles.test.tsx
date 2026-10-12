@@ -36,6 +36,7 @@ const CATALOG = [
   "merchant:catalog:manage",
   "merchant:catalog:read",
   "merchant:config:manage",
+  "merchant:config:read",
   "merchant:credentials:manage",
   "merchant:credentials:read",
   "merchant:entitlements:read",
@@ -47,6 +48,7 @@ const CATALOG = [
   "merchant:roles:manage",
   "merchant:roles:read",
   "merchant:usage:manage",
+  "merchant:usage:read",
 ]
 
 const role = (name: string, grants: string[], custom = false): GroupRole => ({

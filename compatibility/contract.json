@@ -49,6 +49,7 @@
       "func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billing.GetPriceParams, requestOptions ...RequestOption) (*billing.Price, error)",
       "func (c *Client) GetPriceMigration(ctx context.Context, id billing.PriceMigrationID, requestOptions ...RequestOption) (*billing.PriceMigration, error)",
       "func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) (*billing.Product, error)",
+      "func (c *Client) GetPublicConfig(ctx context.Context, options ...RequestOption) (*billing.PublicConfig, error)",
       "func (c *Client) GetRenewal(ctx context.Context, id billing.RenewalID, requestOptions ...RequestOption) (*billing.Renewal, error)",
       "func (c *Client) GetRunningCharge(ctx context.Context, reference string, requestOptions ...RequestOption) (*billing.RunningCharge, error)",
       "func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error)",
@@ -126,8 +127,9 @@
       "func (r *Remote) Ready(ctx context.Context) error",
       "func AccessCutoverPreflight(ctx context.Context, db *pgxpool.Pool, database DatabaseConfig, approvedBy string) (*billing.AccessCutoverReport, error)",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error)",
+      "func NewClientCredentialsTokenProvider(cfg ClientCredentialsConfig) (func(context.Context) (string, error), error)",
       "func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error)",
-      "func NewRemoteMerchant(baseURL string, credential RemoteCredential) (*Client, error)",
+      "func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...RemoteMerchantOptions) (*Client, error)",
       "func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error)",
       "func ReadMerchantFile(path string) (MerchantDeclaration, error)",
       "func WithIdempotencyKey(key string) RequestOption",
@@ -139,6 +141,7 @@
       "type CCBillPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
       "type CaptchaConfig = config.CaptchaConfig",
       "type Client struct {\n}",
+      "type ClientCredentialsConfig struct {\n\tTokenURL     string\n\tClientID     string\n\tClientSecret string\n\n\tResource string\n\n\tScopes []string\n\n\tHTTPClient *http.Client\n}",
       "type Config = config.Config",
       "type Credential = billingauth.Credential",
       "type CredentialKind = billingauth.CredentialKind",
@@ -168,6 +171,7 @@
       "type RedisConfig = config.RedisConfig",
       "type Remote struct {\n}",
       "type RemoteCredential struct {\n\tAPIKey string\n\n\tToken func(context.Context) (string, error)\n\n\tAssertion *AssertionKey\n}",
+      "type RemoteMerchantOptions struct {\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n}",
       "type RemoteOptions struct {\n\tCredentials map[billing.MerchantID]RemoteCredential\n\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n}",
       "type RequestOption func(*requestOptions)",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
@@ -246,7 +250,7 @@
       "const (\n\tMandateRecurring MandateKind = \"recurring\"\n\n\tMandateUnscheduled MandateKind = \"unscheduled\"\n\n\tMandateCardOnFile MandateKind = \"card_on_file\"\n)",
       "const (\n\tMaxEntitlementPrefixes  = 10\n\tDefaultHeldEntitlements = 1000\n\tMaxHeldEntitlements     = 10000\n)",
       "const (\n\tMerchantActive MerchantStatus = \"active\"\n\n\tMerchantDeleted MerchantStatus = \"deleted\"\n)",
-      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
+      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigRead   Permission = \"merchant:config:read\"\n\tRootConfigRead       Permission = \"root:config:read\"\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageRead Permission = \"merchant:usage:read\"\n\tRootUsageRead     Permission = \"root:usage:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tMigrationKeepGrandfathered MigrationFallback = \"keep_grandfathered\"\n\n\tMigrationCancelAtPeriodEnd MigrationFallback = \"cancel_at_period_end\"\n)",
@@ -497,7 +501,7 @@
       "type AccessNote struct {\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tCustomerID   CustomerID     `json:\"customer_id\"`\n\tNote         AccessNoteKind `json:\"note\"`\n\tSourceType   string         `json:\"source_type\"`\n\tSourceID     string         `json:\"source_id\"`\n\tEntitlements []string       `json:\"entitlements\"`\n}",
       "type AccessNoteKind string",
       "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
-      "type AdminAccess struct {\n\tAdmin          AccessLevel `json:\"admin\"`\n\tCatalog        bool        `json:\"catalog\"`\n\tMerchantConfig bool        `json:\"merchant_config\"`\n\tMetrics        bool        `json:\"metrics\"`\n\tScopeID        string      `json:\"scope_id\"`\n}",
+      "type AdminAccess struct {\n\tAdmin          AccessLevel `json:\"admin\"`\n\tCatalog        AccessLevel `json:\"catalog\"`\n\tMerchantConfig AccessLevel `json:\"merchant_config\"`\n\tMetrics        bool        `json:\"metrics\"`\n\tScopeID        string      `json:\"scope_id\"`\n\n\tApplicationPermissions []Permission `json:\"application_permissions\"`\n}",
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
       "type AdmissionBatchResult struct {\n\tItems []AdmissionResult `json:\"items\"`\n}",
       "type AdmissionBlock string",
@@ -1935,6 +1939,17 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "context": "context",
       "http": "net/http",
+      "url": "net/url"
+    },
+    "client_credentials.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "fmt": "fmt",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "strings": "strings",
+      "time": "time",
       "url": "net/url"
     },
     "client_host_events.go": {
@@ -4443,6 +4458,11 @@
       "http": "net/http",
       "strconv": "strconv",
       "url": "net/url"
+    },
+    "public_config.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "http": "net/http"
     },
     "refunds.go": {
       "billing": "github.com/open-rails/openrails/billing",

@@ -13,8 +13,9 @@ pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
+pkg openrails, func NewClientCredentialsTokenProvider(ClientCredentialsConfig) (func(context.Context) (string, error), error)
 pkg openrails, func NewRemote(string, RemoteOptions) (*Remote, error)
-pkg openrails, func NewRemoteMerchant(string, RemoteCredential) (*Client, error)
+pkg openrails, func NewRemoteMerchant(string, RemoteCredential, ...RemoteMerchantOptions) (*Client, error)
 pkg openrails, func ParseMerchantDeclaration([]byte) (MerchantDeclaration, error)
 pkg openrails, func ReadMerchantFile(string) (MerchantDeclaration, error)
 pkg openrails, func WithIdempotencyKey(string) RequestOption
@@ -64,6 +65,7 @@ pkg openrails, method (*Client) GetPaymentAttempt(context.Context, billing.Payme
 pkg openrails, method (*Client) GetPrice(context.Context, billing.PriceID, billing.GetPriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) GetPriceMigration(context.Context, billing.PriceMigrationID, ...RequestOption) (*billing.PriceMigration, error)
 pkg openrails, method (*Client) GetProduct(context.Context, billing.ProductID, ...RequestOption) (*billing.Product, error)
+pkg openrails, method (*Client) GetPublicConfig(context.Context, ...RequestOption) (*billing.PublicConfig, error)
 pkg openrails, method (*Client) GetRenewal(context.Context, billing.RenewalID, ...RequestOption) (*billing.Renewal, error)
 pkg openrails, method (*Client) GetRunningCharge(context.Context, string, ...RequestOption) (*billing.RunningCharge, error)
 pkg openrails, method (*Client) GetSubscription(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.Subscription, error)
@@ -167,6 +169,13 @@ pkg openrails, type CaptchaConfig struct, Provider string
 pkg openrails, type CaptchaConfig struct, SecretKey string
 pkg openrails, type CaptchaConfig struct, SiteKey string
 pkg openrails, type Client struct
+pkg openrails, type ClientCredentialsConfig struct
+pkg openrails, type ClientCredentialsConfig struct, ClientID string
+pkg openrails, type ClientCredentialsConfig struct, ClientSecret string
+pkg openrails, type ClientCredentialsConfig struct, HTTPClient *http.Client
+pkg openrails, type ClientCredentialsConfig struct, Resource string
+pkg openrails, type ClientCredentialsConfig struct, Scopes []string
+pkg openrails, type ClientCredentialsConfig struct, TokenURL string
 pkg openrails, type Config = config.Config
 pkg openrails, type Config struct
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string
@@ -332,6 +341,9 @@ pkg openrails, type RemoteCredential struct
 pkg openrails, type RemoteCredential struct, APIKey string
 pkg openrails, type RemoteCredential struct, Assertion *AssertionKey
 pkg openrails, type RemoteCredential struct, Token func(context.Context) (string, error)
+pkg openrails, type RemoteMerchantOptions struct
+pkg openrails, type RemoteMerchantOptions struct, HTTPClient *http.Client
+pkg openrails, type RemoteMerchantOptions struct, Timeout time.Duration
 pkg openrails, type RemoteOptions struct
 pkg openrails, type RemoteOptions struct, Credentials map[billing.MerchantID]RemoteCredential
 pkg openrails, type RemoteOptions struct, HTTPClient *http.Client
@@ -667,6 +679,7 @@ pkg openrails/billing, const MerchantActive MerchantStatus = "active"
 pkg openrails/billing, const MerchantCatalogManage Permission = "merchant:catalog:manage"
 pkg openrails/billing, const MerchantCatalogRead Permission = "merchant:catalog:read"
 pkg openrails/billing, const MerchantConfigManage Permission = "merchant:config:manage"
+pkg openrails/billing, const MerchantConfigRead Permission = "merchant:config:read"
 pkg openrails/billing, const MerchantCustomerManage Permission = "merchant:customer:manage"
 pkg openrails/billing, const MerchantCustomerRead Permission = "merchant:customer:read"
 pkg openrails/billing, const MerchantCustomersRead Permission = "merchant:customers:read"
@@ -681,6 +694,7 @@ pkg openrails/billing, const MerchantRetirementRefusedGroupMismatch MerchantReti
 pkg openrails/billing, const MerchantRetirementRefusedNotLive MerchantRetirementRefusal = "not_live"
 pkg openrails/billing, const MerchantRetirementRefusedReserved MerchantRetirementRefusal = "reserved"
 pkg openrails/billing, const MerchantUsageManage Permission = "merchant:usage:manage"
+pkg openrails/billing, const MerchantUsageRead Permission = "merchant:usage:read"
 pkg openrails/billing, const MigrationApplied PriceMigrationDisposition = "applied"
 pkg openrails/billing, const MigrationBlocked PriceMigrationDisposition = "blocked"
 pkg openrails/billing, const MigrationCancelAtPeriodEnd MigrationFallback = "cancel_at_period_end"
@@ -749,6 +763,7 @@ pkg openrails/billing, const RootAdminRateLimitsUnlock Permission = "root:admin-
 pkg openrails/billing, const RootCatalogManage Permission = "root:catalog:manage"
 pkg openrails/billing, const RootCatalogRead Permission = "root:catalog:read"
 pkg openrails/billing, const RootConfigManage Permission = "root:config:manage"
+pkg openrails/billing, const RootConfigRead Permission = "root:config:read"
 pkg openrails/billing, const RootCustomerManage Permission = "root:customer:manage"
 pkg openrails/billing, const RootCustomerRead Permission = "root:customer:read"
 pkg openrails/billing, const RootCustomersRead Permission = "root:customers:read"
@@ -760,6 +775,7 @@ pkg openrails/billing, const RootMerchantsRestore Permission = "root:merchants:r
 pkg openrails/billing, const RootMetricsRead Permission = "root:metrics:read"
 pkg openrails/billing, const RootOrdersManage Permission = "root:orders:manage"
 pkg openrails/billing, const RootUsageManage Permission = "root:usage:manage"
+pkg openrails/billing, const RootUsageRead Permission = "root:usage:read"
 pkg openrails/billing, const RootWorkerHealthRead Permission = "root:worker-health:read"
 pkg openrails/billing, const RunningChargeIDPrefix untyped string = "rch_"
 pkg openrails/billing, const RunningChargeRunning RunningChargeState = "running"
@@ -1024,8 +1040,9 @@ pkg openrails/billing, type AcknowledgeHostEventsParams struct
 pkg openrails/billing, type AcknowledgeHostEventsParams struct, HostEventIDs []HostEventID `json:"host_event_ids"`
 pkg openrails/billing, type AdminAccess struct
 pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
-pkg openrails/billing, type AdminAccess struct, Catalog bool `json:"catalog"`
-pkg openrails/billing, type AdminAccess struct, MerchantConfig bool `json:"merchant_config"`
+pkg openrails/billing, type AdminAccess struct, ApplicationPermissions []Permission `json:"application_permissions"`
+pkg openrails/billing, type AdminAccess struct, Catalog AccessLevel `json:"catalog"`
+pkg openrails/billing, type AdminAccess struct, MerchantConfig AccessLevel `json:"merchant_config"`
 pkg openrails/billing, type AdminAccess struct, Metrics bool `json:"metrics"`
 pkg openrails/billing, type AdminAccess struct, ScopeID string `json:"scope_id"`
 pkg openrails/billing, type Admission struct

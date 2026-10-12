@@ -50,8 +50,8 @@ function areaOf(
   )
     return { name: "customer support", allowed: access.admin !== "none" }
   if (under("/ops") || under("/catalog/drift"))
-    return { name: "merchant configuration", allowed: access.merchant_config }
-  if (under("/catalog")) return { name: "the catalog", allowed: access.catalog }
+    return { name: "merchant configuration", allowed: access.merchant_config !== "none" }
+  if (under("/catalog")) return { name: "the catalog", allowed: access.catalog !== "none" }
   return null
 }
 

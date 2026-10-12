@@ -400,3 +400,18 @@ func TestManagementRoutesHaveNoLegacyAliases(t *testing.T) {
 	}
 	require.Positive(t, management)
 }
+
+func TestProvisioningConsumerAndCredentialsShareCapability(t *testing.T) {
+	for _, hostDirectory := range []bool{false, true} {
+		for _, programmatic := range []bool{false, true} {
+			rt := &app.Runtime{Config: &config.Config{}, HostUserInfo: hostDirectory}
+			seen := map[string]int{}
+			opts := Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{MerchantConfig: true, Programmatic: programmatic}}
+			RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, rt, opts)
+			RegisterAppRoutes(recorder{base: "/v1", seen: seen}, rt, opts)
+			for _, key := range []string{"POST /v1/app/scim/v2/Users", "GET /v1/merchant/provisioning-tokens", "POST /v1/merchant/provisioning-tokens", "DELETE /v1/merchant/provisioning-tokens/{id}"} {
+				require.Equal(t, !hostDirectory && programmatic, seen[key] == 1, key)
+			}
+		}
+	}
+}

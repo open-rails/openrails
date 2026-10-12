@@ -5661,8 +5661,8 @@
         ],
         "x-openrails-auth": "application",
         "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -5779,8 +5779,8 @@
         ],
         "x-openrails-auth": "application",
         "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
         },
         "x-openrails-errors": [
           "running_charge_not_found"
@@ -7374,8 +7374,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -7480,8 +7480,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -7592,8 +7592,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param"
@@ -7739,8 +7739,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
@@ -7859,8 +7859,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "service_unavailable"
@@ -8744,8 +8744,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_cursor",
@@ -8794,8 +8794,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
         "x-openrails-errors": [
           "invalid_param",
@@ -9059,9 +9059,10 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
         },
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9107,6 +9108,7 @@
           "root": "root:config:manage"
         },
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -9150,6 +9152,7 @@
           "root": "root:config:manage"
         },
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -10400,16 +10403,65 @@
             ]
           },
           "catalog": {
-            "type": "boolean"
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "update"
+            ]
           },
           "merchant_config": {
-            "type": "boolean"
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "update"
+            ]
           },
           "metrics": {
             "type": "boolean"
           },
           "scope_id": {
             "type": "string"
+          },
+          "application_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "merchant:catalog:manage",
+                "merchant:catalog:read",
+                "merchant:config:manage",
+                "merchant:config:read",
+                "merchant:customer:manage",
+                "merchant:customer:read",
+                "merchant:customers:read",
+                "merchant:entitlements:read",
+                "merchant:events:read",
+                "merchant:metrics:read",
+                "merchant:orders:manage",
+                "merchant:usage:manage",
+                "merchant:usage:read",
+                "root:admin-rate-limits:unlock",
+                "root:catalog:manage",
+                "root:catalog:read",
+                "root:config:manage",
+                "root:config:read",
+                "root:customer:manage",
+                "root:customer:read",
+                "root:customers:read",
+                "root:entitlements:read",
+                "root:events:read",
+                "root:merchants:delete",
+                "root:merchants:read",
+                "root:merchants:restore",
+                "root:metrics:read",
+                "root:orders:manage",
+                "root:usage:manage",
+                "root:usage:read",
+                "root:worker-health:read"
+              ]
+            }
           }
         },
         "required": [
@@ -10417,7 +10469,8 @@
           "catalog",
           "merchant_config",
           "metrics",
-          "scope_id"
+          "scope_id",
+          "application_permissions"
         ]
       },
       "Admission": {

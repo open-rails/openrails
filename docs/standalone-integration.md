@@ -171,6 +171,9 @@ its application's role, decide what it may do. OpenRails mints no credentials
 and serves no route that does; a hosted product mints API keys in the server's
 AuthKit (`ak.CreateAPIKey`, [API keys](merchant-provisioning.md#api-keys)).
 
+See the [remote client setup guide](remote-client-setup.md) for API keys, the
+cached Go OAuth token provider, transport options, and permission discovery.
+
 The remote CLI reads such a token from `--token-file` on every call, so
 whatever refreshes it may rewrite the file in place:
 
@@ -189,19 +192,17 @@ openrails get-merchant-config --server-url https://openrails.example \
 its credential is bound to, with the same operations as in embedded mode:
 
 ```go
-tokens := (&clientcredentials.Config{ // golang.org/x/oauth2/clientcredentials
-    ClientID: "billing-backend", ClientSecret: secret, TokenURL: "https://issuer.example/oauth/token",
-    Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {"https://openrails.example.com"}},
-}).TokenSource(ctx) // caches the token until it expires
-client, err := openrails.NewRemoteMerchant("https://openrails.example", openrails.RemoteCredential{
-    Token: func(context.Context) (string, error) { // or APIKey: a static key
-        t, err := tokens.Token()
-        if err != nil { return "", err }
-        return t.AccessToken, nil
-    },
+token, err := openrails.NewClientCredentialsTokenProvider(openrails.ClientCredentialsConfig{
+    ClientID: "billing-backend", ClientSecret: secret,
+    TokenURL: "https://issuer.example/oauth/token",
+    Resource: "https://openrails.example.com",
 })
+if err != nil { log.Fatal(err) }
+client, err := openrails.NewRemoteMerchant("https://openrails.example", openrails.RemoteCredential{
+    Token: token, // or APIKey: a static merchant key
+}, openrails.RemoteMerchantOptions{Timeout: 10 * time.Second})
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
-if _, err := client.GetMerchantConfiguration(ctx); err != nil { // authenticated boot probe
+if _, err := client.GetAdminAccess(ctx); err != nil { // authenticated boot probe
     log.Fatal(err) // unreachable, bad credential — fail fast
 }
 
@@ -220,18 +221,19 @@ receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmission
 // or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
-A `RemoteCredential` is exactly one of `Token` (a bearer minted per call) and
+A `RemoteCredential` is exactly one of `Token` (a bearer provider called per request) and
 `APIKey` (a static key, such as a hosted product's); the credential's merchant
 is the one every call acts on, and the server names it on every answer
 (`OpenRails-Bound-Merchant`): a credential filed under another merchant's ID
 fails each call with `*openrails.BoundMerchantError`.
-A backend acting for several merchants, or one that sets a transport or a
-per-call timeout, uses `openrails.NewRemote` with `openrails.RemoteOptions`
+A backend acting for several merchants uses `openrails.NewRemote` with `openrails.RemoteOptions`
 (`Credentials` by merchant ID, `HTTPClient`, `Timeout`) and takes each
 merchant's handle from `Merchant(id)`. Every request carries its own
 currency. The constructors validate static configuration without I/O; the
 `Remote`'s `Ready` checks reachability, and any authenticated call proves the
-credential. With `NewRemoteMerchant` the caller's context bounds each call.
+credential. `NewRemoteMerchant` takes optional `RemoteMerchantOptions` with
+the same `HTTPClient` and `Timeout` controls; the caller's context also bounds
+each call.
 
 **Customer tokens.** A backend whose signing key is registered as its
 merchant's remote application mints its customers' tokens with the same
@@ -367,7 +369,7 @@ merchants:
 - An application's token calls the programmatic routes, `/v1/app/*` with
   `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
-  `merchant:usage:manage`, `merchant:events:read`, `merchant:orders:manage`,
+  `merchant:usage:read`, `merchant:usage:manage`, `merchant:events:read`, `merchant:orders:manage`,
   `merchant:customers:read`); a
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad

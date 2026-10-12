@@ -35,7 +35,7 @@ it("billing and catalog staff never request the findings inbox, drift or bell", 
   const queries = client()
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
-    merchant_config: false,
+    merchant_config: "none",
   })
   await mount(
     <QueryClientProvider client={queries}>
@@ -67,7 +67,7 @@ it("a merchant-config operator can open finding resolution without billing or me
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
     admin: "none",
-    catalog: false,
+    catalog: "none",
     metrics: false,
   })
   await mount(
@@ -92,12 +92,13 @@ it("a merchant-config operator can open finding resolution without billing or me
   queries.clear()
 })
 
-it("merchant configuration opens the catalog drift findings query", async () => {
+it("read-only merchant configuration opens drift without refresh authority", async () => {
   const queries = client()
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
+    merchant_config: "read",
     admin: "none",
-    catalog: false,
+    catalog: "none",
     metrics: false,
   })
   await mount(
@@ -110,6 +111,7 @@ it("merchant configuration opens the catalog drift findings query", async () => 
   await vi.waitFor(() =>
     expect(calls(requests)).toContain("GET /merchant/findings")
   )
+  expect(document.body.textContent).not.toContain("Refresh PSPs")
   expect(
     new URLSearchParams(
       requests.find((request) => request.path === "/merchant/findings")!.query

@@ -110,16 +110,16 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		status                   int
 	}{
 		{string(billing.MerchantCustomerRead), http.MethodGet, "/v1/admin/customers", "", http.StatusOK},
-		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/merchant/findings", "", http.StatusOK},
+		{string(billing.MerchantConfigRead), http.MethodGet, "/v1/merchant/findings", "", http.StatusOK},
 		{string(billing.MerchantCustomerManage), http.MethodPatch, "/v1/admin/customers/" + customer, `{}`, http.StatusOK},
 		{string(billing.MerchantConfigManage), http.MethodPost, "/v1/merchant/psps/refresh", "", http.StatusAccepted},
 		{string(billing.MerchantCatalogRead), http.MethodGet, "/v1/catalog/meters", "", http.StatusOK},
-		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/merchant/psps", "", http.StatusOK},
+		{string(billing.MerchantConfigRead), http.MethodGet, "/v1/merchant/psps", "", http.StatusOK},
 		{string(billing.MerchantMetricsRead), http.MethodGet, "/v1/metrics/schema", "", http.StatusOK},
 		{string(billing.MerchantEntitlementsRead), http.MethodPost, "/v1/app/entitlements/check", `{"customer_id":"` + customer + `","entitlements":["content:any"]}`, http.StatusOK},
 		{string(billing.MerchantCatalogRead), http.MethodGet, "/v1/catalog/products?entitlement=content:any", "", http.StatusOK},
 		{string(billing.MerchantUsageManage), http.MethodPost, "/v1/app/admissions/release", `{"request_ids":["req-1"]}`, http.StatusOK},
-		{string(billing.MerchantUsageManage), http.MethodGet, "/v1/app/running-charges/never-started", "", http.StatusNotFound},
+		{string(billing.MerchantUsageRead), http.MethodGet, "/v1/app/running-charges/never-started", "", http.StatusNotFound},
 		{string(billing.MerchantEventsRead), http.MethodGet, "/v1/app/host-events", "", http.StatusOK},
 		{string(billing.MerchantOrdersManage), http.MethodPost, "/v1/app/orders/preview", `{"customer_id":"` + customer + `","lines":[{"price_id":"` + billing.PriceID(uuid.New()).String() + `"}]}`, http.StatusOK},
 	}
@@ -198,7 +198,7 @@ func TestRootActsOnlyThroughABoundToken(t *testing.T) {
 		}
 		w := bound.call(t, handler, http.MethodGet, "/v1/admin/access", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: true, MerchantConfig: true, Metrics: true, ScopeID: mid.String()}, decode[billing.AdminAccess](t, w))
+		require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: billing.AccessUpdate, MerchantConfig: billing.AccessUpdate, Metrics: true, ScopeID: mid.String(), ApplicationPermissions: []billing.Permission{}}, decode[billing.AdminAccess](t, w))
 	}
 
 	atA := f.exchanged(t, handler, supportSession, a)
@@ -207,7 +207,7 @@ func TestRootActsOnlyThroughABoundToken(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code, "the wider ceiling grants support nothing it does not hold: %s", w.Body.String())
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 	w = atA.call(t, handler, http.MethodGet, "/v1/admin/access", nil)
-	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, ScopeID: a.String()}, decode[billing.AdminAccess](t, w))
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Catalog: billing.AccessNone, MerchantConfig: billing.AccessNone, ScopeID: a.String(), ApplicationPermissions: []billing.Permission{}}, decode[billing.AdminAccess](t, w))
 	_, status, body := f.exchangeFor(t, handler, supportSession, b)
 	require.Equal(t, http.StatusBadRequest, status, string(body))
 	require.Contains(t, string(body), "invalid_target", "no role at b, no token bound to b")
