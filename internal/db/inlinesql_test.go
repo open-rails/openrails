@@ -31,6 +31,7 @@ var inlineSQLAllowed = map[string]string{
 	"internal/river/progress.go":                   "River table, runtime schema",
 	"internal/schemasnapshot/":                     "schema list introspects pg_catalog",
 	"sdk/":                                         "e2e harness, separate module",
+	"server/web/console/e2e/server/main.go":        "loopback browser fixture ages a real AuthKit session to exercise native freshness policy",
 }
 
 var (

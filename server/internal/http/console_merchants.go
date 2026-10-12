@@ -157,18 +157,17 @@ func consoleRefuse(w http.ResponseWriter, r *http.Request, err error) {
 	for name, values := range refusal.Header {
 		w.Header()[name] = values
 	}
-	code := billing.CodeAuthenticationUnavailable
-	if refusal.Status == http.StatusUnauthorized {
-		code = billing.CodeAuthenticationRequired
+	message := http.StatusText(refusal.Status)
+	switch {
+	case errors.Is(err, auth.ErrRevoked):
+		billingauth.WriteJSONError(w, refusal.Status, billing.CodeCredentialRevoked, message)
+	case errors.Is(err, auth.ErrExpired):
+		billingauth.WriteJSONError(w, refusal.Status, billing.CodeCredentialExpired, message)
+	case refusal.Status == http.StatusForbidden:
+		billingauth.WriteJSONError(w, refusal.Status, billing.CodePermissionRequired, message)
+	case refusal.Status == http.StatusUnauthorized:
+		billingauth.WriteJSONError(w, refusal.Status, billing.CodeAuthenticationRequired, message)
+	default:
+		billingauth.WriteJSONError(w, refusal.Status, billing.CodeAuthenticationUnavailable, message)
 	}
-	if refusal.Status == http.StatusForbidden {
-		code = billing.CodePermissionRequired
-	}
-	if errors.Is(err, auth.ErrExpired) {
-		code = billing.CodeCredentialExpired
-	}
-	if errors.Is(err, auth.ErrRevoked) {
-		code = billing.CodeCredentialRevoked
-	}
-	billingauth.WriteJSONError(w, refusal.Status, code, http.StatusText(refusal.Status))
 }
