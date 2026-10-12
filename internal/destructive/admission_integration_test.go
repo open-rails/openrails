@@ -379,3 +379,55 @@ func TestDestructiveAdmissionPendingLookup(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+// queryReceipt records the generated query for an EXPLAIN of that same SQL,
+// while exercising its normal typed reader and schema rewriting first.
+type queryReceipt struct {
+	gen.DBTX
+	sql  string
+	args []any
+}
+
+func (q *queryReceipt) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	q.sql = sql
+	q.args = args
+	return q.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func TestDestructiveAdmissionActivityThresholdPlan(t *testing.T) {
+	w := newAdmissionsWorld(t)
+	mid, other := w.merchant(), w.merchant()
+	product, price := uuid.New(), uuid.New()
+	w.exec(`INSERT INTO billing.products(merchant_id,id,key,display_name,tier_rank,archived) VALUES($1,$2,'scale','Scale',0,false)`, mid, product)
+	w.exec(`INSERT INTO billing.prices(merchant_id,id,product_id,key,amount,currency,archived) VALUES($1,$2,$3,'scale',1000000,'USD',false)`, mid, price, product)
+	w.exec(`INSERT INTO billing.customers(merchant_id,id) SELECT $1,md5(n::text)::uuid FROM generate_series(1,2000)n`, mid)
+	w.exec(`INSERT INTO billing.payments(merchant_id,customer_id,price_id,channel,transaction_id,amount,list_amount,currency,status,purchased_at)
+ SELECT $1,c.id,$2,'manual',c.id::text||':'||n::text,1000000,1000000,'USD','succeeded',now()-interval '1 day'
+ FROM billing.customers c CROSS JOIN generate_series(1,2)n WHERE c.merchant_id=$1`, mid, price)
+	w.exec(`ANALYZE billing.payments`)
+	w.exec(`ANALYZE billing.merchants`)
+	capture := &queryReceipt{DBTX: w.db.Qx(t.Context())}
+	q := gen.New(capture)
+	n, err := q.DestructiveMerchantActivityAtLeast(t.Context(), gen.DestructiveMerchantActivityAtLeastParams{MerchantID: mid, Since: w.clock.Now().Add(-30 * 24 * time.Hour), Required: 17})
+	require.NoError(t, err)
+	require.EqualValues(t, 17, n, "duplicates spend one membership and query stops at threshold")
+	var plan string
+	sql := "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + strings.ReplaceAll(capture.sql, "billing.", w.schema+".")
+	require.NoError(t, w.pool.QueryRow(t.Context(), sql, capture.args...).Scan(&plan))
+	t.Log("merchant activity plan:", plan)
+	require.Contains(t, plan, "Limit")
+	require.Contains(t, plan, "payments_destructive_scale_idx", "qualify activity through its ordered partial index")
+	n, err = q.DestructiveMerchantActivityAtLeast(t.Context(), gen.DestructiveMerchantActivityAtLeastParams{MerchantID: other, Since: w.clock.Now().Add(-30 * 24 * time.Hour), Required: 17})
+	require.NoError(t, err)
+	require.Zero(t, n, "another merchant cannot borrow active memberships")
+	n, err = q.DestructiveDeploymentActivityAtLeast(t.Context(), gen.DestructiveDeploymentActivityAtLeastParams{Since: w.clock.Now().Add(-30 * 24 * time.Hour), Required: 17})
+	require.NoError(t, err)
+	require.EqualValues(t, 17, n)
+	sql = "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) " + strings.ReplaceAll(capture.sql, "billing.", w.schema+".")
+	require.NoError(t, w.pool.QueryRow(t.Context(), sql, capture.args...).Scan(&plan))
+	t.Log("deployment activity plan:", plan)
+	require.Contains(t, plan, "payments_destructive_scale_idx")
+	n, err = q.DestructiveMerchantActivityAtLeast(t.Context(), gen.DestructiveMerchantActivityAtLeastParams{MerchantID: mid, Since: w.clock.Now(), Required: 17})
+	require.NoError(t, err)
+	require.Zero(t, n, "old activity cannot scale a current allowance")
+}
