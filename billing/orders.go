@@ -176,6 +176,9 @@ type Order struct {
 	CollectionOwner OrderCollectionOwner `json:"collection_owner"`
 	// CollectionPSPID is the account responsible for collection, when known.
 	CollectionPSPID *PSPID `json:"collection_psp_id"`
+	// ProviderBills are verified provider document references and settlement
+	// facts. They never authorize local collection.
+	ProviderBills []OrderProviderBill `json:"provider_bills"`
 	// Number is the document number, given when the order completes.
 	Number   *string      `json:"number"`
 	Currency string       `json:"currency"`
@@ -201,6 +204,18 @@ type Order struct {
 	// UncollectibleAt is when a usage order was written off.
 	UncollectibleAt *time.Time `json:"uncollectible_at"`
 	CreatedAt       time.Time  `json:"created_at"`
+}
+
+// OrderProviderBill is a verified provider document attached to an order.
+// SettlementSource distinguishes gateway cash, credit, out_of_band or mixed
+// settlement. A null source/settled_at means settlement is not yet verified.
+type OrderProviderBill struct {
+	PSPID            PSPID      `json:"psp_id"`
+	Kind             string     `json:"kind"`
+	Reference        string     `json:"reference"`
+	SettlementSource *string    `json:"settlement_source"`
+	NonCashAmount    int64      `json:"non_cash_amount,string"`
+	SettledAt        *time.Time `json:"settled_at"`
 }
 
 // OrderRenewal is the period of a subscription a renewal order bills. It is

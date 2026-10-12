@@ -274,9 +274,17 @@ func (s *Service) attachLines(ctx context.Context, q *gen.Queries, merchantID uu
 	for _, l := range lines {
 		byOrder[l.OrderID] = append(byOrder[l.OrderID], l)
 	}
+	bills, err := q.ListProviderBillsForOrders(ctx, gen.ListProviderBillsForOrdersParams{MerchantID: merchantID, OrderIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	billsByOrder := map[uuid.UUID][]gen.BillingProviderBill{}
+	for _, bill := range bills {
+		billsByOrder[bill.OrderID] = append(billsByOrder[bill.OrderID], bill)
+	}
 	out := make([]*Order, len(rows))
 	for i, r := range rows {
-		out[i] = &Order{BillingOrder: r, Lines: byOrder[r.ID], PriceReferences: refs}
+		out[i] = &Order{BillingOrder: r, Lines: byOrder[r.ID], PriceReferences: refs, ProviderBills: billsByOrder[r.ID]}
 	}
 	return out, nil
 }
@@ -299,15 +307,11 @@ func (s *Service) load(ctx context.Context, q *gen.Queries, merchantID, id uuid.
 }
 
 func (s *Service) withLines(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, row gen.BillingOrder) (*Order, error) {
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: merchantID, OrderIds: []uuid.UUID{row.ID}})
+	orders, err := s.attachLines(ctx, q, merchantID, []gen.BillingOrder{row})
 	if err != nil {
 		return nil, err
 	}
-	refs, err := orderPriceReferences(ctx, q, lines)
-	if err != nil {
-		return nil, err
-	}
-	return &Order{BillingOrder: row, Lines: lines, PriceReferences: refs}, nil
+	return orders[0], nil
 }
 
 // CancelMerchantOrder withdraws an open order the merchant created.

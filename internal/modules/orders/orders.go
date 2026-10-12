@@ -115,6 +115,7 @@ type Order struct {
 	gen.BillingOrder
 	Lines           []gen.BillingOrderLine
 	PriceReferences map[uuid.UUID]billing.PriceID
+	ProviderBills   []gen.BillingProviderBill
 }
 
 // Payable reports an engine-collected open order not past its expiry.
@@ -175,10 +176,17 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		ID: billing.OrderID(o.ID), CustomerID: billing.CustomerID(o.CustomerID), Origin: billing.OrderOrigin(o.Origin),
 		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
 		CollectionOwner: billing.OrderCollectionOwner(o.CollectionOwner),
+		ProviderBills:   make([]billing.OrderProviderBill, 0, len(o.ProviderBills)),
 		Lines:           make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
 		Payment:   billing.OrderPayment{Status: billing.OrderPaymentStatus(o.PaymentStatus)},
 		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, VoidedAt: o.VoidedAt,
 		UncollectibleAt: o.UncollectibleAt, CreatedAt: o.CreatedAt,
+	}
+	for _, bill := range o.ProviderBills {
+		out.ProviderBills = append(out.ProviderBills, billing.OrderProviderBill{
+			PSPID: billing.PSPID(bill.PspID), Kind: bill.SourceKind, Reference: bill.ProviderReference,
+			SettlementSource: bill.SettlementSource, NonCashAmount: bill.NonCashAmount, SettledAt: bill.SettledAt,
+		})
 	}
 	if o.PspID != nil {
 		psp := billing.PSPID(*o.PspID)

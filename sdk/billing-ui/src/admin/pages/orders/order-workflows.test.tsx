@@ -55,7 +55,6 @@ const order = {
 const paid = (i: number) =>
   aPayment(`pay_${i}`, {
     order_id: "ord_1",
-    price_id: null,
     amount: "1000000",
     transaction_id: `txn_${i}`,
   })

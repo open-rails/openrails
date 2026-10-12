@@ -316,6 +316,17 @@ export const orderSchema = z.object({
   id: z.string(),
   customer_id: z.string(),
   origin: z.string(),
+  /** Only `engine` orders accept generic payment commands. */
+  collection_owner: z.string().nullish(),
+  collection_psp_id: z.string().nullish(),
+  provider_bills: z.array(z.object({
+    psp_id: z.string(),
+    kind: z.string(),
+    reference: z.string(),
+    settlement_source: z.string().nullish(),
+    non_cash_amount: amount,
+    settled_at: time.nullish(),
+  })).nullish().transform((bills) => bills ?? []),
   status: z.string(),
   number: z.string().nullish(),
   currency: z.string(),
@@ -484,14 +495,12 @@ export const paymentSchema = z.object({
   amount_refunded: amount.nullish(),
   currency: z.string(),
   subscription_id: z.string().nullish(),
-  price_id: z.string().nullish(),
+  /** The bill this money movement settles or reverses. */
+  order_id: z.string().nullish(),
   /** `rail | manual | admin` */
   channel: z.string().nullish(),
   rail: z.string().nullish(),
   created_at: time,
-  /** What was bought. */
-  price: priceSchema.nullish(),
-  product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
   /** Normalized decline of a failed payment. */
   failure: z

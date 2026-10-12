@@ -54,18 +54,14 @@ export function subscriptionName(s: Subscription, { t }: Translator): string {
   )
 }
 
-/** What a payment bought: the product's name, else its kind, plus its cadence. */
+/** Payment history names its purpose; purchased terms belong to its order. */
 export function paymentItem(
   p: Payment,
   m: Translator
 ): { name: string; detail: string | null } {
-  const recurring = !!p.price?.billing_interval_hours || !!p.subscription_id
-  const name =
-    p.product?.display_name?.trim() ||
-    m.t(recurring ? "history.subscription" : "history.purchase")
   return {
-    name,
-    detail: recurring ? everyLabel(p.price?.billing_interval_hours, m) : null,
+    name: m.t(p.subscription_id ? "history.subscription" : "history.purchase"),
+    detail: null,
   }
 }
 
