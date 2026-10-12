@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // Restoring the local book preserves observed facts and replay coordinates. No
@@ -166,4 +168,75 @@ func rewriteProviderArchive(t *testing.T, input []byte, edit func(map[string]any
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	return output.Bytes()
+}
+
+func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
+	w := newWorld(t)
+	l := importLegacy(t, w, "nmi", embedded)
+	mid := w.client[embedded].MerchantID()
+	ctx := merchant.WithID(t.Context(), mid)
+	source, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	sub, err := subscriptions.NewSubscriptionRepo(source).GetByID(ctx, l.sub.UUID())
+	require.NoError(t, err)
+	var firstDue time.Time
+	var total int64
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT first_due_at,(accepted_bill->>'Total')::bigint FROM billing.provider_schedules WHERE merchant_id=$1 AND subscription_id=$2`), mid.UUID(), sub.ID).Scan(&firstDue, &total))
+	receipt := observed.ScheduleReceipt{TransactionID: "archive-declined-attempt", Amount: total, Currency: "USD", OccurredAt: firstDue.Add(time.Minute), NextBillingAt: firstDue, Approved: false}
+	var accepted observed.Bill
+	require.NoError(t, source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		accepted, err = observed.ScheduleBill(ctx, source.NewWithPgxTx(tx), sub, receipt)
+		if err != nil {
+			return err
+		}
+		_, err = observed.Record(ctx, source.NewWithPgxTx(tx), accepted, w.clock.Now())
+		return err
+	}))
+	w.settle()
+	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
+	require.NoError(t, err)
+	for _, event := range events.Items {
+		_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
+		require.NoError(t, err)
+	}
+	w.stop()
+	before := w.nmiWrites()
+	var artifact bytes.Buffer
+	require.NoError(t, merchantarchive.Export(ctx, source, mid, &artifact))
+	destinationSchema := "schedule_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	require.NoError(t, engine.Migrate(ctx, w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: destinationSchema, RiverSchema: destinationSchema}}))
+	quoted := pgx.Identifier{destinationSchema}.Sanitize()
+	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
+	_, err = w.pool.Exec(ctx, "INSERT INTO "+quoted+`.merchants (id,slug,status,permission_group_id) VALUES ($1,'archive-destination','active',$2)`, mid.UUID(), uuid.New())
+	require.NoError(t, err)
+	destination, err := db.NewWithPGXPool(w.pool, destinationSchema)
+	require.NoError(t, err)
+	_, err = merchantarchive.Restore(ctx, destination, mid, bytes.NewReader(artifact.Bytes()))
+	require.NoError(t, err, "restore: %v", errors.Unwrap(err))
+	for _, table := range []string{"provider_schedules", "provider_cycle_receipts", "provider_bills"} {
+		read := func(schema string) string {
+			var value string
+			require.NoError(t, w.pool.QueryRow(ctx, fmt.Sprintf("SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text FROM %s.%s t WHERE merchant_id=$1", pgx.Identifier{schema}.Sanitize(), table), mid.UUID()).Scan(&value))
+			return value
+		}
+		require.Equal(t, read(w.schema), read(destinationSchema), table)
+	}
+	// A later provider retry date cannot reinterpret a retained receipt as a new bill.
+	receipt.NextBillingAt = firstDue.Add(1440 * time.Hour)
+	require.NoError(t, destination.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		replayed, err := observed.ScheduleBill(ctx, destination.NewWithPgxTx(tx), sub, receipt)
+		if err != nil {
+			return err
+		}
+		require.Equal(t, accepted.SourceKey, replayed.SourceKey)
+		require.True(t, accepted.PeriodStart.Equal(replayed.PeriodStart))
+		result, err := observed.Record(ctx, destination.NewWithPgxTx(tx), replayed, w.clock.Now())
+		require.False(t, result.Created || result.PaymentCreated || result.Completed)
+		return err
+	}))
+	var count int
+	require.NoError(t, w.pool.QueryRow(ctx, "SELECT count(*) FROM "+quoted+".provider_cycle_receipts WHERE transaction_id=$1", receipt.TransactionID).Scan(&count))
+	require.Equal(t, 1, count)
+	require.Equal(t, before, w.nmiWrites(), "offline schedule restore/replay never contacts the provider")
 }
