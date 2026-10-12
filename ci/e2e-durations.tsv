@@ -1,4 +1,3 @@
-ci	TestAPIHostMigrationDropsHosts	14.5
 ci	TestAdmissionBatchesAnswerPerItem	12.6
 ci	TestAdmissionSubtractsAccrual	10.6
 ci	TestAdmitTxRollsBackWithTheHost	14.9
@@ -83,12 +82,9 @@ ci	TestPeriodicWorkKeepsItsBoundariesAcrossLeaders	21.5
 ci	TestPrepaidOverdraftRepaidByNextFunding	12.4
 ci	TestPrepaidUsagePastTheBalanceIsOwed	12.3
 ci	TestPriceChangeAppliesFromTheNextEvent	10.3
-ci	TestPriceIdentifierMigrationPreservesForeignKeys	11.7
-ci	TestProviderOperationTablesDropRefusesAnOpenHold	8.9
 ci	TestProviderWriteRetention	9.2
 ci	TestPurchasedCreditAccounting	12.7
 ci	TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable	13.8
-ci	TestRateOverrideAndProductArchiveMigration	11.9
 ci	TestRecordedUsageKeepsItsResource	8.6
 ci	TestRecordedUsageResourceKeepsItsRating	11.2
 ci	TestRedisDownKeepsAbuseLimitsPerInstance	12.0
