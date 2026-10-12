@@ -11,8 +11,8 @@ import (
 // and reads; paying needs the customer in person and an Idempotency-Key, and
 // a failed payment answers 402 card_error with the order. The merchant's
 // backend creates unpaid orders for a customer to pay (/v1/app/orders);
-// staff read them, and void, write off or retry the collection of a usage
-// order. Neither ever pays with a card the customer enters.
+// staff inspect them, record external payments, waive usage debt or mark it
+// uncollectible. Staff never initiate saved-card collection.
 var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
