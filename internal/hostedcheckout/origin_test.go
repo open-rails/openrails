@@ -5,6 +5,11 @@ import "testing"
 func TestOriginRefusesEquivalentApplicationOrigins(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"https://identity.example:443", "https://identity.example"},
+		{"https://identity.example:0443", "https://identity.example"},
+		{"http://[0:0:0:0:0:0:0:1]", "http://[::1]"},
+		{"https://127.1", "https://127.0.0.1"},
+		{"https://0x7f000001", "https://127.0.0.1"},
+		{"https://2130706433", "https://127.0.0.1"},
 		{"https://identity.example", "https://IDENTITY.example:443/auth"},
 		{"http://localhost:80", "http://localhost"},
 		{"http://localhost", "http://localhost:80/auth"},
