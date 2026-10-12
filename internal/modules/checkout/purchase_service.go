@@ -349,12 +349,17 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		return nil, err
 	}
 	payment.PspID = &psp
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		// The fallback names immutable accepted identity, not a mutable display name.
+		description = "Purchase " + price.ID.String()
+	}
 	bill, err := observed.Record(ctx, s.transactionDB, observed.Bill{
 		PSPID: psp, CustomerID: customerID, SubscriptionID: req.SubscriptionID, ExistingOrderID: req.OrderID,
 		Owner: observed.OwnerEngine, Kind: "purchase", SourceKind: "purchase", SourceKey: req.TransactionID,
 		Currency: currency, Total: amount, Payment: payment, Settled: true, SettlementSource: "cash",
 		ProviderReference: req.TransactionID,
-		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &product.ID, Description: product.DisplayName,
+		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &product.ID, Description: description,
 			UnitAmount: amount, Amount: amount, AccessDurationHours: price.AccessDurationHours}},
 	}, now)
 	if err != nil {
@@ -529,7 +534,7 @@ func (s *CheckoutPurchaseService) grantPurchasedCredits(ctx context.Context, pay
 	if err != nil {
 		return err
 	}
-	lines, err := s.transactionDB.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderID: *payment.OrderID})
+	lines, err := s.transactionDB.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{*payment.OrderID}})
 	if err != nil {
 		return err
 	}
