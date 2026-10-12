@@ -15,10 +15,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A stale staff sign-in, as a stolen token's is, reaches no route that moves
-// money or grants access (import, catalog, admin API); a recent one passes.
-// Reads and the host's in-process client need no step-up.
-func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
+// Admin changes pass on the staff member's permission, regardless of the
+// age of the sign-in. Customer and network policies are separate.
+func TestSecurityAdminOperationsNeedNoRecentSignIn(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
@@ -69,19 +68,17 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		{http.MethodPost, "/v1/catalog/prices", map[string]any{}},
 		{http.MethodPatch, "/v1/catalog/prices/" + price.ID.String(), map[string]any{}},
 		{http.MethodPost, "/v1/catalog/products", map[string]any{}},
-		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1"}}}}}},
-		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
+		{http.MethodPatch, "/v1/admin/customers/" + member.id, map[string]any{"items": []any{map[string]any{"customer_id": member.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1"}}}}}},
+		{http.MethodPatch, "/v1/admin/customers/" + member.id, map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
 	} {
 		status, body := call(stale, op.method, op.path, op.body)
-		require.Equal(t, http.StatusUnauthorized, status, "%s %s: %v", op.method, op.path, body)
-		require.True(t, stepUp(body), "%s %s: %v", op.method, op.path, body)
-		require.Equal(t, []any{"password"}, body["error"].(map[string]any)["metadata"].(map[string]any)["step_up_methods"],
-			"the provider's challenge reaches the client: %v", body)
+		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError}, status, "%s %s: %v", op.method, op.path, body)
+		require.False(t, stepUp(body), "%s %s: %v", op.method, op.path, body)
 
 		_, body = call(fresh, op.method, op.path, op.body)
 		require.False(t, stepUp(body), "%s %s, fresh: %v", op.method, op.path, body)
 	}
-	require.True(t, member.entitled("content:comp"), "the fresh grants landed")
+	require.True(t, member.entitled("content:comp"), "staff grants land without a recent sign-in")
 
 	// A read needs no step-up, and neither does the host's in-process client.
 	status, body := call(stale, http.MethodGet, "/v1/admin/customers?ids="+member.id, nil)

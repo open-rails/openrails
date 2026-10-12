@@ -14,7 +14,7 @@ func withCustomer(list ...string) []string { return codes(append(list, customerE
 // creditsRoutes is a customer's prepaid money: credit grants, the ledger and
 // balances.
 var creditsRoutes = []Route{
-	{Method: POST, Path: "/v1/admin/credit-grants", Group: Admin, Auth: AuthMerchant, Name: "CreateCreditGrants", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationGrant,
+	{Method: POST, Path: "/v1/admin/credit-grants", Group: Admin, Auth: AuthMerchant, Name: "CreateCreditGrants", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Request: billing.CreateCreditGrantBatchParams{}, Responses: []Reply{{201, billing.CreateCreditGrantBatchResult{}}, {200, billing.CreateCreditGrantBatchResult{}}},
 		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.CreateCreditGrants)},
 	{Method: GET, Path: "/v1/admin/credit-grants", Group: Admin, Auth: AuthMerchant, Name: "ListCreditGrants", Level: LevelRead,
@@ -22,7 +22,7 @@ var creditsRoutes = []Route{
 		Errors: withCustomer("invalid_cursor"), Handler: h(handlers.ListCreditGrants)},
 	{Method: GET, Path: "/v1/admin/credit-grants/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetCreditGrant", Level: LevelRead,
 		Responses: []Reply{{200, billing.CreditGrant{}}}, Errors: codes("credit_grant_not_found", "invalid_param"), Handler: h(handlers.GetCreditGrant)},
-	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
 		Request: billing.RevokeCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: codes("credit_grant_held", "credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.RevokeCreditGrant)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/balance/transactions", Group: Admin, Auth: AuthMerchant, Name: "ListBalanceTransactions", Level: LevelRead,

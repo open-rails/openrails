@@ -291,10 +291,10 @@ whose sign-in form offers password, the deployment's login-capable OIDC provider
 recovery and backup codes. auth-ui keeps the access token in memory and the
 rotating refresh token in the tab's `sessionStorage`, which restores the session
 across reloads of that tab; every API call carries the bearer, never a cookie.
-Every write runs through auth-ui's step-up dialog: when OpenRails answers
-`401 step_up_required` (RFC 9470's `insufficient_user_authentication`, an owner
-operation after a stale sign-in), the console stays signed in and the dialog
-asks the user to confirm it's them and the write is retried. Who can sign in
+OpenRails admin writes do not request a recent sign-in. AuthKit's own
+API-key creation and role grants retain auth-ui's step-up dialog: after
+`401 step_up_required`, the console asks the user to confirm it's them and
+retries that AuthKit operation. Who can sign in
 and what they may do: standalone, the server's merchant roles
 (`owner`/`support`/`viewer`, or the merchant's custom roles) or a trusted
 issuer's token; embedded, the host's `Routes.Auth`.
@@ -304,10 +304,10 @@ issuer's token; embedded, the host's `Routes.Auth`.
 completes the code flow with PKCE, the access token stays in memory and the
 rotating refresh token in IndexedDB. The server's AuthKit must trust the
 issuer for the merchant, and the console asks for tokens for
-`auth.resource.id`. A write OpenRails refuses with `step_up_required` (a
-sign-in older than 15 minutes) re-authorizes at the issuer with `max_age=0` in
-a popup and runs again. Sign-out revokes the refresh token and ends the
-issuer session.
+`auth.resource.id`. AuthKit operations that request step-up re-authorize
+at the issuer with `max_age=0` in a popup and run again. OpenRails admin
+writes use no step-up dialog. Sign-out revokes the refresh token and ends
+the issuer session.
 
 Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 `/admin/config.json` to `localhost:3053`).

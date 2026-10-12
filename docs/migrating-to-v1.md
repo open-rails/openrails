@@ -200,7 +200,7 @@ on one merchant from either, and no call names its merchant.
 | `client.Start`, `Close`, `Ready`, `Probes`, `Routes`, `RiverJobs` | The same methods on the `*openrails.Engine`; each adapter's `Mount` takes the engine |
 | `openrails.NewRemote(url, opts...)` returned the `*Client` | `openrails.NewRemote` takes `openrails.RemoteOptions` and returns the `*openrails.Remote`: `Merchant(id)` is a merchant's handle, `Ready` and `Close` are the remote's. `openrails.NewRemoteMerchant` is one merchant's handle directly |
 | `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `CredentialTarget` | An `openrails.RemoteCredential` (`APIKey` or `Token`) per merchant, in `RemoteOptions.Credentials` by merchant ID. A response naming another merchant fails the call with an `openrails.BoundMerchantError` |
-| `WithHTTPClient`, `WithTimeout` | `RemoteOptions.HTTPClient` and `RemoteOptions.Timeout`; in process, and with `openrails.NewRemoteMerchant`, the call's context is its bound |
+| `WithHTTPClient`, `WithTimeout` | `RemoteOptions.HTTPClient` and `RemoteOptions.Timeout`, or `RemoteMerchantOptions.HTTPClient` and `RemoteMerchantOptions.Timeout` for `openrails.NewRemoteMerchant`; the call context can set a shorter bound |
 | `WithMerchant`, `ForMerchantID` on a call; `WithDefaultMerchant`, `WithMerchantID`; `client.With` | Removed: a handle acts on its own merchant. Take the other merchant's handle |
 | `openrails.RequestMerchant` | Removed: OpenRails binds the merchant; a host's `Authenticate` says who the request is |
 | `client.DeclarePSP(ctx, merchantID, declaration)` | `engine.LocalMerchant(merchantID)` returns a `LocalClient`; `local.DeclarePSP(ctx, declaration)` takes the declaration alone |

@@ -311,7 +311,7 @@ ci/subscriptions	TestSecurityProviderConfigurationSafety	9.4
 ci/subscriptions	TestSecurityRefundNoticeDuringOwnRefundCountsOnce	19.1
 ci/subscriptions	TestSecurityRevokedAccessStaysRevoked	11.7
 ci/subscriptions	TestSecurityRotatedWebhookSecretExpires	19.2
-ci/subscriptions	TestSecurityStaleSignInReachesNoOwnerOperation	7.6
+ci/subscriptions	TestSecurityAdminOperationsNeedNoRecentSignIn	7.6
 ci/subscriptions	TestSecurityStripeDisputeOrdering	17.1
 ci/subscriptions	TestSecurityTierChangeKeysAreCustomerScoped	12.5
 ci/subscriptions	TestSecurityTierChangeStaysInGroup	19.5
@@ -378,7 +378,7 @@ server/ci	TestMerchantCredentialsActAsTheirSession	8.8
 server/ci	TestMerchantNamesAreOwnedByOpenRails	9.1
 server/ci	TestMerchantRenameRoute	11.7
 server/ci	TestMerchantRolePermissionsInTheRunningCatalog	13.3
-server/ci	TestSecurityOwnerOperationsNeedRecentSignIn	13.0
+server/ci	TestSecurityOwnerOperationsNeedNoRecentSignIn	13.0
 server/ci	TestSecurityTeamEmailGrantsOnlyAVerifiedAccount	13.9
 server/ci	TestStandaloneAdminConsolePath	8.9
 server/ci	TestStandaloneBootNeverWaitsOnVaultAndFailsClosedOnKeyChange	7.5

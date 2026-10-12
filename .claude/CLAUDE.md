@@ -67,6 +67,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   group or its `root:` name in the Authenticator's root scope (helpers `auth.Root`).
   Hosts build their roles from the constants and pass none; `Mount` fails for a route
   neither of whose names the Authenticator knows. The in-process `Client` checks none.
+- OpenRails admin and operator changes never require step-up or a recent sign-in;
+  `AuthMerchant` routes must not be `Sensitive`. Their authority is the route's
+  permission. AuthKit's own API-key creation and role grants keep step-up;
+  customer and customer-network policies are unchanged.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
@@ -158,9 +162,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `usage_events` and `admission_operations` are partitioned by month, so every read of
   them names a time range.
 - External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
-  `psp_customers` and `psp_refresh_watermarks`; upstream compute cost is
-  `cost_qualifications` and `cost_observations`. A `checkout_attempts` row (`chk_`) is a
-  provider attempt; a `checkout_sessions` row (`ocs_`) is what a browser pays.
+  `psp_customers` and `psp_refresh_watermarks`. Every purchase is an `orders` row (`ord_`)
+  with its `order_lines`; a `checkout_attempts` row (`chk_`) is a provider attempt; a host
+  charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.

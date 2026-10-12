@@ -13,13 +13,13 @@ var cursorPage = params(text("cursor"), integer("limit"))
 // money the merchant received outside OpenRails, every authorization a PSP
 // answered and rebill cycles.
 var paymentsRoutes = []Route{
-	{Method: POST, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "RecordExternalPayment", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationOffChannel,
+	{Method: POST, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "RecordExternalPayment", Level: LevelUpdate, Limit: middleware.AdminOperationOffChannel,
 		Request: billing.RecordExternalPaymentParams{}, Responses: []Reply{{200, billing.Payment{}}, {201, billing.Payment{}}}, Errors: codes("idempotency_key_reused", "invalid_param", "order_action_not_allowed", "order_has_recurring_line", "order_not_payable", "order_payment_in_progress", "payment_exceeds_due", "resource_not_found", "service_unavailable"), Handler: h(handlers.RecordExternalPayment)},
 	{Method: GET, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "ListPayments", Level: LevelRead,
 		Query: paymentListQuery(text("customer_id"), idsParam), Responses: []Reply{{200, billing.ListPage[billing.Payment]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListPayments)},
 	{Method: GET, Path: "/v1/admin/payments/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetPayment", Level: LevelRead,
 		Responses: []Reply{{200, billing.Payment{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.GetPayment)},
-	{Method: POST, Path: "/v1/admin/payments/{id}/refunds", Group: Admin, Auth: AuthMerchant, Name: "RefundPayment", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive, IdempotencyKey: true,
+	{Method: POST, Path: "/v1/admin/payments/{id}/refunds", Group: Admin, Auth: AuthMerchant, Name: "RefundPayment", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive, IdempotencyKey: true,
 		Request: billing.RefundPaymentParams{}, Responses: []Reply{{201, billing.Payment{}}, {202, billing.Payment{}}}, Errors: codes("idempotency_key_required", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found"), Handler: h(handlers.RefundPayment)},
 	{Method: GET, Path: "/v1/admin/payment-attempts", Group: Admin, Auth: AuthMerchant, Name: "ListPaymentAttempts", Level: LevelRead,
 		Query:     params(cursorPage, idsParam, text("avs_result"), text("card_entry"), text("category"), text("customer_id"), text("cvv_result"), text("cycle_id"), text("kind"), text("observed_via"), text("order_id"), text("owner"), text("payment_id"), text("psp_id"), text("reason"), text("response_code"), text("since"), text("source"), text("subscription_id"), text("until")),
