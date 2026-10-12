@@ -73,7 +73,6 @@ migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
-migration 0073_usage_event_resource.up.sql sha256:af708c10033c41ea7764834ceb1efb215a8d44b3b5bcaf0e0c3809c263bbb1ca
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()

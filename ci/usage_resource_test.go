@@ -3,27 +3,20 @@
 package ci_test
 
 import (
-	"context"
 	"encoding/json"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 // resourceSpend is the customer's USD usage report grouped by resource, as
@@ -97,80 +90,62 @@ func TestRecordedUsageKeepsItsResource(t *testing.T) {
 	require.Equal(t, map[string]string{"gpu:h100": "400", "gpu:a100": "500", "cpu": "100", "": "50"}, bySKU)
 }
 
-// The migration that moves a recorded event's resource from its metadata to
-// its column applies over events recorded before it: a non-blank string
-// resource moves, trimmed; anything else, and a column already set, is left.
-func TestUsageResourceBackfill(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
-	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
-	pool := openPool(t, dsn)
-	f := &fixture{pool: pool, schema: "e2e_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{f.schema}.Sanitize()+" CASCADE")
+// Resource used to be copied into metadata before rating. Recording it in its
+// own column must keep resource-based rate cards working without changing the
+// caller's metadata, including an explicit metadata override.
+func TestRecordedUsageResourceKeepsItsRating(t *testing.T) {
+	p := newPricing(t, newFixture(t), "resource-rating")
+	price := perUnit(100, 0)
+	price.Currency = "USD"
+	_, err := p.client.SetMeter(p.ctx, "gpu-requests", billing.SetMeterParams{
+		EventType: "gpu.request", Aggregation: catalog.AggregationCount,
+		GroupBy: map[string]string{"resource": "metadata.resource"},
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: p.product,
+			Filter: map[string][]string{"resource": {"gpu:a100"}}, Price: price}),
 	})
-	files, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	require.NoError(t, err)
-	before := fstest.MapFS{}
-	for _, name := range files {
-		if strings.HasSuffix(name, "_usage_event_resource.up.sql") {
-			break
-		}
-		body, err := fs.ReadFile(postgresmigrations.FS, name)
-		require.NoError(t, err)
-		before[name] = &fstest.MapFile{Data: body}
-	}
-	require.Less(t, len(before), len(files), "the migration is in this build's chain")
-	cfg := f.config()
-	cfg.DB = &openrails.DBConfig{URL: dsn}
-	application, err := app.BootstrapWithOptions(t.Context(), &cfg, &app.BootstrapOptions{PGXPool: pool, Migrations: before})
-	require.NoError(t, err)
-	require.NoError(t, application.Close(t.Context()))
+	customer := billing.CustomerID(uuid.New())
+	p.grant(customer, 10_000)
 
-	table := func(name string) string { return pgx.Identifier{f.schema, name}.Sanitize() }
-	text := func(s string) *string { return &s }
-	slug := "backfill-" + uuid.NewString()[:8]
-	var merchantID uuid.UUID
-	require.NoError(t, pool.QueryRow(t.Context(), `INSERT INTO `+table("merchants")+` (slug, status) VALUES ($1, 'active') RETURNING id`, slug).Scan(&merchantID))
-	customer := uuid.New()
-	_, err = pool.Exec(t.Context(), `INSERT INTO `+table("customers")+` (merchant_id, id) VALUES ($1, $2)`, merchantID, customer)
-	require.NoError(t, err)
-	stored := map[string]struct {
-		resource *string
-		metadata string
-	}{
-		"moved":      {nil, `{"resource": "gpu:a100"}`},
-		"trimmed":    {nil, `{"resource": "  cpu  "}`},
-		"blank":      {nil, `{"resource": "   "}`},
-		"not text":   {nil, `{"resource": 7}`},
-		"none":       {nil, `{"tier": "pro"}`},
-		"no meta":    {nil, ``},
-		"column set": {text("gpu:h100"), `{"resource": "the caller's own"}`},
-	}
-	for sourceID, row := range stored {
-		var metadata *string
-		if row.metadata != "" {
-			metadata = &row.metadata
-		}
-		_, err := pool.Exec(t.Context(), `INSERT INTO `+table("usage_events")+` (merchant_id, customer_id, invoker_id, currency, resource, event_type,
-			dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount, charges)
-			VALUES ($1, $2, $3, 'USD', $4, 'gpu', '{}', 10, 'worker', $5, 'host', $6::jsonb, now(), 'succeeded', 0, '[]'::jsonb)`,
-			merchantID, customer, customer.String(), row.resource, sourceID, metadata)
-		require.NoError(t, err, sourceID)
-	}
+	metadata := map[string]any{"note": "caller's data"}
+	params := usage(customer, "gpu.request", nil, metadata)
+	params.Resource = "  gpu:a100  "
+	first := p.record(params)
+	require.EqualValues(t, 100, first.Amount, "resource-based cards still price the event")
+	require.Equal(t, "gpu:a100", *first.Resource)
+	require.Equal(t, map[string]int64{"gpu-requests": 100}, charged(first))
+	require.Equal(t, map[string]any{"note": "caller's data"}, metadata, "input metadata is untouched")
+	require.Equal(t, metadata, first.Metadata, "stored metadata contains no synthesized resource")
 
-	bill, _ := f.runtimeWithStripe(t, slug, nil)
-	got := map[string]*string{}
-	rows, err := pool.Query(t.Context(), `SELECT source_id, resource FROM `+table("usage_events")+` WHERE merchant_id = $1`, merchantID)
-	require.NoError(t, err)
-	for rows.Next() {
-		var sourceID string
-		var resource *string
-		require.NoError(t, rows.Scan(&sourceID, &resource))
-		got[sourceID] = resource
-	}
-	require.NoError(t, rows.Err())
-	require.Equal(t, map[string]*string{
-		"moved": text("gpu:a100"), "trimmed": text("cpu"), "blank": nil, "not text": nil, "none": nil, "no meta": nil, "column set": text("gpu:h100"),
-	}, got)
-	require.Equal(t, map[string]int64{"gpu:a100": 10, "cpu": 10, "gpu:h100": 10, "": 40}, resourceSpend(t, bill, billing.CustomerID(customer)))
+	params = usage(customer, "gpu.request", nil, map[string]any{"resource": "gpu:a100"})
+	params.Resource = "gpu:h100"
+	second := p.record(params)
+	require.EqualValues(t, 100, second.Amount, "explicit metadata retains its original pricing precedence")
+	require.Equal(t, "gpu:h100", *second.Resource)
+	require.Equal(t, "gpu:a100", second.Metadata["resource"])
+
+	params = usage(customer, "gpu.request", nil, map[string]any{"resource": nil})
+	params.Resource = "gpu:a100"
+	third := p.record(params)
+	require.Zero(t, third.Amount, "an explicitly empty metadata value is not replaced")
+	require.Contains(t, third.Metadata, "resource")
+	require.Nil(t, third.Metadata["resource"])
+	params = usage(customer, "gpu.request", nil, nil)
+	params.Resource = "gpu:a100"
+	fourth := p.record(params)
+	require.EqualValues(t, 100, fourth.Amount, "nil metadata also receives a rating-only resource")
+	require.Empty(t, fourth.Metadata, "rating does not create stored metadata")
+
+	p.meter("numeric-resource", "resource.quantity", catalog.AggregationSum, "metadata.resource", nil, perUnit(100, 0), nil)
+	params = usage(customer, "resource.quantity", nil, nil)
+	params.Resource = "2"
+	fifth := p.record(params)
+	require.EqualValues(t, 200, fifth.Amount, "sum meters retain the same resource value as filters")
+	require.Empty(t, fifth.Metadata)
+	params = usage(customer, "resource.quantity", nil, map[string]any{"resource": int64(3)})
+	params.Resource = "2"
+	sixth := p.record(params)
+	require.EqualValues(t, 300, sixth.Amount, "explicit numeric metadata retains precedence")
+	require.Equal(t, params.Metadata, sixth.Metadata)
+	require.EqualValues(t, 9_200, p.balance(customer).BalanceAmount)
 }

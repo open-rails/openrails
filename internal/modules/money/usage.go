@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -201,7 +202,20 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			if cerr != nil {
 				return cerr
 			}
-			if quantities, cerr = usageQuantities(cards, eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}); cerr != nil {
+			fields := eventFields{Dimensions: params.Dimensions, Metadata: params.Metadata}
+			// Resource used to be copied into metadata by the service. Keep
+			// that rating input without changing caller or stored metadata;
+			// an explicit metadata value, including nil, keeps precedence.
+			if resource := strings.TrimSpace(params.Resource); resource != "" {
+				if _, exists := fields.Metadata["resource"]; !exists {
+					fields.Metadata = maps.Clone(fields.Metadata)
+					if fields.Metadata == nil {
+						fields.Metadata = make(map[string]any)
+					}
+					fields.Metadata["resource"] = resource
+				}
+			}
+			if quantities, cerr = usageQuantities(cards, fields); cerr != nil {
 				return cerr
 			}
 		}
