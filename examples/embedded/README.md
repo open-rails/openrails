@@ -10,7 +10,7 @@ the root README's [Sell Your Content](../../README.md#sell-your-content).
 |---|---|
 | `main.go` | AuthKit, the OpenRails client (`newBilling`) and the mounted routes |
 | `content.go` | the app's API: `/api/courses` lists the courses with prices and what the user owns (one product read and one entitlement read per page); `/api/courses/:course` answers whoever holds a key that unlocks the video (its course's, or the membership) its signed URL, and anyone else `402` with those keys and the buy page; `/media/*path` serves signed, unexpired URLs |
-| `web/` | the React app, under one `BillingProvider`: the store (a billing-ui `<BuyButton>` per price), each course's player, and its buy page, where `<Offers>` sells everything that unlocks it; the app never handles an order itself. `web/src/clients.ts` builds the auth and billing clients, the one page file the [standalone](../standalone) and [hosted](../hosted) versions change |
+| `web/` | the React app, under one `BillingProvider`: the store (a billing-ui `<BuyButton>` per price), each course's player, and its buy page, where `<ProductList>` sells everything that unlocks it; the app never handles an order itself. `web/src/clients.ts` builds the auth and billing clients, the one page file the [standalone](../standalone) and [hosted](../hosted) versions change |
 | `media/` | the courses' sample videos |
 | `catalog.yaml`, `merchant.example.yaml` | the catalog and the merchant |
 
@@ -18,7 +18,7 @@ AuthKit's token rides `fetch`, not page loads or `<video src>`, so pages fetch
 the API with `auth.authFetch` and play a short-lived signed URL. In production,
 sign with an S3/R2 presigned GET, a CloudFront signed URL or ContentKit's media
 tokens. In a real app, content and its previews come from ContentKit, whose
-paywall names the entitlement to sell, and `<Offers>` takes it from there.
+paywall names the entitlement to sell, and `<ProductList>` takes it from there.
 
 ## Run it
 

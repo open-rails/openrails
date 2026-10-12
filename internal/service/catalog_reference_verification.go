@@ -131,7 +131,7 @@ func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, a
 		return nil, apperr.Invalidf("an existing Stripe price_id is required; lookup-key creation is a separate provider workflow")
 	}
 	if req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
-		return nil, apperr.Invalidf("Stripe trial offers require their separate provider workflow")
+		return nil, apperr.Invalidf("Stripe trial prices require their separate provider workflow")
 	}
 	client, ok := adapter.stripeServiceFor(ctx, accountID)
 	if !ok {
@@ -160,7 +160,7 @@ func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, a
 			return nil, apperr.Invalidf("Stripe price recurring terms do not match the catalog")
 		}
 	} else if remote.Recurring != nil {
-		return nil, apperr.Invalidf("Stripe price is recurring but the catalog offer is one-time")
+		return nil, apperr.Invalidf("Stripe price is recurring but the catalog price is one-time")
 	}
 	out := map[string]string{models.RailKeyStripePriceID: id, models.RailKeyStripeProductID: remote.Product}
 	if remote.LookupKey != "" {
@@ -185,7 +185,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if req.BillingIntervalHours == nil {
 		for key, value := range link {
 			if key != models.RailKeyRail && key != models.RailKeyProvider && strings.TrimSpace(value) != "" {
-				return nil, apperr.Invalidf("one-time Solana offers take no plan reference")
+				return nil, apperr.Invalidf("one-time Solana prices take no plan reference")
 			}
 		}
 		// One-time settlement is a direct transfer; no on-chain plan exists to

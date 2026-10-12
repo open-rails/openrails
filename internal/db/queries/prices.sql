@@ -154,6 +154,23 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND product_id=sqlc.arg(product_id
   AND customer_amount IS NOT DISTINCT FROM sqlc.narg(customer_amount)::jsonb
   AND quantity IS NOT DISTINCT FROM sqlc.narg(quantity)::jsonb;
 
+-- Private identity resolution deliberately includes retained tombstones.
+-- Public catalog reads resolve first, then use the ordinary visible-row reads.
+-- name: LookupPriceStorageID :one
+SELECT id FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = sqlc.arg(public_id)::text
+  AND sha256(public_id::bytea) = sha256(sqlc.arg(public_id)::text::bytea);
+
+-- name: ListPriceReferences :many
+SELECT id, public_id FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- name: ListPriceStorageIDs :many
+-- Canonical IDs identify at most one row per merchant. Make the input-sized
+-- result bound explicit, including empty/NULL batches, without a text-key cap.
+SELECT id, public_id FROM billing.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = ANY(sqlc.arg(ids)::text[])
+  AND sha256(public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest(sqlc.arg(ids)::text[]) AS id)
+LIMIT COALESCE(cardinality(sqlc.arg(ids)::text[]), 0);
+
 -- name: RevivePrice :execrows
 -- Declaring a deleted price's terms again revives its row (the id is the
 -- terms').

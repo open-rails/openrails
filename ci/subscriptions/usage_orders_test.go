@@ -76,7 +76,7 @@ func TestUsageOrdersBillEachChargeOnce(t *testing.T) {
 		return out
 	}
 	pay := func(id billing.OrderID, amount int64) {
-		_, err := client.CreatePayment(ctx, billing.CreatePaymentParams{OrderID: id, Amount: amount, TransactionID: "remit-" + uuid.NewString()})
+		_, err := client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: id, Amount: amount, TransactionID: "remit-" + uuid.NewString()})
 		require.NoError(t, err)
 	}
 	requireOrder := func(o *billing.Order, status billing.OrderStatus, total, paid int64) {

@@ -214,9 +214,13 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Check entitlements",
     section: "programs",
   },
-  "merchant:catalog:read": { label: "Read offers", section: "programs" },
+  "merchant:catalog:read": { label: "Read catalog", section: "operator" },
   "merchant:orders:manage": {
     label: "Create and cancel orders",
+    section: "programs",
+  },
+  "merchant:usage:read": {
+    label: "Read usage and running charges",
     section: "programs",
   },
   "merchant:usage:manage": {
@@ -240,8 +244,12 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     section: "staff",
   },
   "merchant:catalog:manage": { label: "Manage the catalog", section: "operator" },
+  "merchant:config:read": {
+    label: "Read PSPs, findings and merchant settings",
+    section: "operator",
+  },
   "merchant:config:manage": {
-    label: "PSPs, findings and merchant settings",
+    label: "Manage PSPs, findings and merchant settings",
     section: "operator",
   },
   "merchant:metrics:read": {
@@ -286,7 +294,7 @@ export const SECTIONS: {
     id: "programs",
     title: "Programs (/v1/app)",
     description:
-      "What an API key's program may call. A storefront, for example, needs only entitlements and offers.",
+      "What an API key's program may call. A storefront, for example, needs only entitlements and products.",
   },
   {
     id: "staff",
@@ -296,7 +304,7 @@ export const SECTIONS: {
   {
     id: "operator",
     title: "Operator capabilities",
-    description: "Manage the catalog, payment providers, findings and merchant configuration.",
+    description: "Read or manage the catalog, payment providers, findings and merchant configuration.",
   },
   {
     id: "metrics",

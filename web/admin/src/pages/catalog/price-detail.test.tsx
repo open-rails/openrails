@@ -10,65 +10,127 @@ import {
   selectMerchant,
   server,
 } from "@/test/harness"
-import { browserEnvironment, mount, unmount } from "@/test/mount"
+import { act, browserEnvironment, mount, unmount } from "@/test/mount"
 import { PriceDetailPage } from "./price-detail"
 
 afterEach(unmount)
 
-it("shows qualified price versions while history links keep the immutable price ids", async () => {
-  browserEnvironment()
-  const current = aPrice("price_current", "prod_premium", {
-    key: "monthly",
-    version: 1,
-    revision: 3,
-  })
-  const previous = aPrice("price_previous", "prod_premium", {
-    key: "monthly",
-    version: 0,
-    revision: 3,
-    archived: true,
-  })
-  await server({
-    "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
-    "/catalog/prices/price_current": current,
-    "/catalog/products/prod_premium": aProduct("prod_premium", 0, {
-      key: "premium",
-      display_name: "Premium",
-    }),
-    "/catalog/prices/price_current/history": {
+it.each([
+  ["premium", "monthly", "premium:monthly"],
+  ["book/100%", "buy:USD", "book%2F100%25:buy%3AUSD"],
+])(
+  "keeps immutable price IDs through detail and history routing for %s",
+  async (productKey, priceKey, prefix) => {
+    browserEnvironment()
+    const current = aPrice(`${prefix}:v2`, "prod_premium", {
+      key: priceKey,
+      version: 2,
+      revision: 3,
+    })
+    const previous = aPrice(`${prefix}:v1`, "prod_premium", {
+      key: priceKey,
+      version: 1,
+      revision: 3,
+      archived: true,
+    })
+    const pricePath = (id: string) =>
+      `/catalog/prices/${encodeURIComponent(id)}`
+    const history = {
       data: [current, previous].map((price) => ({
         price,
         effective_at: price.created_at,
         archived: price.archived,
       })),
       next_cursor: null,
-    },
-    "/catalog/price-migrations": { data: [], next_cursor: null },
-    "/merchant/psps/routing-preview": { candidates: [] },
-  })
+    }
+    const requests = await server({
+      "/config": {
+        capabilities: { route_groups: { catalog_write: true }, features: {} },
+      },
+      [pricePath(current.id)]: current,
+      [pricePath(previous.id)]: previous,
+      "/catalog/products/prod_premium": aProduct("prod_premium", 0, {
+        key: productKey,
+        display_name: "Premium",
+      }),
+      [pricePath(current.id) + "/history"]: history,
+      [pricePath(previous.id) + "/history"]: history,
+      "/catalog/price-migrations": { data: [], next_cursor: null },
+      "/merchant/psps/routing-preview": { candidates: [] },
+    })
+    selectMerchant("merchant-a")
+    const queries = client()
+    await mount(
+      <QueryClientProvider client={queries}>
+        <MemoryRouter initialEntries={[pricePath(current.id)]}>
+          <Routes>
+            <Route path="/catalog/prices/:id" element={<PriceDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(document.querySelector("h2")?.textContent).toBe(current.id)
+    expect(
+      [...document.querySelectorAll<HTMLAnchorElement>("table a")].map(
+        (link) => ({
+          label: link.textContent,
+          href: link.getAttribute("href"),
+        })
+      )
+    ).toEqual([
+      {
+        label: current.id,
+        href: pricePath(current.id),
+      },
+      {
+        label: previous.id,
+        href: pricePath(previous.id),
+      },
+    ])
+    await act(async () =>
+      document.querySelectorAll<HTMLAnchorElement>("table a")[1]!.click()
+    )
+    expect(document.querySelector("h2")?.textContent).toBe(
+      previous.id + "archived"
+    )
+    expect(
+      requests
+        .filter(
+          (request) =>
+            request.method === "GET" &&
+            request.path.startsWith("/catalog/prices/")
+        )
+        .map((request) => request.path)
+    ).toEqual([
+      pricePath(current.id),
+      pricePath(current.id) + "/history",
+      pricePath(previous.id),
+      pricePath(previous.id) + "/history",
+    ])
+    queries.clear()
+  }
+)
+
+it("refuses a malformed price URL without requesting a price", async () => {
+  browserEnvironment()
+  const requests = await server()
   selectMerchant("merchant-a")
   const queries = client()
   await mount(
     <QueryClientProvider client={queries}>
-      <MemoryRouter initialEntries={["/catalog/prices/price_current"]}>
+      <MemoryRouter initialEntries={["/catalog/prices/bad%ZZ"]}>
         <Routes>
           <Route path="/catalog/prices/:id" element={<PriceDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   )
-
-  expect(document.querySelector("h2")?.textContent).toBe("premium.monthly.v1")
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+    "Invalid price URL."
+  )
   expect(
-    [...document.querySelectorAll<HTMLAnchorElement>("table a")].map(
-      (link) => ({
-        label: link.textContent,
-        href: link.getAttribute("href"),
-      })
-    )
-  ).toEqual([
-    { label: "premium.monthly.v1", href: "/catalog/prices/price_current" },
-    { label: "premium.monthly.v0", href: "/catalog/prices/price_previous" },
-  ])
+    requests.some((request) => request.path.startsWith("/catalog/prices/"))
+  ).toBe(false)
   queries.clear()
 })

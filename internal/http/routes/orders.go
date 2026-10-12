@@ -11,16 +11,14 @@ import (
 // and reads; paying needs the customer in person and an Idempotency-Key, and
 // a failed payment answers 402 card_error with the order. The merchant's
 // backend creates unpaid orders for a customer to pay (/v1/app/orders);
-// staff read them, and void, write off or retry the collection of a usage
-// order. Neither ever pays with a card the customer enters.
+// staff inspect them, record external payments, waive usage debt or mark it
+// uncollectible. Staff never initiate saved-card collection.
 var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
 	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
 	orderCreateErrors = codes(append(append([]string{}, orderPayErrors...), "already_owned", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
-	usageRetryErrors  = codes("card_declined", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_action_not_allowed", "order_not_payable",
-		"order_payment_in_progress", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_not_found", "service_unavailable")
 )
 
 var ordersRoutes = []Route{
@@ -51,16 +49,14 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CreateOrder", IdempotencyKey: true,
 		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}},
 		Errors: codes("already_owned", "checkout_embed_origins_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
-	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CancelOrder", IdempotencyKey: true,
+	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CancelOrder",
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMerchantOrder)},
 	{Method: GET, Path: "/v1/admin/orders", Group: Admin, Auth: AuthMerchant, Name: "ListOrders", Level: LevelRead,
 		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/void", Group: Admin, Auth: AuthMerchant, Name: "VoidOrder", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
-		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.VoidOrder)},
+	{Method: POST, Path: "/v1/admin/orders/{id}/waive-balance", Group: Admin, Auth: AuthMerchant, Name: "WaiveOrderBalance", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.WaiveOrderBalance)},
 	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.MarkOrderUncollectible)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/retry-collection", Group: Admin, Auth: AuthMerchant, Name: "RetryOrderCollection", Level: LevelUpdate, Limit: middleware.AdminOperationOffChannel, IdempotencyKey: true,
-		Request: billing.RetryOrderCollectionParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: usageRetryErrors, Handler: h(handlers.RetryOrderCollection)},
 }

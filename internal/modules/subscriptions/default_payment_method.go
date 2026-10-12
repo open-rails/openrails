@@ -321,7 +321,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 	var swaps []uuid.UUID
 	for _, m := range moves {
 		if !m.swap {
-			if err := s.moveRecurring(ctx, d, m.sub, method.ID, m.lineage, now); err != nil {
+			if err := s.moveRecurring(ctx, d, m.sub, method.ID, m.lineage, now, true); err != nil {
 				return nil, nil, err
 			}
 			continue

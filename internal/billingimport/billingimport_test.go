@@ -25,7 +25,7 @@ func declaredBook() DeclaredBilling {
 			Card: &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("1111"), ExpMonth: ptr(12), ExpYear: ptr(2029)},
 		}},
 		Subscriptions: []DeclaredSubscription{{
-			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: billing.PriceID(uuid.New()),
+			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: billing.PriceID("test:" + uuid.NewString() + ":v1"),
 			Rail: "nmi", RailSubscriptionID: uuid.NewString(),
 			Evidence: json.RawMessage(`{"legacy_id":"` + uuid.NewString() + `"}`),
 		}},

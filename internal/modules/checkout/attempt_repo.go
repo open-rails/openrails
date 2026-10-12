@@ -37,6 +37,13 @@ func checkoutAttemptJSONB(s *models.CheckoutAttempt) (meta, fields, state []byte
 }
 
 func (r *CheckoutAttemptRepo) Create(ctx context.Context, session *models.CheckoutAttempt) error {
+	if session.PriceID != nil {
+		id, err := r.db.PriceReference(ctx, *session.PriceID)
+		if err != nil {
+			return err
+		}
+		session.PublicPriceID = id
+	}
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
@@ -109,7 +116,7 @@ func (r *CheckoutAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*model
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutAttemptFromGen(row)
+	return r.fromGen(ctx, row)
 }
 
 func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.CheckoutAttempt) error {
@@ -118,6 +125,13 @@ func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.Checko
 		return queryScopeErr
 	}
 
+	if session.PriceID != nil {
+		id, err := r.db.PriceReference(ctx, *session.PriceID)
+		if err != nil {
+			return err
+		}
+		session.PublicPriceID = id
+	}
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
@@ -214,7 +228,7 @@ func (r *CheckoutAttemptRepo) GetByReference(ctx context.Context, reference stri
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutAttemptFromGen(row)
+	return r.fromGen(ctx, row)
 }
 
 func (r *CheckoutAttemptRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutAttempt, error) {
@@ -236,5 +250,19 @@ func (r *CheckoutAttemptRepo) GetLatestOpenByUserPriceRail(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutAttemptFromGen(row)
+	return r.fromGen(ctx, row)
+}
+
+func (r *CheckoutAttemptRepo) fromGen(ctx context.Context, row gen.BillingCheckoutAttempt) (*models.CheckoutAttempt, error) {
+	session, err := models.CheckoutAttemptFromGen(row)
+	if err != nil {
+		return nil, err
+	}
+	if session.PriceID != nil {
+		session.PublicPriceID, err = r.db.PriceReference(ctx, *session.PriceID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return session, nil
 }

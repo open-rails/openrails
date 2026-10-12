@@ -20,7 +20,7 @@ Every row and stored column from these nine catalog tables is included:
 | Table | Retained state |
 |---|---|
 | `products` | All products, including archived products, original UUIDs, current revisions, entitlements, credit grants and tiers |
-| `prices` | All immutable price versions, including archived ones, original UUIDs, versions, durations, trials and deposit bounds |
+| `prices` | All immutable price versions, including archived ones, private row UUIDs, stored revisions, durations, trials and deposit bounds |
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
 | `catalog_meters` | Current meter definitions and revisions |
@@ -34,7 +34,7 @@ older mutable product bodies and deleted or overwritten meter/rate-card definiti
 were never retained in the database, so the snapshot cannot reconstruct them.
 
 Archived products and prices are essential: a purchase keeps its original price
-ID after an offer changes or retires. Restoring this snapshot preserves that ID
+ID after a price changes or retires. Restoring this snapshot preserves that ID
 and its owning product. It never substitutes today's price or creates a new
 revision for an old purchase.
 
@@ -87,7 +87,7 @@ also bounds accumulated rows before building YAML. An oversized or unsupported
 catalog is refused rather than truncated; aliases, tags, duplicate keys and
 unknown fields are refused on import.
 
-## Export editable current offers
+## Export editable current prices
 
 The existing declaration workflow remains available:
 
@@ -100,7 +100,7 @@ This export includes unarchived products and their unarchived prices, all meters
 and default rate cards attached to those products. It preserves entitlements,
 tiers, recurring and trial terms, prepaid credit grants and expiry, deposit
 ranges, and configured provider references. It omits database IDs, revision
-history and archived offers.
+history and archived prices.
 
 This document follows ordinary partial-application rules. Omitted products and
 prices remain unchanged; the export does not set `prune: true`. Adding that flag
@@ -115,9 +115,15 @@ formatting changes do not create a new application. Edit relevant declarations
 to make a new change, or use the catalog client/API.
 
 Products and prices match by product key and product-local price key. A fresh
-merchant creates equivalent local offers with its own identities. Provider links
-remain account-specific. To copy offers to a different merchant, remove `psps`
+merchant creates equivalent local prices with its own identities. Provider links
+remain account-specific. To copy prices to a different merchant, remove `psps`
 and `psp_links` declarations or replace them with independently provisioned
 references. Omitting them preserves existing destination bindings; an empty list
 cannot remove an existing binding. Catalog application never creates remote
 provider objects.
+
+Price identity in the merchant API is `product-key:price-key:v1`. Snapshots
+retain private UUID foreign keys and zero-based storage revisions so every
+historical financial reference and provider link survives restore. The public
+ID is derived during migration and restore; its version is the stored revision
+plus one. Snapshot UUIDs are not accepted as public price selectors.

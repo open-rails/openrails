@@ -65,7 +65,7 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 	return nil
 }
 
-// Validate available offers against the current benefit. Historical prices stay
+// Validate available prices against the current benefit. Historical prices stay
 // intact; reactivation checks their compatibility before making them available.
 func (s *Service) validateProductCreditUpdate(ctx context.Context, id billing.ProductID, credit *catalogwire.CreditGrantSpec) error {
 	prices, err := s.ListPricesByProduct(ctx, id, true)

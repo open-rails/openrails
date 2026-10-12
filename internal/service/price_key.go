@@ -54,7 +54,7 @@ func (s *Service) ListPriceHistory(ctx context.Context, id billing.PriceID, page
 	if err != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
-	price, err := prices.GetByID(ctx, id.UUID())
+	price, err := prices.GetByPublicID(ctx, id)
 	if err != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, priceLookup(err)
 	}

@@ -266,13 +266,17 @@ func (s *Service) attachLines(ctx context.Context, q *gen.Queries, merchantID uu
 	if err != nil {
 		return nil, err
 	}
+	refs, err := orderPriceReferences(ctx, q, lines)
+	if err != nil {
+		return nil, err
+	}
 	byOrder := map[uuid.UUID][]gen.BillingOrderLine{}
 	for _, l := range lines {
 		byOrder[l.OrderID] = append(byOrder[l.OrderID], l)
 	}
 	out := make([]*Order, len(rows))
 	for i, r := range rows {
-		out[i] = &Order{BillingOrder: r, Lines: byOrder[r.ID]}
+		out[i] = &Order{BillingOrder: r, Lines: byOrder[r.ID], PriceReferences: refs}
 	}
 	return out, nil
 }
@@ -299,7 +303,11 @@ func (s *Service) withLines(ctx context.Context, q *gen.Queries, merchantID uuid
 	if err != nil {
 		return nil, err
 	}
-	return &Order{BillingOrder: row, Lines: lines}, nil
+	refs, err := orderPriceReferences(ctx, q, lines)
+	if err != nil {
+		return nil, err
+	}
+	return &Order{BillingOrder: row, Lines: lines, PriceReferences: refs}, nil
 }
 
 // CancelMerchantOrder withdraws an open order the merchant created.
@@ -427,4 +435,14 @@ func (s *Service) ExpireDue(ctx context.Context, limit int32) (int, error) {
 // unpaid closed order past retention.
 func SweepMerchants(ctx context.Context, database *db.DB, now time.Time, limit int32) ([]uuid.UUID, error) {
 	return database.GenDirectory().ListOrderSweepMerchants(ctx, gen.ListOrderSweepMerchantsParams{Now: now, PurgeBefore: now.Add(-PurgeAfter), MerchantLimit: limit})
+}
+
+func orderPriceReferences(ctx context.Context, q *gen.Queries, lines []gen.BillingOrderLine) (map[uuid.UUID]billing.PriceID, error) {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for _, line := range lines {
+		if line.PriceID != nil {
+			ids = append(ids, *line.PriceID)
+		}
+	}
+	return db.PriceReferences(ctx, q, ids)
 }

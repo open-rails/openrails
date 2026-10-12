@@ -137,7 +137,7 @@ var Dimensions = []Dimension{
 	{Name: "psp", Description: "the PSP's id (psp_…), empty when none; VAMP thresholds apply per PSP"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
 	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseProductID(s) })},
-	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
+	{Name: "price_id", Description: "immutable price id (product:price:v1)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
@@ -189,6 +189,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `p.purchased_at`,
 		DimJoins: map[string]string{
 			"product_id":    `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
+			"price_id":      `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
 			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
 		},
 		DimExprs: map[string]string{
@@ -197,7 +198,7 @@ var families = map[Family]familySpec{
 			"psp":           `COALESCE('psp_' || p.psp_id::text, '')`,
 			"stream":        streamExpr,
 			"product_id":    `COALESCE('prod_' || pr.product_id::text, '')`,
-			"price_id":      `'price_' || p.price_id::text`,
+			"price_id":      `pr.public_id`,
 			"billing_cycle": billingCycleExpr,
 			"card_brand":    `COALESCE(p.card_brand, '')`,
 			"token_type":    `COALESCE(p.token_type, 'unknown')`,
@@ -211,6 +212,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `s.started_at`,
 		DimJoins: map[string]string{
 			"currency":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"price_id":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 		},
 		DimExprs: map[string]string{
@@ -218,7 +220,7 @@ var families = map[Family]familySpec{
 			"rail":          `s.rail`,
 			"psp":           `COALESCE('psp_' || s.psp_id::text, '')`,
 			"product_id":    `'prod_' || s.product_id::text`,
-			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
+			"price_id":      `COALESCE(pr.public_id, '')`,
 			"billing_cycle": billingCycleExpr,
 			"subscriber_type": `CASE WHEN EXISTS (
 				SELECT 1 FROM billing.subscriptions s2
@@ -233,13 +235,14 @@ var families = map[Family]familySpec{
 		TimeExpr: `s.canceled_at`,
 		DimJoins: map[string]string{
 			"currency": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"price_id": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":    `COALESCE(pr.currency, '')`,
 			"rail":        `s.rail`,
 			"psp":         `COALESCE('psp_' || s.psp_id::text, '')`,
 			"product_id":  `'prod_' || s.product_id::text`,
-			"price_id":    `COALESCE('price_' || s.price_id::text, '')`,
+			"price_id":    `COALESCE(pr.public_id, '')`,
 			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.canceled_at IS NOT NULL`,
@@ -248,10 +251,11 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.subscriptions s`,
 		TimeExpr: `s.ended_at`,
+		DimJoins: map[string]string{"price_id": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`},
 		DimExprs: map[string]string{
 			"rail":        `s.rail`,
 			"product_id":  `'prod_' || s.product_id::text`,
-			"price_id":    `COALESCE('price_' || s.price_id::text, '')`,
+			"price_id":    `COALESCE(pr.public_id, '')`,
 			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.ended_at IS NOT NULL`,
@@ -308,7 +312,7 @@ var families = map[Family]familySpec{
 			"rail":          `s.rail`,
 			"psp":           `COALESCE('psp_' || s.psp_id::text, '')`,
 			"product_id":    `'prod_' || s.product_id::text`,
-			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
+			"price_id":      `COALESCE(pr.public_id, '')`,
 			"billing_cycle": billingCycleExpr,
 			"status":        `s.status::text`,
 		},

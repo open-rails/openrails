@@ -1,8 +1,8 @@
 # Merchant binding
 
 A request acts on one merchant: the one its credential is bound to. Nothing
-in the request names or narrows it (not the Host, a header, the path, the
-query or the body), and no deployment default fills in. A credential bound to
+in the request selects it (not the Host, a header, the path, the query or the
+body), and no deployment default fills in. A credential bound to
 no live merchant reaches no merchant route: `403 merchant_unresolved`. Every
 merchant-bound answer names the merchant it acted on in
 `OpenRails-Bound-Merchant`.
@@ -36,8 +36,18 @@ bound to it.
   token of its application (client credentials). A backend serving several
   merchants passes `openrails.RemoteOptions` one credential per merchant to
   `openrails.NewRemote` and takes each handle from `Merchant(id)`. A handle
-  fails a call whose answer names another merchant
-  (`openrails.BoundMerchantError`).
+  sends `OpenRails-Expected-Merchant` on each call once its merchant is known.
+  The server rejects a different binding with `412 merchant_mismatch` before
+  running the operation. The handle also verifies `OpenRails-Bound-Merchant`
+  and reports a mismatch as `openrails.BoundMerchantError`.
+
+The expectation is a precondition, never a merchant selector or an additional
+permission. Invalid or duplicate values return `400 invalid_param`. Every
+request authenticates again, so a token callback that changes merchants is
+refused on that call. `NewRemoteMerchant` learns its merchant from the first
+bound response and then sends the expectation; use `NewRemote` with the known
+merchant ID to guard the first write too. Older servers may ignore the optional
+header: response checking can detect a mismatch but cannot undo a write there.
 
 **A browser**, on the customer routes (`/v1/me`):
 

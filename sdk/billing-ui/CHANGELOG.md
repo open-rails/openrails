@@ -11,6 +11,12 @@
   management uses `/catalog`, merchant configuration `/merchant`, and metrics
   `/metrics`; customer support stays under `/admin`.
 
+## Product and price lookup
+
+- Product lookup uses `ListProducts` and `GetProduct`, with current prices populated.
+- The product purchase list is exported as `<ProductList>` and `ProductListProps`.
+- Price records remain independently addressable through `GetPrice` and `ListPrices`.
+
 ## Provider operations removed
 
 - Breaking: `OpenRailsErrorCode` and `OPENRAILS_ERROR_CODES` lose
@@ -30,7 +36,7 @@
 ## Public reads name their merchant; token source
 
 - Breaking: `listProducts({ merchant, keys })`, `useProducts({ merchant, keys
-  })` and `<BuyButton merchant>` take the merchant's id, and `<Offers>` takes
+  })` and `<BuyButton merchant>` take the merchant's id, and `<ProductList>` takes
   it with `keys`: `GET /catalog/products?merchant=<id>&keys=…`. The read sends
   no bearer, signed in or out.
 - Breaking: `getConfig()` and `useConfig()` are the deployment's part alone
@@ -71,7 +77,7 @@
 
 ## Orders replace checkout sessions
 
-- Breaking: `<BuyButton>` and `<Offers>` create the customer's order and pay
+- Breaking: `<BuyButton>` and `<ProductList>` create the customer's order and pay
   it in `<OrderCheckout>`; `onPaid` receives the completed `Order`.
   `returnUrl` replaces `successUrl`, and `autoRenew` is gone.
 - Breaking: `<CheckoutPage>`, `<CheckoutFrame>` and the shared payment page
@@ -173,22 +179,22 @@
   and the `returnURL` / `cardSetupReturnURL` props are gone: 3-D Secure runs in
   the page.
 
-## Offers sell products by key
+## ProductList sells products by key
 
 - The public catalog is a lookup by product key: `listProducts({ keys })` and
   `useProducts({ keys })` take the keys alone (1 to 100) and read one page;
   `entitlements`, `limit` and `cursor` are gone, and so is
   `ProductsState.nextCursor`. No keys fetch nothing.
-- `<Offers keys>` replaces `<Offers entitlements>`: your server names the
-  products, with the Go `Client.ListOffers` when it finds them by
+- `<ProductList keys>` replaces `<ProductList entitlements>`: your server names the
+  products, with the Go `Client.ListProducts` when it finds them by
   entitlement.
 
-## Apps buy through BuyButton and Offers
+## Apps buy through BuyButton and ProductList
 
 - `Checkout` and `CheckoutModal` (and their props), the fixture sources and
   the `CheckoutSource` type are no longer exported; the client no longer has
   `createCheckoutSession` or `checkoutSource`. Buy with `<BuyButton>` (it takes
-  `amount`, `autoRenew` and `successUrl`) or `<Offers>`. `CheckoutPage` and
+  `amount`, `autoRenew` and `successUrl`) or `<ProductList>`. `CheckoutPage` and
   `CheckoutFrame` stay, for the shared payment page.
 - The main entry also exports `createBillingClient` (with `BillingClient`,
   `BillingClientOptions` and `ProductListOptions`) beside `formatAmount`, so a
@@ -205,12 +211,12 @@
 - Inside a provider with a client, the checkout saves a new card to the
   customer first and pays on the customer surface.
 
-## Offers sell an entitlement
+## ProductList sell an entitlement
 
 - `<BuyButton product price onPaid onSignInRequired>` buys one price, labelled
   from the catalog unless given `label`. The app never touches a checkout
   session: when orders take a new card (#1168) it creates an order instead.
-- `<Offers entitlements onPaid onSignInRequired>` lists every product on sale
+- `<ProductList entitlements onPaid onSignInRequired>` lists every product on sale
   granting any of the entitlements, a `BuyButton` per price; `products` feeds
   it from the host's server instead.
 - `listProducts({ entitlements, keys })` and `useProducts({ entitlements, keys })`
@@ -417,7 +423,7 @@ Client
 
 ## Advertised checkout rails
 
-- Breaking: `checkoutRails(offers)` takes OpenRails' checkout options alone.
+- Breaking: `checkoutRails(options)` takes OpenRails' checkout options alone.
   Each option carries the `driver` and `public_config` OpenRails derived from
   the armed PSP (Solana: `token_symbol`, `token_name`, `network`); the package
   no longer derives drivers from `psps`. `CheckoutRailOffer` gains `selector`,
@@ -469,7 +475,7 @@ card PSP. Requires OpenRails v0.164.0.
 Provider-neutral hosts: a host passes OpenRails's browser PSP configs through
 and never branches on Stripe, NMI or any other provider.
 
-- `checkoutRails(offers, psps)` / `savedMethodsFor(methods, rails)` derive the
+- `checkoutRails(options, psps)` / `savedMethodsFor(methods, rails)` derive the
   checkout rails and chargeable saved cards from each PSP's `flow` and public
   config.
 - `SavePaymentMethod`: consented in-page card saving with any PSP — Collect.js

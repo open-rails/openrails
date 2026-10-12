@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -15,14 +14,15 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// ErrRemoteClient refuses an operation only an Engine's handle offers.
-var ErrRemoteClient = errors.New("openrails: not available on a remote client")
-
 func init() {
 	engine.Of = func(v any) *engine.Engine {
 		switch v := v.(type) {
 		case *Engine:
 			if v != nil {
+				return v.engine
+			}
+		case *LocalClient:
+			if v != nil && v.Client != nil {
 				return v.engine
 			}
 		case *Client:
@@ -92,13 +92,6 @@ func (e *Engine) MerchantBySlug(slug string) (*Client, error) {
 		return nil, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
 	}
 	return e.Merchant(id)
-}
-
-func (c *Client) embedded() (*engine.Engine, error) {
-	if c == nil || c.engine == nil {
-		return nil, ErrRemoteClient
-	}
-	return c.engine, nil
 }
 
 // StartOption adjusts Start.
@@ -237,25 +230,3 @@ func (UsageSweepArgs) Kind() string { return riverjobs.KindUsageOrders }
 
 // InsertOpts targets QueueBilling.
 func (UsageSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: QueueBilling} }
-
-// DeclarePSP records a PSP identity of the handle's merchant, without
-// credentials, for imported billing facts attributed to it. Call during
-// setup, before serving or starting workers. It never arms the PSP for
-// checkout. Embedded only.
-func (c *Client) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	if e.App.Runtime == nil || e.App.Runtime.Merchants == nil {
-		return nil, fmt.Errorf("openrails: runtime not initialized")
-	}
-	if _, err := e.LiveMerchant(ctx, c.merchantID); err != nil {
-		return nil, fmt.Errorf("openrails: merchant %s: %w", c.merchantID, err)
-	}
-	psp, err := e.App.Runtime.Merchants.DeclarePSP(ctx, c.merchantID, declaration)
-	if err != nil {
-		return nil, err
-	}
-	return &psp, nil
-}

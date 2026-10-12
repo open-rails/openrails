@@ -18,11 +18,11 @@ import (
 
 // activeSubscriberCount is the per-price-row subscriber count: one COUNT(*)
 // query.
-func (s *Service) activeSubscriberCount(ctx context.Context, priceID uuid.UUID) (int, error) {
+func (s *Service) activeSubscriberCount(ctx context.Context, priceID billing.PriceID) (int, error) {
 	if s.subs == nil {
 		return 0, fmt.Errorf("subscription service unavailable")
 	}
-	total, err := s.subs.CountSubscribers(ctx, subscriptions.GetSubscriptionsFilters{PriceID: billing.PriceID(priceID), Status: string(models.StatusActive)})
+	total, err := s.subs.CountSubscribers(ctx, subscriptions.GetSubscriptionsFilters{PriceID: priceID, Status: string(models.StatusActive)})
 	if err != nil {
 		return 0, err
 	}
@@ -71,7 +71,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 			return nil, fmt.Errorf("list prices for product %q: %w", p.Key, err)
 		}
 		for _, price := range prices {
-			active, err := s.activeSubscriberCount(ctx, price.ID)
+			active, err := s.activeSubscriberCount(ctx, price.PublicID)
 			if err != nil {
 				return nil, fmt.Errorf("count active subscribers for price %q: %w", price.Key, err)
 			}
@@ -183,7 +183,7 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve product for price_key %q: %w", key, err)
 	}
-	active, err := s.activeSubscriberCount(ctx, price.ID)
+	active, err := s.activeSubscriberCount(ctx, price.PublicID)
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +254,7 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 		if err != nil {
 			return "", fmt.Errorf("resolve historical price %s: %w", m.PriceID, err)
 		}
-		active, err := s.activeSubscriberCount(ctx, price.ID)
+		active, err := s.activeSubscriberCount(ctx, price.PublicID)
 		if err != nil {
 			return "", err
 		}

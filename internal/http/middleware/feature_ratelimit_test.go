@@ -48,7 +48,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			for _, path := range []string{
-				"/v1/catalog/ask",
+				"/v1/console/catalog/ask",
 			} {
 				before := calls
 				for i, prefix := range []string{"", "/billing"} {
@@ -90,7 +90,7 @@ func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 		{ip: "203.0.113.10", merchant: merchantA, want: http.StatusTooManyRequests},
 		{ip: "203.0.113.11", merchant: merchantA, want: http.StatusOK},
 	} {
-		c.path = "/v1/catalog/ask"
+		c.path = "/v1/console/catalog/ask"
 		c.do(t, h)
 	}
 }

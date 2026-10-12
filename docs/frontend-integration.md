@@ -116,10 +116,12 @@ in one page. It reads no credential, so `merchant` is required signed in or
 out: one merchant id (not its name), else `400 invalid_query`; `404
 resource_not_found` when no live merchant has it. It takes `keys` beside it, 1
 to 100 of them: no entitlement filter, no listing, and any other parameter is
-`400 invalid_query`. billing-ui's `<BuyButton merchant>`, `<Offers merchant
-keys>` and `listProducts({ merchant, keys })` send it. Which products to offer
-is your server's call: the Go `Client.ListOffers` (`GET
-/v1/app/catalog/products`) finds the products on sale granting an entitlement.
+`400 invalid_query`. billing-ui's `<BuyButton merchant>`, `<ProductList merchant
+keys>` and `listProducts({ merchant, keys })` send it. Which products to sell
+is your server's call: the Go `Client.ListProducts` (`GET
+/v1/catalog/products`) filters by product keys or entitlements; use
+`Archived: new(false), ForSale: new(true)` for products on sale. Every product
+includes its current prices.
 
 ### Configuration: `GET /v1/config` and `GET /v1/me/config`
 

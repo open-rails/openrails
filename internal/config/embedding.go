@@ -70,11 +70,11 @@ type RouteGroups struct {
 	// billing.MerchantMetricsRead or RootMetricsRead.
 	Metrics bool
 	// Programmatic is the routes the host's backend calls over HTTP at
-	// /v1/app: entitlement checks, offers, usage and admissions, provider
+	// /v1/app: entitlement checks, usage and admissions, provider
 	// operations, host events and SCIM provisioning. They take an
 	// application Auth says a request is (its Identity's SubjectKind) and
 	// refuse a person. Each route needs its own permission (entitlements,
-	// offers, usage, costs, events, orders, customers), so a program's role
+	// usage, costs, events, orders, customers), so a program's role
 	// grants only what its task needs. SCIM takes any application at the
 	// merchant or the merchant's provisioning token, and is not mounted with
 	// Deps.UserInfo, which reads the directory instead. Embedded, the Client

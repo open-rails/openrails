@@ -1,7 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -30,12 +30,23 @@ import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
 import { useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
+// A price ID can contain its own percent-encoded key bytes. Router params
+// decode an inner %2F again; decode the original URL segment exactly once.
+function priceIDFromPath(pathname: string): string {
+  const segment = pathname.replace(/\/+$/, "").split("/").at(-1) ?? ""
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return ""
+  }
+}
+
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
 // log, with dates) and any pending scheduled migration (progress + cancel)
 // for one price key — the wizard's Step 1 entry point ("Change price") also
 // lives here alongside the catalog list row.
 export function PriceDetailPage() {
-  const { id = "" } = useParams()
+  const id = priceIDFromPath(useLocation().pathname)
   const writesAllowed = useCatalogWrites()
   const navigate = useNavigate()
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
@@ -53,6 +64,13 @@ export function PriceDetailPage() {
     adminQueries.priceMigrations(product?.key, price?.key)
   )
   const latestBatch = migrations?.data?.[0]
+
+  if (!id)
+    return (
+      <p role="alert" className="text-sm text-muted-foreground">
+        Invalid price URL.
+      </p>
+    )
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
@@ -78,13 +96,11 @@ export function PriceDetailPage() {
         </Button>
         <div>
           <h2 className="flex items-center gap-2 text-sm">
-            {product
-              ? `${product.key}.${price.key}.v${price.version}`
-              : price.key}
+            {price.id}
             {price.archived && <Badge variant="secondary">archived</Badge>}
           </h2>
           <p className="text-xs text-muted-foreground">
-            {shortId(price.id, 16)}
+            {product?.display_name}
           </p>
         </div>
         <div className="ml-auto">
@@ -156,12 +172,10 @@ export function PriceDetailPage() {
                     <TableCell>
                       <Link
                         className="text-xs underline-offset-2 hover:underline"
-                        to={`/catalog/prices/${entry.price.id}`}
+                        to={`/catalog/prices/${encodeURIComponent(entry.price.id)}`}
                         title={entry.price.id}
                       >
-                        {product
-                          ? `${product.key}.${entry.price.key}.v${entry.price.version}`
-                          : shortId(entry.price.id, 13)}
+                        {entry.price.id}
                       </Link>
                     </TableCell>
                   </TableRow>
@@ -199,11 +213,8 @@ export function PriceDetailPage() {
             {latestBatch.skipped > 0 && (
               <p className="text-xs text-muted-foreground">
                 {latestBatch.skipped} subscription
-                {latestBatch.skipped === 1
-                  ? " was"
-                  : "s were"}{" "}
-                left alone because another change was already scheduled for
-                them.
+                {latestBatch.skipped === 1 ? " was" : "s were"} left alone
+                because another change was already scheduled for them.
               </p>
             )}
           </CardContent>
@@ -215,7 +226,9 @@ export function PriceDetailPage() {
 
 function CancelMigrationButton({ migrationId }: { migrationId: string }) {
   const queryClient = useQueryClient()
-  const cancelBatch = useMutation(adminMutations.cancelPriceMigration(queryClient))
+  const cancelBatch = useMutation(
+    adminMutations.cancelPriceMigration(queryClient)
+  )
   const confirm = useConfirm()
   return (
     <Button

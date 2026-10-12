@@ -38,10 +38,10 @@ type Cart struct {
 // ExpiresAt is when the cart expires unless it changes first.
 func (c Cart) ExpiresAt() time.Time { return c.LastChangedAt.Add(retention.Carts) }
 
-func cartOf(lines []cartLine, changed time.Time) Cart {
+func cartOf(lines []cartLine, changed time.Time, refs map[uuid.UUID]billing.PriceID) Cart {
 	out := Cart{Lines: make([]billing.OrderLineParams, 0, len(lines))}
 	for _, l := range lines {
-		out.Lines = append(out.Lines, billing.OrderLineParams{PriceID: billing.PriceID(l.PriceID), Quantity: l.Quantity, Amount: l.Amount})
+		out.Lines = append(out.Lines, billing.OrderLineParams{PriceID: refs[l.PriceID], Quantity: l.Quantity, Amount: l.Amount})
 	}
 	if len(lines) > 0 {
 		out.LastChangedAt = changed
@@ -66,7 +66,7 @@ func (s *Service) Cart(ctx context.Context, customerID uuid.UUID) (Cart, error) 
 	}
 	row, err := s.DB.Gen(ctx).GetCart(ctx, gen.GetCartParams{MerchantID: mid.UUID(), CustomerID: customerID})
 	if db.IsNotFound(err) {
-		return cartOf(nil, time.Time{}), nil
+		return cartOf(nil, time.Time{}, nil), nil
 	}
 	if err != nil {
 		return Cart{}, err
@@ -75,7 +75,15 @@ func (s *Service) Cart(ctx context.Context, customerID uuid.UUID) (Cart, error) 
 	if err != nil {
 		return Cart{}, err
 	}
-	return cartOf(lines, row.LastChangedAt), nil
+	ids := make([]uuid.UUID, 0, len(lines))
+	for _, line := range lines {
+		ids = append(ids, line.PriceID)
+	}
+	refs, err := db.PriceReferences(ctx, s.DB.Gen(ctx), ids)
+	if err != nil {
+		return Cart{}, err
+	}
+	return cartOf(lines, row.LastChangedAt, refs), nil
 }
 
 // SetCartLine puts price in the customer's cart: quantity 0 removes its line,
@@ -168,7 +176,15 @@ func (s *Service) takeCart(ctx context.Context, q *gen.Queries, merchantID, cust
 	if len(taken) == 0 {
 		return nil, apperr.Invalidf("the cart is empty").WithParam("cart")
 	}
-	return cartOf(taken, time.Time{}).Lines, nil
+	ids := make([]uuid.UUID, 0, len(taken))
+	for _, line := range taken {
+		ids = append(ids, line.PriceID)
+	}
+	refs, err := db.PriceReferences(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	return cartOf(taken, time.Time{}, refs).Lines, nil
 }
 
 // changeCart is the one way a cart changes: under the cart's row lock, in

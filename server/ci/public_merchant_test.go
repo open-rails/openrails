@@ -81,7 +81,10 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	management := "/v1/catalog/products?keys=" + url.QueryEscape(key)
 	require.Equal(t, http.StatusUnauthorized, serve(handler, rsRequest{path: management}).Code)
 	viewer := merchantKey(t, srv, a, "viewer")
-	require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}).Code)
+	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}))
+	require.Equal(t, productA, id)
+	write := serve(handler, rsRequest{method: http.MethodPost, path: "/v1/catalog/products", authorization: "Bearer " + viewer.Secret})
+	require.Equal(t, http.StatusForbidden, write.Code, write.Body.String())
 	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + keyA.Secret}))
 	require.Equal(t, productA, id)
 
@@ -110,7 +113,7 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 
 	// Elsewhere the parameter names nothing: A's key reads A's rows, or the
 	// route refuses the parameter; it never reads B's.
-	for _, path := range []string{"/v1/catalog/products", "/v1/app/catalog/products"} {
+	for _, path := range []string{"/v1/catalog/products"} {
 		w := serve(handler, rsRequest{path: path + "?" + url.Values{"merchant": {b.String()}, "keys": {key}}.Encode(), authorization: "Bearer " + keyA.Secret})
 		if w.Code == http.StatusBadRequest {
 			continue
@@ -119,6 +122,9 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 		require.Len(t, products, 1, "%s: %s", path, w.Body.String())
 		require.Equal(t, productA, products[0].ID, path)
 	}
+	// Product reads share one authenticated catalog route.
+	retired := serve(handler, rsRequest{path: "/v1/app/catalog/products", authorization: "Bearer " + keyA.Secret})
+	require.Equal(t, http.StatusNotFound, retired.Code, retired.Body.String())
 }
 
 // GET /v1/config is the deployment's alone: every caller reads the same

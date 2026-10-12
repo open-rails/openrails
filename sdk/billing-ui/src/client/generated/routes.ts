@@ -14,6 +14,8 @@ export type OpenRailsRoute = {
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null
+  // Optional console assistance, outside the merchant Go client.
+  consoleOnly?: true
   // wire.ts type names: the JSON body, and each success by status.
   request: string | null
   responses: Readonly<Record<number, string | null>>
@@ -72,7 +74,7 @@ export const OPENRAILS_ROUTES = [
 // The codes every route of a kind answers, by set name.
 export const OPENRAILS_ERROR_SETS: Readonly<Record<string, readonly string[]>> = {
   "request": ["invalid_param", "invalid_query", "invalid_request_body", "request_body_too_large", "unknown_field", "unsupported_media_type"],
-  "tier:customer": ["authentication_required", "authentication_unavailable", "authorization_unavailable", "captcha_invalid", "captcha_required", "credential_expired", "credential_revoked", "customer_issuer_mismatch", "database_busy", "internal_error", "invoker_scoped_principal", "merchant_unresolved", "network_account_linked", "permission_required", "rate_limit_exceeded"],
+  "tier:customer": ["authentication_required", "authentication_unavailable", "authorization_unavailable", "captcha_invalid", "captcha_required", "credential_expired", "credential_revoked", "customer_issuer_mismatch", "database_busy", "internal_error", "invalid_param", "invoker_scoped_principal", "merchant_mismatch", "merchant_unresolved", "network_account_linked", "permission_required", "rate_limit_exceeded"],
   "tier:public": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "rate_limit_exceeded"],
 }
 

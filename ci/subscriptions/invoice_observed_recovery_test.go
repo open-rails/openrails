@@ -77,10 +77,10 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 			case "before_invoice":
 				sale.At = w.clock.Now().Add(-24 * time.Hour)
 			case "void_invoice":
-				_, err := w.client[remote].VoidOrder(t.Context(), invoice)
+				_, err := w.client[remote].WaiveOrderBalance(t.Context(), invoice)
 				require.NoError(t, err)
 			case "already_paid":
-				_, err := w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: invoice, Amount: 50_000_000, TransactionID: "already-remitted"})
+				_, err := w.client[remote].RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: invoice, Amount: 50_000_000, TransactionID: "already-remitted"})
 				require.NoError(t, err)
 			}
 			sale = w.nmi.AddSale(sale)
@@ -172,7 +172,7 @@ func TestObservedInvoiceRecoveryReplayChecksActualLedgerBinding(t *testing.T) {
 	require.NoError(t, err)
 
 	otherInvoice := observedInvoice(t, w, c, 50_000_000)
-	_, err = w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: otherInvoice, Amount: 50_000_000, TransactionID: "other-invoice-bank-payment"})
+	_, err = w.client[remote].RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: otherInvoice, Amount: 50_000_000, TransactionID: "other-invoice-bank-payment"})
 	require.NoError(t, err)
 	// Deliberately corrupt the restored linkage without changing the amount or
 	// receipt ID. A nonnil transfer pointer alone must not bless this archive.
@@ -214,7 +214,7 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			method := c.saveCard("nmi", visa)
 			invoice := observedInvoice(t, source, c, tc.amount)
 			if tc.manual > 0 {
-				_, err := source.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: invoice, Amount: tc.manual, TransactionID: "retained-bank-payment"})
+				_, err := source.client[remote].RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: invoice, Amount: tc.manual, TransactionID: "retained-bank-payment"})
 				require.NoError(t, err)
 			}
 			if tc.uncollectible {

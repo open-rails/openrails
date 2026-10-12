@@ -3,10 +3,10 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,48 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 )
-
-// requireMerchantInitiated: the last charge cited the card's agreement as a
-// merchant-initiated charge and stored nothing anew.
-func (w *world) requireMerchantInitiated(rail string, charged ledgerEntry) {
-	w.t.Helper()
-	if rail == "stripe" {
-		require.Equal(w.t, "true", w.stripe.PaymentIntent(charged.ID)["metadata"].(map[string]string)["openrails_merchant_initiated"])
-		require.Empty(w.t, w.stripe.PaymentIntent(charged.ID)["setup_future_usage"], "an off-session charge saves nothing")
-		return
-	}
-	sale := w.nmi.LastSale()
-	require.Equal(w.t, []string{"merchant", "used"}, []string{sale.InitiatedBy, sale.Indicator})
-	require.NotEmpty(w.t, sale.Initial, "the charge names the card's agreement")
-}
-
-// requireStaffCharge: the staff change's charge of cents on sub keeps its
-// reason and staff member, its operation is the staff's, and the customer
-// was told.
-func (w *world) requireStaffCharge(c *customer, sub billing.SubscriptionID, cents int64, reason string) {
-	w.t.Helper()
-	var paid *billing.Payment
-	for _, p := range w.payments(embedded, c.id) { // newest first
-		if p.Amount == cents*10_000 {
-			paid = &p
-			break
-		}
-	}
-	require.NotNil(w.t, paid, "the staff charge is a payment")
-	require.NotNil(w.t, paid.Reason)
-	require.Equal(w.t, reason, *paid.Reason)
-	var changedBy, invoker string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT metadata->>'changed_by', coalesce(metadata->>'staff_invoker', '') FROM billing.payments WHERE id = $1`), paid.ID.UUID()).Scan(&changedBy, &invoker))
-	require.Equal(w.t, "staff", changedBy)
-	require.NotEmpty(w.t, invoker)
-	var origin, actor, why string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT origin, coalesce(actor, ''), coalesce(origin_reason, '') FROM billing.provider_intents
-		WHERE subscription_id = $1 AND intent_type = 'initial_membership' ORDER BY created_at DESC LIMIT 1`), sub.UUID()).Scan(&origin, &actor, &why))
-	require.Equal(w.t, []string{"admin", invoker}, []string{origin, actor})
-	require.True(w.t, strings.HasSuffix(why, ": "+reason), why)
-	w.requireStaffNotice(c, strconv.FormatInt(cents*10_000, 10))
-}
 
 // requireStaffSchedule: the staff change pending on sub keeps its reason and
 // staff member, and the customer was told.
@@ -80,11 +44,8 @@ func (w *world) requireStaffNotice(c *customer, amount string) {
 	require.Equal(w.t, amount, charged)
 }
 
-// Staff change a subscription at the customer's request as the customer
-// would: an upgrade is charged now, merchant-initiated under the card's
-// recurring agreement, with the reason and staff member kept and the customer
-// told; a downgrade waits for the renewal; a change without a reason, or a
-// charge on a card without an active agreement, is refused.
+// Staff changes schedule the next renewal without charging now, even for an
+// upgrade. Repeats keep one schedule; clearing it and scheduling again are safe.
 func TestStaffSubscriptionChange(t *testing.T) {
 	t.Parallel()
 	forEachRail(t, func(t *testing.T, rail string) {
@@ -94,49 +55,62 @@ func TestStaffSubscriptionChange(t *testing.T) {
 		pro := w.tierPrice(group, 2, 2000, monthHours, false)
 		top := w.tierPrice(group, 3, 3000, monthHours, false)
 		c, sub := w.engineMember(rail, embedded, basic)
-		w.advance(w.subscription(embedded, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 360*time.Hour)
+		end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
+		w.advance(end.Sub(w.clock.Now()) - 360*time.Hour)
 		charges := len(w.railLedger(rail))
-
-		_, err := w.client[remote].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID), IdempotencyKey: "staff-" + uuid.NewString()})
+		params := billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID), IdempotencyKey: "staff-" + uuid.NewString()}
+		_, err := w.client[remote].ChangeSubscription(t.Context(), sub, params)
 		requireCode(t, err, http.StatusBadRequest, billing.CodeInvalidParam)
-		require.Len(t, w.railLedger(rail), charges, "no reason, no change")
-
-		preview, err := w.client[remote].PreviewSubscriptionChange(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID)})
+		preview, err := w.client[remote].PreviewSubscriptionChange(t.Context(), sub, params)
 		require.NoError(t, err)
-		require.Equal(t, "now", preview.Effective)
-		require.Equal(t, int64(1500*10_000), preview.AmountDueNow)
-		up, err := w.client[remote].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID), Reason: "upgrade by phone", IdempotencyKey: "staff-" + uuid.NewString()})
+		require.Equal(t, "period_end", preview.Effective)
+		require.Zero(t, preview.AmountDueNow)
+		require.EqualValues(t, 2000*10_000, preview.NextChargeAmount)
+		require.True(t, end.Equal(*preview.NextChargeDate))
+		params.Reason = "upgrade by phone"
+		up, err := w.client[remote].ChangeSubscription(t.Context(), sub, params)
 		require.NoError(t, err)
-		require.Equal(t, "succeeded", up.Status, "%+v", up)
-		require.Equal(t, "now", up.Effective)
-		require.Equal(t, int64(1500*10_000), up.AmountDueNow, "2000 less half of 1000")
+		require.Equal(t, "succeeded", up.Status)
+		require.Equal(t, "period_end", up.Effective)
+		require.Zero(t, up.AmountDueNow)
+		require.Equal(t, sub, *up.SubscriptionID)
+		require.Equal(t, basic.ID, w.subscription(remote, sub).PriceID)
+		require.Equal(t, pro.ID, w.subscription(remote, sub).ScheduledChange.PriceID)
+		w.requireStaffSchedule(c, sub, params.Reason)
+		require.Len(t, w.railLedger(rail), charges, "a staff upgrade does not charge")
+		require.True(t, c.entitled(basic.ent))
+		require.False(t, c.entitled(pro.ent), "access changes only when renewal settles")
+		again, err := w.client[embedded].ChangeSubscription(t.Context(), sub, params)
+		require.NoError(t, err)
+		require.Equal(t, up, again)
+		var count int
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.scheduled_changes WHERE subscription_id=$1 AND status='scheduled'`), sub.UUID()).Scan(&count))
+		require.Equal(t, 1, count, "a replay does not duplicate the schedule")
+		_, err = w.client[remote].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: priceRef(top.ID), Reason: "another change", IdempotencyKey: uuid.NewString()})
+		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeAlreadyScheduled)
+		clear := billing.ChangeSubscriptionParams{PriceID: priceRef(basic.ID), Reason: "keep current plan", IdempotencyKey: uuid.NewString()}
+		clearPreview, err := w.client[remote].PreviewSubscriptionChange(t.Context(), sub, clear)
+		require.NoError(t, err)
+		require.Zero(t, clearPreview.AmountDueNow)
+		cleared, err := w.client[remote].ChangeSubscription(t.Context(), sub, clear)
+		require.NoError(t, err)
+		require.Equal(t, "now", cleared.Effective)
+		require.Zero(t, cleared.AmountDueNow)
+		require.Nil(t, w.subscription(remote, sub).ScheduledChange)
+		require.Len(t, w.railLedger(rail), charges, "clearing and replay perform no charge")
+		params.IdempotencyKey = uuid.NewString()
+		_, err = w.client[remote].ChangeSubscription(t.Context(), sub, params)
+		require.NoError(t, err)
+		require.Len(t, w.railLedger(rail), charges, "rescheduling performs no charge")
+		w.advanceHealthyTo(end.Add(time.Second))
+		w.runRenewals()
 		ledger := w.railLedger(rail)
-		require.Len(t, ledger, charges+1)
-		require.Equal(t, int64(1500), ledger[len(ledger)-1].Amount)
-		w.requireMerchantInitiated(rail, ledger[len(ledger)-1])
-		w.requireStaffCharge(c, sub, 1500, "upgrade by phone")
-		successor := *up.SubscriptionID
-		require.Equal(t, pro.ID, w.subscription(embedded, successor).PriceID)
+		require.Len(t, ledger, charges+1, "only the automatic renewal charges")
+		require.EqualValues(t, 2000, ledger[len(ledger)-1].Amount)
+		current := w.subscription(remote, sub)
+		require.Equal(t, pro.ID, current.PriceID)
+		require.Nil(t, current.ScheduledChange)
 		require.True(t, c.entitled(pro.ent))
-
-		down, err := w.client[embedded].ChangeSubscription(t.Context(), successor, billing.ChangeSubscriptionParams{PriceID: priceRef(basic.ID), Reason: "downgrade by email", IdempotencyKey: "staff-" + uuid.NewString()})
-		require.NoError(t, err)
-		require.Equal(t, "succeeded", down.Status, "%+v", down)
-		require.Equal(t, "period_end", down.Effective)
-		require.Zero(t, down.AmountDueNow)
-		require.Len(t, w.railLedger(rail), charges+1, "a downgrade charges nothing now")
-		pending := w.subscription(remote, successor).ScheduledChange
-		require.NotNil(t, pending)
-		require.Equal(t, basic.ID, pending.PriceID)
-		w.requireStaffSchedule(c, successor, "downgrade by email")
-
-		// Without an active agreement on the card, staff cannot charge it.
-		_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.mandates SET status = 'ended', end_reason = 'closed', ended_at = now() WHERE subscription_id = $1`), successor.UUID())
-		require.NoError(t, err)
-		_, err = w.client[remote].ChangeSubscription(t.Context(), successor, billing.ChangeSubscriptionParams{PriceID: priceRef(top.ID), Reason: "upgrade again", IdempotencyKey: "staff-" + uuid.NewString()})
-		requireCode(t, err, http.StatusConflict, billing.CodeStoredCredentialRequired)
-		require.Len(t, w.railLedger(rail), charges+1)
-		require.Equal(t, basic.ID, w.subscription(embedded, successor).ScheduledChange.PriceID, "the refused change leaves the schedule")
 		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
@@ -185,4 +159,66 @@ func TestSubscriptionChangeBack(t *testing.T) {
 		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
+}
+
+// A staff retry of a historical pending operation is observation only. The
+// customer may still resume the same accepted operation.
+func TestStaffSubscriptionReplayCannotResumeACharge(t *testing.T) {
+	w := newWorld(t)
+	group := "g" + uuid.NewString()[:8]
+	basic := w.tierPrice(group, 1, 1000, monthHours, false)
+	pro := w.tierPrice(group, 2, 2000, monthHours, false)
+	customer, sub := w.engineMember("stripe", embedded, basic)
+	runtime := engine.Graph(w.rt).Runtime
+	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+	key := "historical-" + uuid.NewString()
+	var operation gen.BillingProviderIntent
+	require.NoError(t, runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		current, err := runtime.SubscriptionService.GetByID(ctx, sub.UUID())
+		if err != nil {
+			return err
+		}
+		price, err := runtime.PriceService.GetCurrentByKey(ctx, current.MerchantID, pro.ProductID.UUID(), pro.Key)
+		if err != nil {
+			return err
+		}
+		payload := checkout.StripeTierChangePayload{UserID: customer.id, SubscriptionID: sub.UUID(), RequestedPrice: pro.ID.String(), PriceID: price.ID, OldPriceID: current.PriceID,
+			StripeSubscriptionID: "legacy-subscription", StripeItemID: "legacy-item", OldStripePriceID: "legacy-basic", StripePriceID: "legacy-pro", Action: "upgrade", PaymentBehavior: "error_if_incomplete",
+			Currency: "USD", RecurringAmount: 20_000_000, AmountDueNow: 15_000_000, PeriodStart: *current.CurrentPeriodStartsAt, PeriodEnd: *current.CurrentPeriodEndsAt}
+		operation, err = intents.NewStore(runtime.DB).Enqueue(ctx, intents.EnqueueParams{MerchantID: current.MerchantID, Provider: "stripe", PspID: current.PspID, IntentType: checkout.TypeStripeTierChange,
+			SubscriptionID: &current.ID, PriceID: &price.ID, Payload: payload, IdempotencyKey: "tier_change:" + customer.id + ":" + key, NextAttemptAt: time.Now().Add(24 * time.Hour), Origin: intents.OriginAdmin})
+		return err
+	}))
+	recorder := &tierReplayExecutor{operation: operation}
+	original := runtime.CheckoutService.Intents
+	runtime.CheckoutService.Intents = recorder
+	defer func() { runtime.CheckoutService.Intents = original }()
+	before := len(w.railLedger("stripe"))
+	params := billing.ChangeSubscriptionParams{PriceID: priceRef(pro.ID), IdempotencyKey: key, Reason: "inspect previous change"}
+	result, err := w.client[remote].ChangeSubscription(t.Context(), sub, params)
+	require.NoError(t, err)
+	require.Equal(t, "processing", result.Status)
+	require.Zero(t, recorder.calls.Load(), "staff cannot resume a pending saved-card charge")
+	require.Len(t, w.railLedger("stripe"), before)
+	params.Reason = "" // customer requests have no staff-only reason field
+	result, err = customer.change(sub, params)
+	require.NoError(t, err)
+	require.Equal(t, "processing", result.Status)
+	require.EqualValues(t, 1, recorder.calls.Load(), "the customer's retry still resumes its accepted operation")
+}
+
+type tierReplayExecutor struct {
+	operation gen.BillingProviderIntent
+	calls     atomic.Int32
+}
+
+func (r *tierReplayExecutor) EnqueueAndExecute(context.Context, intents.EnqueueParams) (gen.BillingProviderIntent, error) {
+	r.calls.Add(1)
+	return r.operation, nil
+}
+func (r *tierReplayExecutor) EnqueueOwnedAndExecute(ctx context.Context, p intents.EnqueueParams, owns func(gen.BillingProviderIntent) error) (gen.BillingProviderIntent, error) {
+	if err := owns(r.operation); err != nil {
+		return gen.BillingProviderIntent{}, err
+	}
+	return r.EnqueueAndExecute(ctx, p)
 }

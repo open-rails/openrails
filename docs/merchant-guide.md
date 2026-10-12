@@ -201,6 +201,12 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   difference now, a downgrade takes effect at the next NMI renewal; only prices of
   the same billing cycle qualify. CCBill upgrades redirect
   to a FlexForm; a Solana tier change is signed in the customer's wallet.
+- Staff changes through `POST /v1/admin/subscriptions/{id}/change` schedule
+  engine-billed price or seat changes at the next renewal, including upgrades
+  and additional seats. Preview reports zero due now; current access and seats
+  remain until renewal settles. Choosing the current terms clears a pending
+  engine change without charging. Staff cannot start or resume an immediate
+  saved-card charge; provider-billed upgrades require the customer's own flow.
 - **Upgrade proration** resets the period: the customer pays `new price − credit`
   now for a fresh period of the new price's cycle, where `credit = old price ×
   time left / current period length`, measured on the subscription's actual current

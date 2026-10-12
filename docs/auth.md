@@ -87,7 +87,7 @@ root role at all of them.
 | merchant config | `billing.MerchantConfigManage` | `billing.RootConfigManage` | PSPs and their refresh, settings |
 | metrics | `billing.MerchantMetricsRead` | `billing.RootMetricsRead` | metrics and their assistants |
 | `/v1/app` | `billing.MerchantEntitlementsRead` | `billing.RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
-| `/v1/app` | `billing.MerchantCatalogRead` | `billing.RootCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |
+| Catalog reads | `billing.MerchantCatalogRead` | `billing.RootCatalogRead` | Product, price, meter and price-migration reads |
 | `/v1/app` | `billing.MerchantUsageManage` | `billing.RootUsageManage` | admissions, usage events and running charges |
 | `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
 | `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
@@ -124,8 +124,8 @@ members and API keys hold a declared role (`server.MerchantRoles`: `viewer`,
 `merchant:custom-<name>`, holding any of the `merchant:` permissions above.
 There are no preset program roles; a merchant composes what each program
 needs. A storefront's key holding `billing.MerchantCatalogRead` and
-`billing.MerchantEntitlementsRead` lists offers and checks entitlements, and is
-refused everything else. The server declares the `root:` names on root too;
+`billing.MerchantEntitlementsRead` reads the catalog and checks entitlements;
+it cannot edit the catalog or customers' billing. The server declares the `root:` names on root too;
 its root owner holds them all.
 
 - Custom roles are AuthKit's (the merchant persona's `CustomRoles`), in the

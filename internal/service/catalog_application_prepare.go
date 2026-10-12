@@ -237,7 +237,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						if account.Archived && !request.Archived {
 							return nil, apperr.Invalidf("provider %q is archived", key)
 						}
-						// A local engine offer still selects an account. Its identity and
+						// A local engine price still selects an account. Its identity and
 						// eligibility must survive the gap before the final commit.
 						out.accounts[account.ID] = account
 					}

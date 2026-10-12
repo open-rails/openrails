@@ -95,7 +95,7 @@ export function RolesTab({ access }: { access: RolesAccess }) {
           <p className="text-sm text-pretty text-muted-foreground">
             {access.everyMerchant
               ? "Roles held in the root group. Their holders act at every merchant."
-              : "A role is a set of permissions held by a teammate or an API key. Define your own so each holds only what it needs: a storefront's key, for example, only checks entitlements and reads offers."}
+              : "A role is a set of permissions held by a teammate or an API key. Define your own so each holds only what it needs: a storefront's key, for example, only checks entitlements and reads products."}
           </p>
         </div>
         {access.manage && (

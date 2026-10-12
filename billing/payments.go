@@ -91,14 +91,14 @@ type PaymentListParams struct {
 	PageRequest
 }
 
-// CreatePaymentParams records money the merchant received outside OpenRails
+// RecordExternalPaymentParams records money the merchant received outside OpenRails
 // (cash, a bank transfer) for one order; it moves no money. A usage order
 // takes up to what it has due; any other order its total, and one with a
 // recurring line is refused, since its renewals charge the customer's card.
 // TransactionID is the remittance's identity: recording it again with the
 // same terms answers the first payment, with other terms is
 // idempotency_key_reused. PaidAt defaults to now.
-type CreatePaymentParams struct {
+type RecordExternalPaymentParams struct {
 	OrderID       OrderID    `json:"order_id"`
 	Amount        int64      `json:"amount,string"`
 	TransactionID string     `json:"transaction_id"`

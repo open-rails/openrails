@@ -121,6 +121,8 @@ const typeSeats = (value: string) => typeInto("#subscription-seats", value)
 describe("the mounted subscription-change dialog", () => {
   it("retains the same wire key across a lost response, dismissal, another preview and processing readback", async () => {
     await openAndReview()
+    expect(document.body.textContent).toContain("No card is charged now")
+    expect(document.body.textContent).not.toContain("charged to their card now")
     answer = async () => {
       throw new TypeError("Network response lost")
     }

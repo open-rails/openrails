@@ -68,6 +68,10 @@ type CheckoutAttemptCreateRequest struct {
 	// Acceptance, when set, is the present payer accepting a recurring price's
 	// quoted terms in this request: the quote is confirmed and charged at once.
 	Acceptance *billingauth.Payer
+
+	// fingerprintPriceID is the retained private identity used only to match
+	// durable receipts across public identifier format changes.
+	fingerprintPriceID string
 }
 
 type CheckoutAttemptConfirmPayment struct {

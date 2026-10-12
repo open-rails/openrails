@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// CatalogDumpOptions exports current, unarchived offers as an editable catalog
+// CatalogDumpOptions exports current, unarchived prices as an editable catalog
 // application. Use the merchant archive for immutable identities and history.
 type CatalogDumpOptions struct {
 	Config   *config.Config

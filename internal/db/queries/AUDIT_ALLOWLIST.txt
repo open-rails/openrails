@@ -12,6 +12,9 @@
 
 ## PERMANENT
 
+# Fixed-width expression index narrows the exact public-ID equality recheck.
+unindexed-filter LookupPriceStorageID # prices_public_id_idx covers merchant_id + sha256(public_id::bytea); exact public_id equality remains mandatory
+
 # Operator-declared catalog/config. Row counts follow the merchant's own
 # configuration, not customer activity.
 unbounded-many ListPSPsForMerchant              # psps: operator-declared, units per merchant

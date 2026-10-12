@@ -577,7 +577,7 @@ until `RouteGroups` turns it on:
   provisioning. They take an application your auth says a request is (an API
   key, a client's own token) holding the route's permission, and refuse a
   person: `root:entitlements:read` for the content gate, `root:catalog:read`
-  for offers, `root:usage:manage`, `root:events:read`, `root:orders:manage`. Give a program a role holding only what its task
+  for catalog reads, `root:usage:manage`, `root:events:read`, `root:orders:manage`. Give a program a role holding only what its task
   needs. Embedded,
   your Go code calls the same operations on the `Client` and you can leave this
   off.
@@ -685,7 +685,7 @@ version that matches your OpenRails:
 pnpm add @openrails/billing-ui@X.Y.Z
 ```
 
-The storefront lists the catalog's offers. A customer who already holds a
+The storefront lists products with their current prices. A customer who already holds a
 course's entitlement gets a link to watch it instead of a buy button:
 
 ```tsx
@@ -832,7 +832,8 @@ from your issuer (AuthKit issues them) for this deployment, holding the route's
 permission: `root:entitlements:read` for the content gate, `root:usage:manage`
 for usage events, admissions and running charges, `root:events:read` for host
 events, `root:orders:manage` for orders. A person is refused.
-Writes take an `Idempotency-Key`, so a retry never double-counts. Embedded, call
+Writes use their durable operation identity (request ID, usage source, running-charge
+reference, or an order's `Idempotency-Key`), so a retry never double-counts. Embedded, call
 the same `Client` methods in process instead. The `scim/v2` routes also take a
 merchant provisioning token, for directories like Okta or Entra ID that can't
 get a token from your issuer; that token opens nothing else.
@@ -896,7 +897,7 @@ permanent purchase. Refunds and revocations can withdraw granted access.
 positive interval recurs until the customer cancels; `null` means a one-time
 payment. There is no separate renewal switch. `access_duration` sets the access
 granted by each payment; `null` means no scheduled expiry. These fields are
-independent: an offer may charge every 30 days and grant 45 days of access per
+independent: a price may charge every 30 days and grant 45 days of access per
 payment. A one-time annual pass uses `billing_interval: null` with
 `access_duration: 365 days`. Day counts are fixed durations, not calendar months
 or years. Zero and negative durations are invalid.
@@ -909,15 +910,15 @@ access already purchased; refunds and explicit revocations may withdraw it.
 Dunning access follows the separate grace policy and does not extend paid time.
 
 Product keys are merchant-wide; price keys belong to their product. For example,
-`channel-membership.monthly` selects the 30-day membership offer.
+`channel-membership.monthly` selects the 30-day membership price.
 OpenRails assigns immutable price revisions automatically, starting at v0.
 Existing subscribers keep their accepted price and benefits until explicitly
-migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
+migrated. Omitted entries stay unchanged; use `archived: true` to retire a price.
 
 ### Evolving the catalog
 
 The following files form a catalog migration: update products in place, create
-new price revisions, retire offers, and restore an earlier revision. All changes
+new price revisions, retire prices, and restore an earlier revision. All changes
 are YAML applications. Apply each file through the same
 `catalog.ReadFile` → `MerchantDeclaration.Catalog` startup path shown above, through
 `client.ApplyCatalog`, or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
@@ -928,13 +929,13 @@ build on the initial `catalog.yaml` above.
 |---|---|
 | Edit fields under an existing product key | Update that product in place; its revision counter advances. |
 | Change financial terms under an existing product/price key | Create a new immutable price revision and archive the previous live revision. |
-| Add a different price key under a product | Create a separate offer; the other prices stay unchanged. |
+| Add a different price key under a product | Create a separate price; the other prices stay unchanged. |
 | Set `archived: true` on a price | Stop new sales at that price; the product and its other prices stay available. |
 | Set `archived: true` on a product | Stop new sales of the product through all its prices. Their individual archive flags stay unchanged. |
 | Omit a product, price, or field | Preserve its stored state. Omission never means deletion. |
 
 **Change a product and raise its price.** Keep the keys to identify the same
-product and offer:
+product and price:
 
 ```yaml
 # catalog-update.yaml
@@ -976,9 +977,9 @@ are omitted and stay unchanged. Existing subscribers keep their accepted benefit
 snapshot; this file does not grant or remove benefits retroactively. The same
 rule applies to editing a bundle's granted keys: earlier buyers retain the
 keys they bought. Moving existing customers to new terms is a separate operation
-from changing the offers available to new customers.
+from changing the prices available to new customers.
 
-**Retire the monthly offer.** Stop new 30-day memberships while keeping the
+**Retire the monthly price.** Stop new 30-day memberships while keeping the
 yearly price on sale:
 
 ```yaml
@@ -992,10 +993,10 @@ products:
 ```
 
 The omitted `yearly` price under `channel-membership` stays unchanged. Monthly subscribers
-keep their accepted price and billing schedule. Archiving an offer does not move
+keep their accepted price and billing schedule. Archiving a price does not move
 them to another product, cancel them, revoke access, or delete history.
 
-**Replace a rental offer.** Retire the three-day rental and add a seven-day
+**Replace a rental price.** Retire the three-day rental and add a seven-day
 rental under the same course product:
 
 ```yaml
@@ -1012,8 +1013,8 @@ products:
         billing_interval: null
 ```
 
-The permanent `course-101.purchase` offer and the bundle remain available.
-Existing three-day rentals retain their original expiry; a new offer never
+The permanent `course-101.purchase` price and the bundle remain available.
+Existing three-day rentals retain their original expiry; a new price never
 extends them automatically. A price cannot move to another product.
 
 **Retire an entire product.** There is no need to repeat its prices:
@@ -1137,7 +1138,7 @@ snapshot. The [merchant archive](internal/merchantarchive/README.md) covers
 financial state and its referenced catalog; review its documented exclusions
 before a whole billing migration.
 
-For an editable declaration containing only current, unarchived offers, use the
+For an editable declaration containing only current, unarchived prices, use the
 lighter dump/apply workflow instead:
 
 ```sh
@@ -1145,7 +1146,7 @@ openrails dump-merchant-catalog --slug onlydemo > catalog.yaml
 openrails apply-catalog --merchant onlydemo --file catalog.yaml
 ```
 
-That document can recreate equivalent offers, using the destination's product and
+That document can recreate equivalent prices, using the destination's product and
 price identities. It does not preserve archived history or original IDs. Provider
 references belong to their configured PSP accounts and must be reviewed before
 copying between merchants. Reapplying an already applied document is a permanent
@@ -1289,7 +1290,7 @@ a separate request-count or token-count wallet. A voluntary refund requires the
 corresponding credits to remain unused and unheld; forced reversals use the source
 lot and preserve the existing rules for already-authorized usage.
 
-#### Updating prepaid offers
+#### Updating prepaid prices
 
 Credit benefits evolve through the same partial updates. For example, this changes
 only the expiry offered by new $100-pack checkouts. Existing credit lots keep the
@@ -1342,7 +1343,7 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 
 Keys are opaque, including UUID-shaped keys: a field that takes an ID never
 accepts a key, and there is no auto-detection. An accepted attempt keeps its
-original price and benefit snapshot after a key moves or an offer is archived.
+original price and benefit snapshot after a key moves or a price is archived.
 More in [products and prices through the Client](docs/catalog-client.md).
 
 ### Features

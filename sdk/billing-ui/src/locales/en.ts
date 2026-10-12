@@ -51,7 +51,7 @@ export const en = {
     once: "one-time",
     permanent: "Access with no scheduled expiry",
   },
-  offers: {
+  products: {
     empty: "Nothing on sale unlocks this",
     once: "{amount}",
     rent: "Rent for {period}, {amount}",
@@ -91,8 +91,7 @@ export const en = {
   },
   cancel: {
     title: "Cancel {name}?",
-    description:
-      "Future payments stop. You keep access already purchased.",
+    description: "Future payments stop. You keep access already purchased.",
     solanaDescription:
       "Your wallet signs an on-chain cancellation. You keep access already purchased.",
     reasonLabel: "Why are you cancelling?",

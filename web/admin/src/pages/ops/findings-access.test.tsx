@@ -35,7 +35,7 @@ it("billing and catalog staff never request the findings inbox, drift or bell", 
   const queries = client()
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
-    merchant_config: false,
+    merchant_config: "none",
   })
   await mount(
     <QueryClientProvider client={queries}>
@@ -67,7 +67,7 @@ it("a merchant-config operator can open finding resolution without billing or me
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
     admin: "none",
-    catalog: false,
+    catalog: "none",
     metrics: false,
   })
   await mount(
@@ -92,12 +92,13 @@ it("a merchant-config operator can open finding resolution without billing or me
   queries.clear()
 })
 
-it("merchant configuration opens the catalog drift findings query", async () => {
+it("read-only merchant configuration opens drift without refresh authority", async () => {
   const queries = client()
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
+    merchant_config: "read",
     admin: "none",
-    catalog: false,
+    catalog: "none",
     metrics: false,
   })
   await mount(
@@ -110,6 +111,7 @@ it("merchant configuration opens the catalog drift findings query", async () => 
   await vi.waitFor(() =>
     expect(calls(requests)).toContain("GET /merchant/findings")
   )
+  expect(document.body.textContent).not.toContain("Refresh scan")
   expect(
     new URLSearchParams(
       requests.find((request) => request.path === "/merchant/findings")!.query
@@ -118,5 +120,44 @@ it("merchant configuration opens the catalog drift findings query", async () => 
   expect(document.body.textContent).not.toContain(
     "Catalog updates are unavailable"
   )
+  queries.clear()
+})
+
+it("a configuration reader sees findings without resolution actions", async () => {
+  const queries = client()
+  routes["GET /merchant/findings"] = {
+    data: [
+      {
+        id: "fnd_readonly",
+        finding_type: "life.worker.stalled",
+        subject_key: "worker",
+        severity: "high",
+        status: "requires_review",
+        last_seen_at: "2026-10-11T00:00:00Z",
+        resolved_at: null,
+      },
+    ],
+    next_cursor: null,
+  }
+  queries.setQueryData(adminQueries.access().queryKey, {
+    ...FULL_ACCESS,
+    merchant_config: "read",
+    metrics: false,
+  })
+  await mount(
+    <QueryClientProvider client={queries}>
+      <MemoryRouter>
+        <OpsPage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("life.worker.stalled")
+  )
+  expect(
+    [...document.querySelectorAll("button")].some(
+      (button) => button.textContent === "Resolve"
+    )
+  ).toBe(false)
   queries.clear()
 })

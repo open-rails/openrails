@@ -32,7 +32,7 @@ import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
-import { useMerchantConfig, useMetrics } from "@/lib/capabilities"
+import { useMerchantConfig, useMerchantConfigUpdates, useMetrics } from "@/lib/capabilities"
 
 export function OpsPage() {
   return useMerchantConfig() ? <FindingsTab /> : null
@@ -46,9 +46,10 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
-  const canUpdate = useMerchantConfig()
+  const canRead = useMerchantConfig()
+  const canUpdate = useMerchantConfigUpdates()
   const metrics = useMetrics()
-  const { data, isPending: loading } = useQuery(adminQueries.findings(canUpdate))
+  const { data, isPending: loading } = useQuery(adminQueries.findings(canRead))
   const { data: gauges } = useQuery({
     ...adminQueries.findingSummary(),
     enabled: metrics,

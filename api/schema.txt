@@ -73,6 +73,8 @@ migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
+migration 0073_public_price_identifiers.up.sql sha256:efa64c2cd59f72534624a832623adda896b879c7fc6bcea6619b24d13d2e39cb
+migration 0074_operational_read_indexes.up.sql sha256:08d106d0d0ea18729529579cc08ace72b5af2fbe09bb99e43d99a874530707bb
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -164,6 +166,8 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   constraint admission_operations_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'captured'::text])))
   constraint admission_operations_state_fields_check CHECK ((((state = 'open'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NULL)) OR ((state = 'released'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NOT NULL)) OR ((state = 'captured'::text) AND (capture_terms IS NOT NULL) AND (captured_amount IS NOT NULL) AND (captured_amount >= 0) AND (captured_at IS NOT NULL))))
   constraint admission_operations_terms_check CHECK (((jsonb_typeof(terms) = 'object'::text) AND (octet_length((terms)::text) <= 65536)))
+  index CREATE INDEX admission_operations_admitted_at_request_id_idx ON ONLY billing.admission_operations USING btree (merchant_id, admitted_at DESC, request_id COLLATE "C" DESC)
+  index CREATE INDEX admission_operations_customer_admitted_at_request_id_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, admitted_at DESC, request_id COLLATE "C" DESC)
   index CREATE INDEX admission_operations_customer_id_currency_admitted_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, admitted_at) WHERE (state <> 'released'::text)
   index CREATE INDEX admission_operations_customer_id_currency_expires_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, expires_at) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX admission_operations_pkey ON ONLY billing.admission_operations USING btree (merchant_id, request_id, admitted_at)
@@ -1631,6 +1635,7 @@ table billing.prices
   column billing_interval_hours integer
   column quantity jsonb
   column deleted_at timestamp with time zone
+  column public_id text NOT NULL
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
@@ -1650,6 +1655,7 @@ table billing.prices
   constraint prices_trial_both_or_neither_check CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL)))
   constraint prices_trial_needs_billing_interval_check CHECK (((trial_unit_amount IS NULL) OR (billing_interval_hours IS NOT NULL)))
   constraint prices_trial_period_positive_check CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0)))
+  index CREATE INDEX prices_archived_created_at_id_idx ON billing.prices USING btree (merchant_id, archived, created_at DESC, id DESC)
   index CREATE INDEX prices_created_at_id_idx ON billing.prices USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX prices_id_product_id_key ON billing.prices USING btree (merchant_id, id, product_id)
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
@@ -1657,12 +1663,14 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
+  index CREATE INDEX prices_public_id_idx ON billing.prices USING btree (merchant_id, sha256((public_id)::bytea))
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
   trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
+  trigger CREATE TRIGGER price_z_public_id BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_public_id()
 
 table billing.product_access
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2375,6 +2383,7 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   index CREATE UNIQUE INDEX usage_events_idem_key ON ONLY billing.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id, occurred_at)
   index CREATE INDEX usage_events_occurred_at_idx ON ONLY billing.usage_events USING btree (merchant_id, occurred_at)
   index CREATE UNIQUE INDEX usage_events_pkey ON ONLY billing.usage_events USING btree (merchant_id, id, occurred_at)
+  index CREATE INDEX usage_events_source_occurred_at_id_idx ON ONLY billing.usage_events USING btree (merchant_id, source, source_id, occurred_at DESC, id DESC)
 
 table billing.webhook_events
   column merchant_id uuid NOT NULL
@@ -2474,6 +2483,22 @@ function billing.assign_object_revision()
       END IF;
       RETURN NEW;
   END $function$
+
+function billing.assign_price_public_id()
+  CREATE OR REPLACE FUNCTION billing.assign_price_public_id()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing'
+  AS $function$
+  DECLARE product_key text;
+  BEGIN
+      SELECT key INTO STRICT product_key FROM billing.products
+      WHERE merchant_id = NEW.merchant_id AND id = NEW.product_id;
+      NEW.public_id := billing.escape_price_key(product_key) || ':'
+          || billing.escape_price_key(NEW.key) || ':v' || (NEW.revision + 1)::text;
+      RETURN NEW;
+  END;
+  $function$
 
 function billing.assign_price_revision()
   CREATE OR REPLACE FUNCTION billing.assign_price_revision()
@@ -2866,6 +2891,30 @@ function billing.ensure_month_partitions(name,timestamp with time zone,timestamp
           month_start := month_start + interval '1 month';
       END LOOP;
       RETURN created;
+  END;
+  $function$
+
+function billing.escape_price_key(text)
+  CREATE OR REPLACE FUNCTION billing.escape_price_key(key text)
+   RETURNS text
+   LANGUAGE plpgsql
+   IMMUTABLE STRICT
+   SET search_path TO 'pg_catalog'
+  AS $function$
+  DECLARE
+      bytes bytea := convert_to(key, 'UTF8');
+      result text := '';
+      value integer;
+  BEGIN
+      FOR i IN 0..length(bytes)-1 LOOP
+          value := get_byte(bytes, i);
+          IF value BETWEEN 65 AND 90 OR value BETWEEN 97 AND 122 OR value BETWEEN 48 AND 57 OR value IN (45, 46, 95, 126) THEN
+              result := result || chr(value);
+          ELSE
+              result := result || '%' || upper(lpad(to_hex(value), 2, '0'));
+          END IF;
+      END LOOP;
+      RETURN result;
   END;
   $function$
 

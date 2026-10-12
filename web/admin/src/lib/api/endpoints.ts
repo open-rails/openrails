@@ -1,10 +1,6 @@
 // Per-endpoint client functions for /v1/admin/*. Shapes are the generated
 // wire types where the route has them, else src/lib/api/types.ts.
-import {
-  api,
-  type CursorEnvelope,
-  type PageRequest,
-} from "./client"
+import { api, type CursorEnvelope, type PageRequest } from "./client"
 import type {
   AdminAccess,
   AlertWebhook,
@@ -459,7 +455,7 @@ export const createPrice = (body: CreatePriceParams) =>
 // also reads every PSP's copy and reports its drift: a read, never a write,
 // and slow enough that it stays opt-in.
 export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-  api<Price>(`/catalog/prices/${id}`, {
+  api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, {
     query: verify ? { verify: true } : undefined,
     signal,
   })
@@ -478,15 +474,21 @@ export const getProductByKey = async (productKey: string) => {
 // updatePrice archives or restores a price, or changes its PSP links
 // (a PSP set to null is unlinked).
 export const updatePrice = (id: string, body: UpdatePriceParams) =>
-  api<Price>(`/catalog/prices/${id}`, { method: "PATCH", body })
+  api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body,
+  })
 
 // getPriceHistory returns the history of a price's key, most recent first:
 // when the key moved to which price.
 export const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
-  api<ListPage<PriceKeyMovement>>(`/catalog/prices/${priceId}/history`, {
-    query: { limit: PAGE_MAX },
-    signal,
-  })
+  api<ListPage<PriceKeyMovement>>(
+    `/catalog/prices/${encodeURIComponent(priceId)}/history`,
+    {
+      query: { limit: PAGE_MAX },
+      signal,
+    }
+  )
 
 // --- Price migrations ---
 
@@ -640,7 +642,10 @@ export const getAdminAccess = (signal?: AbortSignal) =>
 
 // updateCustomer changes only the settings params names and answers the
 // customer.
-export const updateCustomer = (customerId: string, params: UpdateCustomerParams) =>
+export const updateCustomer = (
+  customerId: string,
+  params: UpdateCustomerParams
+) =>
   api<Customer>(`/admin/customers/${customerId}`, {
     method: "PATCH",
     body: params,

@@ -99,6 +99,8 @@ var excludedColumns = map[string]string{
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
+	// Canonical price IDs are reconstructed from immutable keys and revision.
+	"prices": "public_id",
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	"psps":              "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",
@@ -259,7 +261,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
-	// Current available offers obey the same product/price contract as ordinary
+	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (

@@ -296,6 +296,8 @@ alongside it: see [backup and recovery](backup-and-recovery.md).
 
 ## API keys
 
+The [remote client setup guide](remote-client-setup.md) covers backend credentials, least-privilege reads and independent customer-token signing.
+
 OpenRails serves no route that mints credentials. A merchant's API keys are
 AuthKit's, in the merchant's group: a hosted product mints one with
 `ak.CreateAPIKey(ctx, who, iam.GroupByID(merchantID), …)` holding a merchant
@@ -309,7 +311,7 @@ trusted issuer ([standalone](standalone-integration.md#deployment)).
 
 A key acts at its merchant alone ([merchant binding](merchant-binding.md))
 and holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
-(`billing.MerchantCustomerRead`: read-only, the right choice for LLM agents),
+(read-only customer billing, catalog, merchant configuration, metrics and usage),
 `support` (`billing.MerchantCustomerRead` and `billing.MerchantCustomerManage`:
 acts on customers) and `owner` (everything, the merchant's configuration and
 the programmatic routes included). A program's key holds a custom role the

@@ -40,7 +40,7 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
-| `catalog-ask` | `catalog-ask` | 10 | `POST /v1/catalog/ask` (including drafting) |
+| `catalog-ask` | `catalog-ask` | 10 | `POST /v1/console/catalog/ask` (including drafting) |
 
 Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front
 of OpenRails (Traefik). A bucket left out of `rate_limits` is not limited, any other key refuses

@@ -37,7 +37,7 @@ own router sends the checkout host's requests to `HostedCheckout()`.
 ```json
 {
   "customer_id": "4d1c…",
-  "lines": [{ "price_id": "price_…" }],
+  "lines": [{ "price_id": "premium:buy-usd:v1" }],
   "checkout": {
     "success_url": "https://shop.example/thanks?order={ORDER_ID}",
     "cancel_url": "https://shop.example/cart",
@@ -57,9 +57,22 @@ own router sends the checkout host's requests to `HostedCheckout()`.
   shown again. Set it only when your site signed the customer in.
 
 The answer's `checkout.url` is the checkout URL. Redirect the customer to it.
-It is shown once: OpenRails keeps only a hash of its secret, every later read
-shows `url: null`, and a retry with the same `Idempotency-Key` answers the
-same URL. A lost URL means canceling the order and creating another.
+The order stores its secret's hash. A bounded creation receipt retains only
+that secret, in the same transaction, until the checkout's original expiry.
+An authenticated retry with the same `Idempotency-Key` and request recovers
+the same URL while the order and checkout remain open. The reply reads the
+current order: completed, canceled or expired checkouts return no URL, and a
+retry never extends either expiry. Ordinary order reads always show `url: null`.
+
+An upgrade can also recover the capability from an older creation receipt,
+after checking the same order, customer, current secret hash and expiry. Its
+old response body is never returned.
+
+Creation receipts use the existing expiry cleanup and are excluded from billing
+archives. If a receipt has expired or is unavailable after a restore, no secret
+is reconstructed from its hash; cancel an unpaid order and create another when
+a new checkout link is needed. Create the replacement only after cancellation
+succeeds; an unresolved payment must be settled or reconciled first.
 
 ## Paying
 

@@ -1,4 +1,4 @@
-// <Offers merchant keys> against the real server: the public catalog looks
+// <ProductList merchant keys> against the real server: the public catalog looks
 // the merchant's seeded products up by key in one read with no credential, a
 // BuyButton per price, and a signed-out visitor is sent to sign in. The
 // catalog takes its merchant and keys alone.
@@ -12,7 +12,7 @@ async function merchantId(request: APIRequestContext) {
   return seeded.merchant_id
 }
 
-test("Offers looks a merchant's products up by key", async ({
+test("ProductList looks a merchant's products up by key", async ({
   page,
   request,
 }) => {
@@ -27,10 +27,10 @@ test("Offers looks a merchant's products up by key", async ({
       })
   })
   await page.goto(
-    `/offers.html#merchant=${merchant}&keys=e2e-membership,e2e-lifetime`
+    `/products.html#merchant=${merchant}&keys=e2e-membership,e2e-lifetime`
   )
 
-  await expect(page.getByTestId("offer")).toHaveCount(2)
+  await expect(page.getByTestId("product")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Membership" })).toBeVisible()
   await expect(
     page.getByRole("heading", { name: "Lifetime pass" })

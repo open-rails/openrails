@@ -66,10 +66,9 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	blockHistory()
 	w.advance(5 * 24 * time.Hour)
-	params := billing.RetryOrderCollectionParams{PaymentMethodID: pmid(method), IdempotencyKey: "merchant-recovery"}
-	_, err := w.client[remote].RetryOrderCollection(t.Context(), second, params)
-	requireCode(t, err, http.StatusServiceUnavailable, billing.CodeServiceUnavailable)
-	require.Len(t, w.nmi.Attempts(), 2, "held retry sends no additional sale")
+	w.settleCollectionScans()
+	w.settle()
+	require.Len(t, w.nmi.Attempts(), 2, "held scheduled retry sends no additional sale")
 	w.nmi.ClearIntercepts()
 	w.refreshProviders()
 	w.settleCollectionScans()

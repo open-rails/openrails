@@ -26,10 +26,10 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationsFromGen(rows []gen.BillingNotification) ([]*models.NotificationQueue, error) {
+func (r *NotificationQueueRepo) notificationsFromGen(ctx context.Context, rows []gen.BillingNotification) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
-	for _, r := range rows {
-		m, err := models.NotificationFromGen(r)
+	for _, row := range rows {
+		m, err := db.NotificationFromGen(ctx, r.db.Gen(ctx), row)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +100,7 @@ func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*mod
 	if err != nil {
 		return nil, err
 	}
-	return models.NotificationFromGen(row)
+	return db.NotificationFromGen(ctx, r.db.Gen(ctx), row)
 }
 
 func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
@@ -112,7 +112,7 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 	if err != nil {
 		return nil, err
 	}
-	return notificationsFromGen(rows)
+	return r.notificationsFromGen(ctx, rows)
 }
 
 // MarkEmailed stamps emailed_at once; already-stamped rows are a no-op.
@@ -201,7 +201,7 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 	if err != nil {
 		return nil, 0, err
 	}
-	notifications, err := notificationsFromGen(rows)
+	notifications, err := r.notificationsFromGen(ctx, rows)
 	if err != nil {
 		return nil, 0, err
 	}

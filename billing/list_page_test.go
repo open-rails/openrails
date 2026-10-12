@@ -28,8 +28,8 @@ func TestListPageWire(t *testing.T) {
 		require.Len(t, back.Items, len(tc.page.Items))
 	}
 	nested, err := json.Marshal(struct {
-		Offers ListPage[int] `json:"offers"`
+		ProductList ListPage[int] `json:"prices"`
 	}{})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"offers":{"data":[],"next_cursor":null}}`, string(nested))
+	require.JSONEq(t, `{"prices":{"data":[],"next_cursor":null}}`, string(nested))
 }

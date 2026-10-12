@@ -69,7 +69,7 @@ export function DashboardPage() {
 // firstArea is where a caller without metrics starts.
 function firstArea(access: AdminAccess): string {
   if (access.admin !== "none") return "/customers"
-  if (access.catalog) return "/catalog"
+  if (access.catalog !== "none") return "/catalog"
   return "/settings"
 }
 
@@ -195,7 +195,6 @@ function MetricsDashboard() {
   return (
     <div className="flex flex-col gap-4">
       {header}
-
 
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (

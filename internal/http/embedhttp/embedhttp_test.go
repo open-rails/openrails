@@ -25,7 +25,7 @@ func TestCapabilities(t *testing.T) {
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "merchant_config_edits": false,
 		"catalog_copilot": false,
-		"hosted_extra":    true,
+		"hosted_extra":    true, "customer_provisioning": false,
 	}, caps.Features)
 
 	// Merchant-config edits need the group and an editable source.

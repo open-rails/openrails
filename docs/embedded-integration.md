@@ -279,8 +279,8 @@ and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
 with the rest of the merchant's configuration; the edits mount only with
 Vault. Imported billing facts attributed to a PSP without credentials need its
-identity first: `client.DeclarePSP(ctx, billing.PSPDeclaration{...})`
-during setup.
+identity first through `LocalClient.DeclarePSP(ctx, billing.PSPDeclaration{...})`
+during setup. Obtain that local extension from `engine.LocalMerchant(merchantID)`.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
 and set it as `MerchantDeclaration.Catalog`; `New` applies it on every start, like calling
@@ -428,10 +428,10 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` at the customer's merchant, orders and the merchant's payment setup included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
 | `RouteGroups.Admin` | Customer support (`/v1/admin/*`) at the credential's merchant: payments and refunds, subscriptions, orders, credits, access, usage; reads need `root:customer:read`, updates `root:customer:manage` |
-| `RouteGroups.Catalog` (`/v1/catalog`, `/v1/catalog/price-migrations`) | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
-| `RouteGroups.MerchantConfig` (`/v1/merchant`) | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), reading and resolving findings, settings, billing import and export, the dashboard layout; needs `root:config:manage` |
+| `RouteGroups.Catalog` (`/v1/catalog`, `/v1/catalog/price-migrations`) | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; reads need `root:catalog:read`, edits `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
+| `RouteGroups.MerchantConfig` (`/v1/merchant`) | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), reading and resolving findings, settings, billing import and export, the dashboard layout; reads need `root:config:read`, edits and billing-archive export `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
-| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:usage:read` or `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write uses its operation's durable identity (`request_id`, source identity, `reference`, or an order's `Idempotency-Key`), identically in process and remotely |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`, for the one merchant whose `Issuer` you declare; needs a staff group on. Over several merchants bound by group, `Mount` refuses it |
 | `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
@@ -468,15 +468,15 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`; embedded, in the host's transaction: `AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx` |
+| Admission (hot path) | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
 | Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements` (programmatic), `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
-| Catalog (API hosts) | `ListOffers` (programmatic: what a customer may buy, by entitlement or product key), `ApplyCatalog`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card) |
+| Catalog (API hosts) | `ApplyCatalog`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card) |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
-| Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `VoidOrder`, `MarkOrderUncollectible`, `RetryOrderCollection` (usage orders). Only the customer pays with a card they enter |
-| Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
+| Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `WaiveOrderBalance`, `MarkOrderUncollectible` (usage orders). Only the customer pays with a card they enter |
+| Payments | `GetPayment`, `ListPayments`, `RecordExternalPayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
 | Running charges | `StartRunningCharge`, `StopRunningCharge`, `GetRunningCharge`, `ListRunningCharges` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 
@@ -511,8 +511,20 @@ Orders and their previews use the shared client too. See
 [checkout](api/commerce.md).
 
 A host that must start or stop a running charge in the same commit as its own
-rows uses its engine handle's `StartRunningChargeTx` and `StopRunningChargeTx`
-with a transaction from its pool. See [running charges](running-charges.md).
+rows obtains a `LocalClient` from `engine.LocalMerchant(merchantID)` and uses its
+`StartRunningChargeTx` and `StopRunningChargeTx` with a transaction from its pool.
+See [running charges](running-charges.md).
+
+`Engine.Merchant` returns the shared `*Client`, whose methods work both in process
+and over HTTP. `Engine.LocalMerchant` is the explicit extension for operations
+that require the local engine: `DeclarePSP`, `SCIMHandler`,
+`StartRunningChargeTx`, `StopRunningChargeTx`, `AdmitTx`, `CaptureAdmissionsTx`
+and `ReleaseAdmissionsTx`. The transaction methods commit with the host's own
+rows; see [admissions](admission-operations.md). `LocalClient` embeds `*Client`,
+so ordinary operations remain available; pass `local.Client` to a consumer
+accepting the shared client. The factory does no I/O; merchant binding and
+the existing lifecycle checks remain unchanged. These local methods are absent
+from remote clients rather than failing at runtime.
 
 One engine serves every live merchant in its directory, each through its own
 handle. `Merchant` reads nothing and refuses only the zero ID; each call reads
@@ -589,7 +601,7 @@ host that keeps a pushed copy instead leaves `UserInfo` out, turns on
 `RouteGroups.Programmatic` and points its directory at
 `{Prefix}/v1/app/scim/v2` with an application credential or a provisioning
 token (`client.CreateProvisioningToken`); a directory in the same binary pushes to
-`client.SCIMHandler()` with no token. In tests, `openrailstest.UserInfo` is an
+`local.SCIMHandler()` with no token, after `engine.LocalMerchant(merchantID)`. In tests, `openrailstest.UserInfo` is an
 in-memory `openrails.UserInfo`. See [customer contacts](customer-contacts.md).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,
