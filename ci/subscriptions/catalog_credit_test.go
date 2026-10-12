@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -90,8 +91,11 @@ products:
       deposit:
         archived: true
 `, key))
+	// Five substantive edits spent this staff member's hourly allowance.
+	w.advance(2 * time.Hour)
 	_, err = w.client[remote].UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 	require.Error(t, err, "a restored deposit must still have a funding benefit")
+	require.NotEqual(t, "rate_limit_exceeded", codeOf(err))
 	p, err = w.client[embedded].GetProduct(t.Context(), p.ID)
 	require.NoError(t, err)
 	require.Nil(t, p.CreditGrant)

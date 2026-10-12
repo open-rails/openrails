@@ -335,6 +335,12 @@ func TestHeavyBuyerCacheRaces(t *testing.T) {
 		}()
 	}
 	for i := 1; i <= versions; i++ {
+		// Entitlement edits and revokes are destructive: at most five per
+		// actor-hour and fifteen per day, so each block of four edits (and
+		// its one revoke) starts a new day.
+		if i > 1 && i%4 == 1 {
+			f.clock.Advance(25 * time.Hour)
+		}
 		_, err := f.client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{all[i]})})
 		require.NoError(t, err)
 		require.Equal(t, map[string]bool{all[i-1]: false, all[i]: true}, f.held(whale, time.Time{}, all[i-1], all[i]), "a read after an edit returns sees it")

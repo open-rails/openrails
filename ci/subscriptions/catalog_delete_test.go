@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -123,8 +124,10 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 			}
 			kept, unsold, sold := through+"-kept", through+"-unsold", through+"-sold"
 			apply(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
-				kept:   {DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000), "extra": price(2_000_000), "bought": price(3_000_000)}},
-				unsold: {DisplayName: catalog.Value("Unsold"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000)}},
+				kept: {DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000), "extra": price(2_000_000), "bought": price(3_000_000)}},
+				// Priceless, so the prune stays within one actor's destructive
+				// allowance: five removed or archived objects.
+				unsold: {DisplayName: catalog.Value("Unsold")},
 				sold:   {DisplayName: catalog.Value("Sold"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000)}},
 			}})
 			extra, err := priceByKey(t.Context(), c, kept, "extra")
@@ -163,6 +166,8 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, live.Archived)
 
+			// The prune spent the staff member's hourly allowance.
+			w.advance(2 * time.Hour)
 			only.Products[kept] = catalog.ApplyProduct{DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000), "extra": price(2_000_000)}}
 			apply(only)
 			revived, err := priceByKey(t.Context(), c, kept, "extra")
