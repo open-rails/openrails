@@ -21,6 +21,7 @@ import (
 // recurring amount (which can differ from a trial's initial charge). It must
 // never be called to reconstruct a schedule from today's subscription period.
 func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UUID, firstDue time.Time, cadenceHours int, recurringAmount int64, now time.Time) error {
+	firstDue = firstDue.UTC().Truncate(time.Microsecond)
 	if firstDue.IsZero() || !validCadence(cadenceHours, 0) || recurringAmount <= 0 {
 		return errors.New("accepted provider schedule terms are incomplete")
 	}
@@ -74,6 +75,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 // DeclareSchedule accepts an operator-verified forward import agreement. No
 // order, cash movement or historical settlement is invented by this declaration.
 func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, firstDue time.Time, cadenceHours, cadenceMonths int, now time.Time) error {
+	firstDue = firstDue.UTC().Truncate(time.Microsecond)
 	if bill.SubscriptionID == nil || firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || strings.TrimSpace(source) == "" || len(source) > 512 {
 		return errors.New("declared provider schedule is incomplete")
 	}
@@ -122,6 +124,7 @@ type ScheduleReceipt struct {
 // New ambiguous receipts remain unresolved; a transaction ID alone never
 // creates an obligation.
 func ScheduleBill(ctx context.Context, d *db.DB, sub *models.Subscription, receipt ScheduleReceipt) (Bill, error) {
+	receipt.OccurredAt = receipt.OccurredAt.UTC().Truncate(time.Microsecond)
 	if sub == nil || receipt.TransactionID == "" || receipt.OccurredAt.IsZero() {
 		return Bill{}, errors.New("provider cycle receipt is incomplete")
 	}
