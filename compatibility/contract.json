@@ -2046,7 +2046,7 @@
       "sha256": "crypto/sha256"
     },
     "internal/billingauth/contract.go": {
-      "auth": "github.com/open-rails/helpers/auth",
+      "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context"
     },
@@ -2082,7 +2082,7 @@
       "fs": "io/fs",
       "http": "net/http",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
-      "userinfo": "github.com/open-rails/helpers/userinfo",
+      "userinfo": "github.com/open-rails/authkit/userinfo",
       "v9": "github.com/redis/go-redis/v9",
       "vaultapi": "github.com/hashicorp/vault/api"
     },
@@ -4382,7 +4382,7 @@
       "http": "net/http"
     },
     "openrailstest/auth.go": {
-      "authtest": "github.com/open-rails/helpers/auth/authtest",
+      "authtest": "github.com/open-rails/authkit/auth/authtest",
       "http": "net/http",
       "httproutes": "github.com/open-rails/openrails/internal/http/routes",
       "openrails": "github.com/open-rails/openrails",
@@ -4406,7 +4406,7 @@
       "sort": "sort",
       "strings": "strings",
       "sync": "sync",
-      "userinfo": "github.com/open-rails/helpers/userinfo"
+      "userinfo": "github.com/open-rails/authkit/userinfo"
     },
     "operational_reads.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4541,7 +4541,7 @@
       "uuid": "github.com/google/uuid"
     },
     "server/control_plane.go": {
-      "auth": "github.com/open-rails/helpers/auth",
+      "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
@@ -4641,7 +4641,7 @@
       "routebundle": "github.com/open-rails/openrails/internal/http/routebundle",
       "sync": "sync",
       "time": "time",
-      "userinfo": "github.com/open-rails/helpers/userinfo"
+      "userinfo": "github.com/open-rails/authkit/userinfo"
     },
     "web/admin/embed.go": {
       "embed": "embed",

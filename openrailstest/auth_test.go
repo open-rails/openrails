@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
+	helpersauthtest "github.com/open-rails/authkit/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -123,7 +123,7 @@ func TestCheckAuthCatchesABrokenAuthenticator(t *testing.T) {
 	}
 }
 
-// rootless is an Authenticator that is no helpers/auth Root.
+// rootless is an Authenticator that is no authkit/auth Root.
 type rootless struct{ a *authtest.Fake }
 
 func (r rootless) Authenticate(req *http.Request) (billingauth.Verified, error) {

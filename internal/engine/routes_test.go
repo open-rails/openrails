@@ -180,8 +180,8 @@ func TestRouteGroupsFailClosed(t *testing.T) {
 		sel config.Routes
 		err string
 	}{
-		"a staff group, no root scope": {config.Routes{Auth: hookAuth{}, RouteGroups: authtest.AdminGroups()}, "helpers/auth Root"},
-		"programmatic, no root scope":  {config.Routes{Auth: hookAuth{}, RouteGroups: config.RouteGroups{Programmatic: true}}, "helpers/auth Root"},
+		"a staff group, no root scope": {config.Routes{Auth: hookAuth{}, RouteGroups: authtest.AdminGroups()}, "authkit/auth Root"},
+		"programmatic, no root scope":  {config.Routes{Auth: hookAuth{}, RouteGroups: config.RouteGroups{Programmatic: true}}, "authkit/auth Root"},
 		"permissions the Auth does not know": {config.Routes{Auth: knowsNone{fake}, RouteGroups: config.RouteGroups{Catalog: true}},
 			`knows none of its permissions ["merchant:catalog:manage" "root:catalog:manage"]`},
 	} {

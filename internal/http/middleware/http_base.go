@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -153,7 +153,7 @@ func AllRequests(*http.Request) bool { return true }
 // browser-tier request gets `Access-Control-Allow-Origin: *` and never
 // Allow-Credentials; every other request gets no CORS headers. The header
 // lists add the ones credentials travels in when it advertises them
-// (helpers/auth Headers): the mount's Authenticator.
+// (authkit/auth Headers): the mount's Authenticator.
 func PermissiveCORSHTTP(match func(*http.Request) bool, credentials any) HTTPMiddleware {
 	allow := []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Request-ID", "X-Forwarded-For", "X-Real-IP", "Idempotency-Key", "X-E2E-Run-ID", "X-Captcha-Token", "Accept-Language"}
 	expose := []string{"WWW-Authenticate", "X-Request-ID", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-Captcha-Required"}

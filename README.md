@@ -379,11 +379,11 @@ func (v session) CheckRecentSignIn(context.Context) error {
 }
 ```
 
-The types are `github.com/open-rails/helpers/auth`. Mount with
+The types are `github.com/open-rails/authkit/auth`. Mount with
 `Routes{Auth: shopAuth{sessions}, ...}`, build your roles from
 `billing.Permissions()`, and check your auth in CI with
 `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
-(`github.com/open-rails/helpers/auth/authtest`). Serving one merchant, set
+(`github.com/open-rails/authkit/auth/authtest`). Serving one merchant, set
 `MerchantDeclaration.Issuer` to your issuer and return a zero `BoundScope`.
 
 If your app already loads its own configuration (koanf, kong, flags), build the
@@ -546,7 +546,7 @@ until `RouteGroups` turns it on:
 - Permissions are OpenRails' own (`billing.Permissions()`), each named
   `persona:resource:action` in two personas. A route acting on a merchant
   admits a caller holding its `root:` name in your auth's root scope
-  (helpers/auth `Root`: AuthKit's root group) or its `merchant:` name in that
+  (authkit/auth `Root`: AuthKit's root group) or its `merchant:` name in that
   merchant's own scope (the AuthKit group whose id is the merchant's). With a
   route group on, `Auth` must be a `Root`, and `Mount` fails for a route
   neither of whose names it knows.

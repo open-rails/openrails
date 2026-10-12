@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/open-rails/helpers/userinfo"
+	"github.com/open-rails/authkit/userinfo"
 
 	"github.com/open-rails/openrails"
 )

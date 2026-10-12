@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/open-rails/authkit/auth"
+	helpersauthtest "github.com/open-rails/authkit/auth/authtest"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/helpers/auth"
-	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"

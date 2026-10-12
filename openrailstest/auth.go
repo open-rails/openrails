@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/helpers/auth/authtest"
+	"github.com/open-rails/authkit/auth/authtest"
 
 	"github.com/open-rails/openrails"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
 // CheckAuth fails t when routes.Auth breaks the contract OpenRails' gates
-// rely on: helpers' authtest.Check with the root: permissions of the route
+// rely on: AuthKit's auth/authtest.Check with the root: permissions of the route
 // groups routes turns on (billing.Permissions), which it fills into c
 // (Permissions c sets must be the same), held in the Authenticator's
 // RootScope, so c.Scope stays zero; and OpenRails' own rule that a person's

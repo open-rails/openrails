@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# The embedded library needs no AuthKit: AuthKit belongs to the host, and to
-# the server module (server/) for standalone. The root module's graph holds
-# none, so a host never inherits OpenRails' AuthKit version.
+# The embedded library uses AuthKit's standard-library-only contract packages.
+# AuthKit's runtime belongs to an opting-in host or the standalone server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export GOWORK=off
-if authkit="$(go list -m all | grep -E '^github.com/open-rails/authkit( |$)')"; then
-  printf 'The root module requires AuthKit; it belongs to server/:\n%s\n' "$authkit" >&2
-  exit 1
-fi
+check_authkit_dependencies() {
+  local dep
+  while IFS= read -r dep; do
+    case "$dep" in
+      github.com/open-rails/authkit/auth|github.com/open-rails/authkit/auth/authtest|github.com/open-rails/authkit/userinfo|github.com/open-rails/authkit/userinfo/userinfotest) ;;
+      github.com/open-rails/authkit|github.com/open-rails/authkit/*)
+        printf 'The embedded library links an AuthKit implementation package: %s\n' "$dep" >&2
+        return 1
+        ;;
+    esac
+  done
+}
 packages=(. ./adapters/http ./adapters/gin ./adapters/fiber ./internal/engine ./internal/config ./internal/billingauth ./internal/app ./internal/service ./internal/http/embedhttp ./internal/http/inprocess ./internal/hosttools ./openrailstest/...)
 deps="$(go list -deps "${packages[@]}")"
-if forbidden="$(printf '%s\n' "$deps" | grep -E '^github.com/open-rails/authkit(/|$)')"; then
-  printf 'The billing engine links AuthKit:\n%s\n' "$forbidden" >&2
-  exit 1
-fi
-# Compile and run an independent consumer against the exact source, with its
-# own authentication: its module graph, and so its go.sum, holds no AuthKit.
+check_authkit_dependencies <<<"$deps"
+# Compile and run an independent consumer with its own authentication. The
+# AuthKit module supplies only contracts; its server and database do not link.
 consumer_dir="$(mktemp -d)"
 trap 'rm -rf "$consumer_dir"' EXIT
 cat > "$consumer_dir/go.mod" <<MOD
@@ -34,7 +38,7 @@ import (
  "context"
  "net/http"
  "time"
- "github.com/open-rails/helpers/auth"
+ "github.com/open-rails/authkit/auth"
  "github.com/open-rails/openrails"
  "github.com/open-rails/openrails/billing"
  gin "github.com/open-rails/openrails/adapters/gin"
@@ -70,7 +74,5 @@ func main() {
 }
 GO
 (cd "$consumer_dir" && go mod tidy && go run .)
-if grep -q 'github.com/open-rails/authkit' "$consumer_dir/go.sum"; then
-  echo "An embedded host's go.sum holds AuthKit" >&2
-  exit 1
-fi
+consumer_deps="$(cd "$consumer_dir" && go list -deps -f '{{.ImportPath}}' .)"
+check_authkit_dependencies <<<"$consumer_deps"

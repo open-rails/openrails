@@ -58,8 +58,11 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-The module requires no AuthKit, so it never sets your AuthKit version. A host
-imports four kinds of package; everything else is `internal/`:
+The module versions its authentication and user-directory contracts with
+AuthKit, importing only `authkit/auth` and `authkit/userinfo`. Those packages
+use the standard library and link no AuthKit server or database implementation.
+A host may implement the contracts itself or opt into AuthKit. A host imports
+four kinds of OpenRails package; everything else is `internal/`:
 
 | Package | Holds |
 |---|---|
@@ -324,7 +327,7 @@ the account in `Config.Merchants`; rotate by updating it and constructing a new 
 
 OpenRails has no logins of its own, and you write no middleware for it. You
 supply your auth only when you mount routes, as `Routes.Auth`: an
-`openrails.Authenticator` (helpers/auth's), which only says who a request is.
+`openrails.Authenticator` (authkit/auth's), which only says who a request is.
 OpenRails asks it once per request and builds every gate from its answer, a
 `Verified`:
 
@@ -386,7 +389,7 @@ events, `root:orders:manage` for orders
 (`root:customers:read` finds a customer by openrails.dev account, only where
 the [customer network](customer-network.md) runs). Give a program a role
 holding only what its task needs.
-With any route group on, `Auth` is a helpers/auth `Root`, as
+With any route group on, `Auth` is a authkit/auth `Root`, as
 `ak.Authenticator()` is: its `RootScope` is AuthKit's root group, and a
 merchant's own scope is the AuthKit group whose id is the merchant's. `Mount`
 fails for a route neither of whose names your Authenticator knows
@@ -398,7 +401,7 @@ person `SubjectUser` and an application's credential `SubjectApplication`,
 since the programmatic routes refuse a person whatever it holds.
 `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
 checks an implementation in your CI with helpers' conformance kit
-(`github.com/open-rails/helpers/auth/authtest`): anonymous, refused, staff, a
+(`github.com/open-rails/authkit/auth/authtest`): anonymous, refused, staff, a
 user holding nothing, one-permission holders, a stale sign-in and your
 application, each of the route groups' `root:` permissions in exactly your
 `RootScope`, and staff signed out last; it fails on any acceptance or mix-up,

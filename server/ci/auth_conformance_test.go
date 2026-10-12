@@ -16,9 +16,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	helpersauthtest "github.com/open-rails/authkit/auth/authtest"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
-	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"

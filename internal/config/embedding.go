@@ -15,18 +15,18 @@ type Routes struct {
 	//
 	// A request acts on the one merchant its credential is bound to, and
 	// nothing in the request names it: the merchant whose scope the
-	// Verified's BoundScope is (helpers/auth Bound: {Authority: RootScope's,
+	// Verified's BoundScope is (authkit/auth Bound: {Authority: RootScope's,
 	// ID: the merchant's id}), else the merchant that declares the
 	// Identity's Issuer (MerchantDeclaration.Issuer). A credential bound to
 	// neither is refused 403 merchant_unresolved.
 	//
-	// With a route group on, Auth is a helpers/auth Root, as AuthKit's
+	// With a route group on, Auth is a authkit/auth Root, as AuthKit's
 	// ak.Authenticator() is. A route acting on merchant M admits its
 	// merchant: permission held in M's scope ({Authority: RootScope's, ID:
 	// M's id}) or its root: twin held in RootScope. The names are
 	// billing.Permissions: declare them in your auth and grant them in its
 	// roles. Mount fails for a route neither of whose names Auth knows
-	// (helpers/auth PermissionCatalog); a name it does not know is never
+	// (authkit/auth PermissionCatalog); a name it does not know is never
 	// asked.
 	Auth billingauth.Authenticator
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.

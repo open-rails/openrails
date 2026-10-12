@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/helpers/smtp/smtptest"
-	"github.com/open-rails/helpers/userinfo"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"

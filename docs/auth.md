@@ -13,9 +13,9 @@ it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
 for a staff or programmatic route's permission. Admin operations require no
 recent sign-in; sensitive customer-network operations retain that check
-(helpers/auth `RecentSignInChecker`). The host names no
+(authkit/auth `RecentSignInChecker`). The host names no
 permission and no scope: the names are OpenRails' own ([below](#permissions)),
-and the scopes come from the Authenticator's `RootScope` (helpers/auth `Root`).
+and the scopes come from the Authenticator's `RootScope` (authkit/auth `Root`).
 AuthKit provides one as `ak.Authenticator()`; a host without AuthKit writes
 its own ([below](#your-own-auth)). The standalone server mounts its routes
 with its own AuthKit's, exactly like an embedded host, and the in-process Go
@@ -55,8 +55,8 @@ challenge as the error's metadata. A Verified without `Can` holds nothing; an
 identity without a subject or invoker is refused, so an Authenticator that
 checks nothing admits no one; each handler checks the verdict again before it
 runs. A route group never mounts without `Auth`, behind an `Auth` that is not
-a helpers/auth `Root`, or with a route neither of whose permissions the `Auth`
-knows (helpers/auth `PermissionCatalog`); a name it does not know is never
+a authkit/auth `Root`, or with a route neither of whose permissions the `Auth`
+knows (authkit/auth `PermissionCatalog`); a name it does not know is never
 asked. `openrailstest.CheckAuth` checks an Authenticator against this contract
 in the host's CI, with the route groups' `root:` permissions.
 
@@ -161,7 +161,9 @@ for its merchant, and the page shows the root group alone.
 
 A host without AuthKit implements the same contract over its own users and
 roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
-helpers/auth names no provider, so nothing in it is AuthKit's:
+`authkit/auth` defines the contract and uses only the standard library. It is
+versioned with AuthKit but imports no AuthKit runtime, so a host implements it
+without running AuthKit:
 
 - `Authenticate(r)` reads the request's credential, live: `ErrUnauthenticated`
   for none or an unknown one (joined with `ErrRevoked` once signed out),
@@ -182,7 +184,7 @@ helpers/auth names no provider, so nothing in it is AuthKit's:
   credential bound to one merchant holds nothing at another; a person keeps
   their root roles.
 - Customer-network operations marked `sensitive` ask the recent-sign-in
-  check (helpers/auth `RecentSignInChecker`): nil within your step-up window,
+  check (authkit/auth `RecentSignInChecker`): nil within your step-up window,
   else an `auth.Challenge` with `ErrStepUpRequired` and the window as
   `MaxAge`. Admin operations never ask it.
 - `KnownPermission` knows `billing.Permissions()`, so `Mount` checks every

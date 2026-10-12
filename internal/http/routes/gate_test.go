@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -571,14 +571,14 @@ type rootAnswering struct {
 
 func (a rootAnswering) RootScope(context.Context) (billingauth.Scope, error) { return a.scope() }
 
-// rootless is an Authenticator that is no helpers/auth Root.
+// rootless is an Authenticator that is no authkit/auth Root.
 type rootless struct{ a billingauth.Authenticator }
 
 func (r rootless) Authenticate(req *http.Request) (billingauth.Verified, error) {
 	return r.a.Authenticate(req)
 }
 
-// catalogued knows only its own permissions (helpers/auth PermissionCatalog).
+// catalogued knows only its own permissions (authkit/auth PermissionCatalog).
 type catalogued struct {
 	*recordingAuth
 	known []billing.Permission
@@ -950,18 +950,21 @@ func admitAll(context.Context, billing.MerchantID, billing.CustomerID, string, b
 	return nil
 }
 
-// boundAuth admits who, bound to scope (helpers/auth Bound), holding every
+// boundAuth admits who, bound to scope (authkit/auth Bound), holding every
 // permission there. scopes, when not nil, are the scopes its token was
 // granted, and client the OAuth client it was issued to.
 type boundAuth struct {
-	who    billingauth.Identity
-	scope  billingauth.Scope
-	scopes []string
-	client string
+	who      billingauth.Identity
+	scope    billingauth.Scope
+	scopes   []string
+	client   string
+	asserted *bool
 }
 
 func (a boundAuth) Authenticate(*http.Request) (billingauth.Verified, error) {
 	switch {
+	case a.asserted != nil:
+		return assertedAuth{a}, nil
 	case a.scopes != nil:
 		return scopedAuth{a}, nil
 	case a.client != "":
@@ -985,6 +988,11 @@ func (a scopedAuth) Scopes() []string { return a.scopes }
 type clientAuth struct{ boundAuth }
 
 func (a clientAuth) ClientID() string { return a.client }
+
+// assertedAuth exposes the verified assertion-grant capability.
+type assertedAuth struct{ boundAuth }
+
+func (a assertedAuth) Asserted() bool { return *a.asserted }
 
 // A credential acts on the one merchant it is bound to. A bound scope is a
 // live merchant's in the root authority or the credential reaches no
@@ -1051,6 +1059,7 @@ func TestCustomerIssuer(t *testing.T) {
 	here := authtest.MerchantScope(merchantA)
 	foreign := authtest.User(userA)
 	foreign.Issuer, foreign.Invoker.Issuer = "https://issuer.example", "https://issuer.example"
+	asserted, notAsserted := true, false
 	native := authtest.User(userA)
 
 	var issuer string
@@ -1083,7 +1092,9 @@ func TestCustomerIssuer(t *testing.T) {
 		"its issuer's user, bound to no scope":      {&recordingAuth{who: native}, "", true},
 		"the root authority's account, bound":       {boundAuth{who: native, scope: here}, "", true},
 		"that account, granted the customer scope":  {boundAuth{who: native, scope: here, scopes: []string{"openid", billing.ScopeSelf}}, "", true},
-		"the customer the merchant's backend names": {boundAuth{who: foreign, scope: here, client: foreign.Issuer}, "", false},
+		"the customer the merchant's backend names": {boundAuth{who: foreign, scope: here, asserted: &asserted}, "", false},
+		"a matching client is not an assertion":     {boundAuth{who: foreign, scope: here, client: foreign.Issuer}, foreign.Issuer, false},
+		"an explicitly unasserted credential":       {boundAuth{who: foreign, scope: here, asserted: &notAsserted}, foreign.Issuer, false},
 		"another issuer's user":                     {boundAuth{who: foreign, scope: here}, foreign.Issuer, false},
 		"another issuer's user through a client":    {boundAuth{who: foreign, scope: here, client: "admin-ui"}, foreign.Issuer, false},
 	} {
