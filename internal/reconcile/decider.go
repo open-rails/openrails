@@ -453,7 +453,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 			continue
 		}
 		switch {
-		case t.Type == TransactionTypeSale && t.Success:
+		case (t.Type == TransactionTypeSale || t.Type == TransactionTypeSettlement) && t.Success:
 			if renewTxn == nil || t.OccurredAt.After(renewTxn.OccurredAt) {
 				renewTxn = t
 			}
@@ -631,7 +631,7 @@ func renewPaidPeriods(txns []RemoteTransaction, cutoff, declinedAt time.Time, st
 	paid := map[string]bool{}
 	for i := range txns {
 		t := txns[i]
-		if t.Type == TransactionTypeSale && t.Success && !t.OccurredAt.Before(cutoff) && t.OccurredAt.Before(declinedAt) {
+		if (t.Type == TransactionTypeSale || t.Type == TransactionTypeSettlement) && t.Success && !t.OccurredAt.Before(cutoff) && t.OccurredAt.Before(declinedAt) {
 			paid[t.TransactionID] = true
 		}
 	}
@@ -668,7 +668,7 @@ func paidPeriod(txns []RemoteTransaction, cutoff time.Time, start, end *time.Tim
 	}
 	seen := map[string]bool{}
 	for _, t := range txns {
-		if t.Type == TransactionTypeSale && t.Success && !t.OccurredAt.Before(cutoff) && !seen[t.TransactionID] {
+		if (t.Type == TransactionTypeSale || t.Type == TransactionTypeSettlement) && t.Success && !t.OccurredAt.Before(cutoff) && !seen[t.TransactionID] {
 			seen[t.TransactionID] = true
 		}
 	}

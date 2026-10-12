@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // FindingType is the PS-1..PS-9 pull discrepancy taxonomy.
@@ -204,6 +205,8 @@ type MaterializeResult struct {
 // charge (PS-4), deduped on (tenant, rail, transaction_id), and grants
 // the subscription's product when the period is current.
 type BackfillPaymentAction struct {
+	StripeBill    *subscriptions.StripeBill
+	NextBillingAt *time.Time
 	PspID         *uuid.UUID
 	Rail          string
 	TransactionID string

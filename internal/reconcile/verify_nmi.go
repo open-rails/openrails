@@ -370,7 +370,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 				}
 			}
 			for sub, txns := range perSub {
-				if _, err := backfillSubscriptionPayments(ctx, q, sub, txns, now, defaultBackfillLookback); err != nil {
+				if _, err := backfillSubscriptionPayments(ctx, v.DB, sub, txns, now, defaultBackfillLookback); err != nil {
 					return err
 				}
 				if err := refundChargesAfterCancel(ctx, v.DB, sub, txns, now); err != nil {

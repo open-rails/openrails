@@ -213,6 +213,11 @@ type correlator struct {
 // how documents the successful path; ambiguous=true means candidates existed
 // but identity could not be pinned to exactly one subscription.
 func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *LocalSubscription, how string, ambiguous bool) {
+	if t.StripeBill != nil {
+		if s := c.local.byPSID[t.StripeBill.SubscriptionID]; s != nil && s.CollectionPolicy == models.CollectionPolicyProvider {
+			return s, "verified_invoice", false
+		}
+	}
 	if provider == ProviderNMI {
 		return c.nmiSubForTxn(t)
 	}
@@ -713,6 +718,8 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			action.Backfill = &BackfillPaymentAction{
 				Rail:          link.railName,
 				TransactionID: t.TransactionID,
+				StripeBill:    t.StripeBill,
+				NextBillingAt: r.NextBillingAt,
 				AmountCents:   int64(minor),
 				Currency:      currency,
 				PurchasedAt:   t.OccurredAt,
@@ -1289,6 +1296,8 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		action := &BackfillPaymentAction{
 			Rail:           sub.Rail,
 			TransactionID:  t.TransactionID,
+			StripeBill:     t.StripeBill,
+			NextBillingAt:  t.NextBillingAt,
 			AmountCents:    int64(minor),
 			Currency:       currency,
 			PurchasedAt:    t.OccurredAt,
@@ -1300,6 +1309,9 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				"correlated_via":     how,
 				"provider":           string(provider),
 			},
+		}
+		if remote := corr.remote.subByPSID[sub.RailSubscriptionID]; action.NextBillingAt == nil && remote != nil {
+			action.NextBillingAt = remote.NextBillingAt
 		}
 		if inherited {
 			action.Metadata["currency_provenance"] = "inherited_from_subscription_price"
@@ -1547,16 +1559,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 			action.PriceID = *s.PriceID
 		}
 	}
-	if action.PriceID == uuid.Nil {
-		// Without a price the insert can't satisfy NOT NULL; mark the
-		// original refunded only.
-		action.MarkRefundedOnly = true
-	}
-	if t.TransactionID == original.TransactionID {
-		// NMI refunds ride the original transaction record; inserting would
-		// collide with the sale row. Mark the original refunded instead.
-		action.MarkRefundedOnly = true
-	}
+
 	f.Apply = &ApplyAction{RecordRefund: action}
 	return f, true
 }

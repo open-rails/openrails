@@ -3,7 +3,10 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"strings"
 	"time"
 
@@ -62,110 +65,75 @@ func metadataJSON(m map[string]any) []byte {
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
-	if !a.ChargeAfterCancel {
-		return w.backfillPayment(ctx, w.DB, a)
+	if strings.TrimSpace(a.Currency) == "" {
+		return false, fmt.Errorf("payment currency required")
 	}
 	var changed bool
 	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := w.DB.NewWithPgxTx(tx)
-		var err error
-		if changed, err = w.backfillPayment(ctx, d, a); err != nil || !changed {
-			return err
+		if a.SubscriptionID == nil {
+			return errors.New("unattributed charge requires its accepted checkout order; price alone is not a bill")
 		}
-		clock := clockwork.NewFakeClockAt(w.now())
-		payment, err := payments.NewPaymentService(d, clock).GetByPSPTransactionID(ctx, models.Rail(a.Rail), a.TransactionID)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *a.SubscriptionID)
 		if err != nil {
 			return err
 		}
-		return intents.RefundChargeAfterCancel(ctx, d, payment, clock)
+		if sub.CustomerID != a.CustomerID || a.PspID == nil || sub.PspID != *a.PspID || string(sub.Rail) != a.Rail {
+			return observed.ErrConflict
+		}
+		txn := RemoteTransaction{TransactionID: a.TransactionID, SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true,
+			AmountCents: a.AmountCents, Currency: a.Currency, OccurredAt: a.PurchasedAt, StripeBill: a.StripeBill, NextBillingAt: a.NextBillingAt}
+		if a.AmountMicros != nil {
+			return errors.New("historical amount-only import requires explicit accepted bill evidence")
+		}
+		count, err := backfillSubscriptionPayments(ctx, d, sub, []RemoteTransaction{txn}, w.now(), declaredImportLookback)
+		if err != nil {
+			return err
+		}
+		changed = count > 0
+		if a.ChargeAfterCancel {
+			clock := clockwork.NewFakeClockAt(w.now())
+			payment, err := payments.NewPaymentService(d, clock).GetByPSPTransactionID(ctx, models.Rail(a.Rail), a.TransactionID)
+			if err != nil {
+				return err
+			}
+			return intents.RefundChargeAfterCancel(ctx, d, payment, clock)
+		}
+		// The lifecycle convergence path applies the verified paid period.
+		// Replaying a money fact never grants today's catalog/current period.
+		return nil
 	})
 	return changed, err
 }
 
-func (w *PGLocalWriter) backfillPayment(ctx context.Context, d *db.DB, a BackfillPaymentAction) (bool, error) {
-	currency := strings.TrimSpace(a.Currency)
-	if currency == "" {
-		return false, fmt.Errorf("payment currency required")
-	}
-	amount := moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))
-	if a.AmountMicros != nil {
-		amount = moneyutil.Micros(*a.AmountMicros)
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	n, err := d.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
-		MerchantID:     tid.UUID(),
-		PriceID:        uuidOrNil(a.PriceID),
-		Rail:           string(a.Rail),
-		TransactionID:  a.TransactionID,
-		Amount:         int64(amount),
-		Currency:       currency,
-		SubscriptionID: a.SubscriptionID,
-		Metadata:       metadataJSON(a.Metadata),
-		PurchasedAt:    a.PurchasedAt,
-		CustomerID:     a.CustomerID,
-		PspID:          a.PspID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if a.Grant != nil {
-		if _, err := (&PGLocalWriter{DB: d, Now: w.Now}).GrantAccess(ctx, *a.Grant); err != nil {
-			return n > 0, err
-		}
-	}
-	return n > 0, nil
-}
-
 func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error) {
-	if a.MarkRefundedOnly {
-		if a.RefundedPaymentID == nil {
-			return false, nil
-		}
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return false, scopeErr
-		}
-		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, gen.ReconcileMarkPaymentRefundedParams{MerchantID: scopeMerchantID.UUID(), ID: *a.RefundedPaymentID})
-		return n > 0, err
+	if a.RefundedPaymentID == nil || strings.TrimSpace(a.TransactionID) == "" {
+		return false, errors.New("refund requires its original payment and provider reference")
 	}
-	amount := moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))
-	if amount > 0 {
-		amount = -amount // refunds are negative-amount payment rows
+	amount, err := moneyutil.RailMinorToNative(a.Currency, moneyutil.Cents(a.AmountCents))
+	if err != nil || amount <= 0 {
+		return false, errors.New("refund requires a positive exact billed amount")
 	}
-	currency := strings.TrimSpace(a.Currency)
-	if currency == "" {
-		return false, fmt.Errorf("payment currency required")
-	}
-	tid, err := merchant.Require(ctx)
+	svc := payments.NewPaymentService(w.DB, clockwork.NewFakeClockAt(w.now()))
+	original, err := svc.GetByID(ctx, *a.RefundedPaymentID)
 	if err != nil {
 		return false, err
 	}
-	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
-		MerchantID:        tid.UUID(),
-		PriceID:           uuidOrNil(a.PriceID),
-		Rail:              string(a.Rail),
-		TransactionID:     a.TransactionID,
-		Amount:            int64(amount),
-		Currency:          currency,
-		SubscriptionID:    a.SubscriptionID,
-		RefundedPaymentID: a.RefundedPaymentID,
-		Metadata:          metadataJSON(a.Metadata),
-		PurchasedAt:       a.PurchasedAt,
-		CustomerID:        a.CustomerID,
-		PspID:             a.PspID,
-	})
-	if err != nil {
-		return false, err
+	if original.OrderID == nil || original.CustomerID != a.CustomerID || !strings.EqualFold(original.Currency, a.Currency) || original.PspID == nil || a.PspID == nil || *original.PspID != *a.PspID {
+		return false, observed.ErrConflict
 	}
-	if n > 0 && a.RefundedPaymentID != nil {
-		if _, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, gen.ReconcileMarkPaymentRefundedParams{MerchantID: tid.UUID(), ID: *a.RefundedPaymentID}); err != nil {
-			return true, err
-		}
+	// Query reports can reuse the sale's reference for its refund action.
+	// Namespace that verified action; retain the original provider reference.
+	key := a.TransactionID
+	if key == original.TransactionID {
+		key = "refund:" + key
 	}
-	return n > 0, nil
+	_, lookupErr := svc.GetByPSPTransactionID(db.WithPSPID(ctx, *original.PspID), original.Rail, key)
+	if lookupErr != nil && !db.IsNotFound(lookupErr) {
+		return false, lookupErr
+	}
+	_, err = svc.Refund(ctx, original.ID, key, amount, payments.ReversalRefund)
+	return db.IsNotFound(lookupErr) && err == nil, err
 }
 
 // AdoptPaymentMethod takes the provider's card onto the method through the

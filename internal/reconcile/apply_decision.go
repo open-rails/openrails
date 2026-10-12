@@ -31,6 +31,18 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	if d.Kind == TransitionNone || d.stale(sub) {
 		return false, nil
 	}
+	if d.Kind == TransitionRenew && sub.CollectionPolicy != models.CollectionPolicyEngine && !d.Declared {
+		var verifiedEnd, verifiedStart time.Time
+		for _, receipt := range d.Backfill {
+			if bill := receipt.ObservedBill; bill != nil && bill.Kind != "adjustment" && bill.Settled && bill.PeriodEnd.After(verifiedEnd) {
+				verifiedStart, verifiedEnd = bill.PeriodStart, bill.PeriodEnd
+			}
+		}
+		if verifiedEnd.IsZero() || sub.CurrentPeriodEndsAt != nil && !verifiedEnd.After(*sub.CurrentPeriodEndsAt) {
+			return false, nil
+		}
+		d.NewPeriodStart, d.NewPeriodEnd = &verifiedStart, &verifiedEnd
+	}
 	switch d.Kind {
 	case TransitionParkUnknown:
 		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {

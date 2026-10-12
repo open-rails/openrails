@@ -11,12 +11,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // The DeclaredBilling import lands a host-declared snapshot of its legacy
@@ -41,6 +44,7 @@ const (
 
 // DeclaredSubscriptionFact is one subscription's host-declared facts.
 type DeclaredSubscriptionFact struct {
+	AcceptedSchedule   *billing.DeclaredProviderSchedule
 	CollectionPolicy   models.CollectionPolicy
 	SourceID           string // host's stable id (result reporting)
 	Customer           uuid.UUID
@@ -227,6 +231,17 @@ func ImportDeclaredSubscriptions(
 			priceCache[f.PriceID] = p
 		}
 
+		if (f.Rail == string(models.RailNMI) || f.Rail == string(models.RailCCBill)) && f.CancelKind == DeclaredCancelNone && f.AcceptedSchedule == nil {
+			block("live provider schedule requires explicit accepted_schedule terms; no historical reconstruction is performed")
+			continue
+		}
+		if schedule := f.AcceptedSchedule; schedule != nil {
+			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
+				block("accepted_schedule requires verified reference, amount, currency, cadence and first renewal boundary")
+				continue
+			}
+		}
+
 		// Period pair from facts + catalog: the paid period is one billing cycle
 		// wide, its start clamped to signup. This derivation lives HERE (next to
 		// the catalog), not in each host's importer.
@@ -305,10 +320,24 @@ func ImportDeclaredSubscriptions(
 		if err != nil {
 			return out, fmt.Errorf("declared import: load %s: %w", subID, err)
 		}
+		if schedule := f.AcceptedSchedule; schedule != nil {
+			quantity := 1
+			if schedule.Quantity != nil {
+				quantity = *schedule.Quantity
+			}
+			bill := observed.Bill{PSPID: f.PspID, CustomerID: f.Customer, SubscriptionID: &sub.ID,
+				Owner: string(f.CollectionPolicy), Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
+				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: "Declared provider subscription",
+					Quantity: schedule.Quantity, UnitAmount: schedule.Amount / int64(quantity), Amount: schedule.Amount,
+					BillingIntervalHours: &schedule.IntervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}
+			if err := observed.DeclareSchedule(ctx, database, schedule.SourceReference, bill, schedule.FirstDueAt, schedule.IntervalHours, asOf); err != nil {
+				return out, fmt.Errorf("declared import accepted schedule %s: %w", f.SourceID, err)
+			}
+		}
 		if f.CancelKind != DeclaredCancelNone && outcome == DeclaredImported {
 			// Fresh row from settled history: written faithfully above; no decider
 			// pass, but money truth still lands.
-			if _, err := backfillSubscriptionPayments(ctx, q, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
+			if _, err := backfillSubscriptionPayments(ctx, database, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
 			}
 			// Declared canceled but the provider-side schedule was not confirmed
