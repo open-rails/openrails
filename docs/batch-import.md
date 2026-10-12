@@ -272,14 +272,22 @@ never construct historical orders from a transaction amount and today's price.
 This is a forward import contract; old prelaunch data needs an explicit reset or
 a book that carries these verified facts.
 
-For live NMI and CCBill subscriptions, supply `accepted_schedule` with a stable
-`source_reference`, recurring `amount` in native currency units, `currency`,
-`first_due_at`, and exactly one of `interval_hours` (whole days) or
+For live NMI and CCBill subscriptions, `accepted_schedule` states the accepted
+terms: a stable `source_reference`, recurring `amount` in native currency units,
+`currency`, `first_due_at`, and exactly one of `interval_hours` (whole days) or
 `interval_months` (calendar months). The anchor preserves its accepted time of
 day. A monthly January 31 anchor yields February's last day and then March 31.
-`paid_through` and a changed retry date cannot supply this evidence. Approved
-transactions also carry the provider-confirmed `next_billing_at` boundary.
-An unchanged transaction receipt remains bound to its original cycle on replay.
+Approved transactions also carry the provider-confirmed `next_billing_at`
+boundary. An unchanged transaction receipt remains bound to its original cycle
+on replay.
+
+Without `accepted_schedule`, the import derives the terms from the book the way
+enrollment freezes them: the declared price's whole-day cadence, a first due one
+cycle before `paid_through`, and the book's approved charge of the price's
+amount inside that cycle. A book that does not prove them still imports the
+subscription, with an `import.schedule.unresolved` finding; its receipts stay
+`pull.bill.unresolved` findings until the terms are declared and the book is
+imported again. A receipt no accepted bill can hold never fails the import.
 
 For Stripe cash receipts, supply a complete `stripe_invoice` on each declared
 transaction. It contains invoice identity, customer reference, finalized status,
