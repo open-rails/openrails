@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -24,7 +23,7 @@ import (
 
 // SyncConfig reconciles a freshly loaded configuration with the identities
 // Postgres records, the cache's SyncFunc: it registers each document's PSP and
-// custodian identity, supersedes an identity its key no longer names, releases
+// custodian identity, refuses changes to an existing PSP's identity, releases
 // an archived PSP's fingerprint and fingerprints the rest. A document it
 // cannot serve moves into Rejected and its previously served version keeps
 // serving. Unchanged Vault versions skip the work.
@@ -65,6 +64,12 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		var declared []DeclaredCredential
 		for _, key := range set.PSPKeys() {
 			p := set.PSPs[key].Value
+			if slices.ContainsFunc(rows, func(row gen.BillingPsp) bool {
+				return row.SupersededAt == nil && strings.EqualFold(row.Key, key) && !pspDocNames(p, row)
+			}) {
+				reject(merchantdocs.PSPDoc(key), "a PSP's account identity cannot change; add a separate PSP and keep this account for existing billing")
+				continue
+			}
 			if p.Environment != s.providerEnvironment {
 				continue
 			}
@@ -72,7 +77,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), err.Error())
 				continue
 			}
-			row, why, err := s.registerPSP(ctx, q, id, key, p, rows)
+			row, why, err := s.registerPSP(ctx, q, id, key, p)
 			if err != nil {
 				return err
 			}
@@ -158,19 +163,9 @@ func registerCustodian(ctx context.Context, q *gen.Queries, id billing.MerchantI
 	return "", err
 }
 
-// registerPSP records a PSP document's identity, current under its key. An
-// identity the key named before is superseded and drains.
-func (s *Service) registerPSP(ctx context.Context, q *gen.Queries, id billing.MerchantID, key string, p merchantdocs.PSP, rows []gen.BillingPsp) (gen.BillingPsp, string, error) {
+// registerPSP records a PSP document's identity, current under its key.
+func (s *Service) registerPSP(ctx context.Context, q *gen.Queries, id billing.MerchantID, key string, p merchantdocs.PSP) (gen.BillingPsp, string, error) {
 	pspID, rail, environment, account := PSPNaturalKey(p.Rail, p.Environment, p.AccountID)
-	for _, row := range rows {
-		if row.SupersededAt == nil && strings.EqualFold(row.Key, key) && row.ID != pspID {
-			log.WithFields(log.Fields{"merchant_id": id.String(), "psp": key, "superseded": row.AccountID, "current": account}).
-				Warn("merchant config: a PSP document names another account; the old identity drains")
-			if err := q.SupersedePSP(ctx, gen.SupersedePSPParams{MerchantID: id.UUID(), ID: row.ID}); err != nil {
-				return gen.BillingPsp{}, "", err
-			}
-		}
-	}
 	row, err := q.RegisterPSP(ctx, gen.RegisterPSPParams{ID: pspID, MerchantID: id.UUID(), Key: key, Rail: rail, Environment: environment, AccountID: account})
 	var pgErr *pgconn.PgError
 	switch {
