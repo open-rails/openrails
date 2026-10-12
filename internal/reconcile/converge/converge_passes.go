@@ -895,9 +895,6 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			subID = billing.SubscriptionID(*d.SubscriptionID)
 		}
 		subject := "provider_charge:" + d.UserID + ":" + subID.String() + ":" + d.PeriodKey
-		// payment_ids is ordered purchased_at DESC: ids[0] is the later charge —
-		// the default refund target (operator can override before approving).
-		rec := recommend.CancelAndRefundRec(billing.SubscriptionID{}, billing.PaymentID(d.PaymentIds[0]))
 		out = append(out, ConvergeFinding{
 			Type:       findingDuplicateCharge,
 			Shape:      ShapeExcess,
@@ -906,14 +903,13 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			SubjectKey: subject,
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": d.UserID, "subscription_id": subID.String(), "period_start": d.PeriodKey,
+				"customer_id": d.UserID, "subscription_id": subID.String(), "order_id": d.PeriodKey,
 				"product_id": billing.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10), "currency": d.Currency,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
-				recommend.EvidenceKey: rec.Map(),
 			},
-			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for the %s period of subscription %s (%q; total %s; payments %s). Refund the later charge %s unless an operator action explains it.",
-				d.UserID, d.Count, d.PeriodKey, subID.String(), d.ProductKey, moneyutil.FormatAmount(d.TotalAmount, d.Currency), strings.Join(ids, ", "), ids[0]),
+			RecommendedAction: fmt.Sprintf("Customer %s has net captured money exceeding the frozen total of order %s for subscription %s (%q; net %s; payments %s). Review the order and refund only the verified excess; multiple partial payments are not inherently duplicates.",
+				d.UserID, d.PeriodKey, subID.String(), d.ProductKey, moneyutil.FormatAmount(d.TotalAmount, d.Currency), strings.Join(ids, ", ")),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})
 	}
