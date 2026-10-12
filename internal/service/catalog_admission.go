@@ -25,10 +25,9 @@ import (
 
 type catalogAdmissionKey struct{}
 type catalogAdmission struct {
-	before     catalogState
-	targets    map[catalogObject]bool
-	action     *destructive.Action
-	rolledBack bool
+	before  catalogState
+	targets map[catalogObject]bool
+	action  *destructive.Action
 	// unstarted: refused before its write ran, so no provider call was made.
 	unstarted bool
 	finished  bool
@@ -135,8 +134,10 @@ func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, t
 	if scope.action != nil && !scope.finished {
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
+		// A local catalog effect commits only with its FinishTx, so an unfinished
+		// local command changed nothing; a provider call may have.
 		outcome := destructive.OutcomeUncertain
-		if scope.rolledBack && (!scope.external || scope.unstarted) {
+		if !scope.external || scope.unstarted {
 			outcome = destructive.OutcomeNoEffect
 		}
 		err = errors.Join(err, s.rt.DestructiveAdmissions.Finish(finish, mid.UUID(), scope.action.ID, outcome, ""))
@@ -219,7 +220,7 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 		if req.SetEntitlements {
 			keys, err := catalogwire.NormalizeEntitlements(req.Entitlements)
 			if err != nil {
-				return nil, err
+				return nil, apperr.Invalidf("%s", err)
 			}
 			keys = append([]string{}, keys...)
 			slices.Sort(keys)
@@ -307,7 +308,7 @@ func createProductPlan(req billing.CreateProductParams) catalogClassification {
 			return nil, err
 		}
 		if _, err := catalogwire.NormalizeEntitlements(req.Entitlements); err != nil {
-			return nil, err
+			return nil, apperr.Invalidf("%s", err)
 		}
 		return nil, nil
 	}

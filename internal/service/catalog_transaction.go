@@ -79,14 +79,11 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			return err
 		}
 		if admission != nil && !sameCatalogTargets(admission, scoped.catalogBefore) {
-			admission.rolledBack, admission.unstarted = true, true
+			admission.unstarted = true
 			return errCatalogSnapshotMoved
 		}
 		var callErr error
 		if out, callErr = fn(ctx, &scoped); callErr != nil {
-			if admission != nil {
-				admission.rolledBack = true
-			}
 			return callErr
 		}
 		after, err := readCatalogState(ctx, q, mid.UUID())
@@ -103,7 +100,6 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			}
 			if !admission.targets[object] {
 				// The catalog moved after planning; plan and admit again.
-				admission.rolledBack = true
 				return errCatalogSnapshotMoved
 			}
 		}
@@ -117,9 +113,6 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			}
 		}
 		if err := refuseNewBenefitOverlap(ctx, q, mid.UUID(), before); err != nil {
-			if admission != nil {
-				admission.rolledBack = true
-			}
 			return err
 		}
 		if admission != nil && admission.action != nil {
