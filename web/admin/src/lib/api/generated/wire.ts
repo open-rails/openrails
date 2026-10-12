@@ -68,6 +68,7 @@ export type AdmitParams = {
   resource?: string
   currency?: string
   estimated_amount?: string
+  usage?: UsageEstimate
   accrual_rate_delta_per_hour?: string
   source?: string
   expires_at?: string
@@ -112,8 +113,6 @@ export type AlertWebhook = {
 
 export type Allowance = {
   included?: number
-  accrue_from?: string
-  cap?: string
 }
 
 export type Application = {
@@ -288,18 +287,36 @@ export type CaptchaConfig = {
   token_header: string
 }
 
+export type CaptureAdmissionBatchParams = {
+  items?: CaptureAdmissionParams[]
+}
+
 export type CaptureAdmissionParams = {
-  amount?: string
+  request_id?: string
   usage?: CaptureUsage
+  amount?: string
+}
+
+export type CaptureBatchResult = {
+  items: CaptureResult[]
 }
 
 export type CaptureReceipt = {
   request_id: string
   customer_id: string
   currency: string
+  estimated_amount: string
   amount: string
+  charges: UsageCharge[]
+  usage_event_id: string | null
   balance_transaction_id: string | null
   replayed: boolean
+}
+
+export type CaptureResult = {
+  status: number
+  receipt: CaptureReceipt | null
+  error: ErrorDetails | null
 }
 
 export type CaptureUsage = {
@@ -977,7 +994,6 @@ export type Matrix = {
 export type MatrixCell = {
   unit_amount: string
   maximum_amount?: string
-  included?: number
 }
 
 export type MerchantCheckoutSettings = {
@@ -2164,9 +2180,22 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "invoker" | "resource"
+  group_by: "event_type" | "invoker" | "meter" | "resource"
   rows: UsageRow[]
   next_cursor: string | null
+}
+
+export type UsageCharge = {
+  meter_key: string
+  cell: string | null
+  quantity: number
+  amount: string
+}
+
+export type UsageEstimate = {
+  event_type?: string
+  dimensions?: Record<string, number>
+  metadata?: Record<string, unknown>
 }
 
 export type UsageEvent = {
@@ -2183,6 +2212,7 @@ export type UsageEvent = {
   metadata: Record<string, unknown> | null
   source: string
   source_id: string
+  charges: UsageCharge[]
   balance_transaction_id: string | null
   occurred_at: string
   created_at: string
@@ -2197,8 +2227,10 @@ export type UsageEventResult = {
 
 export type UsageRow = {
   key: string
+  cell: string | null
   event_count: number
   amount: string
+  quantity: number | null
   dimensions: Record<string, number> | null
 }
 

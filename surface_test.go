@@ -66,6 +66,9 @@ var embeddedMethods = map[string]string{
 	"DeclarePSP":           "the hosted product: a PSP identity without credentials, for imported billing facts",
 	"StartRunningChargeTx": "host-four: StartRunningCharge inside the host's transaction",
 	"StopRunningChargeTx":  "host-four: StopRunningCharge inside the host's transaction",
+	"AdmitTx":              "host-four: Admit inside the host's transaction",
+	"CaptureAdmissionsTx":  "host-four: CaptureAdmissions inside the host's transaction",
+	"ReleaseAdmissionsTx":  "host-four: ReleaseAdmissions inside the host's transaction",
 }
 
 // routeArguments are the arguments of the methods that refuse a request with

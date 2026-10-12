@@ -32,7 +32,6 @@ import { ApiError } from "@/lib/api/client"
 import type {
   Meter,
 } from "@/lib/api/generated/wire"
-import { formatCap } from "@/lib/duration"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { useCatalogWrites } from "@/lib/capabilities"
@@ -241,7 +240,6 @@ export function MeterDetailPage() {
   const navigate = useNavigate()
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
   const writesAllowed = useCatalogWrites()
-  const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
     adminQueries.allProducts({ errorAction: "Load products for metering" })
   )
@@ -319,7 +317,6 @@ export function MeterDetailPage() {
             meter={meter}
             writesAllowed={writesAllowed}
             products={productsQuery.data?.data ?? []}
-            meters={metersQuery.data?.data ?? []}
             productsPending={productsQuery.isPending}
             productsError={Boolean(productsQuery.error)}
             productsForbidden={
@@ -464,9 +461,7 @@ function DefaultRateSection({
             value={
               card.allowance?.included !== undefined
                 ? `${card.allowance.included.toLocaleString()} included`
-                : card.allowance?.accrue_from
-                  ? `Accrues from ${card.allowance.accrue_from}${card.allowance.cap ? `, capped at ${formatCap(card.allowance.cap)}` : ""}`
-                  : "None"
+                : "None"
             }
           />
           <ContractFact label="Updated" value={formatDate(card.updated_at)} />

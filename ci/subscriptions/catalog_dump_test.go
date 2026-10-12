@@ -44,7 +44,6 @@ products:
     rate_cards:
     - ordinal: 3
       meter: api-calls
-      payment_term: in_arrears
       filter: {model: [fast]}
       allowance: {included: 10}
       price:

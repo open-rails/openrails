@@ -67,8 +67,28 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 	return result.RowsAffected(), nil
 }
 
+const deleteProduct = `-- name: DeleteProduct :execrows
+UPDATE billing.products SET archived = true, deleted_at = now(), updated_at = now()
+WHERE products.merchant_id = $1::uuid AND id = $2::uuid AND deleted_at IS NULL
+`
+
+type DeleteProductParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Deletes a product nothing refers to; deleted is always archived.
+func (q *Queries) DeleteProduct(ctx context.Context, arg DeleteProductParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProduct, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
+
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1 AND deleted_at IS NULL
 `
 
 type GetProductByIDParams struct {
@@ -76,6 +96,7 @@ type GetProductByIDParams struct {
 	MerchantID uuid.UUID
 }
 
+// Reads leave deleted products out: nothing ever referred to them.
 func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) (BillingProduct, error) {
 	row := q.db.QueryRow(ctx, getProductByID, arg.ID, arg.MerchantID)
 	var i BillingProduct
@@ -93,12 +114,13 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.Revision,
 		&i.CreditGrant,
 		&i.Ownership,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1 AND deleted_at IS NULL
 `
 
 type GetProductByKeyParams struct {
@@ -123,12 +145,13 @@ func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams
 		&i.Revision,
 		&i.CreditGrant,
 		&i.Ownership,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
 `
 
 func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
@@ -154,6 +177,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 			&i.Revision,
 			&i.CreditGrant,
 			&i.Ownership,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -166,8 +190,8 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products
-WHERE products.merchant_id = $1::uuid
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products
+WHERE products.merchant_id = $1::uuid AND deleted_at IS NULL
 `
 
 func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
@@ -193,6 +217,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 			&i.Revision,
 			&i.CreditGrant,
 			&i.Ownership,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +230,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
 `
 
@@ -237,6 +262,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 			&i.Revision,
 			&i.CreditGrant,
 			&i.Ownership,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -249,8 +275,8 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 }
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products
-WHERE products.merchant_id = $1::uuid
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at FROM billing.products
+WHERE products.merchant_id = $1::uuid AND deleted_at IS NULL
   AND ($2::boolean IS NULL OR archived = $2::boolean)
   AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
   AND ($4::text[] IS NULL OR key = ANY ($4::text[]))
@@ -312,6 +338,7 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 			&i.Revision,
 			&i.CreditGrant,
 			&i.Ownership,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -321,6 +348,29 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockProductForDelete = `-- name: LockProductForDelete :one
+SELECT id, key FROM billing.products
+WHERE products.merchant_id = $1::uuid AND id = $2::uuid AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockProductForDeleteParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+type LockProductForDeleteRow struct {
+	ID  uuid.UUID
+	Key string
+}
+
+func (q *Queries) LockProductForDelete(ctx context.Context, arg LockProductForDeleteParams) (LockProductForDeleteRow, error) {
+	row := q.db.QueryRow(ctx, lockProductForDelete, arg.MerchantID, arg.ID)
+	var i LockProductForDeleteRow
+	err := row.Scan(&i.ID, &i.Key)
+	return i, err
 }
 
 const patchProduct = `-- name: PatchProduct :one
@@ -334,8 +384,8 @@ UPDATE billing.products SET
     archived = COALESCE($11::boolean, archived),
     revision = CASE WHEN $12::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
-WHERE products.merchant_id = $13::uuid AND id = $14::uuid
-RETURNING id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership
+WHERE products.merchant_id = $13::uuid AND id = $14::uuid AND deleted_at IS NULL
+RETURNING id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at
 `
 
 type PatchProductParams struct {
@@ -388,6 +438,79 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		&i.Revision,
 		&i.CreditGrant,
 		&i.Ownership,
+		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const productHoldsReferences = `-- name: ProductHoldsReferences :one
+SELECT (
+    EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
+    OR EXISTS (SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
+    OR EXISTS (SELECT 1 FROM billing.product_access WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
+    OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND from_product_id = $2::uuid)
+    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
+)::boolean AS referenced
+`
+
+type ProductHoldsReferencesParams struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+}
+
+// Whether a record refers to the product itself: a subscription, a grant,
+// product access, a price migration or a meter's rate card. Its prices'
+// references, purchase lines among them, are PricesHoldReferences'.
+func (q *Queries) ProductHoldsReferences(ctx context.Context, arg ProductHoldsReferencesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, productHoldsReferences, arg.MerchantID, arg.ProductID)
+	var referenced bool
+	err := row.Scan(&referenced)
+	return referenced, err
+}
+
+const reviveProduct = `-- name: ReviveProduct :execrows
+UPDATE billing.products SET
+    display_name = $1::text,
+    description = $2::text,
+    credit_grant = $3::jsonb,
+    tier_group = NULLIF($4::text, ''),
+    tier_rank = $5::int,
+    ownership = $6::text,
+    archived = $7::boolean,
+    deleted_at = NULL,
+    created_at = now(),
+    updated_at = now()
+WHERE products.merchant_id = $8::uuid AND id = $9::uuid AND deleted_at IS NOT NULL
+`
+
+type ReviveProductParams struct {
+	DisplayName string
+	Description *string
+	CreditGrant []byte
+	TierGroup   *string
+	TierRank    int32
+	Ownership   *string
+	Archived    bool
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+}
+
+// Declaring a deleted product's key again revives its row (the id is the
+// key's) with the new definition, as created now.
+func (q *Queries) ReviveProduct(ctx context.Context, arg ReviveProductParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reviveProduct,
+		arg.DisplayName,
+		arg.Description,
+		arg.CreditGrant,
+		arg.TierGroup,
+		arg.TierRank,
+		arg.Ownership,
+		arg.Archived,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -54,6 +54,9 @@ const (
 	// ExpiredCheckoutAttempts keeps a checkout attempt that expired without
 	// reaching a provider 90 days past its expiry.
 	ExpiredCheckoutAttempts = 90 * Day
+	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
+	// period 100 days past the period's start: a month plus the ingest window.
+	MeterPeriodQuantities = 100 * Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past

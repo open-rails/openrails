@@ -843,7 +843,7 @@ get a token from your issuer; that token opens nothing else.
 | `POST /billing/v1/app/entitlements/check` | which entitlements a user holds now, up to 100 keys and 10 prefixes at once: gate your content with it (a read; no `Idempotency-Key`) |
 | `POST /billing/v1/app/usage-events` | record metered usage, failed work included |
 | `POST /billing/v1/app/admissions` | admit requests against a customer's budget, holding funds |
-| `POST /billing/v1/app/admissions/{request_id}/capture` | settle one at its actual cost |
+| `POST /billing/v1/app/admissions/capture` | settle them at what the work used, priced by the rate cards |
 | `POST /billing/v1/app/admissions/release`, `/extend` | free holds; move their deadlines |
 | `POST /billing/v1/app/running-charges` | charge a customer at a rate per hour until you stop it |
 | `POST /billing/v1/app/running-charges/{reference}/stop` | stop it and post what it charged |
@@ -1100,8 +1100,9 @@ apply with `ApplyCatalogParams{Force: true}`, `?force=true` or
 the field. `MerchantDeclaration.Catalog` never forces, and a conflict never fails `New`.
 
 All these examples preserve omitted entries. `prune: true` makes a document the
-whole catalog: an omitted product or price is archived only when no edit set any
-of its fields; otherwise the file lets it go. Nothing is deleted.
+whole catalog: an omitted product or price that no edit set is deleted when
+nothing ever referred to it and archived otherwise; one an edit set, the file
+lets go. A purchased product is never deleted.
 Changing existing subscribers' accepted prices requires an explicit scheduled
 reprice operation. A product's keys are not part of the accepted terms:
 editing a product's `entitlements` changes what every buyer and subscriber of

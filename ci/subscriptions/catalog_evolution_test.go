@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -234,13 +235,10 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	product, err = productByKey(t.Context(), c, "video")
 	require.NoError(t, err)
 	require.False(t, product.Archived, "prune keeps a product an edit touched")
-	other, err := productByKey(t.Context(), c, "other-video")
-	require.NoError(t, err)
-	require.True(t, other.Archived, "explicit prune retires omitted products only documents set")
-	retired, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
-	require.NoError(t, err)
-	require.True(t, retired.Archived, "explicit prune archives prices without deleting history")
-	require.Equal(t, first.Version, retired.Version)
+	_, err = productByKey(t.Context(), c, "other-video")
+	require.ErrorIs(t, err, billing.ErrNotFound, "explicit prune deletes an omitted product only documents set and nothing refers to")
+	_, err = c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
+	requireCode(t, err, http.StatusNotFound, "price_not_found")
 }
 
 // Matching an archived version by its full terms must also recover its PSP
@@ -426,15 +424,16 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	legacyPriceIndex := 0
 
 	// The pre-revision row format omitted product and price revisions and
-	// ownership, and carried each product's keys on the product.
+	// ownership and deletion, and carried each product's keys on the product.
 	legacy := legacyArchive(t, archive.Bytes(), func(table string, values []*string) []*string {
 		switch table {
 		case "prices":
 			values = newestFirst[legacyPriceIndex]
 			legacyPriceIndex++
+			values = values[:len(values)-1] // deleted_at, the last column
 		case "products":
 			keys := "[]"
-			values = values[:len(values)-1] // ownership, the last column
+			values = values[:len(values)-2] // ownership and deleted_at, the last columns
 			values = append(append(append([]*string{}, values[:6]...), &keys), values[6:]...)
 		}
 		if table == "prices" || table == "products" {

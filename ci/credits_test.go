@@ -90,16 +90,15 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 		return replay[0].Admission
 	}
 	require.Equal(t, billing.AdmissionOpen, *state().State)
-	capture := billing.CaptureAdmissionParams{Amount: 250_000, Usage: &billing.CaptureUsage{EventType: "inference"}}
-	receipt, err := client.CaptureAdmission(ctx, requestID, capture)
+	inference := &billing.CaptureUsage{EventType: "inference"}
+	receipt, err := captureAdmission(ctx, client, requestID, 250_000, inference)
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, receipt.Amount)
 	require.NotNil(t, receipt.BalanceTransactionID)
-	again, err := client.CaptureAdmission(ctx, requestID, capture)
+	again, err := captureAdmission(ctx, client, requestID, 250_000, inference)
 	require.NoError(t, err)
 	require.True(t, again.Replayed)
-	capture.Amount = 260_000
-	_, err = client.CaptureAdmission(ctx, requestID, capture)
+	_, err = captureAdmission(ctx, client, requestID, 260_000, inference)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	captured := state()
 	require.Equal(t, billing.AdmissionCaptured, *captured.State)

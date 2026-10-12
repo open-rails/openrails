@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -82,18 +83,36 @@ var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
 
 // CaptureAdmission settles an admitted request. The first capture fixes its
-// amount and usage terms; an exact retry returns the original receipt.
-func (s *Service) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
+// terms; an exact retry returns the original receipt.
+func (s *Service) CaptureAdmission(ctx context.Context, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return nil, fmt.Errorf("request_id required")
-	}
-	return s.moneyService().CaptureAdmission(ctx, requestID, params.Amount, params.Usage)
+	return s.moneyService().CaptureAdmission(ctx, params)
+}
+
+// CaptureAdmissionTx is CaptureAdmission inside tx, a transaction from the
+// host's pool: the capture commits with the host's record of the work.
+func (s *Service) CaptureAdmissionTx(ctx context.Context, tx pgx.Tx, params billing.CaptureAdmissionParams) (receipt *billing.CaptureReceipt, err error) {
+	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
+		receipt, err = money.NewMoneyService(txDB, s.rt.Clock).CaptureAdmission(ctx, params)
+		return err
+	})
+	return receipt, err
+}
+
+// ReleaseAdmissionTx is ReleaseAdmission inside tx, a transaction from the
+// host's pool.
+func (s *Service) ReleaseAdmissionTx(ctx context.Context, tx pgx.Tx, requestID string) (admission *billing.Admission, err error) {
+	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
+		gate := spendgate.New(txDB)
+		gate.SetClock(s.now)
+		admission, err = s.releaseAdmission(ctx, gate, requestID)
+		return err
+	})
+	return admission, err
 }
 
 // GetAdmission reads an allowed admission and its hold.
@@ -129,11 +148,14 @@ func (s *Service) ReleaseAdmission(ctx context.Context, requestID string) (*bill
 		return nil, err
 	}
 	defer release()
+	return s.releaseAdmission(ctx, s.spendGate(), requestID)
+}
+
+func (s *Service) releaseAdmission(ctx context.Context, gate *spendgate.Gate, requestID string) (*billing.Admission, error) {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	gate := s.spendGate()
 	if err := gate.Release(ctx, requestID); err != nil {
 		return nil, err
 	}

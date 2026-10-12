@@ -539,11 +539,15 @@ export type Account = z.infer<typeof accountSchema>
 /**
  * One group of a usage report: its events and their total `amount`.
  * `dimensions` are the summed event dimensions when grouped by event type.
+ * Grouped by meter, `key` is the meter, `cell` its matrix cell and
+ * `quantity` what it priced.
  */
 export const usageRowSchema = z.object({
   key: z.string(),
+  cell: z.string().nullish(),
   event_count: z.number(),
   amount,
+  quantity: z.number().nullish(),
   dimensions: z.record(z.string(), z.number()).nullish(),
 })
 export type UsageRow = z.infer<typeof usageRowSchema>

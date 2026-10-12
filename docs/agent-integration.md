@@ -62,7 +62,7 @@ milestone order, each verifiable before the next:
    `openrailstest.CheckAuth` in a test, then that an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.
 5. **Backend calls.** Use the Client where the host needs admission/holds, usage,
-   or entitlement reads. Verify: `Admit` + `CaptureAdmission` round-trip in a test.
+   or entitlement reads. Verify: `Admit` + `CaptureAdmissions` round-trip in a test.
 6. **Checkout end-to-end.** Frontend work per
    [frontend-integration.md](frontend-integration.md). Verify: sandbox checkout →
    webhook (use [dev/local-webhooks.md](dev/local-webhooks.md) for a public URL) →

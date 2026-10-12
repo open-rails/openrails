@@ -4,6 +4,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
 // page is a list route's paging parameters.
@@ -14,8 +15,7 @@ var (
 	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
 	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
-		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found",
-		"meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
+		"default_rate_card_not_found", "meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
 		"revision_mismatch", "usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
 	}
 )
@@ -53,6 +53,8 @@ var catalogRoutes = []Route{
 		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
 	{Method: PATCH, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "UpdateProduct", Level: LevelUpdate,
 		Request: billing.UpdateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.UpdateProduct)},
+	{Method: DELETE, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "DeleteProduct", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+		Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found"), Handler: h(handlers.DeleteProduct)},
 	{Method: POST, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePrice", Level: LevelUpdate,
 		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,

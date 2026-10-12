@@ -138,6 +138,24 @@ func UpdateProduct(r *httprequest.Request) {
 	writeProduct(r, svc, http.StatusOK, out)
 }
 
+// DeleteProduct deletes a product nothing ever referred to, with its prices;
+// one a record refers to is refused with product_in_use.
+func DeleteProduct(r *httprequest.Request) {
+	id, ok := productIDParam(r)
+	if !ok {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	if err := svc.DeleteProduct(r.Request.Context(), id); err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.NoContent()
+}
+
 func productIDParam(r *httprequest.Request) (billing.ProductID, bool) {
 	id, err := billing.ParseProductID(r.Param("id"))
 	if err != nil || id.IsZero() {

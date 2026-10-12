@@ -86,7 +86,7 @@ SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint,
 WHERE merchant_id = $4::uuid AND request_id = $5::text
   AND admitted_at = $6::timestamptz
   AND state <> 'captured'
-RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards
 `
 
 type CaptureAdmissionOperationParams struct {
@@ -125,6 +125,8 @@ func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmi
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
+		&i.EstimateUsage,
+		&i.RateCards,
 	)
 	return i, err
 }
@@ -160,7 +162,7 @@ func (q *Queries) ExtendAdmissionOperation(ctx context.Context, arg ExtendAdmiss
 }
 
 const getAdmissionOperation = `-- name: GetAdmissionOperation :one
-SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
+SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
   AND admitted_at >= $3::timestamptz
 ORDER BY admitted_at DESC
@@ -193,6 +195,8 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
+		&i.EstimateUsage,
+		&i.RateCards,
 	)
 	return i, err
 }
@@ -263,14 +267,15 @@ func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHe
 const insertAdmissionOperation = `-- name: InsertAdmissionOperation :one
 INSERT INTO billing.admission_operations (
     merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms,
-    requested_expires_at, expires_at, admitted_at, window_keys
+    requested_expires_at, expires_at, admitted_at, window_keys, estimate_usage, rate_cards
 ) VALUES (
     $1::uuid, $2::text, $3::uuid,
     $4::text, $5::bigint, $6::bigint, $7::jsonb,
     $8::timestamptz, $8::timestamptz,
-    $9::timestamptz, $10::text[]
+    $9::timestamptz, $10::text[],
+    $11::jsonb, $12::jsonb
 )
-RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards
 `
 
 type InsertAdmissionOperationParams struct {
@@ -284,6 +289,8 @@ type InsertAdmissionOperationParams struct {
 	RequestedExpiresAt *time.Time
 	AdmittedAt         time.Time
 	WindowKeys         []string
+	EstimateUsage      []byte
+	RateCards          []byte
 }
 
 func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmissionOperationParams) (BillingAdmissionOperation, error) {
@@ -298,6 +305,8 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 		arg.RequestedExpiresAt,
 		arg.AdmittedAt,
 		arg.WindowKeys,
+		arg.EstimateUsage,
+		arg.RateCards,
 	)
 	var i BillingAdmissionOperation
 	err := row.Scan(
@@ -317,12 +326,14 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
+		&i.EstimateUsage,
+		&i.RateCards,
 	)
 	return i, err
 }
 
 const lockAdmissionOperation = `-- name: LockAdmissionOperation :one
-SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
+SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
   AND admitted_at = $3::timestamptz
 FOR UPDATE
@@ -354,6 +365,8 @@ func (q *Queries) LockAdmissionOperation(ctx context.Context, arg LockAdmissionO
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
+		&i.EstimateUsage,
+		&i.RateCards,
 	)
 	return i, err
 }

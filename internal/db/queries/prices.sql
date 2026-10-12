@@ -19,27 +19,31 @@ INSERT INTO billing.prices (
 FROM billing.products catalog_product
 WHERE catalog_product.merchant_id=sqlc.arg(merchant_id)::uuid
   AND catalog_product.id=sqlc.arg(product_id)::uuid
+  AND catalog_product.deleted_at IS NULL
 RETURNING prices.*;
+
+-- Reads leave deleted prices out: nothing ever referred to them.
 
 -- name: GetPriceByID :one
 SELECT price.* FROM billing.prices price
-WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid;
+WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid AND price.deleted_at IS NULL;
 
 -- name: ListPricesByIDs :many
-SELECT * FROM billing.prices WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM billing.prices WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL;
 
 -- name: ListPricesWithProductByIDs :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = ANY(sqlc.arg(ids)::uuid[])
+  AND price.deleted_at IS NULL
 ORDER BY price.created_at DESC, price.id DESC;
 
 -- All prices for a product, archived included: the catalog apply matches
 -- archived rows rather than re-creating them (prices_product_amount_window_key).
 -- name: ListPricesByProduct :many
 SELECT * FROM billing.prices price
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1;
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1 AND price.deleted_at IS NULL;
 
 -- name: ListCurrentPricesByProducts :many
 SELECT price.* FROM billing.prices price
@@ -64,8 +68,7 @@ ORDER BY price.amount ASC;
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
-
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.deleted_at IS NULL
 ORDER BY price.amount ASC;
 
 -- name: ListPricesFiltered :many
@@ -73,7 +76,7 @@ ORDER BY price.amount ASC;
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM billing.prices price
 JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.deleted_at IS NULL
   AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
   AND (sqlc.narg(currency)::text IS NULL OR price.currency = sqlc.narg(currency)::text)
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
@@ -131,13 +134,13 @@ WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND product.key = sqlc.arg
 -- All rows (archived + current) ever pointed at by this key — the version chain.
 -- name: ListPriceChainByKey :many
 SELECT * FROM billing.prices
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND deleted_at IS NULL
 ORDER BY created_at ASC;
 
 -- The archived members of a key's chain: its prior versions.
 -- name: ListPriorVersionsByKey :many
 SELECT * FROM billing.prices
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND archived
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND archived AND deleted_at IS NULL
 ORDER BY created_at ASC;
 
 -- name: GetPriceByTerms :one
@@ -167,3 +170,46 @@ SELECT id, public_id FROM billing.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND public_id = ANY(sqlc.arg(ids)::text[])
   AND sha256(public_id::bytea) IN (SELECT sha256(id::bytea) FROM unnest(sqlc.arg(ids)::text[]) AS id)
 LIMIT COALESCE(cardinality(sqlc.arg(ids)::text[]), 0);
+
+-- name: RevivePrice :execrows
+-- Declaring a deleted price's terms again revives its row (the id is the
+-- terms').
+UPDATE billing.prices AS price SET archived = sqlc.arg(archived)::boolean, deleted_at = NULL, updated_at = now()
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = sqlc.arg(id)::uuid AND price.deleted_at IS NOT NULL;
+
+-- name: ListProductPriceIDs :many
+-- Every version of every key of a product, archived included.
+SELECT id FROM billing.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND deleted_at IS NULL;
+
+-- name: ListPriceKeyIDs :many
+-- Every version of one price key, archived included.
+SELECT id FROM billing.prices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND deleted_at IS NULL;
+
+-- name: PricesHoldReferences :one
+-- Whether a record refers to any of the prices: a purchase line or payment,
+-- a subscription, a checkout, a price migration, a scheduled change, a
+-- provider write or a PSP link.
+SELECT (
+    EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.checkout_attempts WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND to_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.provider_intents WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.price_psp_bindings WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+)::boolean AS referenced;
+
+-- name: DeleteProductPrices :exec
+-- A deleted product's prices go with it; deleted is always archived.
+UPDATE billing.prices SET archived = true, deleted_at = now(), updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND deleted_at IS NULL;
+
+-- name: DeletePriceKey :exec
+-- Deletes every version of a price key nothing refers to.
+UPDATE billing.prices SET archived = true, deleted_at = now(), updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND deleted_at IS NULL;

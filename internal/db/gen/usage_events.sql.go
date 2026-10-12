@@ -13,7 +13,7 @@ import (
 )
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND event_type = $3 AND source = $4 AND source_id = $5
   AND occurred_at >= $7::timestamptz
@@ -64,6 +64,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		&i.CreatedAt,
 		&i.Outcome,
 		&i.ForgivenAmount,
+		&i.Charges,
 	)
 	return i, err
 }
@@ -74,9 +75,9 @@ INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at,
-    outcome, forgiven_amount
+    outcome, forgiven_amount, charges
 ) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $16, $12, $13, $14,
-    $17::text, $18::bigint)
+    $17::text, $18::bigint, $19::jsonb)
 `
 
 type InsertUsageEventParams struct {
@@ -98,6 +99,7 @@ type InsertUsageEventParams struct {
 	PricingAuthority string
 	Outcome          string
 	ForgivenAmount   int64
+	Charges          []byte
 }
 
 // billing.usage_events: append-only metered usage, partitioned by month on
@@ -125,6 +127,7 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.PricingAuthority,
 		arg.Outcome,
 		arg.ForgivenAmount,
+		arg.Charges,
 	)
 	return err
 }
@@ -223,6 +226,83 @@ func (q *Queries) UsageReport(ctx context.Context, arg UsageReportParams) ([]Usa
 	for rows.Next() {
 		var i UsageReportRow
 		if err := rows.Scan(&i.Key, &i.EventCount, &i.TotalAmount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageReportByMeter = `-- name: UsageReportByMeter :many
+SELECT g.key, g.event_count, g.total_amount, g.quantity
+FROM (
+    SELECT ((c.charge ->> 'meter_key') || chr(31) || COALESCE(c.charge ->> 'cell', ''))::text AS key,
+           COUNT(*)::bigint AS event_count,
+           COALESCE(SUM((c.charge ->> 'amount')::bigint), 0)::bigint AS total_amount,
+           COALESCE(SUM((c.charge ->> 'quantity')::bigint), 0)::bigint AS quantity
+    FROM billing.usage_events ue
+    CROSS JOIN LATERAL jsonb_array_elements(ue.charges) AS c(charge)
+    WHERE ue.merchant_id = $1 AND ue.customer_id = $2
+      AND ue.currency = $3
+      AND ue.occurred_at >= $4::timestamptz
+      AND ue.occurred_at < $5::timestamptz
+    GROUP BY 1
+) g
+WHERE $6::bigint IS NULL
+   OR g.total_amount < $6::bigint
+   OR (g.total_amount = $6::bigint AND g.key COLLATE "C" > $7::text)
+ORDER BY g.total_amount DESC, g.key COLLATE "C"
+LIMIT $8::int
+`
+
+type UsageReportByMeterParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	FromAt      time.Time
+	ToAt        time.Time
+	AfterAmount *int64
+	AfterKey    *string
+	RowLimit    int32
+}
+
+type UsageReportByMeterRow struct {
+	Key         string
+	EventCount  int64
+	TotalAmount int64
+	Quantity    int64
+}
+
+// One page of a customer's usage over [from, to) in one currency, grouped by
+// what each meter (and matrix cell) charged it: the key is the meter key and
+// the cell joined by U+001F. Ordered as UsageReport.
+func (q *Queries) UsageReportByMeter(ctx context.Context, arg UsageReportByMeterParams) ([]UsageReportByMeterRow, error) {
+	rows, err := q.db.Query(ctx, usageReportByMeter,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.FromAt,
+		arg.ToAt,
+		arg.AfterAmount,
+		arg.AfterKey,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageReportByMeterRow
+	for rows.Next() {
+		var i UsageReportByMeterRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.EventCount,
+			&i.TotalAmount,
+			&i.Quantity,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

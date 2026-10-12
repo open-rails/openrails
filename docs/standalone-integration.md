@@ -212,12 +212,14 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     Invoker:         userID,
     InvokerType:     billing.InvokerTypeDelegated,
     Currency:        "USD",
-    EstimatedAmount: 50_000,    // native units (USD: micros)
-    ExpiresAt:       &deadline, // required with a hold: the job's deadline
+    // the rate cards price the estimate into the hold
+    Usage:     &billing.UsageEstimate{EventType: "chat", Dimensions: map[string]int64{"input_tokens": prompt, "output_tokens": maxTokens}},
+    ExpiresAt: &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
-    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
-})
+receipts, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{
+    RequestID: requestID, // priced by the cards pinned at admission
+    Usage:     &billing.CaptureUsage{EventType: "chat", Dimensions: map[string]int64{"input_tokens": used.Input, "output_tokens": used.Output}},
+}})
 // or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
@@ -273,13 +275,14 @@ is its durable retry identity:
 # Pre-authorize + hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/app/admissions \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
-       "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
+  -d '{"items":[{"customer_id":"...","invoker":"user-123","request_id":"req-789",
+       "usage":{"event_type":"chat","dimensions":{"input_tokens":4000,"output_tokens":1000}},
+       "expires_at":"2026-09-16T12:00:00Z"}]}'
 
-# Settle at real cost…
-curl -X POST https://openrails.example/v1/app/admissions/req-789/capture \
+# Settle what the work used, at the admitted price…
+curl -X POST https://openrails.example/v1/app/admissions/capture \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
+  -d '{"items":[{"request_id":"req-789","usage":{"event_type":"chat","dimensions":{"input_tokens":4000,"output_tokens":620}}}]}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/app/admissions/release \

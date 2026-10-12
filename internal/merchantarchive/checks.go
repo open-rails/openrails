@@ -319,7 +319,7 @@ var referenceChecks = []rowCheck{
 	{"subscriptions", `deleted_at IS NULL
 	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
-	{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
+	{"meter_period_quantities", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=meter_period_quantities.customer_id)`},
 	{"ledger_transfers", `(source_id LIKE 'order_collection:%' OR source_id LIKE 'invoice_collection:%') AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
 	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1

@@ -343,7 +343,11 @@ or retries a past-due subscription the PSP schedules
   nothing written in between. See [running charges](../running-charges.md).
 - **Usage events** (`POST /v1/app/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
-  up to 35 days old. An item with `outcome: failed` is work that cost and did
+  up to 35 days old. An event without an `amount` is priced by its meters'
+  rate cards when it is recorded (`charges`; see
+  [usage pricing](../usage-pricing.md)); a priced meter that cannot price it
+  refuses the item `422 usage_not_priced`. A charge draws the prepaid balance
+  and the rest is owed: usage is never refused for money. An item with `outcome: failed` is work that cost and did
   not deliver: the customer's own failures are forgiven up to its policy's
   `bad_spend_windows` and charged past them (`amount` is what was charged,
   `forgiven_amount` what grace absorbed); a delegated invoker's

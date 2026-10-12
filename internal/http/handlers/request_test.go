@@ -222,7 +222,7 @@ func TestAdmitVerdictsIsolateItems(t *testing.T) {
 	}
 	allows := func(id billing.CustomerID) bool { return id != scopedOut }
 
-	out := admitVerdicts(context.Background(), items, allows, admit)
+	out := AdmitVerdicts(context.Background(), items, allows, admit)
 	require.Len(t, out, len(items))
 	status := make([]int, len(out))
 	for i, v := range out {

@@ -14,9 +14,6 @@ var (
 	ErrMeterInUse              = money.ErrMeterInUse
 	ErrDefaultRateCardNotFound = money.ErrDefaultRateCardNotFound
 	ErrRateCardProductNotFound = money.ErrRateCardProductNotFound
-	ErrAllowanceMeterNotFound  = money.ErrAllowanceMeterNotFound
-	ErrAllowanceSourceInvalid  = money.ErrAllowanceSourceInvalid
-	ErrAllowanceSourceInUse    = money.ErrAllowanceSourceInUse
 	ErrMeterRateCardConflict   = money.ErrMeterRateCardConflict
 	ErrUsageRateCardInvalid    = money.ErrUsageRateCardInvalid
 )

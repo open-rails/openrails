@@ -5,11 +5,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
-// admissionErrors are the codes of a route addressed to one admission.
-var admissionErrors = []string{"admission_not_found", billing.CodeServiceCredentialCustomerScopeDenied}
-
-func withAdmission(list ...string) []string { return codes(append(list, admissionErrors...)...) }
-
 // usageQuery is a usage report's query: a page of its groups.
 var usageQuery = params(text("currency"), text("from"), text("group_by"), pageParams, text("to"))
 
@@ -30,9 +25,8 @@ var meteringRoutes = []Route{
 		Errors: codes("invalid_cursor", "invalid_query", "currency_unsupported"), Handler: h(handlers.ListUsageEvents)},
 	{Method: POST, Path: "/v1/app/admissions", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "Admit",
 		Request: billing.AdmitBatchParams{}, Responses: []Reply{{200, billing.AdmitBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.Admit)},
-	{Method: POST, Path: "/v1/app/admissions/{request_id}/capture", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "CaptureAdmission",
-		Request: billing.CaptureAdmissionParams{}, Responses: []Reply{{200, billing.CaptureReceipt{}}},
-		Errors: withAdmission("idempotency_key_reused", "insufficient_credits", "invalid_param"), Handler: h(handlers.CaptureAdmission)},
+	{Method: POST, Path: "/v1/app/admissions/capture", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "CaptureAdmissions",
+		Request: billing.CaptureAdmissionBatchParams{}, Responses: []Reply{{200, billing.CaptureBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.CaptureAdmissions)},
 	{Method: POST, Path: "/v1/app/admissions/release", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "ReleaseAdmissions",
 		Request: billing.ReleaseAdmissionBatchParams{}, Responses: []Reply{{200, billing.AdmissionBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ReleaseAdmissions)},
 	{Method: POST, Path: "/v1/app/admissions/extend", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "ExtendAdmissions",

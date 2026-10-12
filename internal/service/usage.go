@@ -39,8 +39,8 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 // corrected charge never silently keeps the original number.
 //
 // Amount is the host-priced cost in the currency's internal precision; 0
-// records a free event whose Dimensions still aggregate through rate-card
-// rating (gauge meters report unit-second quantities).
+// leaves the event to its meters' rate cards, which price its Dimensions (and
+// metadata) when it is recorded.
 //
 // Failed records failed usage (see billing.UsageFailed); the windows it counts
 // toward are resolved from InvokerType.
@@ -60,10 +60,10 @@ type RecordUsageInput struct {
 	OccurredAt time.Time
 }
 
-// RecordUsage durably records a metered usage event, debiting the ledger for a
-// non-zero Amount. Idempotent on (merchant, payer, currency,
-// usage:<event_type>, source, source_id); a replay with a different Amount
-// returns money.ErrIdempotencyKeyReused.
+// RecordUsage durably records a metered usage event and posts its charge: a
+// non-zero Amount, else what its meters' rate cards charge it. Idempotent on
+// (merchant, payer, currency, usage:<event_type>, source, source_id); a
+// replay with a different Amount returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billing.UsageEvent, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -121,11 +121,24 @@ func usageEventReceipt(ev *models.UsageEvent) *billing.UsageEvent {
 		ID: billing.UsageEventID(ev.ID), CustomerID: billing.CustomerID(ev.CustomerID), Invoker: ev.Invoker, Currency: ev.Currency,
 		EventType: ev.EventType, Dimensions: ev.Dimensions, Outcome: billing.UsageOutcome(ev.Outcome), Amount: ev.Amount, ForgivenAmount: ev.ForgivenAmount,
 		Resource: ev.Resource, Metadata: ev.Metadata,
-		Source: ev.Source, SourceID: ev.SourceID, OccurredAt: ev.OccurredAt, CreatedAt: ev.CreatedAt, Replayed: ev.Replayed,
+		Source: ev.Source, SourceID: ev.SourceID, Charges: usageCharges(ev.Charges), OccurredAt: ev.OccurredAt, CreatedAt: ev.CreatedAt, Replayed: ev.Replayed,
 	}
 	if ev.LedgerTransferID != nil {
 		txn := billing.BalanceTransactionID(*ev.LedgerTransferID)
 		out.BalanceTransactionID = &txn
+	}
+	return out
+}
+
+// usageCharges is the wire form of an event's meter charges.
+func usageCharges(in []models.UsageCharge) []billing.UsageCharge {
+	out := make([]billing.UsageCharge, len(in))
+	for i, c := range in {
+		out[i] = billing.UsageCharge{MeterKey: c.MeterKey, Quantity: c.Quantity, Amount: c.Amount}
+		if c.Cell != "" {
+			cell := c.Cell
+			out[i].Cell = &cell
+		}
 	}
 	return out
 }

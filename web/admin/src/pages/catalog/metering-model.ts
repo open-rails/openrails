@@ -15,7 +15,6 @@ import {
   nativeAmountToInput,
   supportedCurrencies,
 } from "@/lib/format"
-import { capToHours, formatCap, hoursToCap, parseHours } from "@/lib/duration"
 
 export interface KeyValueRow {
   key: string
@@ -26,7 +25,6 @@ export interface MatrixCellRow {
   key: string
   unitAmount: string
   maximumAmount: string
-  included: string
 }
 
 export interface TierRow {
@@ -44,7 +42,7 @@ export interface MeterFormValues {
   groupBy: KeyValueRow[]
 }
 
-export type AllowanceMode = "none" | "included" | "accrual"
+export type AllowanceMode = "none" | "included"
 
 export interface RateCardFormValues {
   productId: string
@@ -57,7 +55,7 @@ export interface RateCardFormValues {
   matrixEnabled: boolean
   matrixDimension: string
   matrixCells: MatrixCellRow[]
-  tierMode: "volume" | "graduated"
+  tierMode: "graduated"
   tiers: TierRow[]
   packageAmount: string
   packageSize: string
@@ -65,8 +63,6 @@ export interface RateCardFormValues {
   filters: KeyValueRow[]
   allowanceMode: AllowanceMode
   allowanceIncluded: string
-  allowanceAccrueFrom: string
-  allowanceCap: string
 }
 
 export class RateCardFormError extends Error {
@@ -146,11 +142,8 @@ export function rateCardFormValues(
   const price = card?.price
   const matrix = price?.per_unit?.matrix
   const allowance = card?.allowance
-  const allowanceMode: AllowanceMode = allowance?.accrue_from
-    ? "accrual"
-    : allowance?.included !== undefined
-      ? "included"
-      : "none"
+  const allowanceMode: AllowanceMode =
+    allowance?.included !== undefined ? "included" : "none"
   const currency = price?.currency ?? "USD"
   return {
     productId: card?.product_id ?? "",
@@ -166,9 +159,8 @@ export function rateCardFormValues(
       key,
       unitAmount: moneyToInput(currency, cell.unit_amount),
       maximumAmount: moneyToInput(currency, cell.maximum_amount),
-      included: integerToInput(cell.included),
     })),
-    tierMode: price?.tiered?.mode ?? "graduated",
+    tierMode: "graduated",
     tiers: (
       price?.tiered?.tiers ?? [
         { up_to: null, unit_amount: "0", flat_amount: "0" },
@@ -187,8 +179,6 @@ export function rateCardFormValues(
     })),
     allowanceMode,
     allowanceIncluded: integerToInput(allowance?.included),
-    allowanceAccrueFrom: allowance?.accrue_from ?? "",
-    allowanceCap: allowance?.cap ? formatCap(allowance.cap) : "",
   }
 }
 
@@ -276,19 +266,6 @@ function buildPrice(
                   row.maximumAmount,
                   `Maximum for ${key}`,
                   `${fieldPrefix}-maximum`
-                ),
-              }
-            : {}),
-          ...(optionalWhole(
-            row.included,
-            `Included units for ${key}`,
-            `${fieldPrefix}-included`
-          ) > 0
-            ? {
-                included: optionalWhole(
-                  row.included,
-                  `Included units for ${key}`,
-                  `${fieldPrefix}-included`
                 ),
               }
             : {}),
@@ -401,27 +378,13 @@ function buildAllowance(
   values: RateCardFormValues
 ): Allowance | undefined {
   if (values.allowanceMode === "none") return undefined
-  if (values.allowanceMode === "included") {
-    return {
-      included: optionalWhole(
-        values.allowanceIncluded,
-        "Included allowance",
-        "allowance-included"
-      ),
-    }
+  return {
+    included: optionalWhole(
+      values.allowanceIncluded,
+      "Included allowance",
+      "allowance-included"
+    ),
   }
-  const accrueFrom = normalizeMeterKey(values.allowanceAccrueFrom)
-  if (!accrueFrom) {
-    rateCardError("allowance-source", "Select the allowance source meter.")
-  }
-  const hours = parseHours(values.allowanceCap) ?? capToHours(values.allowanceCap)
-  if (!hours) {
-    rateCardError(
-      "allowance-cap",
-      "Allowance cap must be whole hours, days or weeks, such as 30 days."
-    )
-  }
-  return { accrue_from: accrueFrom, cap: hoursToCap(hours) }
 }
 
 function rowsToMap(rows: KeyValueRow[], name: string): Record<string, string> {

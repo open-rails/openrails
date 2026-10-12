@@ -141,6 +141,9 @@ func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantI
 	if values[0] == nil || *values[0] != merchantID {
 		return nil, fmt.Errorf("catalog row merchant mismatch")
 	}
+	if p.Name == "catalog_rate_cards" {
+		contract.ClearMeteredPaymentTerm(p, values)
+	}
 	if err := contract.ValidateValues(p, values); err != nil {
 		return nil, err
 	}

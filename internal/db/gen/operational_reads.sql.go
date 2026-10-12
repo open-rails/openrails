@@ -13,7 +13,7 @@ import (
 )
 
 const getUsageEventByID = `-- name: GetUsageEventByID :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND occurred_at >= $3::timestamptz
   AND occurred_at <= $4::timestamptz
@@ -55,13 +55,14 @@ func (q *Queries) GetUsageEventByID(ctx context.Context, arg GetUsageEventByIDPa
 		&i.CreatedAt,
 		&i.Outcome,
 		&i.ForgivenAmount,
+		&i.Charges,
 	)
 	return i, err
 }
 
 const listAdmissionOperations = `-- name: ListAdmissionOperations :many
 
-SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
+SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards FROM billing.admission_operations
 WHERE merchant_id = $1::uuid
   AND admitted_at >= $2::timestamptz
   AND admitted_at < $3::timestamptz
@@ -127,6 +128,8 @@ func (q *Queries) ListAdmissionOperations(ctx context.Context, arg ListAdmission
 			&i.CapturedAmount,
 			&i.CapturedAt,
 			&i.ReleasedAt,
+			&i.EstimateUsage,
+			&i.RateCards,
 		); err != nil {
 			return nil, err
 		}
@@ -139,7 +142,7 @@ func (q *Queries) ListAdmissionOperations(ctx context.Context, arg ListAdmission
 }
 
 const listUsageEvents = `-- name: ListUsageEvents :many
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount FROM billing.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount, charges FROM billing.usage_events
 WHERE merchant_id = $1::uuid
   AND occurred_at >= $2::timestamptz
   AND occurred_at < $3::timestamptz
@@ -211,6 +214,7 @@ func (q *Queries) ListUsageEvents(ctx context.Context, arg ListUsageEventsParams
 			&i.CreatedAt,
 			&i.Outcome,
 			&i.ForgivenAmount,
+			&i.Charges,
 		); err != nil {
 			return nil, err
 		}

@@ -218,10 +218,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.PreviewPriceMigration(ctx, billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: id})
 			return err
 		},
-		"capture": func(id string) error {
-			_, err := c.CaptureAdmission(ctx, id, billing.CaptureAdmissionParams{Amount: 1})
-			return err
-		},
 		"entitlement key": func(id string) error {
 			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customerID}, Entitlements: []string{"pro", id}, At: now})
 			return err

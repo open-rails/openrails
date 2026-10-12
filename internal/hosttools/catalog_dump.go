@@ -317,7 +317,10 @@ func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.
 		return fmt.Errorf("list catalog rate cards: %w", err)
 	}
 	for _, row := range rows {
-		rc := catalog.RateCard{Ordinal: int(row.Ordinal), PaymentTerm: catalog.PaymentTerm(row.PaymentTerm)}
+		rc := catalog.RateCard{Ordinal: int(row.Ordinal)}
+		if row.PaymentTerm != nil {
+			rc.PaymentTerm = catalog.PaymentTerm(*row.PaymentTerm)
+		}
 		if row.MeterKey != nil {
 			rc.Meter = *row.MeterKey
 		}

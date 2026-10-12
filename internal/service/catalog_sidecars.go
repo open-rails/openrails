@@ -228,26 +228,9 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		}
 	}
 	currentCards := make(map[string]CatalogRateCardSpec)
-	nextCards := make(map[string]CatalogRateCardSpec)
 	for _, c := range current.RateCards {
 		if c.MeterKey != "" {
 			currentCards[c.MeterKey] = c
-		}
-	}
-	for _, c := range next.RateCards {
-		if c.MeterKey != "" {
-			nextCards[c.MeterKey] = c
-		}
-	}
-	for _, currentCard := range current.RateCards {
-		key := currentCard.MeterKey
-		if key == "" {
-			continue
-		}
-		if _, keep := nextCards[key]; !keep {
-			if err := money.CheckCatalogRateCardRemoval(ctx, tx, merchantID, key); err != nil {
-				return err
-			}
 		}
 	}
 	for _, c := range next.RateCards {
@@ -296,7 +279,7 @@ func readCatalogBillingQueries(ctx context.Context, q *gen.Queries, merchantID u
 		return out, err
 	}
 	for _, c := range cards {
-		card := CatalogRateCardSpec{id: c.ID, createdAt: c.CreatedAt, ProductKey: c.ProductKey, Ordinal: int(c.Ordinal), MeterKey: c.MeterKey, PaymentTerm: c.PaymentTerm, Allowance: c.Allowance, Price: c.Price}
+		card := CatalogRateCardSpec{id: c.ID, createdAt: c.CreatedAt, ProductKey: c.ProductKey, Ordinal: int(c.Ordinal), MeterKey: c.MeterKey, PaymentTerm: derefString(c.PaymentTerm), Allowance: c.Allowance, Price: c.Price}
 		if err := json.Unmarshal(c.Filter, &card.Filter); err != nil {
 			return out, err
 		}
@@ -321,7 +304,8 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 	slices.SortFunc(state.Meters, func(a, b CatalogMeterSpec) int { return strings.Compare(a.Key, b.Key) })
 	for i := range state.RateCards {
 		c := &state.RateCards[i]
-		if c.PaymentTerm == "" {
+		// Only a flat fee states when it is collected.
+		if c.PaymentTerm == "" && c.MeterKey == "" {
 			c.PaymentTerm = "in_arrears"
 		}
 		if len(c.Filter) == 0 {
@@ -357,14 +341,7 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 			if err := catalogrules.ValidateAllowance("catalog allowance", &allowance); err != nil {
 				return err
 			}
-			if allowance.Cap != "" {
-				duration, err := catalogrules.ParseDurationSpec(allowance.Cap)
-				if err != nil {
-					return err
-				}
-				allowance.Cap = duration.String()
-			}
-			if allowance.Included == 0 && allowance.AccrueFrom == "" && allowance.Cap == "" {
+			if allowance.Included == 0 {
 				c.Allowance = nil
 			} else {
 				c.Allowance, _ = json.Marshal(allowance)

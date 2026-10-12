@@ -851,7 +851,7 @@ func TestCaptureMovesRunOut(t *testing.T) {
 	require.True(t, watch.DepletesAt.Equal(t0.Add(8000*time.Second)))
 	require.True(t, watch.NextCheckAt.After(t0))
 
-	_, err = w.client.CaptureAdmission(w.ctx, requestID, billing.CaptureAdmissionParams{Amount: 1_500_000})
+	_, err = captureAdmission(w.ctx, w.client, requestID, 1_500_000, nil)
 	require.NoError(t, err)
 	require.True(t, w.balance(customer).DepletesAt.Equal(t0.Add(8500*time.Second)), "1.5 USD is spent; the rest of the hold is free")
 	require.False(t, w.watched(customer).NextCheckAt.After(t0), "the capture marks the watch due at once")

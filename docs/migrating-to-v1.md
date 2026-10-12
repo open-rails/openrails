@@ -325,7 +325,7 @@ upgrade; its buyer buys through an order.
 | `DepositCredits`, `GetDeposit` | `client.CreateCreditGrants(` with up to 100 `billing.CreateCreditGrantParams`, all or none; `client.ListCreditGrants(` by `source_id` answers what a key did |
 | Revoke with a body on `DELETE` | `client.RevokeCreditGrant(` |
 | `GetCreditAccount` | `client.GetBalance(` answers `billing.Balance` (`balance_amount`, `held_amount`, `available_amount`, `owed_amount`) |
-| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
+| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.CaptureAdmissions(` (`billing.CaptureAdmissionParams`: usage priced by the pinned rate cards, or a host-stated amount), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
 | `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; usage reports through `client.QueryMetrics(`. Resource revenue is removed |
 | `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | Removed: only the customer's own credential spends its balance |
 | `InvokerTypePayer` (`invoker_type: "payer"`) | `billing.InvokerTypeCustomer` (`"customer"`) |
@@ -430,7 +430,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
 | `PUT …/spend-delegations:upsert` | Removed |
-| `/v1/merchant/admissions/{id}/…` | `POST /v1/app/admissions/{request_id}/capture`, `POST /v1/app/admissions/release`, `POST /v1/app/admissions/extend`, with the host backend's credential |
+| `/v1/merchant/admissions/{id}/…` | `POST /v1/app/admissions/capture`, `POST /v1/app/admissions/release`, `POST /v1/app/admissions/extend`, with the host backend's credential |
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/metrics/query` |
 | `/v1/merchant/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
 | `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |

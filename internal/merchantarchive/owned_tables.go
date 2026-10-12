@@ -41,7 +41,7 @@ var ownedTables = []string{
 	"merchant_slug_aliases",
 	"merchant_write_posture",
 	"merchants",
-	"metered_rating_watermarks",
+	"meter_period_quantities",
 	"money_settings",
 	"nmi_bulk_checkpoints",
 	"nmi_history_months",

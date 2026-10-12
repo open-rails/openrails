@@ -246,16 +246,3 @@ func ForCell(rp catalog.RatePrice, dimValue string) (ChargeModel, bool) {
 	}
 	return ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: cell.UnitAmount, DivideBy: rp.PerUnit.DivideBy, Round: rp.PerUnit.Round, MaximumAmount: maxAmt}, true
 }
-
-// RateUsage rates quantity units against a card, through the matrix cell of
-// dimValue when the price is a matrix. Allowances are netted by the caller.
-func RateUsage(rc catalog.RateCard, dimValue string, quantity int64) (int64, error) {
-	if rc.Price.PerUnit != nil && rc.Price.PerUnit.Matrix != nil {
-		cm, ok := ForCell(rc.Price, dimValue)
-		if !ok {
-			return 0, fmt.Errorf("meter %q rate card has no matrix cell for %q=%q", rc.Meter, rc.Price.PerUnit.Matrix.Dimension, dimValue)
-		}
-		return cm.Rate(quantity)
-	}
-	return Of(rc.Price).Rate(quantity)
-}

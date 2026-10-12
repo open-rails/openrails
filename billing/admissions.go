@@ -1,9 +1,6 @@
 package billing
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,9 +33,13 @@ type AdmitParams struct {
 	// TrustLevel selects money policy; empty uses the customer's stored level.
 	TrustLevel string `json:"trust_level,omitempty"`
 	// Resource is attribution only.
-	Resource        string `json:"resource,omitempty"`
-	Currency        string `json:"currency"`
-	EstimatedAmount int64  `json:"estimated_amount,string"`
+	Resource string `json:"resource,omitempty"`
+	Currency string `json:"currency"`
+	// EstimatedAmount is a host-stated hold. Usage instead states the usage
+	// the request expects, which the meters' rate cards price into the hold;
+	// the two are exclusive, and with neither the admission holds nothing.
+	EstimatedAmount int64          `json:"estimated_amount,string"`
+	Usage           *UsageEstimate `json:"usage,omitempty"`
 	// AccrualRateDeltaPerHour is the ongoing rate this request adds, in native
 	// units per hour; an accrual_rate_cap policy gates on it.
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
@@ -51,8 +52,19 @@ type AdmitParams struct {
 	Roles []uuid.UUID `json:"roles,omitempty"`
 }
 
-// MaxAdmissionBatchItems bounds one Admit, ReleaseAdmissions or
-// ExtendAdmissions call.
+// UsageEstimate is the usage an admission expects, e.g. {requests: 1} for a
+// call or {input_tokens: <prompt>, output_tokens: <max_tokens>} for an LLM
+// request. Its event type's rate cards price it at the customer's current
+// period quantities, without advancing them, and are pinned with the
+// admission: its capture is priced by them.
+type UsageEstimate struct {
+	EventType  string           `json:"event_type"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
+	Metadata   map[string]any   `json:"metadata,omitempty"`
+}
+
+// MaxAdmissionBatchItems bounds one Admit, CaptureAdmissions,
+// ReleaseAdmissions or ExtendAdmissions call.
 const MaxAdmissionBatchItems = 1000
 
 // AdmitBatchParams is the body of POST /v1/admin/admissions.
@@ -130,8 +142,9 @@ type AdmitBatchResult struct {
 	Items []AdmissionVerdict `json:"items"`
 }
 
-// CaptureUsage records a usage event with a capture when EventType is set.
-// The first capture fixes these terms.
+// CaptureUsage is the usage a capture records: its quantities (Dimensions,
+// Metadata) and its idempotency coordinate, Source ("admit" when empty) and
+// SourceID (the request id when empty).
 type CaptureUsage struct {
 	EventType  string           `json:"event_type"`
 	Resource   string           `json:"resource,omitempty"`
@@ -141,42 +154,61 @@ type CaptureUsage struct {
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }
 
-// CaptureAdmissionParams settles an admitted request at Amount; zero completes it at
-// no cost. Amount is required. A retry that changes the terms is
-// ErrIdempotencyKeyReused.
+// CaptureAdmissionParams settles one admitted request. Usage alone is priced
+// by the admission's pinned rate cards (or the cards in force when it pinned
+// none): its event type must be the admitted one. Amount instead settles at a
+// host-stated price, recording Usage when it is set. Above the hold the rest
+// is owed, never clamped. The first capture fixes its terms: an exact retry
+// answers its receipt, a changed one is ErrIdempotencyKeyReused.
 type CaptureAdmissionParams struct {
-	Amount int64         `json:"amount,string"`
-	Usage  *CaptureUsage `json:"usage,omitempty"`
+	RequestID string        `json:"request_id"`
+	Usage     *CaptureUsage `json:"usage,omitempty"`
+	Amount    *int64        `json:"amount,omitempty,string"`
 }
 
-// UnmarshalJSON refuses a capture that does not name its amount, so a
-// missing field is never read as a free completion.
-func (p *CaptureAdmissionParams) UnmarshalJSON(raw []byte) error {
-	var in struct {
-		Amount *int64        `json:"amount,string"`
-		Usage  *CaptureUsage `json:"usage"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil {
-		return err
-	}
-	if in.Amount == nil {
-		return errors.New("amount is required")
-	}
-	p.Amount, p.Usage = *in.Amount, in.Usage
-	return nil
+// CaptureAdmissionBatchParams settles 1 to MaxAdmissionBatchItems admitted
+// requests.
+type CaptureAdmissionBatchParams struct {
+	Items []CaptureAdmissionParams `json:"items"`
 }
 
-// CaptureReceipt is the result of settling one admitted request.
-// BalanceTransactionID is null for a zero-cost capture.
+// CaptureReceipt is the result of settling one admitted request: Amount is
+// what it charged, the sum of Charges when its usage was priced by rate
+// cards. UsageEventID is the usage event it recorded; BalanceTransactionID
+// the ledger posting it made (its first charge's), null when it charged
+// nothing.
 type CaptureReceipt struct {
 	RequestID            string                `json:"request_id"`
 	CustomerID           CustomerID            `json:"customer_id"`
 	Currency             string                `json:"currency"`
+	EstimatedAmount      int64                 `json:"estimated_amount,string"`
 	Amount               int64                 `json:"amount,string"`
+	Charges              []UsageCharge         `json:"charges"`
+	UsageEventID         *UsageEventID         `json:"usage_event_id"`
 	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 	Replayed             bool                  `json:"replayed"`
+}
+
+// CaptureResult is one item of a capture batch: Status is what capturing
+// that item alone answers, with Receipt or Error.
+type CaptureResult struct {
+	Status  int             `json:"status"`
+	Receipt *CaptureReceipt `json:"receipt"`
+	Error   *ErrorDetails   `json:"error"`
+}
+
+// Err is the item's refusal as the error capturing it alone would return,
+// nil when it was captured.
+func (r CaptureResult) Err() error {
+	if r.Error == nil {
+		return nil
+	}
+	return &StatusError{Status: r.Status, ErrorDetails: *r.Error}
+}
+
+// CaptureBatchResult is one result per item, in request order.
+type CaptureBatchResult struct {
+	Items []CaptureResult `json:"items"`
 }
 
 // ReleaseAdmissionBatchParams releases the holds of 1 to

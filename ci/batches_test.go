@@ -128,7 +128,7 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	for _, id := range []string{r1, r2, r3} {
 		admit(id)
 	}
-	_, err = a.CaptureAdmission(ctx, r3, billing.CaptureAdmissionParams{Amount: 50_000})
+	_, err = captureAdmission(ctx, a, r3, 50_000, nil)
 	require.NoError(t, err)
 
 	released, err := a.ReleaseAdmissions(ctx, []string{r1, "unknown-" + uuid.NewString(), r3, r1})

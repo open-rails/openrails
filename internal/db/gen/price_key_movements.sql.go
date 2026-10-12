@@ -50,6 +50,7 @@ const listPriceKeyMovements = `-- name: ListPriceKeyMovements :many
 SELECT movement.id, movement.merchant_id, movement.key, movement.price_id, movement.effective_at, movement.created_at, movement.archived FROM billing.price_key_movements movement
 JOIN billing.prices price ON price.merchant_id = movement.merchant_id AND price.id = movement.price_id
 WHERE movement.merchant_id = $1::uuid AND price.product_id = $2::uuid AND movement.key = $3::text
+ AND price.deleted_at IS NULL
  AND ($4::timestamptz IS NULL OR (movement.effective_at, movement.id) < ($4::timestamptz, $5::uuid))
 ORDER BY movement.effective_at DESC, movement.id DESC
 LIMIT $6::int

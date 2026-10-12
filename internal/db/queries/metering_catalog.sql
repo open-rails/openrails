@@ -46,7 +46,7 @@ VALUES (
            AND product_id = sqlc.arg(product_id)::uuid),
         1
     ),
-    sqlc.arg(meter_key)::text, 'in_arrears', sqlc.arg(filter)::jsonb,
+    sqlc.arg(meter_key)::text, NULL, sqlc.arg(filter)::jsonb,
     sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb
 )
 ON CONFLICT (merchant_id, meter_key)
@@ -64,15 +64,6 @@ FROM billing.catalog_rate_cards
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
 FOR UPDATE;
-
--- name: GetUsageRateCardAllowanceDependencyCurrencies :one
-SELECT COALESCE(
-    array_agg(DISTINCT upper(COALESCE(price ->> 'currency', ''))),
-    ARRAY[]::text[]
-)::text[] AS currencies
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND allowance ->> 'accrue_from' = sqlc.arg(meter_key)::text;
 
 -- The meter row is already locked by the caller, which serializes every rate-card
 -- mutation for this meter.

@@ -130,6 +130,7 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Product` |  |
 | PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | catalog update |
+| DELETE | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 204 — | catalog update; limit `destructive` |
 | POST | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | catalog update |
 | GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Price>` |  |
 | GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |

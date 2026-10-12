@@ -60,7 +60,6 @@ export function RateCardEditor({
   meter,
   writesAllowed = false,
   products,
-  meters,
   productsPending = false,
   productsError = false,
   productsForbidden = false,
@@ -68,7 +67,6 @@ export function RateCardEditor({
   meter: Meter
   writesAllowed?: boolean
   products: Product[]
-  meters: Meter[]
   productsPending?: boolean
   productsError?: boolean
   productsForbidden?: boolean
@@ -169,8 +167,8 @@ export function RateCardEditor({
                 {existing ? "Edit default rate" : "Add default rate"}
               </DialogTitle>
               <DialogDescription>
-                Set the in-arrears price every customer is rated by. Money is
-                entered in major currency units.
+                Set the price that charges every customer's usage as it is
+                recorded. Money is entered in major currency units.
               </DialogDescription>
             </DialogHeader>
 
@@ -269,7 +267,7 @@ export function RateCardEditor({
             </form.Subscribe>
 
             <FilterFields form={form} meter={meter} />
-            <AllowanceFields form={form} meters={meters} meterKey={meter.key} />
+            <AllowanceFields form={form} />
 
             <form.Subscribe selector={(state) => state.values}>
               {(values) => <RateSummary values={values} />}
@@ -506,7 +504,6 @@ function MatrixFields({
                     key: "",
                     unitAmount: "",
                     maximumAmount: "",
-                    included: "",
                   })
                 }
               >
@@ -516,18 +513,17 @@ function MatrixFields({
             </div>
             <FieldIssue fieldId="matrix-add-cell" />
             {field.state.value.length > 0 && (
-              <div className="hidden gap-2 px-0.5 text-xs text-muted-foreground sm:grid sm:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+              <div className="hidden gap-2 px-0.5 text-xs text-muted-foreground sm:grid sm:grid-cols-[1fr_1fr_1fr_auto]">
                 <span>Value</span>
                 <span>Unit price</span>
                 <span>Maximum</span>
-                <span>Included units</span>
                 <span className="size-8" aria-hidden="true" />
               </div>
             )}
             {field.state.value.map((row, index) => (
               <div
                 key={index}
-                className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto]"
+                className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
               >
                 <RowTextField
                   id={`matrix-cell-${index}-value`}
@@ -564,16 +560,6 @@ function MatrixFields({
                   inputMode="decimal"
                   placeholder="Maximum"
                 />
-                <RowTextField
-                  id={`matrix-cell-${index}-included`}
-                  label="Included units"
-                  value={row.included}
-                  onChange={(value) =>
-                    form.setFieldValue(`matrixCells[${index}].included`, value)
-                  }
-                  inputMode="numeric"
-                  placeholder="Included"
-                />
                 <RemoveRowButton
                   label={`Remove matrix cell ${index + 1}`}
                   onClick={() => field.removeValue(index)}
@@ -590,27 +576,6 @@ function MatrixFields({
 function TieredFields({ form }: { form: MeteringForm }) {
   return (
     <>
-      <form.Field name="tierMode">
-        {(field) => (
-          <div className="grid gap-1.5">
-            <Label htmlFor="tier-mode">Tier mode</Label>
-            <Select
-              value={field.state.value}
-              onValueChange={(value) =>
-                field.handleChange(value as "volume" | "graduated")
-              }
-            >
-              <SelectTrigger id="tier-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="graduated">Graduated</SelectItem>
-                <SelectItem value="volume">Volume</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </form.Field>
       <form.Field name="tiers" mode="array">
         {(field) => (
           <div className="grid gap-2">
@@ -836,16 +801,7 @@ function FilterFields({
   )
 }
 
-function AllowanceFields({
-  form,
-  meters,
-  meterKey,
-}: {
-  form: MeteringForm
-  meters: Meter[]
-  meterKey: string
-}) {
-  const formIssue = React.useContext(RateCardIssueContext)
+function AllowanceFields({ form }: { form: MeteringForm }) {
   return (
     <section className="grid gap-4 border-t pt-5">
       <h3 className="text-sm font-medium">Allowance</h3>
@@ -856,7 +812,7 @@ function AllowanceFields({
             <Select
               value={field.state.value}
               onValueChange={(value) =>
-                field.handleChange(value as "none" | "included" | "accrual")
+                field.handleChange(value as "none" | "included")
               }
             >
               <SelectTrigger id="allowance-mode" className="w-full">
@@ -865,9 +821,6 @@ function AllowanceFields({
               <SelectContent>
                 <SelectItem value="none">No allowance</SelectItem>
                 <SelectItem value="included">Fixed included units</SelectItem>
-                <SelectItem value="accrual">
-                  Accrue from another meter
-                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -888,46 +841,6 @@ function AllowanceFields({
                 />
               )}
             </form.Field>
-          ) : mode === "accrual" ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <form.Field name="allowanceAccrueFrom">
-                {(field) => (
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="allowance-source">Source meter</Label>
-                    <Input
-                      id="allowance-source"
-                      list="allowance-source-meters"
-                      value={field.state.value}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
-                      }
-                      placeholder="active-seats"
-                      autoComplete="off"
-                      {...fieldIssueProps("allowance-source", formIssue)}
-                    />
-                    <datalist id="allowance-source-meters">
-                      {meters
-                        .filter((candidate) => candidate.key !== meterKey)
-                        .map((candidate) => (
-                          <option key={candidate.key} value={candidate.key} />
-                        ))}
-                    </datalist>
-                    <FieldIssue fieldId="allowance-source" />
-                  </div>
-                )}
-              </form.Field>
-              <form.Field name="allowanceCap">
-                {(field) => (
-                  <TextField
-                    id="allowance-cap"
-                    label="Accrual cap"
-                    value={field.state.value}
-                    onChange={field.handleChange}
-                    placeholder="30 days"
-                  />
-                )}
-              </form.Field>
-            </div>
           ) : null
         }
       </form.Subscribe>
@@ -944,8 +857,6 @@ function RateSummary({ values }: { values: RateCardFormValuesCompat }) {
     } as Meter["rate_card"])
     if (request.allowance?.included !== undefined) {
       summary += ` · ${request.allowance.included.toLocaleString()} included`
-    } else if (request.allowance?.accrue_from) {
-      summary += ` · allowance from ${request.allowance.accrue_from}`
     }
   } catch {
     // Incomplete form state is expected while editing.

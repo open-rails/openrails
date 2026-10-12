@@ -8,9 +8,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 |---|---|---|---|
 | `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
 | `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
-| `allowance_meter_not_found` | 404 | `invalid_request_error` | The rate card's allowance meter does not exist. |
-| `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
-| `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
 | `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
 | `application_required` | 403 | `authorization_error` | The route is your backend's: it takes an application's credential, never a person's. |
 | `as_of_required` | 400 | `invalid_request_error` | The import needs as_of, its RFC 3339 evidence horizon. |
@@ -129,6 +126,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
 | `price_not_sellable` | 400 | `invalid_request_error` | No PSP can sell this price. |
+| `product_in_use` | 409 | `invalid_request_error` | Records refer to the product; archive it instead. |
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
@@ -186,6 +184,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
+| `usage_not_priced` | 422 | `invalid_request_error` | A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field. |
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |
 | `webhook_invalid` | 400 | `invalid_request_error` | The outbound webhook is invalid. |

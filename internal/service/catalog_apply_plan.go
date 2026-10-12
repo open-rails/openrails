@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -97,8 +98,9 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 		}
 	}
 	if params.Prune {
-		// A whole catalog: an omitted object only documents set is archived;
-		// one an edit touched or created is released to the edit.
+		// A whole catalog: an omitted product or price only documents set is
+		// deleted when nothing refers to it and archived otherwise; one an edit
+		// touched or created is released to the edit.
 		for _, obj := range slices.SortedFunc(maps.Keys(live), compareCatalogObjects) {
 			product, declared := params.Products[obj.key]
 			_, kept := product.Prices[obj.priceKey]
@@ -107,9 +109,7 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 				obj.kind == billing.CatalogObjectProduct && declared,
 				obj.kind == billing.CatalogObjectPrice && kept:
 			case owners.soleFileOwned(obj):
-				if string(live[obj].fields["archived"]) != "true" {
-					plan.prune = append(plan.prune, obj)
-				}
+				plan.prune = append(plan.prune, obj)
 			default:
 				plan.release = append(plan.release, obj)
 			}
@@ -176,20 +176,31 @@ func fieldConflicts(obj catalogObject, fields map[string]json.RawMessage, live *
 	return conflict, len(conflict.Fields) > 0
 }
 
-// pruneCatalogObjects archives omitted objects only the document held.
+// pruneCatalogObjects deletes the omitted objects only the document held when
+// nothing refers to them, and archives the rest. Prices sort before their
+// product, so a product's unreferenced prices are gone before it is weighed.
 func (s *Service) pruneCatalogObjects(ctx context.Context, objects []catalogObject) error {
 	for _, obj := range objects {
 		state := s.catalogBefore[obj]
+		archived := string(state.fields["archived"]) == "true"
 		var err error
 		switch obj.kind {
 		case billing.CatalogObjectProduct:
-			_, err = s.DeactivateProduct(ctx, billing.ProductID(state.productID))
-		case billing.CatalogObjectPrice:
-			id, refErr := s.catalogDatabase().PriceReference(ctx, state.priceID)
-			if refErr != nil {
-				return refErr
+			err = s.deleteProduct(ctx, state.productID)
+			if errors.Is(err, ErrProductInUse) {
+				err = nil
+				if !archived {
+					_, err = s.DeactivateProduct(ctx, billing.ProductID(state.productID))
+				}
 			}
-			_, err = s.DeactivatePrice(ctx, id)
+		case billing.CatalogObjectPrice:
+			var deleted bool
+			if deleted, err = s.deletePriceKey(ctx, state.productID, obj.priceKey); err == nil && !deleted && !archived {
+				var id billing.PriceID
+				if id, err = s.catalogDatabase().PriceReference(ctx, state.priceID); err == nil {
+					_, err = s.DeactivatePrice(ctx, id)
+				}
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("prune %s: %w", obj, err)

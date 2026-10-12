@@ -54,9 +54,10 @@ type RecordUsageParams struct {
 	Currency    string           `json:"currency"`
 	EventType   string           `json:"event_type"`
 	Dimensions  map[string]int64 `json:"dimensions,omitempty"`
-	// Amount is the host-priced cost in native units. Zero records a
-	// metered-only event that the catalog's rate cards price; a failed event's
-	// Amount is what the failure cost, and is never catalog-rated.
+	// Amount is the host-priced cost in native units. Zero records an event
+	// the rate cards of its event type's meters price when it is recorded
+	// (UsageEvent.Charges); a failed event's Amount is what the failure cost,
+	// and is never rated.
 	Amount int64 `json:"amount,string"`
 	// Outcome is succeeded when empty.
 	Outcome  UsageOutcome   `json:"outcome,omitempty"`
@@ -70,8 +71,9 @@ type RecordUsageParams struct {
 	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
 
-// UsageEvent is one recorded usage event. Amount is what it charged; a failed
-// event's ForgivenAmount is what its grace absorbed, so Amount +
+// UsageEvent is one recorded usage event. Amount is what it charged: the
+// host's price, or the sum of its Charges when its meters' rate cards priced
+// it. A failed event's ForgivenAmount is what its grace absorbed, so Amount +
 // ForgivenAmount is the cost the host reported. Replayed: the event was
 // already recorded and this call metered nothing.
 type UsageEvent struct {
@@ -88,12 +90,34 @@ type UsageEvent struct {
 	Metadata       map[string]any   `json:"metadata"`
 	Source         string           `json:"source"`
 	SourceID       string           `json:"source_id"`
-	// BalanceTransactionID is the ledger debit a priced event made.
+	// Charges are what each priced meter charged the event when it was
+	// recorded; empty for an event no priced meter consumes and for a
+	// host-priced event.
+	Charges []UsageCharge `json:"charges"`
+	// BalanceTransactionID is the ledger posting a priced event made: its
+	// first charge's when meters priced it.
 	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 	OccurredAt           time.Time             `json:"occurred_at"`
 	CreatedAt            time.Time             `json:"created_at"`
 	Replayed             bool                  `json:"replayed"`
 }
+
+// UsageCharge is what one meter charged one usage event: R(Q+q) - R(Q), where
+// q is Quantity in the meter's unit, Q the customer's quantity of the meter
+// (and Cell) earlier in the event's billing period, and R the rate card's
+// price for a period. Cell is the matrix cell it was priced in, null without
+// a matrix.
+type UsageCharge struct {
+	MeterKey string  `json:"meter_key"`
+	Cell     *string `json:"cell"`
+	Quantity int64   `json:"quantity"`
+	Amount   int64   `json:"amount,string"`
+}
+
+// ErrUsageNotPriced is a usage event a priced meter cannot price: its matrix
+// has no cell for the event's value, or no rate card of the event type is in
+// its currency. A catalog gap is refused, never free.
+var ErrUsageNotPriced error = newCodedError(CodeUsageNotPriced, ErrInvalid)
 
 // MaxUsageBatchItems bounds one RecordUsage call.
 const MaxUsageBatchItems = 1000
@@ -133,6 +157,8 @@ const (
 	UsageByEventType UsageGroupBy = "event_type"
 	UsageByResource  UsageGroupBy = "resource"
 	UsageByInvoker   UsageGroupBy = "invoker"
+	// UsageByMeter groups what each meter, and matrix cell, charged.
+	UsageByMeter UsageGroupBy = "meter"
 )
 
 // DefaultUsagePageLimit and MaxUsagePageLimit bound a usage report's page of
@@ -156,11 +182,16 @@ type GetUsageParams struct {
 }
 
 // UsageRow is one group of a usage report. Dimensions are the summed event
-// dimensions, reported when grouping by event_type.
+// dimensions, reported when grouping by event_type. Grouped by meter, Key is
+// the meter key, Cell its matrix cell (null without a matrix), Quantity the
+// summed quantity it priced and Amount what it charged; both are null in
+// other groupings.
 type UsageRow struct {
 	Key        string           `json:"key"`
+	Cell       *string          `json:"cell"`
 	EventCount int64            `json:"event_count"`
 	Amount     int64            `json:"amount,string"`
+	Quantity   *int64           `json:"quantity"`
 	Dimensions map[string]int64 `json:"dimensions"`
 }
 

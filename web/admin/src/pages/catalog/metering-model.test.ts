@@ -61,33 +61,25 @@ describe("usage rate amounts", () => {
     const request = buildRateCardRequest(
       rate({
         matrixEnabled: true, matrixDimension: "model",
-        matrixCells: [{ key: "fast", unitAmount: "0.01", maximumAmount: "20", included: "100" }],
+        matrixCells: [{ key: "fast", unitAmount: "0.01", maximumAmount: "20" }],
         filters: [{ key: "region", value: "eu, us, eu" }],
       })
     )
     expect(request.filter).toEqual({ region: ["eu", "us"] })
     expect(request.price.per_unit?.matrix).toEqual({
       dimension: "model",
-      cells: { fast: { unit_amount: "10000", maximum_amount: "20000000", included: 100 } },
+      cells: { fast: { unit_amount: "10000", maximum_amount: "20000000" } },
     })
   })
 
-  it.each([
-    [{ allowanceMode: "included" as const, allowanceIncluded: "500" }, { included: 500 }],
-    [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: " Active Seats ", allowanceCap: "30d" },
-      { accrue_from: "active-seats", cap: "30d" }],
-    [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: "seats", allowanceCap: "1 week" },
-      { accrue_from: "seats", cap: "7d" }],
-    [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: "seats", allowanceCap: "36 hours" },
-      { accrue_from: "seats", cap: "36h" }],
-  ])("builds the %o allowance", (values, allowance) => {
-    expect(buildRateCardRequest(rate({ unitAmount: "1", ...values })).allowance).toEqual(allowance)
+  it("builds an included allowance", () => {
+    expect(buildRateCardRequest(rate({ unitAmount: "1", allowanceMode: "included", allowanceIncluded: "500" })).allowance).toEqual({ included: 500 })
   })
 
   it("addresses a row validation failure to the exact invalid control", () => {
     const invalid = rate({
       matrixEnabled: true, matrixDimension: "model",
-      matrixCells: [{ key: "", unitAmount: "0.01", maximumAmount: "", included: "" }],
+      matrixCells: [{ key: "", unitAmount: "0.01", maximumAmount: "" }],
     })
     expect(() => buildRateCardRequest(invalid)).toThrow(RateCardFormError)
     try {

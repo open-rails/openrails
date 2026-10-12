@@ -29,6 +29,7 @@ func admitInput(p billing.AdmitParams) billingservice.AdmitInput {
 		Resource:                p.Resource,
 		Currency:                p.Currency,
 		EstimatedAmount:         p.EstimatedAmount,
+		Usage:                   p.Usage,
 		AccrualRateDeltaPerHour: p.AccrualRateDeltaPerHour,
 		Source:                  p.Source,
 		SourceID:                p.RequestID,
@@ -63,9 +64,9 @@ func admitRefusal(code, message, param string) billing.AdmissionVerdict {
 	return billing.AdmissionVerdict{Status: err.HTTPStatus, Error: &details}
 }
 
-// admitVerdicts admits each item on its own: one item's bad input, scope
+// AdmitVerdicts admits each item on its own: one item's bad input, scope
 // denial, refusal or backend error never fails another.
-func admitVerdicts(
+func AdmitVerdicts(
 	ctx context.Context,
 	items []billing.AdmitParams,
 	allows func(billing.CustomerID) bool,
@@ -98,6 +99,9 @@ func admitVerdicts(
 			out[i] = admitRefusal(billing.CodeInvalidParam, "expires_at required when estimated_amount places a hold", "expires_at")
 		case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
 			out[i] = admitRefusal(billing.CodeInvalidParam, "expires_at already passed", "expires_at")
+		case refusalOf(err) != nil:
+			details := refusalOf(err).ToResponse().Error
+			out[i] = billing.AdmissionVerdict{Status: refusalOf(err).HTTPStatus, Error: &details}
 		default:
 			var refusal interface{ ErrorCode() string }
 			if errors.As(err, &refusal) {
@@ -130,7 +134,7 @@ func Admit(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	verdicts := admitVerdicts(r.Request.Context(), params.Items,
+	verdicts := AdmitVerdicts(r.Request.Context(), params.Items,
 		func(c billing.CustomerID) bool { return serviceCustomerScopeAllows(r, c) }, svc.Admit)
 	for i := range verdicts {
 		if verdicts[i].Error != nil {
@@ -138,48 +142,6 @@ func Admit(r *httprequest.Request) {
 		}
 	}
 	r.JSON(http.StatusOK, billing.AdmitBatchResult{Items: verdicts})
-}
-
-// admissionParam resolves {request_id} to its customer and checks the
-// credential's customer scope.
-func admissionParam(r *httprequest.Request, svc *billingservice.Service) (string, bool) {
-	requestID := strings.TrimSpace(r.Param("request_id"))
-	customer, err := svc.AdmissionCustomer(r.Request.Context(), requestID)
-	if errors.Is(err, spendgate.ErrNotFound) {
-		r.APIError(api.Coded("admission_not_found", ""))
-		return "", false
-	}
-	if err != nil {
-		r.InternalError("admission lookup failed", err)
-		return "", false
-	}
-	return requestID, requireServiceCustomerScope(r, billingidentity.CustomerID(customer))
-}
-
-// CaptureAdmission settles an admitted request.
-func CaptureAdmission(r *httprequest.Request) {
-	var params billing.CaptureAdmissionParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	if params.Amount < 0 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	requestID, ok := admissionParam(r, svc)
-	if !ok {
-		return
-	}
-	receipt, err := svc.CaptureAdmission(r.Request.Context(), requestID, params)
-	if err != nil {
-		writeMoneyError(r, err, "capture failed")
-		return
-	}
-	r.SuccessJSON(receipt)
 }
 
 // admissionItemScope resolves one request id to its customer and checks the
@@ -227,6 +189,69 @@ func admissionBatch(r *httprequest.Request, n int, run func(*billingservice.Serv
 	r.JSON(http.StatusOK, billing.AdmissionBatchResult{Items: out})
 }
 
+// CaptureAdmissions settles admitted requests, one result per item in order:
+// each is captured or refused on its own, exactly as capturing it alone.
+func CaptureAdmissions(r *httprequest.Request) {
+	var params billing.CaptureAdmissionBatchParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	if !batchItems(r, len(params.Items), billing.MaxAdmissionBatchItems) || !requireMerchantRoutePrincipal(r) {
+		return
+	}
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	out := CaptureResults(r.Request.Context(), params.Items, func(requestID string) *api.APIError {
+		return admissionItemScope(r, svc, requestID)
+	}, svc.CaptureAdmission)
+	for i := range out {
+		if out[i].Error != nil {
+			out[i].Error.RequestID = r.RequestID()
+		}
+	}
+	r.JSON(http.StatusOK, billing.CaptureBatchResult{Items: out})
+}
+
+// CaptureResults captures each item on its own. scope, when set, refuses an
+// item the credential may not settle.
+func CaptureResults(
+	ctx context.Context,
+	items []billing.CaptureAdmissionParams,
+	scope func(requestID string) *api.APIError,
+	capture func(context.Context, billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error),
+) []billing.CaptureResult {
+	refused := func(err *api.APIError) billing.CaptureResult {
+		details := err.ToResponse().Error
+		return billing.CaptureResult{Status: err.HTTPStatus, Error: &details}
+	}
+	out := make([]billing.CaptureResult, len(items))
+	for i, item := range items {
+		item.RequestID = strings.TrimSpace(item.RequestID)
+		if item.RequestID == "" {
+			out[i] = refused(api.Coded(billing.CodeInvalidParam, "request_id required").WithParam("request_id"))
+			continue
+		}
+		if scope != nil {
+			if refusal := scope(item.RequestID); refusal != nil {
+				out[i] = refused(refusal)
+				continue
+			}
+		}
+		receipt, err := capture(ctx, item)
+		switch {
+		case err == nil:
+			out[i] = billing.CaptureResult{Status: http.StatusOK, Receipt: receipt}
+		case errors.Is(err, spendgate.ErrNotFound):
+			out[i] = refused(api.Coded("admission_not_found", ""))
+		default:
+			out[i] = refused(admissionFailure(ctx, err, item.RequestID, "capture failed"))
+		}
+	}
+	return out
+}
+
 // ReleaseAdmissions frees the holds of admitted requests, one result per
 // request id. Releasing a released admission answers it.
 func ReleaseAdmissions(r *httprequest.Request) {
@@ -239,15 +264,25 @@ func ReleaseAdmissions(r *httprequest.Request) {
 		if refusal := admissionItemScope(r, svc, requestID); refusal != nil {
 			return admissionRefusal(refusal)
 		}
-		admission, err := svc.ReleaseAdmission(r.Request.Context(), requestID)
-		switch {
-		case err == nil:
-			return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
-		case errors.Is(err, spendgate.ErrCaptured):
-			return admissionRefusal(api.Coded("admission_captured", ""))
-		}
-		return admissionRefusal(admissionFailure(r, err, requestID, "release failed"))
+		return ReleaseResult(r.Request.Context(), requestID, svc.ReleaseAdmission)
 	})
+}
+
+// ReleaseResult releases one admission.
+func ReleaseResult(ctx context.Context, requestID string, release func(context.Context, string) (*billing.Admission, error)) billing.AdmissionResult {
+	if requestID == "" {
+		return admissionRefusal(api.Coded(billing.CodeInvalidParam, "request_id required").WithParam("request_id"))
+	}
+	admission, err := release(ctx, requestID)
+	switch {
+	case err == nil:
+		return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
+	case errors.Is(err, spendgate.ErrNotFound):
+		return admissionRefusal(api.Coded("admission_not_found", ""))
+	case errors.Is(err, spendgate.ErrCaptured):
+		return admissionRefusal(api.Coded("admission_captured", ""))
+	}
+	return admissionRefusal(admissionFailure(ctx, err, requestID, "release failed"))
 }
 
 // ExtendAdmissions moves open holds' deadlines later, one result per item.
@@ -279,17 +314,17 @@ func ExtendAdmissions(r *httprequest.Request) {
 		case errors.As(err, &invalid):
 			return admissionRefusal(api.Coded(billing.CodeInvalidParam, invalid.Message).WithParam(invalid.Param))
 		}
-		return admissionRefusal(admissionFailure(r, err, requestID, "extend failed"))
+		return admissionRefusal(admissionFailure(r.Request.Context(), err, requestID, "extend failed"))
 	})
 }
 
 // admissionFailure is a money refusal, or an internal error whose cause
 // reaches the operator log and never the wire.
-func admissionFailure(r *httprequest.Request, err error, requestID, message string) *api.APIError {
+func admissionFailure(ctx context.Context, err error, requestID, message string) *api.APIError {
 	if refusal := moneyRefusal(err); refusal != nil {
 		return refusal
 	}
-	log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error(message)
+	log.WithContext(ctx).WithError(err).WithField("request_id", requestID).Error(message)
 	return api.Coded(billing.CodeInternalError, message)
 }
 

@@ -245,9 +245,10 @@ func TestCatalogDocumentRelinquishesSharesAndForces(t *testing.T) {
 	require.Equal(t, "Two", product.DisplayName)
 }
 
-// prune archives only the omitted objects the file alone set; an omitted
-// object an edit touched or created stays, released by the file.
-func TestCatalogPruneArchivesOnlyWhatTheFileAloneSet(t *testing.T) {
+// prune removes only the omitted objects the file alone set (deleted when
+// nothing refers to them); an omitted object an edit touched or created
+// stays, released by the file.
+func TestCatalogPruneRemovesOnlyWhatTheFileAloneSet(t *testing.T) {
 	w := newWorld(t)
 	c := w.client[embedded]
 	id := uuid.NewString()[:8]
@@ -279,10 +280,11 @@ func TestCatalogPruneArchivesOnlyWhatTheFileAloneSet(t *testing.T) {
 		require.NoError(t, err)
 		return product.Archived
 	}
-	require.True(t, archived(p), "the file alone set p")
+	_, err = productByKey(t.Context(), c, p)
+	require.ErrorIs(t, err, billing.ErrNotFound, "the file alone set p, and nothing refers to it: deleted")
 	require.False(t, archived(q), "an edit touched q")
 	require.False(t, archived(r), "an edit created r")
-	require.Equal(t, []string{}, w.fieldOwners("product", q, "", "display_name"), "the file released what it omitted and could not archive")
+	require.Equal(t, []string{}, w.fieldOwners("product", q, "", "display_name"), "the file released what it omitted and could not remove")
 	priceArchived := func(product string) bool {
 		_, err := priceByKey(t.Context(), c, product, "one")
 		if errors.Is(err, billing.ErrNotFound) {

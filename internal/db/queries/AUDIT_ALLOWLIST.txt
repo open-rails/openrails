@@ -23,7 +23,7 @@ unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same s
 unbounded-many ListProvisioningTokens           # provisioning_tokens: tokens the merchant's staff minted, one per directory
 unbounded-many ListCatalogMeters                # catalog_meters: operator-declared, units per merchant
 unbounded-many ListDefaultCatalogRateCards      # catalog_rate_cards: declared cards, one per meter or product ordinal
-unbounded-many ListArrearsRateCards             # catalog_rate_cards+catalog_meters: the declared usage cards, one per meter, rated for every customer
+unbounded-many ListUsageRatingCards             # catalog_meters+catalog_rate_cards: an event type's declared meters and their cards, by the event-type index
 unbounded-many ListActiveProducts               # products: operator-declared catalog
 unbounded-many ListAllProducts                  # products: operator-declared catalog
 unbounded-many ListAllActivePricesWithProduct   # prices+products: operator-declared catalog

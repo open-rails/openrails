@@ -22,7 +22,8 @@ document skips what an edit set ([catalog ownership](catalog-ownership.md)).
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
 later API edits. Omission preserves records and fields; explicit `archived: true`
-retires an entry, and `prune: true` opts into archiving omitted products and prices.
+retires an entry, and `prune: true` removes omitted products and prices that
+only documents set: deleted when nothing ever referred to them, archived otherwise.
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
@@ -122,17 +123,17 @@ bounds, or metered rate-card fields.
 |---|---|---|
 | `flat` | fixed amount | base fees ("$5/mo includes…") |
 | `per_unit` | `round(qty × unit_amount / divide_by)` | linear rates; `divide_by` keeps integer micros exact (e.g. micros/hour rated per second: `divide_by: 3_600`); `round: up\|down\|half_up` (default `half_up`) picks the mode, declared inside `per_unit` — the one place it is read; optional `maximum_amount` cap, `matrix` for per-SKU cells on a meter dimension |
-| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; prefer graduated — volume has price cliffs and doesn't invert |
+| `tiered` | `graduated` (bands stack) or `volume` (final band prices everything) | volume discounts; a metered card takes `graduated` only |
 | `package` | `ceil((qty − free_units)/package_size) × amount` | block pricing, round-up-to-next-unit |
 
 **Metered usage** — declare `meters:` (event_type, value_property, aggregation,
 group_by) and attach `rate_cards:` to a product: each card binds one meter to a charge
-model, with optional `allowance` (included usage netted off first, poolable and
-accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
-products declare no billing cadence — the billing period is the window: the daily
-pass rates reported usage through the cards and bills each customer's owed usage as a
-usage order, including a customer whose only activity is metered usage.
-See the metering API documentation for complete rate-card contracts.
+model, with an optional `allowance` (`included` usage netted off first, per period).
+Usage products declare no billing cadence — the billing period is the window. Each
+usage event is priced through the cards when it is recorded and draws the prepaid
+balance or is owed at once; the daily pass bills each customer's owed usage as a
+usage order. A metered card states no `payment_term`. See
+[usage pricing](usage-pricing.md).
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
 Supplied links are validated against the provider (object exists + money terms match)
@@ -291,6 +292,18 @@ never deleted. Its buyers keep their access and their money, and their payments,
 orders and subscriptions keep naming it. Subscriptions on its prices stay
 grandfathered and keep renewing. Archiving refunds nobody; a refund is its own
 decision (`Client.RefundPayment`).
+
+### Deleting a product
+
+`DELETE /v1/catalog/products/{id}` (`Client.DeleteProduct`) deletes a
+product nothing ever referred to, with its prices, and answers 204. Reads and
+catalog listings leave it out. Creating its key again revives it with the new
+definition, since a product's id is its key's. A product an order line,
+payment, subscription, grant, product access, checkout, price migration,
+scheduled change, provider write, PSP link or meter rate card refers to is
+never deleted: the request answers `409 product_in_use`, and you archive it
+instead. A purchase therefore always names a product that exists. OpenRails
+deletes only its own product, never the host's content behind it.
 
 Granting credits is money-in, an admin change (`billing.MerchantCustomerManage`). Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit

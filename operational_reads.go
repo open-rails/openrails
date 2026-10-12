@@ -3,10 +3,24 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
 )
+
+func admissionPath(requestID string) (string, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return "", invalidErr("request_id is required")
+	}
+	segment := url.PathEscape(requestID)
+	if segment == "." || segment == ".." {
+		segment = strings.ReplaceAll(segment, ".", "%2E")
+	}
+	return "/v1/app/admissions/" + segment, nil
+}
 
 // GetAdmission reads an admitted request and its current hold state without
 // replaying admission. Denied or no-longer-retained requests are not found.

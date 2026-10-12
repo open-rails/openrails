@@ -16,14 +16,16 @@ INSERT INTO billing.products (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 
+-- Reads leave deleted products out: nothing ever referred to them.
+
 -- name: GetProductByID :one
-SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1 AND deleted_at IS NULL;
 
 -- name: GetProductByKey :one
-SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1 AND deleted_at IS NULL;
 
 -- name: ListProductsByIDs :many
-SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListActiveProducts :many
@@ -31,13 +33,12 @@ SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id
 
 -- name: ListAllProducts :many
 SELECT * FROM billing.products
-WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
-;
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL;
 
 -- name: ListProductsFiltered :many
 -- One keyset page, newest first: rows after (after_at, after_id).
 SELECT * FROM billing.products
-WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
   AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
   AND (sqlc.narg(keys)::text[] IS NULL OR key = ANY (sqlc.narg(keys)::text[]))
@@ -64,5 +65,43 @@ UPDATE billing.products SET
     archived = COALESCE(sqlc.narg(archived)::boolean, archived),
     revision = CASE WHEN sqlc.arg(keys_changed)::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
-WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL
 RETURNING *;
+
+-- name: ReviveProduct :execrows
+-- Declaring a deleted product's key again revives its row (the id is the
+-- key's) with the new definition, as created now.
+UPDATE billing.products SET
+    display_name = sqlc.arg(display_name)::text,
+    description = sqlc.narg(description)::text,
+    credit_grant = sqlc.narg(credit_grant)::jsonb,
+    tier_group = NULLIF(sqlc.narg(tier_group)::text, ''),
+    tier_rank = sqlc.arg(tier_rank)::int,
+    ownership = sqlc.narg(ownership)::text,
+    archived = sqlc.arg(archived)::boolean,
+    deleted_at = NULL,
+    created_at = now(),
+    updated_at = now()
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NOT NULL;
+
+-- name: LockProductForDelete :one
+SELECT id, key FROM billing.products
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL
+FOR UPDATE;
+
+-- name: ProductHoldsReferences :one
+-- Whether a record refers to the product itself: a subscription, a grant,
+-- product access, a price migration or a meter's rate card. Its prices'
+-- references, purchase lines among them, are PricesHoldReferences'.
+SELECT (
+    EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
+    OR EXISTS (SELECT 1 FROM billing.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
+    OR EXISTS (SELECT 1 FROM billing.product_access WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
+    OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_product_id = sqlc.arg(product_id)::uuid)
+    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
+)::boolean AS referenced;
+
+-- name: DeleteProduct :execrows
+-- Deletes a product nothing refers to; deleted is always archived.
+UPDATE billing.products SET archived = true, deleted_at = now(), updated_at = now()
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL;

@@ -34,17 +34,3 @@ export function parseHours(text: string): number | null {
   return Number.isSafeInteger(hours) && hours > 0 ? hours : null
 }
 
-// An allowance cap is spelled "720h" or "30d" on the wire.
-export function capToHours(cap: string): number | null {
-  const match = /^(\d+)([hd])$/.exec(cap.trim().toLowerCase())
-  return match ? Number(match[1]) * HOURS_PER_UNIT[match[2]] : null
-}
-
-export function hoursToCap(hours: number): string {
-  return hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`
-}
-
-export function formatCap(cap: string): string {
-  const hours = capToHours(cap)
-  return hours === null ? cap : formatHours(hours)
-}

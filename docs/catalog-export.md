@@ -104,7 +104,8 @@ history and archived prices.
 
 This document follows ordinary partial-application rules. Omitted products and
 prices remain unchanged; the export does not set `prune: true`. Adding that flag
-archives omitted products and prices, without deleting omitted meters. A
+deletes omitted products and prices nothing referred to and archives the rest,
+without deleting omitted meters. A
 product's explicit `rate_cards` list replaces its default cards, subject to
 dependency checks.
 

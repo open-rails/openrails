@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -140,6 +141,9 @@ type AdmitRequest struct {
 
 	Currency        string
 	EstimatedAmount int64
+	// Usage is the usage estimate the rate cards price into the hold, in place
+	// of EstimatedAmount.
+	Usage *billing.UsageEstimate
 	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
 	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
 	// the host knows it, because only the host knows what it is about to deploy.
@@ -154,9 +158,12 @@ type AdmitRequest struct {
 
 // AdmitDecision is the unified outcome.
 type AdmitDecision struct {
-	Allowed   bool
-	BlockedBy string // "budget" | "abuse" | "money" | ""
-	DenyCode  string
+	Allowed bool
+	// EstimatedAmount is what the admission holds: the host's estimate, or
+	// what its usage estimate was priced at.
+	EstimatedAmount int64
+	BlockedBy       string // "budget" | "abuse" | "money" | ""
+	DenyCode        string
 	// AvailableAmount is the payer's spendable balance (settled − money-window
 	// reservations) the affordability gate was evaluated against; HeldAmount is the
 	// total in-flight reservation after this admit. StartCapacity = Available − Held.
@@ -208,8 +215,14 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 
 	terms := spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
 		Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour}
+	var estimate []byte
+	if req.Usage != nil {
+		if estimate, err = money.UsageEstimate(*req.Usage); err != nil {
+			return AdmitDecision{}, err
+		}
+	}
 	replay, err := a.gate.CheckIdentity(ctx, q, spendgate.AdmitInput{Customer: req.CustomerID.UUID(), Currency: req.Currency,
-		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms})
+		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms, EstimateUsage: estimate})
 	if err != nil {
 		var conflict *spendgate.Conflict
 		if errors.As(err, &conflict) {
@@ -218,8 +231,17 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		return AdmitDecision{}, err
 	}
 	if replay != nil {
-		return AdmitDecision{Allowed: true, AvailableAmount: replay.AvailableAmount,
+		return AdmitDecision{Allowed: true, EstimatedAmount: replay.EstimatedAmount, AvailableAmount: replay.AvailableAmount,
 			HoldExpiresAt: replay.ExpiresAt, Replayed: true, State: replay.State}, nil
+	}
+
+	// A usage estimate is priced at the customer's current period quantities
+	// by the cards it pins.
+	var pinned []byte
+	if req.Usage != nil {
+		if req.EstimatedAmount, pinned, err = a.money.RateUsageEstimate(ctx, q, req.CustomerID, money.NormalizeCurrency(req.Currency), *req.Usage); err != nil {
+			return AdmitDecision{}, err
+		}
 	}
 
 	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
@@ -321,6 +343,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		Customer: req.CustomerID.UUID(), Currency: req.Currency, RequestID: req.SourceID,
 		Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt,
 		AccountBalance: available, CreditLimit: creditLine, Policy: policy, Request: sgReq,
+		EstimateUsage: estimate, RateCards: pinned,
 		Terms: spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
 			Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour},
 	}
@@ -339,7 +362,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		return AdmitDecision{}, err
 	}
 	if dec.Allowed {
-		return AdmitDecision{Allowed: true, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
+		return AdmitDecision{Allowed: true, EstimatedAmount: dec.EstimatedAmount, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
 	}
 	code, blocked := DenyBudgetExceeded, "budget"
 	if dec.BlockedBalance {
@@ -356,7 +379,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	if dec.RetryAfter%time.Second > 0 {
 		seconds++
 	}
-	return AdmitDecision{BlockedBy: blocked, DenyCode: code, AvailableAmount: available,
+	return AdmitDecision{BlockedBy: blocked, DenyCode: code, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
 		RetryAfterSeconds: seconds}, nil
 }
 

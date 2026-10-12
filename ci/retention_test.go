@@ -139,7 +139,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	_, err = client.CaptureAdmission(ctx, request, billing.CaptureAdmissionParams{Amount: 90_000, Usage: &billing.CaptureUsage{EventType: "inference"}})
+	_, err = captureAdmission(ctx, client, request, 90_000, &billing.CaptureUsage{EventType: "inference"})
 	require.NoError(t, err)
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("admission_operations", thisMonth)))
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("usage_events", thisMonth)))

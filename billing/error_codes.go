@@ -40,6 +40,8 @@ const (
 	CodeIdempotencyKeyInUse    = "idempotency_key_in_use"
 	CodeInsufficientCredits    = "insufficient_credits"
 	CodeInsufficientFunds      = "insufficient_funds"
+	// CodeUsageNotPriced: a priced meter cannot price a usage event.
+	CodeUsageNotPriced = "usage_not_priced"
 	// Orders.
 	CodeAlreadyOwned             = "already_owned"
 	CodeOrderLineUnavailable     = "order_line_unavailable"
@@ -83,6 +85,11 @@ const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 // CodeRevisionMismatch: an edit's expected_revision is not the object's
 // current revision; metadata.revision is the current one.
 const CodeRevisionMismatch = "revision_mismatch"
+
+// CodeProductInUse: a record refers to the product or one of its prices (a
+// purchase, subscription, grant, access, checkout, migration, provider write,
+// PSP link or rate card), so it is never deleted; archive it instead.
+const CodeProductInUse = "product_in_use"
 
 // Request-shape codes: the request never reached its operation.
 const (
@@ -300,6 +307,7 @@ var errorCodes = []ErrorCode{
 
 	// Catalog and metering.
 	{"product_not_found", 404, invalid, "The product does not exist."},
+	{CodeProductInUse, 409, invalid, "Records refer to the product; archive it instead."},
 	{"price_not_found", 404, invalid, "The price does not exist."},
 	{"price_key_not_found", 404, invalid, "No price holds this key."},
 	{"price_key_cadence_conflict", 409, invalid, "The product's default price key is held by a price on another cadence."},
@@ -312,13 +320,11 @@ var errorCodes = []ErrorCode{
 	{"usage_meter_not_found", 404, invalid, "The usage meter does not exist."},
 	{"default_rate_card_not_found", 404, invalid, "The meter has no default rate card."},
 	{"rate_card_product_not_found", 404, invalid, "The rate card names a product that does not exist."},
-	{"allowance_meter_not_found", 404, invalid, "The rate card's allowance meter does not exist."},
 	{"usage_rate_card_invalid", 400, invalid, "The usage rate card is invalid."},
 	{"usage_meter_invalid", 400, invalid, "The meter definition is invalid."},
+	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
-	{"allowance_source_invalid", 409, invalid, "The allowance source cannot back this rate card."},
-	{"allowance_source_in_use", 409, invalid, "The allowance source is in use."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

@@ -50,9 +50,9 @@ func TestPriceIdentifierMigrationPreservesForeignKeys(t *testing.T) {
 	require.NoError(t, err)
 	_, indexBody, ok := strings.Cut(string(indexes), "\n")
 	require.True(t, ok)
-	parent := before["0069_subscriptions_sort_indexes.up.sql"]
+	parent := before["0072_capture_quantities.up.sql"]
 	require.NotNil(t, parent)
-	indexHeader := "-- parent: 69 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
+	indexHeader := "-- parent: 72 sha256:" + migratekit.ContentDigest(string(parent.Data)) + "\n"
 	before[indexMigration] = &fstest.MapFile{Data: []byte(indexHeader + indexBody)}
 	require.Less(t, len(before), len(files))
 	cfg := f.config()
