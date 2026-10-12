@@ -71,11 +71,16 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	require.True(t, second.PaymentCreated)
 	require.False(t, second.Completed)
 	w.settle()
-	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
+	for {
+		events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
 		require.NoError(t, err)
+		if len(events.Items) == 0 {
+			break
+		}
+		for _, event := range events.Items {
+			_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
+			require.NoError(t, err)
+		}
 	}
 	w.stop()
 	charges, setups := w.providerWrites("nmi")
@@ -189,7 +194,10 @@ func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
 	var firstDue time.Time
 	var total int64
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT first_due_at,(accepted_bill->>'Total')::bigint FROM billing.provider_schedules WHERE merchant_id=$1 AND subscription_id=$2`), mid.UUID(), sub.ID).Scan(&firstDue, &total))
-	receipt := observed.ScheduleReceipt{TransactionID: "archive-declined-attempt", Amount: total, Currency: "USD", OccurredAt: firstDue.Add(time.Minute), NextBillingAt: firstDue, Approved: false}
+	// The imported book already settled its first accepted cycle. Archive a
+	// failed attempt against the next obligation, without reopening that bill.
+	nextDue := firstDue.Add(monthHours * time.Hour)
+	receipt := observed.ScheduleReceipt{TransactionID: "archive-declined-attempt", Amount: total, Currency: "USD", OccurredAt: nextDue.Add(time.Minute), NextBillingAt: nextDue, Approved: false}
 	var accepted observed.Bill
 	require.NoError(t, source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -201,11 +209,16 @@ func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
 		return err
 	}))
 	w.settle()
-	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
+	for {
+		events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
 		require.NoError(t, err)
+		if len(events.Items) == 0 {
+			break
+		}
+		for _, event := range events.Items {
+			_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
+			require.NoError(t, err)
+		}
 	}
 	w.stop()
 	before := w.nmiWrites()
