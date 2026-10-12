@@ -185,8 +185,8 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err != nil {
 			return err
 		}
-		if !catalogrules.BillingSupported(meter.Aggregation) {
-			return invalidUsageRateCard(fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation))
+		if err := catalogrules.ValidateMeterPrice("usage rate card", meter.Aggregation, in.Price); err != nil {
+			return invalidUsageRateCard(err)
 		}
 		if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
 			return invalidUsageRateCard(err)

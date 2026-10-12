@@ -118,6 +118,12 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	if price.Package != nil {
 		blocks++
 	}
+	if price.Model == catalog.ModelDynamic {
+		if blocks != 0 {
+			return fmt.Errorf("%s: model dynamic has no price block", where)
+		}
+		return nil
+	}
 	if blocks != 1 {
 		return fmt.Errorf("%s: price model requires exactly one matching sub-block", where)
 	}
@@ -183,7 +189,7 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 			return fmt.Errorf("%s: free_units must be >= 0", where)
 		}
 	default:
-		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package, got %q", where, price.Model)
+		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package/dynamic, got %q", where, price.Model)
 	}
 	return nil
 }
@@ -200,6 +206,17 @@ func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 	}
 	if price.Model == catalog.ModelTiered && price.Tiered.Mode == catalog.TierModeVolume {
 		return fmt.Errorf("%s: a metered price cannot use volume tiers; use graduated", where)
+	}
+	return nil
+}
+
+// ValidateMeterPrice verifies that a meter can supply a price's quantity.
+func ValidateMeterPrice(where string, aggregation catalog.Aggregation, price catalog.RatePrice) error {
+	if !BillingSupported(aggregation) {
+		return fmt.Errorf("%s: aggregation %q is not supported for billing", where, aggregation)
+	}
+	if price.Model == catalog.ModelDynamic && aggregation != catalog.AggregationSum {
+		return fmt.Errorf("%s: dynamic pricing requires a sum meter", where)
 	}
 	return nil
 }
