@@ -1330,6 +1330,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		revokeSources = []models.AccessSourceType{models.AccessSourceSubscription, models.AccessSourceGrace}
 	}
 
+	previousRevision := subscription.LifecycleRev
 	if err := s.ApplyLocalCancellation(ctx, txDB, subscription, LocalCancellation{
 		EndedAt:       endAt,
 		CancelType:    params.CancelType,
@@ -1340,6 +1341,9 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("Failed to apply local cancellation")
 		return nil, err
+	}
+	if subscription.LifecycleRev == previousRevision {
+		return result, nil // the locked lifecycle already reflects this cancellation
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id": subscription.ID,
@@ -1358,17 +1362,18 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	case models.CancelTypeMerchant:
 		reason = PremiumEndReasonRail
 	}
+	// The committed revision identifies this cancellation, including retries
+	// after rollback and a later revoke of a period-end cancellation.
 	notification := &models.NotificationEvent{
-		ID:         uuidutil.NewV7(),
+		ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("canceled:%d", subscription.LifecycleRev))),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
 		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID)},
 	}
-	if err := notificationRepo.Create(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
-	} else {
-		result.Notifications = append(result.Notifications, notification)
+	if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+		return nil, fmt.Errorf("record membership ended notification: %w", err)
 	}
+	result.Notifications = append(result.Notifications, notification)
 
 	return result, nil
 }
