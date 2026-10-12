@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -63,8 +64,9 @@ type ConfirmTierChangeInput struct {
 	OldSubscriptionID uuid.UUID
 
 	// Acting user + new-plan identity (for the new membership).
-	UserID     string
-	NewPriceID uuid.UUID
+	UserID       string
+	NewPriceID   uuid.UUID
+	NewProductID uuid.UUID
 
 	// New on-chain subscription account the atomic tx created (from the prepare
 	// step's result). This is the rail_subscription_id of the new membership +
@@ -264,6 +266,20 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 	if in.IsUpgrade {
 		createParams.TransactionID = in.Signature
+		// The landed transfer is the verified bill: the new plan's prorated
+		// first period, settled by this on-chain charge.
+		if in.NewProductID == uuid.Nil {
+			return nil, fmt.Errorf("recurring: upgrade requires the new plan's product")
+		}
+		hours, err := safecast.Convert[int](in.NewPeriodHours)
+		if err != nil {
+			return nil, fmt.Errorf("recurring: confirm tier-change: new period hours overflow: %w", err)
+		}
+		createParams.ProviderBill = &observed.Bill{PSPID: oldSub.PspID, CustomerID: oldSub.CustomerID, Owner: string(models.ProviderCollectionPolicy(string(models.RailSolana))),
+			Kind: "initial", SourceKind: "solana_tier_change", SourceKey: in.Signature, ProviderReference: newPDA,
+			Currency: moneyutil.NormalizeCurrency(in.NewCurrency), Total: chargeAmount, PeriodStart: newPeriodStart, PeriodEnd: newPeriodEnd, DueAt: newPeriodStart,
+			Settled: true, SettlementSource: "cash",
+			Lines: []observed.Line{{PriceID: &in.NewPriceID, ProductID: &in.NewProductID, Description: "Subscription upgrade", UnitAmount: chargeAmount, Amount: chargeAmount, BillingIntervalHours: &hours}}}
 	}
 
 	var (
