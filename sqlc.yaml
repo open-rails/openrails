@@ -72,6 +72,7 @@ sql:
       - "internal/migrate/postgres/0073_notification_events.up.sql"
       - "internal/migrate/postgres/0074_public_price_identifiers.up.sql"
       - "internal/migrate/postgres/0075_operational_read_indexes.up.sql"
+      - "internal/migrate/postgres/0076_dynamic_pricing.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

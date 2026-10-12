@@ -96,7 +96,7 @@ export function RateCardEditor({
           !(await confirm({
             title: "Replace the default rate?",
             description:
-              "Billed usage orders and amounts already accrued do not change. The new rate can only affect the remaining positive delta in the current unfinalized period and future periods.",
+              "Amounts already charged do not change. New events use the new rate; admitted work keeps its pinned rate.",
             confirmLabel: "Replace rate",
             cancelLabel: "Keep current rate",
           }))
@@ -265,7 +265,7 @@ export function RateCardEditor({
                       </div>
                     )}
                   </form.Field>
-                  <PricingModelField form={form} />
+                  <PricingModelField form={form} meter={meter} />
                 </div>
               )}
             </section>
@@ -281,12 +281,19 @@ export function RateCardEditor({
                   )}
                   {model === "tiered" && <TieredFields form={form} />}
                   {model === "package" && <PackageFields form={form} />}
+                  {model === "dynamic" && (
+                    <p className="text-sm text-muted-foreground">
+                      <AdminMessage id={"Charge each event’s stated amount when it reports positive units. Missing amounts or zero units charge nothing."} />
+                    </p>
+                  )}
                 </section>
               )}
             </form.Subscribe>
 
             <FilterFields form={form} meter={meter} />
-            <AllowanceFields form={form} />
+            <form.Subscribe selector={(state) => state.values.model}>
+              {(model) => model !== "dynamic" && <AllowanceFields form={form} />}
+            </form.Subscribe>
 
             <form.Subscribe selector={(state) => state.values}>
               {(values) => <RateSummary values={values} />}
@@ -347,9 +354,14 @@ type MeteringForm = ReactFormExtendedApi<
   unknown
 >
 
-function PricingModelField({ form }: { form: MeteringForm }) {
+function PricingModelField({
+  form,
+  meter,
+}: {
+  form: MeteringForm
+  meter: Meter
+}) {
   const { id: adminId } = useAdminUI()
-
   return (
     <form.Field name="model">
       {(field) => (
@@ -360,7 +372,7 @@ function PricingModelField({ form }: { form: MeteringForm }) {
           <Select
             value={field.state.value}
             onValueChange={(value) =>
-              field.handleChange(value as "per_unit" | "tiered" | "package")
+              field.handleChange(value as "per_unit" | "tiered" | "package" | "dynamic")
             }
           >
             <SelectTrigger id={adminId("rate-model")} className="w-full">
@@ -375,6 +387,9 @@ function PricingModelField({ form }: { form: MeteringForm }) {
               </SelectItem>
               <SelectItem value="package">
                 <AdminMessage id={"Package"} />
+              </SelectItem>
+              <SelectItem value="dynamic" disabled={meter.aggregation !== "sum"}>
+                <AdminMessage id={"Dynamic (event amount)"} />
               </SelectItem>
             </SelectContent>
           </Select>

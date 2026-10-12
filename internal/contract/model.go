@@ -145,6 +145,7 @@ type field struct {
 	name     string
 	t        reflect.Type
 	optional bool // omitempty or omitzero: absent when empty
+	required bool // binding:"required": explicit input presence, not inferred from JSON tags
 	nullable bool // null when unset: a pointer or map written without omitempty (a nil list is written [])
 	quoted   bool // `,string`: a number written as a string
 }
@@ -183,6 +184,11 @@ func fieldsOf(t reflect.Type) []field {
 				name = f.Name
 			}
 			member := field{name: name, t: f.Type}
+			for _, rule := range strings.Split(f.Tag.Get("binding"), ",") {
+				if rule == "required" {
+					member.required = true
+				}
+			}
 			for _, opt := range strings.Split(opts, ",") {
 				switch opt {
 				case "omitempty", "omitzero":

@@ -170,6 +170,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.start()
 	ctx := t.Context()
+	declareDynamicMeter(t, w.client[remote], "idor", "units")
 	group := "g" + uuid.NewString()[:8]
 	from := w.tierPrice(group, 1, 1000, monthHours, false)
 	to := w.tierPrice(group, 2, 2000, monthHours, false)
@@ -186,7 +187,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	aCard := a.saveCard("nmi", visa)
 	_, err = w.client[remote].UpdateCustomer(ctx, a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
-	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: new(int64(50_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

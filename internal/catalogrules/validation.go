@@ -118,6 +118,12 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	if price.Package != nil {
 		blocks++
 	}
+	if price.Model == catalog.ModelDynamic {
+		if blocks != 0 {
+			return fmt.Errorf("%s: model dynamic has no price block", where)
+		}
+		return nil
+	}
 	if blocks != 1 {
 		return fmt.Errorf("%s: price model requires exactly one matching sub-block", where)
 	}
@@ -183,7 +189,7 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 			return fmt.Errorf("%s: free_units must be >= 0", where)
 		}
 	default:
-		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package, got %q", where, price.Model)
+		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package/dynamic, got %q", where, price.Model)
 	}
 	return nil
 }
@@ -204,6 +210,17 @@ func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 	return nil
 }
 
+// ValidateMeterPrice verifies that a meter can supply a price's quantity.
+func ValidateMeterPrice(where string, aggregation catalog.Aggregation, price catalog.RatePrice) error {
+	if !BillingSupported(aggregation) {
+		return fmt.Errorf("%s: aggregation %q is not supported for billing", where, aggregation)
+	}
+	if price.Model == catalog.ModelDynamic && aggregation != catalog.AggregationSum {
+		return fmt.Errorf("%s: dynamic pricing requires a sum meter", where)
+	}
+	return nil
+}
+
 // ValidateAllowance normalizes and validates included usage.
 func ValidateAllowance(where string, allowance *catalog.Allowance) error {
 	if allowance == nil {
@@ -213,6 +230,15 @@ func ValidateAllowance(where string, allowance *catalog.Allowance) error {
 		return fmt.Errorf("%s: allowance.included must be >= 0", where)
 	}
 	return nil
+}
+
+// ValidateUsageAllowance refuses allowances on event-stated prices: their
+// amount is not a cumulative quantity price from which included units deduct.
+func ValidateUsageAllowance(where string, price catalog.RatePrice, allowance *catalog.Allowance) error {
+	if price.Model == catalog.ModelDynamic && allowance != nil {
+		return fmt.Errorf("%s: a dynamic price cannot have an allowance", where)
+	}
+	return ValidateAllowance(where, allowance)
 }
 
 // ValidateFilter normalizes a meter filter and rejects ambiguous or empty
@@ -366,5 +392,5 @@ func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	if err := ValidateUsagePrice(where, &rc.Price); err != nil {
 		return err
 	}
-	return ValidateAllowance(where, rc.Allowance)
+	return ValidateUsageAllowance(where, rc.Price, rc.Allowance)
 }

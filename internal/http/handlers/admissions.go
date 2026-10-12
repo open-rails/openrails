@@ -363,8 +363,10 @@ func usageRefusal(err *api.APIError) billing.UsageEventResult {
 
 func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params billing.RecordUsageParams) billing.UsageEventResult {
 	switch {
-	case params.Amount < 0:
+	case params.Amount != nil && *params.Amount < 0:
 		return usageRefusal(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
+	case params.Outcome == billing.UsageFailed && params.Amount == nil:
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, "failed usage must state amount").WithParam("amount"))
 	case params.CustomerID.IsZero():
 		return usageRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
 	case len(params.SourceID) > maxSourceIDBytes:

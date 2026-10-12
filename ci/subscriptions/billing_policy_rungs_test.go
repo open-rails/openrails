@@ -38,6 +38,7 @@ func TestBillingPolicyRungs(t *testing.T) {
 	}
 	w.start()
 	ctx, client := t.Context(), w.client[remote]
+	declareDynamicMeter(t, client, "rungs", "units")
 
 	type payer struct {
 		name string
@@ -84,7 +85,7 @@ func TestBillingPolicyRungs(t *testing.T) {
 	}
 	spend := func(amount int64, payers ...payer) {
 		for _, p := range payers {
-			_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: p.c.cid(), Invoker: p.c.id, Currency: "USD", EventType: "rungs", Amount: amount, Source: "test", SourceID: uuid.NewString()})
+			_, err := recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: p.c.cid(), Invoker: p.c.id, Currency: "USD", EventType: "rungs", Amount: new(int64(amount)), Source: "test", SourceID: uuid.NewString()})
 			require.NoError(t, err, p.name)
 		}
 		w.advance(time.Minute)

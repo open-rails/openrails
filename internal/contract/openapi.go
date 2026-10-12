@@ -135,7 +135,7 @@ func (m *model) objectSchema(o *object) *obj {
 	var required []string
 	for _, f := range o.fields {
 		props.set(f.name, m.memberSchema(f))
-		if o.output && !f.optional {
+		if (o.output && !f.optional) || (o.input && f.required) {
 			required = append(required, f.name)
 		}
 	}

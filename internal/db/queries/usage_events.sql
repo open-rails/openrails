@@ -3,14 +3,14 @@
 -- (merchant, customer, currency, event_type, source, source_id) is claimed under
 -- the customer spend lock by GetUsageEventByCoords over the ingest window.
 
--- pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
+-- stated_amount is the optional host cost; each meter decides whether to charge it.
 -- name: InsertUsageEvent :exec
 INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at,
+    ledger_transfer_id, stated_amount, metadata, occurred_at, created_at,
     outcome, forgiven_amount, charges
-) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.arg(pricing_authority), $12, $13, $14,
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.narg(stated_amount)::bigint, $12, $13, $14,
     sqlc.arg(outcome)::text, sqlc.arg(forgiven_amount)::bigint, sqlc.arg(charges)::jsonb);
 
 -- name: GetUsageEventByCoords :one

@@ -31,6 +31,8 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
 	a, err := engine.MerchantBySlug("inspect-a")
 	require.NoError(t, err)
+	declareDynamicMeter(t, a, "capture", "units")
+	declareDynamicMeter(t, a, "tokens", "tokens")
 	b, err := engine.MerchantBySlug("inspect-b")
 	require.NoError(t, err)
 	auth := &authtest.Fake{}
@@ -64,7 +66,7 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 			_, err = a.ReleaseAdmissions(t.Context(), []string{string(state)})
 		}
 		if state == billing.AdmissionCaptured {
-			_, err = captureAdmission(t.Context(), a, string(state), 50_000, nil)
+			_, err = captureAdmission(t.Context(), a, string(state), 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 		}
 		require.NoError(t, err)
 	}
@@ -108,17 +110,17 @@ func TestOperationalReadsAreBoundedAndReadOnly(t *testing.T) {
 
 	var events []*billing.UsageEvent
 	for i, id := range []billing.CustomerID{customer, customer, second} {
-		items, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: id, Invoker: id.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: []string{"first", "second", "third"}[i], Amount: 1_000, Dimensions: map[string]int64{"tokens": 3}, Metadata: map[string]any{"trace": "kept"}}})
+		items, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: id, Invoker: id.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: []string{"first", "second", "third"}[i], Amount: new(int64(1_000)), Dimensions: map[string]int64{"tokens": 3}, Metadata: map[string]any{"trace": "kept"}}})
 		require.NoError(t, err)
 		require.NoError(t, items[0].Err())
 		events = append(events, items[0].Event)
 	}
-	failed, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: "failed", Amount: 1_000, Outcome: billing.UsageFailed}})
+	failed, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: "failed", Amount: new(int64(1_000)), Outcome: billing.UsageFailed}})
 	require.NoError(t, err)
 	require.NoError(t, failed[0].Err())
 	events = append(events, failed[0].Event)
 	oldAt := clock.Now().Add(-32 * 24 * time.Hour)
-	items, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: "older", Amount: 1_000, OccurredAt: &oldAt}})
+	items, err := a.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "tokens", Source: "jobs", SourceID: "older", Dimensions: map[string]int64{"tokens": 1}, Amount: new(int64(1_000)), OccurredAt: &oldAt}})
 	require.NoError(t, err)
 	require.NoError(t, items[0].Err())
 	older := items[0].Event

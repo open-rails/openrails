@@ -331,6 +331,9 @@ func validateUsageMeterRateCardContracts(
 	if err := json.Unmarshal(state.Price, &price); err != nil {
 		return fmt.Errorf("decode usage meter rate card price: %w", err)
 	}
+	if err := catalogrules.ValidateMeterPrice("usage rate card", replacement.Aggregation, price); err != nil {
+		return meterRateCardConflict(err)
+	}
 	if err := catalogrules.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
 		return meterRateCardConflict(err)
 	}

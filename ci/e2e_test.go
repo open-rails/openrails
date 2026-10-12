@@ -327,6 +327,28 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.True(t, after["content:premium"], "the public access check observes the entitlement granted for the product")
 }
 
+// declareDynamicMeter makes the stated-price fixture explicit. Its events
+// carry a positive valueProperty quantity as well as the amount.
+func declareDynamicMeter(t *testing.T, client *openrails.Client, eventType, valueProperty string) {
+	t.Helper()
+	if meter, err := client.GetMeter(t.Context(), eventType); err == nil {
+		require.Equal(t, catalog.AggregationSum, meter.Aggregation)
+		require.Equal(t, valueProperty, meter.ValueProperty)
+		require.NotNil(t, meter.RateCard)
+		require.Equal(t, catalog.ModelDynamic, meter.RateCard.Price.Model)
+		return
+	} else {
+		require.ErrorIs(t, err, billing.ErrNotFound)
+	}
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "dynamic-" + uuid.NewString(), DisplayName: "Dynamic usage"})
+	require.NoError(t, err)
+	_, err = client.SetMeter(t.Context(), eventType, billing.SetMeterParams{
+		EventType: eventType, Aggregation: catalog.AggregationSum, ValueProperty: valueProperty,
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "USD"}}),
+	})
+	require.NoError(t, err)
+}
+
 // recordUsage records one usage event; the item's refusal is the error.
 func recordUsage(ctx context.Context, client *openrails.Client, params billing.RecordUsageParams) (*billing.UsageEvent, error) {
 	results, err := client.RecordUsage(ctx, []billing.RecordUsageParams{params})
@@ -346,9 +368,9 @@ func createCreditGrant(ctx context.Context, client *openrails.Client, customer b
 	return &grants[0], nil
 }
 
-// captureAdmission settles one admission at a host-stated amount: a batch of
-// one.
-func captureAdmission(ctx context.Context, client *openrails.Client, requestID string, amount int64, usage *billing.CaptureUsage) (*billing.CaptureReceipt, error) {
+// captureAdmission settles one admission through its dynamic meter: a batch
+// of one.
+func captureAdmission(ctx context.Context, client *openrails.Client, requestID string, amount int64, usage billing.CaptureUsage) (*billing.CaptureReceipt, error) {
 	results, err := client.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{RequestID: requestID, Amount: &amount, Usage: usage}})
 	if err != nil {
 		return nil, err

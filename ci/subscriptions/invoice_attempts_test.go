@@ -36,7 +36,8 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: customer, Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
 	require.NoError(t, err)
 	require.True(t, admitted[0].Allowed(), "%+v", admitted)
-	_, err = captureAdmission(ctx, client, request, owed, nil)
+	declareDynamicMeter(t, client, "capture", "units")
+	_, err = captureAdmission(ctx, client, request, owed, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 
 	w.advance(time.Minute)

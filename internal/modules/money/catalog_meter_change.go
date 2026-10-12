@@ -49,8 +49,8 @@ func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUI
 // CheckCatalogRateCardContracts validates the resulting rate card against the
 // resulting meter, never the old card.
 func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter catalogrules.Meter, filter map[string][]string, price catalog.RatePrice) error {
-	if !catalogrules.BillingSupported(meter.Aggregation) {
-		return invalidUsageRateCard(fmt.Errorf("meter %q does not support billing", meter.Key))
+	if err := catalogrules.ValidateMeterPrice("rate card", meter.Aggregation, price); err != nil {
+		return invalidUsageRateCard(err)
 	}
 	if err := catalogrules.ValidateDimensions("default usage rate card", meter.GroupBy, filter, &price); err != nil {
 		return meterRateCardConflict(err)

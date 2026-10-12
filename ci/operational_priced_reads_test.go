@@ -52,7 +52,7 @@ func TestOperationalReadsPreservePricedQuantities(t *testing.T) {
 	}{{"embedded", embedded}, {"remote", remote(billing.MerchantUsageManage)}}
 	const quantity int64 = 1<<53 + 1
 	cell := "small"
-	wantCharges := []billing.UsageCharge{{MeterKey: "tokens", Cell: &cell, Quantity: quantity, Amount: 1}}
+	wantCharges := []billing.UsageCharge{{MeterKey: "tokens", Model: catalog.ModelPerUnit, Cell: &cell, Quantity: quantity, Amount: 1}}
 	type operation struct {
 		client  *openrails.Client
 		admit   billing.AdmitParams
@@ -81,7 +81,7 @@ func TestOperationalReadsPreservePricedQuantities(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
 		require.EqualValues(t, 1, verdicts[0].Admission.EstimatedAmount)
-		capture := billing.CaptureAdmissionParams{RequestID: admit.RequestID, Usage: &billing.CaptureUsage{EventType: "large", Dimensions: dimensions, Metadata: metadata}}
+		capture := billing.CaptureAdmissionParams{RequestID: admit.RequestID, Usage: billing.CaptureUsage{EventType: "large", Dimensions: dimensions, Metadata: metadata}}
 		captures, err := writer.client.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture}, key)
 		require.NoError(t, err)
 		require.NoError(t, captures[0].Err())
@@ -129,7 +129,7 @@ func TestOperationalReadsPreservePricedQuantities(t *testing.T) {
 			require.NotNil(t, verdicts[0].Error)
 			require.Equal(t, billing.CodeIdempotencyKeyReused, verdicts[0].Error.Code)
 			changedCapture := op.capture
-			changedCapture.Usage = &billing.CaptureUsage{EventType: "large", Dimensions: map[string]int64{"tokens": quantity - 1}, Metadata: op.capture.Usage.Metadata}
+			changedCapture.Usage = billing.CaptureUsage{EventType: "large", Dimensions: map[string]int64{"tokens": quantity - 1}, Metadata: op.capture.Usage.Metadata}
 			captures, err = op.client.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{changedCapture}, op.key)
 			require.NoError(t, err)
 			require.ErrorIs(t, captures[0].Err(), billing.ErrIdempotencyKeyReused)

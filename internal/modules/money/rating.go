@@ -30,7 +30,8 @@ import (
 // of that meter (and matrix cell) in the event's billing period is Q, and the
 // event is charged R(Q+q) - R(Q), where R is the card's price for a whole
 // period. R never falls as Q grows, so no charge is negative, and a period's
-// charges sum to R of its total: per-event rounding never drifts.
+// charges sum to R of its total: per-event rounding never drifts. A dynamic
+// card instead charges the event's stated amount for a positive quantity.
 
 func usageNotPriced(param, format string, args ...any) error {
 	return &apperr.Error{Status: http.StatusUnprocessableEntity, Code: billing.CodeUsageNotPriced, Message: fmt.Sprintf(format, args...), Param: param}
@@ -53,12 +54,14 @@ type usageQuantity struct {
 	card     ratingCard
 	cell     string
 	quantity int64
+	stated   *int64
 }
 
 // eventFields are the parts of an event a meter reads.
 type eventFields struct {
 	Dimensions map[string]int64
 	Metadata   map[string]any
+	Amount     *int64
 }
 
 // usageCards reads the rate cards that price eventType in currency. A card in
@@ -120,7 +123,7 @@ func usageQuantities(cards []ratingCard, ev eventFields) ([]usageQuantity, error
 			}
 			cell = value
 		}
-		out = append(out, usageQuantity{card: card, cell: cell, quantity: quantity})
+		out = append(out, usageQuantity{card: card, cell: cell, quantity: quantity, stated: ev.Amount})
 	}
 	return out, nil
 }
@@ -284,6 +287,21 @@ func marginalPrice(card ratingCard, cell string, before, quantity int64) (int64,
 
 const maxQuantity = int64(^uint64(0) >> 1)
 
+// price takes a dynamic card's amount from the event; catalog cards ignore
+// that field and price the quantity marginally.
+func (u usageQuantity) price(before int64) (int64, error) {
+	if u.card.Price.Model == catalog.ModelDynamic {
+		if before < 0 || u.quantity < 0 || before > maxQuantity-u.quantity {
+			return 0, fmt.Errorf("meter %q: period quantity out of range", u.card.MeterKey)
+		}
+		if u.quantity == 0 || u.stated == nil {
+			return 0, nil
+		}
+		return *u.stated, nil
+	}
+	return marginalPrice(u.card, u.cell, before, u.quantity)
+}
+
 // usagePeriodStart is the billing period an event dated occurred belongs
 // to: the one usage orders close, under the merchant's boundary and anchored
 // on the customer's first activity.
@@ -331,6 +349,7 @@ func (s *MoneyService) priceUsageTx(ctx context.Context, q *gen.Queries, payer i
 		return nil, err
 	}
 	now := s.now()
+	var totalAmount int64
 	for _, u := range quantities {
 		total, err := q.AddMeterPeriodQuantity(ctx, gen.AddMeterPeriodQuantityParams{
 			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency, MeterKey: u.card.MeterKey,
@@ -339,11 +358,15 @@ func (s *MoneyService) priceUsageTx(ctx context.Context, q *gen.Queries, payer i
 		if err != nil {
 			return nil, fmt.Errorf("meter %q period quantity: %w", u.card.MeterKey, err)
 		}
-		amount, err := marginalPrice(u.card, u.cell, total-u.quantity, u.quantity)
+		amount, err := u.price(total - u.quantity)
 		if err != nil {
 			return nil, err
 		}
-		charges = append(charges, models.UsageCharge{MeterKey: u.card.MeterKey, Cell: u.cell, Quantity: u.quantity, Amount: amount})
+		if amount < 0 || totalAmount > maxQuantity-amount {
+			return nil, fmt.Errorf("usage amount overflows int64")
+		}
+		totalAmount += amount
+		charges = append(charges, models.UsageCharge{MeterKey: u.card.MeterKey, Model: u.card.Price.Model, Cell: u.cell, Quantity: u.quantity, Amount: amount})
 	}
 	if _, err := q.PruneMeterPeriodQuantities(ctx, gen.PruneMeterPeriodQuantitiesParams{MerchantID: merchantID, Before: now.Add(-retention.MeterPeriodQuantities)}); err != nil {
 		return nil, err

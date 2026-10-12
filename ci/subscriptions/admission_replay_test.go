@@ -20,6 +20,7 @@ import (
 // Embedded and remote callers recover the durable admission's current state.
 func TestAdmissionRetryReturnsCurrentHold(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "capture", "units")
 	c := w.newCustomer()
 	_, err := createCreditGrant(t.Context(), w.client[embedded], c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -37,7 +38,7 @@ func TestAdmissionRetryReturnsCurrentHold(t *testing.T) {
 				case billing.AdmissionReleased:
 					_, err = client.ReleaseAdmissions(t.Context(), []string{params[0].RequestID})
 				case billing.AdmissionCaptured:
-					_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
+					_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 				case billing.AdmissionExpired:
 					w.clock.Advance(2 * time.Hour)
 				}
@@ -77,6 +78,7 @@ func (tr *lostResponse) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestAdmissionAndCaptureRecoverAfterLostResponses(t *testing.T) {
 	w := newWorld(t)
+	declareDynamicMeter(t, w.client[embedded], "capture", "units")
 	c := w.newCustomer()
 	merchant := w.client[embedded].MerchantID()
 	_, err := createCreditGrant(t.Context(), w.client[embedded], c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
@@ -100,16 +102,16 @@ func TestAdmissionAndCaptureRecoverAfterLostResponses(t *testing.T) {
 	require.True(t, again[0].Allowed())
 
 	transport.drop.Store(true)
-	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
+	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.ErrorIs(t, err, billing.ErrUnreachable)
-	receipt, err := captureAdmission(t.Context(), client, params[0].RequestID, 50_000, nil)
+	receipt, err := captureAdmission(t.Context(), client, params[0].RequestID, 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 	require.True(t, receipt.Replayed)
 	require.NotNil(t, receipt.BalanceTransactionID)
-	replayed, err := captureAdmission(t.Context(), w.client[embedded], params[0].RequestID, 50_000, nil)
+	replayed, err := captureAdmission(t.Context(), w.client[embedded], params[0].RequestID, 50_000, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.NoError(t, err)
 	require.Equal(t, receipt.BalanceTransactionID, replayed.BalanceTransactionID)
-	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_001, nil)
+	_, err = captureAdmission(t.Context(), client, params[0].RequestID, 50_001, billing.CaptureUsage{EventType: "capture", Dimensions: map[string]int64{"units": 1}})
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	balance, err := client.GetBalance(t.Context(), c.cid(), "USD")
 	require.NoError(t, err)

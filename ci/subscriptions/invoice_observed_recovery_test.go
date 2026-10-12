@@ -25,9 +25,10 @@ import (
 
 func observedInvoice(t *testing.T, w *world, c *customer, amount int64) billing.OrderID {
 	t.Helper()
+	declareDynamicMeter(t, w.client[remote], "observed-invoice", "units")
 	_, err := w.client[remote].UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: amount * 2}}})
 	require.NoError(t, err)
-	_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "observed-invoice", Amount: amount, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "observed-invoice", Amount: new(int64(amount)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	job, err := w.jobs.Insert(t.Context(), invoicePass{}, &river.InsertOpts{Queue: "billing"})

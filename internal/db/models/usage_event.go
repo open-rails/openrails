@@ -3,15 +3,14 @@ package models
 import (
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/google/uuid"
 )
 
-// UsageEvent is one append-only record of metered usage, the source of truth
-// for usage reporting and invoice line items. Host-priced events carry final
-// cost; catalog events carry an unpriced meter input. Host cost is debited in
-// the same transaction. A replay is found by (merchant, customer, currency,
-// event_type, source, source_id) within the ingest window, so it neither
-// double-records nor double-charges.
+// UsageEvent is one append-only record of usage and its posted meter charges.
+// A replay is found by (merchant, customer, currency, event_type, source,
+// source_id) within the ingest window, so it neither records nor charges twice.
 type UsageEvent struct {
 	ID uuid.UUID `json:"id"`
 	// MerchantID scopes this row to a merchant.
@@ -42,9 +41,9 @@ type UsageEvent struct {
 	SourceID string `json:"source_id"`
 	// LedgerTransferID links to the ledger debit transfer this event produced.
 	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id,omitempty"`
-	// PricingAuthority is host when Amount is the host's price, catalog when
-	// the meters' rate cards priced the event (Charges).
-	PricingAuthority string `json:"-"`
+	// StatedAmount is the optional cost supplied by the host, independent of
+	// what the meters charged. Failed events always state their cost.
+	StatedAmount *int64 `json:"stated_amount,string"`
 	// Charges are what each priced meter charged the event when it was
 	// recorded; Amount is their sum.
 	Charges    []UsageCharge  `json:"charges"`
@@ -60,8 +59,9 @@ type UsageEvent struct {
 // UsageCharge is what one meter charged one usage event: its quantity in the
 // meter's unit, in the matrix cell it was priced in (empty without a matrix).
 type UsageCharge struct {
-	MeterKey string `json:"meter_key"`
-	Cell     string `json:"cell,omitempty"`
-	Quantity int64  `json:"quantity"`
-	Amount   int64  `json:"amount,string"`
+	MeterKey string        `json:"meter_key"`
+	Model    catalog.Model `json:"model"`
+	Cell     string        `json:"cell,omitempty"`
+	Quantity int64         `json:"quantity"`
+	Amount   int64         `json:"amount,string"`
 }

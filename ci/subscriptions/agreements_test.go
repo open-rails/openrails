@@ -38,6 +38,7 @@ func TestRevokingAgreements(t *testing.T) {
 	w.settings = billing.MerchantSettings{Profile: &billing.MerchantProfile{BillingURL: billingURL}}
 	w.start()
 	ctx, client := t.Context(), w.client[remote]
+	declareDynamicMeter(t, client, "agreements", "units")
 
 	c := w.newCustomer()
 	directory.Put(userinfo.User{ID: c.id, Email: "member@host.test", Username: "member"})
@@ -55,8 +56,8 @@ func TestRevokingAgreements(t *testing.T) {
 	require.NoError(t, err)
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": card})
 	use := func(amount int64) error {
-		_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "agreements",
-			Amount: amount, Source: "test", SourceID: uuid.NewString()})
+		_, err := recordUsage(ctx, client, billing.RecordUsageParams{Dimensions: map[string]int64{"units": 1}, CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "agreements",
+			Amount: new(int64(amount)), Source: "test", SourceID: uuid.NewString()})
 		return err
 	}
 	// collect runs the usage pass a minute on, so the usage so far is in it.

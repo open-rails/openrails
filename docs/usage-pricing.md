@@ -1,11 +1,10 @@
 # Usage pricing
 
 Usage is priced when it is recorded. A usage event (`POST /v1/app/usage-events`,
-`RecordUsage`) with no `amount` is priced by the rate cards of its event type's
-meters, in the transaction that records it, and its charge is posted at once:
-the prepaid balance, admissions, spend windows and the threshold pass see it as
-it happens. An event with an `amount` is priced by the host: that amount is its
-charge.
+`RecordUsage`) is priced by each matching meter's rate card, in the transaction
+that records it. The prepaid balance, admissions, spend windows and threshold
+pass see the charge at once. A `dynamic` card charges the event's optional
+`amount`; other cards price its quantities and ignore that amount.
 
 ## How an event is priced
 
@@ -14,7 +13,7 @@ event's currency, takes a quantity from the event: 1 for a `count` meter, the
 `value_property` for a `sum` meter (from `dimensions`, then `metadata`). A card's
 `filter` can exclude the event; a meter that takes nothing charges nothing.
 
-For each meter (and matrix cell), the customer's quantity so far in the event's
+For each catalog-priced meter (and matrix cell), the customer's quantity so far in the event's
 billing period is Q, and the event's quantity q. The event is charged
 
     R(Q + q) − R(Q)
@@ -30,7 +29,7 @@ The period is the one [usage orders](usage-orders.md) close: the merchant's
 quantities are kept in `meter_period_quantities`, 100 days per period.
 
 The event records what each meter charged it: `charges`, one
-`{meter_key, cell, quantity, amount}` per meter, and `amount`, their sum.
+`{meter_key, model, cell, quantity, amount}` per meter, and `amount`, their sum.
 
 ## Charge models
 
@@ -46,6 +45,27 @@ Volume tiers are refused on a metered card: a later event reaching a cheaper
 band would lower the price of earlier units, a negative charge. A metered card
 states no `payment_term`: the customer's billing mode decides whether a charge
 draws a prepaid balance or is invoiced.
+
+## Dynamic prices
+
+A rate card with `price: {model: dynamic, currency: USD}` has no price block
+and requires a `sum` meter. Dynamic cards do not accept an allowance. The event still supplies units in the meter's
+`value_property`. With a positive quantity the card charges the event's
+`amount`, a nonnegative integer decimal string in the currency's native units.
+Missing `amount` means zero; zero or missing units also means zero regardless
+of the amount. There is no additional per-event price limit.
+
+A matching dynamic card and a catalog card each charge independently. An event
+with 10 units and `amount: "250000"` pays 250,000 micros to each dynamic card
+that consumes it, plus any catalog charges. Its `charges` and the usage report
+retain quantity and money, so the implied native-unit price is amount divided
+by quantity. The supplied value is stored separately as `stated_amount`, even
+when a catalog card ignores it. Retrying with a different amount, including
+changing an absent amount to explicit zero, is `idempotency_key_reused`.
+
+Failed usage must explicitly state its cost. It is never rated or counted in
+meter-period quantities: the existing grace windows decide what is forgiven
+and what is charged. Running charges keep their own hourly rate.
 
 ## Posting
 

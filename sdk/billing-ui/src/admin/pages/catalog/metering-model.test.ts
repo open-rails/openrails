@@ -58,6 +58,20 @@ describe("meter definition", () => {
 })
 
 describe("usage rate amounts", () => {
+  it("round-trips a dynamic card without inventing a price block", () => {
+    const values = rateCardFormValues({
+      product_id: "prod_1", price: { model: "dynamic", currency: "USD" },
+      filter: {}, allowance: null,
+    })
+    expect(values.model).toBe("dynamic")
+    expect(buildRateCardRequest(values)).toEqual({
+      product_id: "prod_1", filter: {}, price: { model: "dynamic", currency: "USD" },
+    })
+    expect(buildRateCardRequest(rate({
+      model: "dynamic", allowanceMode: "included", allowanceIncluded: "500",
+    })).allowance).toBeUndefined()
+  })
+
   it.each([
     [
       "per-unit with a divisor and a cap",

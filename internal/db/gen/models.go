@@ -70,7 +70,7 @@ type BillingAdmissionOperation struct {
 	CapturedAmount *int64
 	CapturedAt     *time.Time
 	ReleasedAt     *time.Time
-	// The usage the request expects ({event_type, dimensions, metadata}); estimated_amount is its price when admitted. Null for a host-stated estimate.
+	// The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. estimated_amount is its price when admitted. Null for a host-stated hold.
 	EstimateUsage []byte
 	// The rate cards that priced estimate_usage, pinned: the capture is priced by them, whatever the catalog says later.
 	RateCards []byte
@@ -1611,8 +1611,6 @@ type BillingUsageEvent struct {
 	Source           string
 	SourceID         string
 	LedgerTransferID *uuid.UUID
-	// host = amount is the host's final price; catalog = the meters' rate cards priced the event when it was recorded (charges). Capture and failed usage write host.
-	PricingAuthority string
 	Metadata         []byte
 	// When the usage happened; the partition key. Accepted only within the ingest window, so every read and the idempotency lookup name a time range.
 	OccurredAt time.Time
@@ -1621,8 +1619,10 @@ type BillingUsageEvent struct {
 	Outcome string
 	// The part of a failed event's reported cost its grace absorbed; amount + forgiven_amount is what the host reported. Zero for a succeeded event.
 	ForgivenAmount int64
-	// What each meter charged the event when it was recorded: [{meter_key, cell, quantity, amount}]; empty for an event no priced meter consumes and for a host-priced event.
+	// What each meter charged the event: [{meter_key, model, cell, quantity, amount}]. Empty when no meter consumes it or the usage failed.
 	Charges []byte
+	// Optional host cost in native currency units. Dynamic meter cards charge it; other cards ignore it. Failed events must state their cost.
+	StatedAmount *int64
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.
