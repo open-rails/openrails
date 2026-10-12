@@ -1,4 +1,3 @@
--- parent: 26 sha256:961eabcd68a5888c75a63262f36ec1f53dd11d574c42129fb6ca365a26a4210a
 -- Repair: none-needed Every writer admits a later attempt for a period only
 -- after the earlier one is released; a stored pair that breaks the index is a
 -- period charged twice, and the index refuses to start on it rather than hide it.

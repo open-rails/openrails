@@ -1,4 +1,3 @@
--- parent: 39 sha256:4febe204bff455254954b55647a62949020c39c17d157e98a59d40fbbc350541
 -- A payment method is the card account the customer chose; its issuer and
 -- the networks maintain it. Every change to the card is an append-only
 -- version, and the method has a lifecycle: active, then closed by its bank,

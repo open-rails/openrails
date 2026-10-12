@@ -1,4 +1,3 @@
--- parent: 70 sha256:407e305726f35570d6e3c3a68ff05cf5b11253050c56bdd48404881649d05815
 -- Repair: none-needed The new table and column hold no stored row a check refuses: existing events record no charges, and a metered card's payment term is cleared before its check.
 -- Usage is priced when it is recorded: each meter's period-to-date quantity
 -- per customer prices the next event at the difference it makes, so the

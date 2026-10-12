@@ -1,4 +1,3 @@
--- parent: 48 sha256:523ded1436577062f7cdccb4fcdedabf7fbf328d2d84ae6cb51b92708e644170
 -- Repair: none-needed Merchant configuration lives in a file or in Vault: export it before upgrading (dump-merchant-config); Postgres keeps identities and what OpenRails discovers.
 -- A merchant's configuration (display name, settings, billing policies, alert
 -- webhooks, PSPs and custodians with their settings, credentials and archived

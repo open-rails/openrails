@@ -1,4 +1,3 @@
--- parent: 45 sha256:c3637847a8f8f54e107d944be36e0f984c268cec01b1ee59bf8a7a64f54e5249
 -- Repair: none-needed A dropped table refuses no stored row, and nothing reads it.
 -- Spend delegations are deleted: only the customer's own credential spends its
 -- balance, so the restore guard stops checking their table.

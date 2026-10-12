@@ -1,4 +1,3 @@
--- parent: 55 sha256:70665c5081ec44999b2fef3f32c7194273a2d822c145df58595e80dc41ae9193
 -- Repair: none-needed A new table; links are made from now on.
 -- An openrails.dev account linked to one merchant's customer, proven from both
 -- sides in one exchange. customers gains nothing: the link points at the

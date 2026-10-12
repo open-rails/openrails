@@ -1,4 +1,3 @@
--- parent: 12 sha256:f763fb5269cea5b859a2c06c1594189edc2c4070e0aebe0e875b5341fc6fb4b7
 -- Repair: none-needed A new table; no rows exist.
 CREATE TABLE billing.federated_grants (
     merchant_id uuid NOT NULL,

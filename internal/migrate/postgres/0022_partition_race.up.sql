@@ -1,4 +1,3 @@
--- parent: 21 sha256:0e79a42562a198854248f988ee8054e1be0ef8bc11f7480d83e0f4671bd9a56b
 -- Writers crossing into a new month create its partitions at the same moment.
 -- The loser of that race meets the winner's partition as a duplicate relation,
 -- object or catalog row, depending on timing; each means the partition exists,

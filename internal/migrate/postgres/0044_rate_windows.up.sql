@@ -1,4 +1,3 @@
--- parent: 43 sha256:4117a134f308efc5bd74c7645bee5b077b666e2a2c8871bce83b1d32bd4b9c3d
 -- Repair: none-needed A new table; replicas start counting afresh.
 -- Rate-limit windows, admin lockouts and captcha challenges that replicas
 -- without Redis share; with Redis they live there.

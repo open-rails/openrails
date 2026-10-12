@@ -1,4 +1,3 @@
--- parent: 65 sha256:ba76508cd8dfc4330c0dbf794c325870cd5f7f81aa9ab8e15968c83014e11986
 -- A meter's rate card prices every customer: customer rate overrides go, with
 -- the customer column that scoped them and the revision only they carried.
 -- Every remaining card belongs to a product.

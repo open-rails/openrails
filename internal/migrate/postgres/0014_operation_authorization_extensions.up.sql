@@ -1,4 +1,3 @@
--- parent: 13 sha256:a47f61861f81b8f9e850d65930d625621ab1ad28304ad6d7b4cfd356f09f57ba
 -- Repair: none-needed No authorization has been extended: extended_amount starts
 -- at 0, so every existing authorized_amount equals its opening amount.
 ALTER TABLE billing.operation_authorizations

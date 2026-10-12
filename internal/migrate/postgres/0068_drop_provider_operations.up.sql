@@ -1,4 +1,3 @@
--- parent: 67 sha256:f8429901c74af88f5794886cef10b195af6379bd0f09500213af40dae97d6992
 -- Repair: none-needed Dropped tables refuse no stored row and nothing reads them; an open hold refuses the migration.
 -- Provider operations are deleted: a host charges its own price with a
 -- running charge. An open hold is still a customer's held money, so the

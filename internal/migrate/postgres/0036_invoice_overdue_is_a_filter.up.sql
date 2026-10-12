@@ -1,4 +1,3 @@
--- parent: 35 sha256:b2ea19ed4e55bfa9e6802b6c47149b0a512178cc7fb32d570c32543dc64d71f5
 -- Repair: none-needed Every past_due invoice becomes open before the check narrows: overdue is read from due_at.
 -- An invoice is overdue by its due date, not by a status: past_due goes, and
 -- the partial indexes name the one open status.

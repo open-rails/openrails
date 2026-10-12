@@ -1,4 +1,3 @@
--- parent: 34 sha256:d230349587eb4c95bdc6688e05abbefdbf98e7784e7418b138c80e421f9f8930
 -- The same gateway account declared twice under different labels is billed
 -- by both PSPs. The credential that names the account identifies it: a PSP
 -- whose credential another live PSP on its rail already holds is a duplicate,

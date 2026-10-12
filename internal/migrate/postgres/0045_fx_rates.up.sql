@@ -1,4 +1,3 @@
--- parent: 44 sha256:30e54cfe73c050b71e3a4b4c0ca73afba7b48f572f77b41ba9224fcc6a0ffc0a
 -- Repair: none-needed A new table; the first refresh, or the first quote, fills it.
 -- The FX rates one refresh reads for the whole fleet, which every replica
 -- quotes from.

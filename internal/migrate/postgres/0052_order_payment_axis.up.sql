@@ -1,4 +1,3 @@
--- parent: 51 sha256:4fb29d6824539bcd8b8a3380117ee67723d7d125737f21f41f2bb217cdf0eb7a
 -- An order has two status axes, as Stripe's Order and Shopify's do: its own
 -- (open, processing, complete, canceled, expired) and its payment's, as a
 -- PaymentIntent's (requires_payment_method, requires_action, processing,

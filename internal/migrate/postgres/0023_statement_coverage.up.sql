@@ -1,4 +1,3 @@
--- parent: 22 sha256:09a81dbe64902874020e8d5354747e32cd927f4903bc4a5f19ba1f5bd647d718
 -- A period statement is paid once the invoices billing its charges are. These
 -- find a period's billed charges, and the statements still waiting on other
 -- invoices, so a payment costs only the statements it reaches.

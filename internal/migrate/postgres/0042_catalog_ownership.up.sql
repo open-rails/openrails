@@ -1,4 +1,3 @@
--- parent: 41 sha256:3520284944cff2914942ed9cd2ace776e1efee46ef3d2e33d62576ae24f49eb8
 -- Repair: none-needed Existing products shift their revision up by one so revisions start at 1; existing meters, rate cards and price keys start at 1; no field has an owner until a document or an edit sets it.
 -- Catalog field ownership, as server-side apply: a document (the apply
 -- manager) and individual edits (the edit manager) record which fields they

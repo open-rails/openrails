@@ -1,4 +1,3 @@
--- parent: 4 sha256:3b3a7a0b7b01937cc9e4f15830ae3b4d61c97e6904ac86e59421eb722ada33a1
 -- Purchased credit lots retain one grant per payment, with explicit cash and
 -- merchant promotional funding. Existing manual grants remain unchanged.
 -- Repair: none-needed Existing credit writers never emitted paid_amount provenance.

@@ -1,4 +1,3 @@
--- parent: 31 sha256:8b78c6afcb88533bbcc54eac2a3d380092e969f4ef5a766837cab2685afc5de1
 -- Stored-credential agreements leave the card row. A mandate is one agreement
 -- on one saved card: recurring (one subscription), unscheduled (collection in
 -- one currency) or card_on_file (reuse for one-click buys). It holds the

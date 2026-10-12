@@ -1,4 +1,3 @@
--- parent: 19 sha256:06e79a26e8e962977dad613e8f7f2ea42f648f7bfcbcfd10d63b9a24e8c105a2
 -- Repair: none-needed This migration converts every merchant's per-key windows
 -- into product access and drops the per-key tables and columns; it adds no
 -- constraint over stored rows.

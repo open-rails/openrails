@@ -1,4 +1,3 @@
--- parent: 25 sha256:afac32d8e54ecafbfa0fcf4f9257c361584a6bf83584d699d294fc465d771e66
 -- Repair: none-needed The marker is cleared on every row that is not canceled
 -- before its check; a stored pair of a live subscription and a stop-pending one
 -- for the same customer and product is a customer billed twice, and the

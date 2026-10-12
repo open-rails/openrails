@@ -1,4 +1,3 @@
--- parent: 29 sha256:4061d333f16c182fd4ea7fb88079493a88124e58fdcdf4060d13c42738bdde09
 -- Repair: none-needed Each new CHECK only widens the old one's values, so every stored row satisfies it.
 -- A card an account updater reissued under another brand is recorded as such:
 -- it voids the card's stored-credential agreements. Stripe's card updater is a

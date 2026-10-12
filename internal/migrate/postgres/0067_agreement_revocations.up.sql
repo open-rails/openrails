@@ -1,4 +1,3 @@
--- parent: 66 sha256:399b5a0380bb3c82886b57acb3fe3475765b8652066347cfaaed93de0d438ab3
 -- Repair: none-needed Pre-launch: customer.payment_authority_revoked goes with its route, its few events with it; the new column is null for every row.
 -- A customer revokes its charge agreements one at a time: mandate.revoked
 -- names the agreement, and a revoked collection agreement closes the

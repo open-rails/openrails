@@ -1,4 +1,3 @@
--- parent: 11 sha256:c5e2703d3c5bd79f7e3f6a1b5d73633540c89c3fadd1e6a3886a37f4e4e7f03f
 -- Repair: preserve Existing observation cursors are never promoted to applied coverage.
 -- Observation cursors from earlier versions (including advisory-only pulls)
 -- cannot attest that the local financial mirror caught up. Keep them intact;

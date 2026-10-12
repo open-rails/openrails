@@ -1,4 +1,3 @@
--- parent: 37 sha256:05bfe0cd6102160d3456cf13d6898b9ba9822289b699bd2632c34b50c235952b
 -- Orders (#1168): a customer's purchase of priced lines with frozen totals,
 -- paid through checkout attempts; ownership claims guard concurrent buys;
 -- one gapless document sequence per merchant numbers what is paid.

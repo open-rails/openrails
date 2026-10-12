@@ -1,4 +1,3 @@
--- parent: 2 sha256:c04092234322616c50b0c9fe7f3d3b6e0b85adc9372507f9ae95eb907641b9ac
 -- Repair: none-needed The existing live (merchant_id,key) uniqueness and financial tuple uniqueness imply the weaker product/key indexes. New price revisions are backfilled below before their constraints; product revisions start at the valid default zero.
 -- A price key names a version chain within its product, not the whole merchant.
 DROP INDEX billing.prices_key_key;

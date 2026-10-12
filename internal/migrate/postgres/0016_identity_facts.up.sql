@@ -1,4 +1,3 @@
--- parent: 15 sha256:ec71d28b334cfc7dfe5aa9721255bcf2dd53c688b37a81cb5b58701d2f1f9b86
 -- Repair: none-needed New nullable columns and an unblocked default preserve every existing row.
 ALTER TABLE billing.customers ADD COLUMN username text;
 ALTER TABLE billing.customers ADD COLUMN blocked boolean DEFAULT false NOT NULL;

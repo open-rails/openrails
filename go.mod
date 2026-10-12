@@ -4,6 +4,7 @@ go 1.26.9
 
 // Frontend dependencies can contain Go files; they are not Go packages.
 ignore ./sdk/billing-ui/node_modules
+
 ignore ./web/checkout/node_modules
 
 require (
@@ -19,7 +20,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/migratekit v1.10.0
+	github.com/open-rails/migratekit v1.11.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.47.0
@@ -117,7 +118,7 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect

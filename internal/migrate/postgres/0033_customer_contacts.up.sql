@@ -1,4 +1,3 @@
--- parent: 32 sha256:d658673718a6d8cd3c4b839579c2a15e0e4c0fcd753afd1cf7f19690166450bf
 -- Repair: none-needed New tables have no rows; the dropped columns leave with their values.
 -- Who a customer is now comes from the host's directory: in process when
 -- embedded, else the copy its directory pushes (SCIM) or a verified token's

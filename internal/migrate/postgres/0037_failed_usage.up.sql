@@ -1,4 +1,3 @@
--- parent: 36 sha256:127cecfe2584035e274ee63cb1f3e988c18f09b7b8a37e8f64f7090d4d63be0d
 -- Repair: none-needed Every existing usage event succeeded and forgave nothing, which the new checks accept; the defaults fill only the existing rows.
 -- Usage that failed is a usage event with outcome failed: what the failure
 -- cost, forgiven up to the customer's grace and charged past it. Its amount is
