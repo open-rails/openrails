@@ -301,6 +301,9 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid billing.Mercha
 // store. Shared by PSP resolution and by custodian-routed webhooks, so both
 // arm from exactly the same row and the same secret names.
 func (s *MerchantsSource) custodianConfig(ctx context.Context, mid billing.MerchantID, custodian merchants.CustodianScope) (*config.ResolvedCustodian, error) {
+	if custodian.Kind == models.CustodianPlatform {
+		return s.service().PlatformCustodianConfig(ctx, mid, custodian.ID)
+	}
 	d, err := custodians.Require(custodian.Kind)
 	if err != nil {
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)

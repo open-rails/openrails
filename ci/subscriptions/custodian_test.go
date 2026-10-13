@@ -25,12 +25,18 @@ import (
 // tokens they convert to, and the detokenizing proxy, which hands each sale
 // to the NMI gateway behind it and records its credential-on-file fields.
 type btFake struct {
-	mu      sync.Mutex
-	seq     int
-	intents map[string]string // id -> card number
-	tokens  map[string]string
-	byKey   map[string]string // idempotency key -> token
-	sales   []btSale
+	mu                     sync.Mutex
+	seq                    int
+	intents                map[string]string // id -> card number
+	applications           map[string]string // token intent -> creating application
+	tokens                 map[string]string
+	byKey                  map[string]string // idempotency key -> token
+	sales                  []btSale
+	tenant, application    string
+	containers             map[string][]string
+	decline                bool
+	failConversion         bool
+	loseConversionResponse bool
 	// gateway charges the detokenized card and answers its transaction id.
 	gateway func(form url.Values, number string) string
 }
@@ -43,7 +49,7 @@ type btSale struct {
 }
 
 func newBTFake(t *testing.T) (*btFake, string) {
-	f := &btFake{intents: map[string]string{}, tokens: map[string]string{}, byKey: map[string]string{}}
+	f := &btFake{intents: map[string]string{}, tokens: map[string]string{}, byKey: map[string]string{}, containers: map[string][]string{}, applications: map[string]string{}}
 	server := httptest.NewServer(f)
 	t.Cleanup(server.Close)
 	return f, server.URL
@@ -56,6 +62,7 @@ func (f *btFake) collect(number string) string {
 	f.seq++
 	id := fmt.Sprintf("ti_%d", f.seq)
 	f.intents[id] = number
+	f.applications[id] = f.application
 	return id
 }
 
@@ -95,11 +102,14 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(http.StatusNotFound, map[string]any{"title": "not found"})
 			return
 		}
-		reply(http.StatusOK, btCard(id, number))
+		card := btCard(id, number)
+		card["tenant_id"], card["created_by"] = f.tenant, f.applications[id]
+		reply(http.StatusOK, card)
 	case r.Method == http.MethodPost && r.URL.Path == "/tokens":
 		var req struct {
-			IntentID    string `json:"token_intent_id"`
-			Deduplicate bool   `json:"deduplicate_token"`
+			IntentID    string   `json:"token_intent_id"`
+			Deduplicate bool     `json:"deduplicate_token"`
+			Containers  []string `json:"containers"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			reply(http.StatusBadRequest, map[string]any{"title": err.Error()})
@@ -110,23 +120,37 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(http.StatusNotFound, map[string]any{"title": "not found"})
 			return
 		}
+		if f.failConversion {
+			reply(http.StatusServiceUnavailable, map[string]any{"title": "conversion temporarily unavailable"})
+			return
+		}
+		card := func(id string) map[string]any {
+			c := btCard(id, number)
+			c["tenant_id"], c["containers"] = f.tenant, f.containers[id]
+			return c
+		}
 		key := r.Header.Get("BT-IDEMPOTENCY-KEY")
 		if id, ok := f.byKey[key]; ok && key != "" {
-			reply(http.StatusCreated, btCard(id, number))
+			reply(http.StatusCreated, card(id))
 			return
 		}
 		if req.Deduplicate {
 			for id, held := range f.tokens {
-				if held == number {
-					reply(http.StatusCreated, btCard(id, number))
+				if held == number && strings.Join(f.containers[id], ",") == strings.Join(req.Containers, ",") {
+					reply(http.StatusCreated, card(id))
 					return
 				}
 			}
 		}
 		f.seq++
 		id := fmt.Sprintf("tok_%d", f.seq)
-		f.tokens[id], f.byKey[key] = number, id
-		reply(http.StatusCreated, btCard(id, number))
+		f.tokens[id], f.byKey[key], f.containers[id] = number, id, req.Containers
+		if f.loseConversionResponse {
+			f.loseConversionResponse = false
+			reply(http.StatusServiceUnavailable, map[string]any{"title": "conversion response lost"})
+			return
+		}
+		reply(http.StatusCreated, card(id))
 	case r.Method == http.MethodPost && r.URL.Path == "/proxy":
 		if err := r.ParseForm(); err != nil {
 			reply(http.StatusBadRequest, map[string]any{"proxy_error": map[string]any{"title": err.Error()}})
@@ -143,6 +167,12 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok {
 			reply(http.StatusBadRequest, map[string]any{"proxy_error": map[string]any{"title": "detokenization failed"}})
+			return
+		}
+		if f.decline {
+			f.sales = append(f.sales, btSale{Number: number})
+			w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
+			_, _ = w.Write([]byte("response=2&responsetext=DECLINED&response_code=200"))
 			return
 		}
 		sale := btSale{TransactionID: f.gateway(r.PostForm, number), Number: number, InitiatedBy: r.PostForm.Get("initiated_by"),

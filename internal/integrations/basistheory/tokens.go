@@ -23,6 +23,7 @@ type CardDetails struct {
 // the INTENT and is NOT moved to the token on conversion — CIT-with-CVC
 // charges must reference the intent (`{{ token_intent: … }}`).
 type TokenIntent struct {
+	CreatedBy   string       `json:"created_by"`
 	ID          string       `json:"id"`
 	TenantID    string       `json:"tenant_id"`
 	Type        string       `json:"type"`
@@ -34,6 +35,7 @@ type TokenIntent struct {
 
 // CardToken is a durable stored card token (container /pci/high/).
 type CardToken struct {
+	Containers  []string     `json:"containers"`
 	ID          string       `json:"id"`
 	TenantID    string       `json:"tenant_id"`
 	Type        string       `json:"type"`
@@ -84,6 +86,8 @@ func (c *Client) GetTokenIntent(ctx context.Context, id string) (*TokenIntent, e
 
 // ConvertOpts controls intent -> durable-token conversion.
 type ConvertOpts struct {
+	// Container is fixed by the server for platform custody.
+	Container string
 	// IdempotencyKey derives from the durable intent row so a replay converts
 	// once.
 	IdempotencyKey string
@@ -103,6 +107,9 @@ func (c *Client) ConvertTokenIntent(ctx context.Context, intentID string, opts C
 		return nil, errors.New("basistheory: token intent id is required")
 	}
 	req := map[string]any{"token_intent_id": intentID}
+	if opts.Container != "" {
+		req["containers"] = []string{opts.Container}
+	}
 	if opts.Deduplicate {
 		req["deduplicate_token"] = true
 	}

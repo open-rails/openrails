@@ -7,8 +7,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
@@ -136,7 +139,7 @@ func (s *OrderAttemptService) Route(ctx context.Context, in RoutingInput) (*Rout
 			Policy:     models.PSPRoutingPolicyExplicit,
 			Candidates: []RoutingCandidate{{Selector: target.PSP, Rail: target.Rail, PSPID: targetPSPID(target)}},
 		}
-		providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target))
+		providerConfig, err := s.routingConfig(ctx, target)
 		if err != nil {
 			decision.Target = railTarget{}
 			if errors.Is(err, railresolve.ErrRailNotArmed) {
@@ -189,6 +192,33 @@ func targetAccountID(target railTarget) string {
 		return ""
 	}
 	return target.Scope.AccountID
+}
+
+// A gateway can offer an existing merchant-held card or a new platform card.
+// This is only an availability check: submission and execution resolve the
+// chosen instrument's exact custody, never fall back to another vault.
+func (s *OrderAttemptService) routingConfig(ctx context.Context, target railTarget) (*config.ResolvedPSP, error) {
+	source := s.purchaseService.railSource()
+	cfg, err := source.RailConfig(ctx, target.Rail, targetAccountID(target))
+	if err == nil || target.Rail != string(models.RailNMI) {
+		return cfg, err
+	}
+	svc := merchants.Of(s.db)
+	if svc == nil {
+		return nil, err
+	}
+	mid, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	platform, platformErr := svc.PlatformCardCustodian(ctx, mid)
+	if platformErr != nil {
+		return nil, platformErr
+	}
+	if platform == nil {
+		return nil, err
+	}
+	return source.RailConfig(db.WithCustodianID(ctx, platform.ID), target.Rail, targetAccountID(target))
 }
 
 func targetPSPID(target railTarget) uuid.UUID {
@@ -302,7 +332,7 @@ func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets ord
 			return skipped, models.PSPRoutingSkipResolveFailed
 		}
 	}
-	providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target))
+	providerConfig, err := s.routingConfig(ctx, target)
 	if err != nil {
 		if errors.Is(err, railresolve.ErrRailNotArmed) {
 			return target, models.PSPRoutingSkipNotArmed

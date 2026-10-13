@@ -223,3 +223,39 @@ func TestDecodeNMISalePayload(t *testing.T) {
 	require.Len(t, ref, len(id.String())+len("_e2e_")+8)
 	require.NotEqual(t, ref, NMISaleOrderReference(id, "run-2"))
 }
+
+func TestPlatformOrderSaleKeepsItsCustodianAddress(t *testing.T) {
+	t.Parallel()
+	psp, custodian := uuid.New(), uuid.New()
+	payload := NMISalePayload{OrderID: uuid.New(), OrderAttemptID: uuid.New(), PaymentID: uuid.New(), PaymentMethodID: uuid.New(),
+		UserID: uuid.NewString(), Provider: "nmi", Amount: 1_000_000, ListAmount: 1_000_000, Currency: "USD",
+		AcceptedAt: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), RequestFingerprint: strings.Repeat("ab", 32),
+		NewCard: true, PurchaseScoped: true, Token: "ti_collected",
+		Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: models.CustodianPlatform, CustodianID: &custodian}}
+	for _, scenario := range []string{"matching", "missing", "different", "recurring", "stripe"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := payload
+			in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), IntentType: TypeNMISale, Rail: "nmi", PspID: &psp, CustodianID: &custodian}
+			switch scenario {
+			case "missing":
+				in.CustodianID = nil
+			case "different":
+				other := uuid.New()
+				in.CustodianID = &other
+			case "recurring":
+				p.Recurring = true
+			case "stripe":
+				in.Rail, p.Provider = "stripe", "stripe"
+			}
+			var err error
+			in.Payload, err = json.Marshal(p)
+			require.NoError(t, err)
+			_, err = DecodeNMISalePayload(in)
+			if scenario == "matching" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}

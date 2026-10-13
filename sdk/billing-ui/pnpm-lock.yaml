@@ -11,6 +11,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.7.0
         version: 1.9.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@basis-theory/web-elements':
+        specifier: ^3.2.0
+        version: 3.2.0
       '@hugeicons/core-free-icons':
         specifier: ^4.2.3
         version: 4.2.3
@@ -265,6 +268,9 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@basis-theory/web-elements@3.2.0':
+    resolution: {integrity: sha512-vQrg0hfEEDtvCgED5bMMSBwfhaeuivWXzG1s+IRqf8RR2zlC6JUXx7iYzwAI058ZqqToFOzb4YNjQkcwCDSxpQ==}
 
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
@@ -2905,6 +2911,8 @@ snapshots:
       use-sync-external-store: 1.7.0(react@19.2.8)
     optionalDependencies:
       '@types/react': 19.2.18
+
+  '@basis-theory/web-elements@3.2.0': {}
 
   '@bramus/specificity@2.4.2':
     dependencies:
