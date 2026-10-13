@@ -551,10 +551,10 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
                 VALUES ($1, 'pull.charge.missing', $2, 'high', 'reconcile_required', $3, $4, 'pull')`),
 				w.client[embedded].MerchantID().UUID(), transaction, w.psp[rail].UUID(), rail)
 			require.NoError(t, err)
-			// The financial finding deliberately keeps recovery incomplete, so
-			// this job must retry even though the provider observation succeeds.
-			// Count completed, error-free observations that actually read charges;
-			// an arbitrary failed pull cannot satisfy this regression.
+			// The financial finding deliberately holds recovery; the pass that
+			// observes it still completes, as no retry can settle it. Count
+			// completed, error-free observations that actually read charges; an
+			// arbitrary failed pull cannot satisfy this regression.
 			completedObservations := func() (int, error) {
 				var n int
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.maintenance_runs
@@ -566,7 +566,7 @@ func TestPullLeavesAChargeToItsExecutingOperation(t *testing.T) {
 			}
 			before, err := completedObservations()
 			require.NoError(t, err)
-			pullNow(rivertype.JobStateRetryable)
+			pullNow(rivertype.JobStateCompleted)
 			require.Eventually(t, func() bool {
 				n, err := completedObservations()
 				return err == nil && n > before

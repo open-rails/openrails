@@ -37,8 +37,8 @@ func TestLegacyNMIDrift(t *testing.T) {
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {
 			row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
-			return err == nil && row.State == rivertype.JobStateRetryable
-		}, 20*time.Second, 20*time.Millisecond, "observed drift keeps financial recovery incomplete")
+			return err == nil && row.State == rivertype.JobStateCompleted && len(row.Errors) == 0
+		}, 20*time.Second, 20*time.Millisecond, "observed drift holds financial recovery, not the completed pass")
 	}
 
 	w.nmi.EditSchedule(amount.railSub, func(s *nmimock.Schedule) { s.Amount = "14.99" })

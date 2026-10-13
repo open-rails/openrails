@@ -293,8 +293,8 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			require.NoError(t, err)
 			require.Eventually(t, func() bool {
 				row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
-				return err == nil && row.State == rivertype.JobStateRetryable
-			}, 30*time.Second, 20*time.Millisecond, "the deliberately unresolved book cannot complete provider recovery")
+				return err == nil && row.State == rivertype.JobStateCompleted && len(row.Errors) == 0
+			}, 30*time.Second, 20*time.Millisecond, "the pass completes: the unresolved book awaits an operator, not a retry")
 			w.settle()
 			require.NoError(t, w.pool.QueryRow(t.Context(), watermark, mid.UUID(), psp.UUID()).Scan(&completedAfter))
 			require.Equal(t, completedBefore, completedAfter, "incomplete financial history cannot advance completed coverage")

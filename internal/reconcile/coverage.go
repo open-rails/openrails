@@ -53,21 +53,41 @@ func (r *RunResult) PullProofs() PullProofs {
 	return out
 }
 
-// AppliedEventCoverage confirms the financial part of an observed provider
+// AppliedCoverage is the financial verdict on one observed provider window.
+type AppliedCoverage int
+
+const (
+	// CoverageIncomplete: the read failed, aborted or fell short of the
+	// window. Reading it again can complete it.
+	CoverageIncomplete AppliedCoverage = iota
+	// CoverageHeld: the window was read in full, but receipts in it await an
+	// operator (open financial findings). Reading it again changes nothing.
+	CoverageHeld
+	// CoverageApplied: every receipt in the window is in the book.
+	CoverageApplied
+)
+
+// AppliedEventCoverage judges the financial part of an observed provider
 // window. Policy-held lifecycle transitions do not prevent receipt recovery;
 // this does not authorize those transitions or prove provider finality.
-func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Time) bool {
+func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Time) AppliedCoverage {
 	if r == nil || r.Mode != ModeEnforce || r.Summary == nil {
-		return false
+		return CoverageIncomplete
 	}
 	rep := r.Summary.Providers[string(provider)]
-	if rep == nil || rep.Aborted || rep.Error != "" || len(rep.ApplyErrors) != 0 || r.hasUnapplied(string(provider), true) {
-		return false
+	if rep == nil || rep.Aborted || rep.Error != "" || len(rep.ApplyErrors) != 0 {
+		return CoverageIncomplete
 	}
 	cov := rep.Coverage
-	return cov.TransactionsExhaustive && cov.TransactionsPaginatedComplete &&
-		cov.TransactionWindowSince != nil && !cov.TransactionWindowSince.After(since) &&
-		cov.TransactionWindowUntil != nil && !cov.TransactionWindowUntil.Before(until)
+	if !cov.TransactionsExhaustive || !cov.TransactionsPaginatedComplete ||
+		cov.TransactionWindowSince == nil || cov.TransactionWindowSince.After(since) ||
+		cov.TransactionWindowUntil == nil || cov.TransactionWindowUntil.Before(until) {
+		return CoverageIncomplete
+	}
+	if r.hasUnapplied(string(provider), true) {
+		return CoverageHeld
+	}
+	return CoverageApplied
 }
 
 func (r *RunResult) hasUnapplied(provider string, financialOnly bool) bool {

@@ -660,7 +660,7 @@ func (w *world) runRenewals() {
 // refreshProviders runs the normal observation worker after a healthy fixture
 // advances its business clock. It is explicit: outage and ambiguity scenarios
 // must not silently gain a provider refresh whenever they advance time.
-func (w *world) refreshProviders() {
+func (w *world) refreshProviders() *rivertype.JobRow {
 	w.t.Helper()
 	id, _, err := riverjobs.EnqueueMerchantRefresh(w.t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
 	require.NoError(w.t, err)
@@ -672,7 +672,7 @@ func (w *world) refreshProviders() {
 		require.NoError(w.t, err)
 		if job.State == rivertype.JobStateCompleted {
 			w.settle()
-			return
+			return job
 		}
 		if job.State == rivertype.JobStateRetryable || job.State == rivertype.JobStateDiscarded || time.Now().After(deadline) {
 			w.t.Fatalf("provider refresh did not complete: state=%s errors=%v", job.State, job.Errors)

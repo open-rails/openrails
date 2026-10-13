@@ -46,22 +46,29 @@ func TestAppliedEventCoverageSeparatesReceiptsFromHeldLifecycle(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		edit func(*RunResult, *ProviderReport)
-		want bool
+		want AppliedCoverage
 	}{
-		{"complete", func(*RunResult, *ProviderReport) {}, true},
-		{"advisory only", func(r *RunResult, _ *ProviderReport) { r.Mode = ModeAdvisory }, false},
-		{"pagination incomplete", func(_ *RunResult, p *ProviderReport) { p.Coverage.TransactionsPaginatedComplete = false }, false},
-		{"apply failure", func(_ *RunResult, p *ProviderReport) { p.ApplyErrors = []string{"receipt transaction rolled back"} }, false},
+		{"complete", func(*RunResult, *ProviderReport) {}, CoverageApplied},
+		{"advisory only", func(r *RunResult, _ *ProviderReport) { r.Mode = ModeAdvisory }, CoverageIncomplete},
+		{"pagination incomplete", func(_ *RunResult, p *ProviderReport) { p.Coverage.TransactionsPaginatedComplete = false }, CoverageIncomplete},
+		{"apply failure", func(_ *RunResult, p *ProviderReport) { p.ApplyErrors = []string{"receipt transaction rolled back"} }, CoverageIncomplete},
 		{"withheld cancellation", func(r *RunResult, _ *ProviderReport) {
 			r.Findings = []FindingRecord{{Provider: ProviderNMI, Type: FindingLocalActiveRemoteDead, Status: FindingStatusReconcileRequired}}
-		}, true},
+		}, CoverageApplied},
 		{"unresolved receipt", func(r *RunResult, _ *ProviderReport) {
 			r.Findings = []FindingRecord{{Provider: ProviderNMI, Type: FindingChargeMissingLocal, Status: FindingStatusRequiresReview}}
-		}, false},
+		}, CoverageHeld},
+		{"ignored stray schedule", func(r *RunResult, _ *ProviderReport) {
+			r.Findings = []FindingRecord{{Provider: ProviderNMI, Type: FindingRemoteSubMissingLocal, Status: FindingStatusIgnored}}
+		}, CoverageHeld},
+		{"unresolved receipt in a failed read", func(r *RunResult, p *ProviderReport) {
+			r.Findings = []FindingRecord{{Provider: ProviderNMI, Type: FindingChargeMissingLocal, Status: FindingStatusRequiresReview}}
+			p.Error = "page unavailable"
+		}, CoverageIncomplete},
 		{"incomplete window", func(_ *RunResult, p *ProviderReport) {
 			end := until.Add(-time.Second)
 			p.Coverage.TransactionWindowUntil = &end
-		}, false},
+		}, CoverageIncomplete},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			p := &ProviderReport{Coverage: SnapshotCoverage{TransactionsExhaustive: true, TransactionsPaginatedComplete: true, TransactionWindowSince: &since, TransactionWindowUntil: &until}}

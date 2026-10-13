@@ -39,13 +39,13 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT watermark_at FROM billing.psp_refresh_watermarks WHERE merchant_id=$1 AND psp_id=$2 AND event_domain='completed_events'`), mid.UUID(), psp.UUID()).Scan(&completedBefore))
 			refreshHeld := func() {
 				t.Helper()
-				// Ordinary worker, intentionally incomplete financial observation.
+				// Ordinary worker: unresolved money holds recovery; the pass completes.
 				job, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: mid.UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				require.Eventually(t, func() bool {
 					row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
-					return err == nil && row.State == rivertype.JobStateRetryable
-				}, 20*time.Second, 20*time.Millisecond, "unresolved money prevents refresh completion")
+					return err == nil && row.State == rivertype.JobStateCompleted && len(row.Errors) == 0
+				}, 20*time.Second, 20*time.Millisecond, "unresolved money holds recovery without failing the refresh")
 			}
 			var transaction string
 			if recorded {

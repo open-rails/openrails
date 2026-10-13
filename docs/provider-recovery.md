@@ -36,6 +36,11 @@ Observation and application use separate domains in `psp_refresh_watermarks`:
   domain. Fetch failures, incomplete pagination, failed financial writes and
   unresolved receipt identity prevent completion.
 
+Only a failed read fails the refresh job, which then retries. A refresh held
+only by findings an operator must settle completes; the open findings and this
+gate are the signal. A PSP without pull credentials is not read and does not
+make the refresh incomplete; it joins the first refresh after it is armed.
+
 A deliberately withheld cancellation does not prevent financial observation.
 It also does not become permission to cancel: full reconciliation proofs and
 destructive policy remain separate. A confirmed Stripe reversal records its

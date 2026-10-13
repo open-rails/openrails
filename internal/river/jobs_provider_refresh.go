@@ -350,6 +350,8 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"converge_errors":  stats.ConvergeErrors,
 		"lane_errors":      stats.LaneErrors,
 		"gated":            stats.Gated,
+		"held":             stats.Held,
+		"unarmed":          stats.Unarmed,
 	}).Info("Provider Refresh: pass completed")
 	if err != nil {
 		// Merchant connection failed — nothing ran; river retries with backoff.
@@ -360,7 +362,13 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return river.JobSnooze(time.Second)
 	}
 	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors+stats.CCBillErrors > 0 {
-		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d", stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors)
+		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d converge=%d ccbill=%d",
+			stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors, stats.CCBillErrors)
+	}
+	if stats.Held > 0 {
+		// Every read completed; recovery waits on an operator, not a retry.
+		// The open findings and the recovery gate are the signal.
+		logger.WithField("held_psps", stats.Held).Warn("Provider Refresh: financial recovery held until an operator resolves the PSP's open financial findings")
 	}
 	return nil
 }
@@ -393,7 +401,18 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			accountBuilder.AccountIDs = map[reconcile.Provider]string{provider: account.AccountID}
 			armed := accountBuilder.Build(tctx, billing.MerchantID(mid))
 			fetcher, ok := armed.Fetchers[provider]
-			if !ok || armed.Coverage[provider].Binding.ID != account.ID {
+			switch {
+			case !ok && armed.Unavailable[provider]:
+				// Configuration unreadable is not "not armed": read it again.
+				stats.ProviderErrors++
+				continue
+			case !ok:
+				// Not armed (its WARN names the missing secret): nothing to read,
+				// so nothing incomplete. It joins the first pass after arming.
+				stats.Unarmed++
+				logger.WithFields(log.Fields{"psp_id": account.ID, "rail": account.Rail}).Debug("Provider Refresh: PSP not armed; not refreshable")
+				continue
+			case armed.Coverage[provider].Binding.ID != account.ID:
 				if providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) != nil {
 					stats.ProviderErrors++
 				}
@@ -646,7 +665,12 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			return false
 		}
 		if qualifiedRecovery {
-			if !res.AppliedEventCoverage(provider, since, until) {
+			switch res.AppliedEventCoverage(provider, since, until) {
+			case reconcile.CoverageApplied:
+			case reconcile.CoverageHeld:
+				out.Held++
+				return false
+			default:
 				out.ProviderErrors++
 				return false
 			}
@@ -660,11 +684,14 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	if applied {
 		since = until
 	}
-	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0
-	if qualifiedRecovery && !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 {
+	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0 && out.Held == 0
+	if qualifiedRecovery && !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 && out.Held == 0 {
 		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
-		if err != nil || conflicts {
-			out.ProviderErrors++
+		if err != nil {
+			out.WatermarkErrors++
+			log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: read open financial findings failed")
+		} else if conflicts {
+			out.Held++
 		} else {
 			more, err := w.completeRecovery(ctx, mid, pspID, horizon)
 			if err != nil {
@@ -783,6 +810,11 @@ type providerRefreshStats struct {
 	LaneErrors      int
 	// Gated counts passes that observed receipts with lifecycle changes held.
 	Gated int
+	// Held counts PSPs read in full whose financial recovery waits on
+	// operator-actionable findings; Unarmed, PSPs with no pull credentials.
+	// Neither makes the pass incomplete.
+	Held    int
+	Unarmed int
 }
 
 func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
@@ -794,6 +826,7 @@ func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
 	s.UpdatedFindings += r.UpdatedFindings
 	s.WatermarkErrors += r.WatermarkErrors
 	s.ProviderErrors += r.ProviderErrors
+	s.Held += r.Held
 }
 
 type providerRefreshMerchantResult struct {
@@ -809,6 +842,7 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 	r.UpdatedFindings += p.UpdatedFindings
 	r.WatermarkErrors += p.WatermarkErrors
 	r.ProviderErrors += p.ProviderErrors
+	r.Held += p.Held
 	r.Changed = r.Changed || p.Changed
 	if len(p.Proofs) > 0 {
 		if r.Proofs == nil {
@@ -827,6 +861,7 @@ type providerRefreshProviderResult struct {
 	UpdatedFindings int
 	WatermarkErrors int
 	ProviderErrors  int
+	Held            int
 	Changed         bool
 	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs

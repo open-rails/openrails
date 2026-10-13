@@ -38,6 +38,10 @@ type MerchantPullClients struct {
 	// two NMI PSPs an "exhaustive" roster would cancel every subscription of
 	// the unread one.
 	Coverage map[Provider]PSPCoverage
+	// Unavailable marks rails that did not arm because the merchant's
+	// configuration could not be read: a retry may arm them. A rail absent
+	// from Fetchers and from Unavailable is one the merchant has not armed.
+	Unavailable map[Provider]bool
 }
 
 // PSPCoverage is one rail's PSP coverage for a pull pass.
@@ -86,9 +90,10 @@ type MerchantFetcherBuilder struct {
 // already logged) so the remaining rails keep pulling.
 func (b MerchantFetcherBuilder) Build(ctx context.Context, mid billing.MerchantID) MerchantPullClients {
 	out := MerchantPullClients{
-		Fetchers: map[Provider]RailFetcher{},
-		Probers:  map[Provider]SubscriptionProber{},
-		Coverage: map[Provider]PSPCoverage{},
+		Fetchers:    map[Provider]RailFetcher{},
+		Probers:     map[Provider]SubscriptionProber{},
+		Coverage:    map[Provider]PSPCoverage{},
+		Unavailable: map[Provider]bool{},
 	}
 	b.buildNMI(ctx, mid, &out)
 	b.buildCCBill(ctx, mid, &out)
@@ -114,9 +119,14 @@ func (b MerchantFetcherBuilder) environment() string {
 // resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
 // the merchant declares active on the rail versus the one this pass arms from.
 func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid billing.MerchantID, provider Provider, out *MerchantPullClients) (merchants.PSPScope, bool) {
-	scope, ok := b.resolveScopeInner(ctx, mid, provider)
-	if !ok || out == nil {
-		return scope, ok
+	scope, ok, err := b.resolveScopeInner(ctx, mid, provider)
+	if err != nil {
+		b.warnScopeError(ctx, mid, provider, err)
+		out.markUnavailable(provider, err)
+		return merchants.PSPScope{}, false
+	}
+	if !ok {
+		return scope, false
 	}
 	declared := 1
 	if b.Merchants != nil {
@@ -142,30 +152,29 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid bi
 	return scope, true
 }
 
-func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid billing.MerchantID, provider Provider) (merchants.PSPScope, bool) {
+func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid billing.MerchantID, provider Provider) (merchants.PSPScope, bool, error) {
 	if b.Merchants == nil {
-		return merchants.PSPScope{}, false
+		return merchants.PSPScope{}, false, nil
 	}
 	rail := string(provider)
 	if pin := strings.TrimSpace(b.AccountIDs[provider]); pin != "" {
 		scope, ok, err := b.Merchants.PSPScopeByAccountID(ctx, mid, rail, pin)
-		if err != nil {
-			b.warnScopeError(ctx, mid, provider, err)
-			return merchants.PSPScope{}, false
-		}
-		if !ok {
+		if err == nil && !ok {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": rail, "account_id": pin,
 			}).Warn("provider pull: pinned PSP is not declared for this merchant")
 		}
-		return scope, ok
+		return scope, ok, err
 	}
-	scope, ok, err := b.Merchants.PullPSPScope(ctx, mid, rail, b.environment())
-	if err != nil {
-		b.warnScopeError(ctx, mid, provider, err)
-		return merchants.PSPScope{}, false
+	return b.Merchants.PullPSPScope(ctx, mid, rail, b.environment())
+}
+
+// markUnavailable records a rail left unarmed because the merchant's
+// configuration could not be read, never because it is not credentialed.
+func (out *MerchantPullClients) markUnavailable(provider Provider, err error) {
+	if errors.Is(err, merchants.ErrConfigUnavailable) {
+		out.Unavailable[provider] = true
 	}
-	return scope, ok
 }
 
 func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid billing.MerchantID, provider Provider, err error) {
@@ -201,9 +210,10 @@ func (b MerchantFetcherBuilder) secret(ctx context.Context, mid billing.Merchant
 
 // requireSecret is secret, failing loud: absence or a backend failure logs one
 // WARN naming merchant, rail and the secret name.
-func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool) {
+func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string, out *MerchantPullClients) (string, bool) {
 	value, found, err := b.secret(ctx, mid, scope, key)
 	if err != nil {
+		out.markUnavailable(Provider(scope.Rail), err)
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
@@ -222,7 +232,7 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.M
 
 func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderNMI, out); ok {
-		if _, ok := b.requireSecret(ctx, mid, scope, "security_key"); !ok {
+		if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 			return // fail closed (logged): a declared account never falls back across planes
 		}
 		factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: railresolve.NMIEndpoints{QueryURL: b.Endpoints.NMIQueryURL, V5BaseURL: b.Endpoints.NMIV5BaseURL}}
@@ -231,6 +241,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 		}
 		client, err := factory.Client(ctx, b.Merchants.Secrets(), mid, scope)
 		if err != nil {
+			out.markUnavailable(ProviderNMI, err)
 			// Fail closed: a declared account never falls back across planes.
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": "nmi",
@@ -253,11 +264,11 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 			}).Warn("provider pull: rail not armed — CCBill account_id must be clientAccnum-clientSubacc (e.g. 999999-0000)")
 			return
 		}
-		username, ok := b.requireSecret(ctx, mid, scope, "datalink_username")
+		username, ok := b.requireSecret(ctx, mid, scope, "datalink_username", out)
 		if !ok {
 			return
 		}
-		password, ok := b.requireSecret(ctx, mid, scope, "datalink_password")
+		password, ok := b.requireSecret(ctx, mid, scope, "datalink_password", out)
 		if !ok {
 			return
 		}
@@ -281,7 +292,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 
 func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderStripe, out); ok {
-		secretKey, ok := b.requireSecret(ctx, mid, scope, "secret_key")
+		secretKey, ok := b.requireSecret(ctx, mid, scope, "secret_key", out)
 		if !ok {
 			return
 		}
