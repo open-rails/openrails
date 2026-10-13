@@ -301,7 +301,12 @@ export function OrderPayment({
     payment: () => Promise<OrderPaymentInput>,
     preserveUnconfirmed = false
   ): Promise<boolean> => {
-    if (busy || order.collection_owner !== "engine") return false
+    if (
+      busy ||
+      order.collection_owner !== "engine" ||
+      (pendingSaved && !preserveUnconfirmed)
+    )
+      return false
     setBusy(true)
     setError(undefined)
     try {
@@ -469,7 +474,7 @@ export function OrderPayment({
         </form>
       ) : (
         <div className="grid gap-4">
-          {walletPsp && walletAmount ? (
+          {!pendingSaved && walletPsp && walletAmount ? (
             <StripeWallets
               publishableKey={walletPsp.config!.publishable_key!}
               amount={walletAmount}
@@ -480,7 +485,7 @@ export function OrderPayment({
               }
             />
           ) : null}
-          {walletShown && walletPsp && walletAmount ? (
+          {!pendingSaved && walletShown && walletPsp && walletAmount ? (
             <p className="text-center text-[13px] text-muted-foreground">
               or pay another way
             </p>
@@ -608,7 +613,7 @@ export function OrderPayment({
               <PayButton
                 label={`${payLabel} with ${item.display_name}`}
                 processing={busy}
-                disabled={!open}
+                disabled={!open || !!pendingSaved}
               />
             </form>
           ))}
@@ -622,7 +627,7 @@ export function OrderPayment({
                   key={item.psp_id}
                   type="button"
                   className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open}
+                  disabled={busy || !open || !!pendingSaved}
                   onClick={() =>
                     void pay(async () => ({
                       return_url: returnUrl ?? window.location.href,
@@ -642,7 +647,7 @@ export function OrderPayment({
                   key={token.symbol}
                   type="button"
                   className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open}
+                  disabled={busy || !open || !!pendingSaved}
                   onClick={() =>
                     void pay(async () => ({
                       token_symbol: token.symbol,
