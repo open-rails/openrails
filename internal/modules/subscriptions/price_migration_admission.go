@@ -96,42 +96,6 @@ func (s *PriceMigrationService) admitMigration(ctx context.Context, request bill
 	return &action, nil, nil
 }
 
-func (s *PriceMigrationService) admitMigrationCancel(ctx context.Context, id billing.PriceMigrationID, units int) (*destructive.Action, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	actor, err := destructive.ActorFromContext(ctx)
-	if err != nil && units > 0 {
-		return nil, err
-	}
-	target := "price-migration-cancel/" + id.String()
-	digest := destructive.Digest(struct{ ID billing.PriceMigrationID }{id})
-	if s.admissions == nil {
-		if units == 0 {
-			return nil, nil
-		}
-		return nil, errors.New("price migration destructive admission is not wired")
-	}
-	action, found, err := s.admissions.FindPending(ctx, mid.UUID(), target, actor, digest)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		if units == 0 {
-			return nil, nil
-		}
-		action, err = s.admissions.Admit(ctx, destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CatalogChange, Target: target, Key: target, Digest: digest, Units: int64(units), Actor: actor})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if _, err = s.admissions.Start(ctx, mid.UUID(), action.ID); err != nil {
-		return nil, err
-	}
-	return &action, nil
-}
-
 func (s *PriceMigrationService) finishSettledMigration(ctx context.Context, id billing.PriceMigrationID) error {
 	if s.admissions == nil {
 		return nil
@@ -155,7 +119,7 @@ func (s *PriceMigrationService) finishSettledMigration(ctx context.Context, id b
 	if action.State == destructive.StateSucceeded || action.State == destructive.StateNoEffect {
 		return nil
 	}
-	if action.Result != fmt.Sprintf("migration:%s:prepared", id) {
+	if action.Result != fmt.Sprintf("migration:%s:prepared", id.UUID()) {
 		return nil
 	}
 	if row.Scheduled > 0 || row.Blocked > 0 {

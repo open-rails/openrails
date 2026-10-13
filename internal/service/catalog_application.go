@@ -61,7 +61,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		if prepared.replay != nil {
 			return prepared.replay, nil
 		}
-		receipt, err := catalogCommandOnce(ctx, s, "catalog/application", params, origin, false, applicationAdmissionPlan(params, prepared, force), func(ctx context.Context, s *Service) (*billing.CatalogApplicationReceipt, error) {
+		receipt, err := catalogCommandOnce(ctx, s, "catalog/application", params, origin, applicationAdmissionPlan(params, prepared, force), func(ctx context.Context, s *Service) (*billing.CatalogApplicationReceipt, error) {
 			return s.commitCatalogApplication(ctx, params, digest, prepared, force)
 		})
 		if !errors.Is(err, errCatalogSnapshotMoved) {

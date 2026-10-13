@@ -14,7 +14,7 @@ import (
 // EnsureProduct creates the full declaration only if absent. Reuse never
 // updates labels, tier entitlements or lifecycle; those are explicit updates.
 func (s *Service) EnsureProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
-	return catalogCommand(ctx, s, "product/"+req.Key, req, "", false, createProductPlan(req), func(ctx context.Context, s *Service) (*billing.Product, error) {
+	return catalogCommand(ctx, s, "product/"+req.Key, req, "", createProductPlan(req), func(ctx context.Context, s *Service) (*billing.Product, error) {
 		return s.ensureProductCommand(ctx, req)
 	})
 }

@@ -35,8 +35,11 @@ They are implementation constants rather than merchant configuration.
 
 Creating a new catalog object is additive and spends nothing; changing, archiving
 or removing an existing product, price or meter's billable, access or routing
-terms is counted per object. A file applied with `openrails catalog apply` is
-admitted on the merchant's separate autonomous budget rather than an actor's.
+terms is counted per object. A catalog edit that fails before it commits spends
+nothing, even after a provider call. Canceling a price migration keeps
+subscriptions where they are, so it spends nothing and no incident holds it. A
+file applied with `openrails catalog apply` is admitted on the merchant's
+separate autonomous budget rather than an actor's.
 
 ## Review and clear
 

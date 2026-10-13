@@ -122,3 +122,52 @@ func TestDestructiveConfigurationLostReplyReusesAdmission(t *testing.T) {
 	require.EqualValues(t, 1, count, "lost response replay uses the original logical command")
 	require.Zero(t, pending, "durable readback proves that write succeeded")
 }
+
+// Canceling a price migration keeps subscriptions where they are: it spends
+// no unit beyond the migration's own, and a hold on its actor does not refuse it.
+func TestDestructivePriceMigrationCancelSpendsNothing(t *testing.T) {
+	w := newWorld(t)
+	client, staff := w.client[embedded], catalogEditor(t)
+	from := w.membership("content:cancel-move", 10_000_000)
+	hours := monthHours
+	to, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: from.ProductID, Key: "cancel-move-next", UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
+	require.NoError(t, err)
+	var subs []billing.SubscriptionID
+	for range 2 {
+		c := w.newCustomer()
+		subs = append(subs, c.subscribe(embedded, "stripe", from.ID.String(), "content:cancel-move", c.saveCard("stripe", visa)))
+	}
+	migration, err := client.CreatePriceMigration(staff, billing.CreatePriceMigrationParams{FromPriceID: from.ID, ToPriceID: to.ID, EffectiveAt: w.clock.Now().Add(45 * day).UTC().Truncate(time.Second)})
+	require.NoError(t, err)
+	require.Equal(t, 2, migration.Scheduled)
+	actorUnits := func() (actions, units int64) {
+		t.Helper()
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*),coalesce(sum(units),0) FROM "+w.schema+".destructive_actions WHERE actor_id='catalog-editor'").Scan(&actions, &units))
+		return actions, units
+	}
+	_, moved := actorUnits()
+	require.EqualValues(t, 3, moved, "two moves and the source price it archives")
+
+	product, err := client.CreateProduct(staff, billing.CreateProductParams{Key: "cancel-move-spend", DisplayName: "Spend"})
+	require.NoError(t, err)
+	for i := range 5 - moved {
+		_, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{fmt.Sprintf("spend:%d", i)})})
+		require.NoError(t, err)
+	}
+	_, err = client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"spend:held"})})
+	require.Equal(t, "rate_limit_exceeded", codeOf(err), "the migration and two edits spent the actor's five")
+
+	canceled, err := client.CancelPriceMigration(staff, migration.ID)
+	require.NoError(t, err, "a held actor may still cancel its migration")
+	require.Equal(t, 2, canceled.Canceled)
+	for _, id := range subs {
+		sub := w.subscription(embedded, id)
+		require.Equal(t, from.ID, sub.PriceID)
+		require.Nil(t, sub.ScheduledChange)
+	}
+	actions, units := actorUnits()
+	require.EqualValues(t, [2]int64{3, 5}, [2]int64{actions, units}, "the migration and two edits; the cancel recorded nothing")
+	var pending int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+w.schema+".destructive_actions WHERE actor_id='catalog-editor' AND state IN ('reserved','started','uncertain')").Scan(&pending))
+	require.Zero(t, pending, "with no move left, the migration's admission settles")
+}

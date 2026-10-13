@@ -751,7 +751,9 @@ func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string
 // Cancel cancels the migration's still-scheduled moves; applied and blocked
 // ones stay, and an archived source stays archived. A Stripe subscription
 // already carrying the move as a Stripe schedule is listed in
-// RailReleaseRequired: that schedule is not released here.
+// RailReleaseRequired: that schedule is not released here. Canceling keeps
+// subscriptions where they are, so it spends no destructive unit and no hold
+// refuses it. The migration's own admission settles once no move is pending.
 func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigrationID) (*billing.PriceMigrationCancel, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -763,18 +765,6 @@ func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigr
 	rows, err := s.db.Gen(ctx).ListScheduledMigrationChanges(ctx, gen.ListScheduledMigrationChangesParams{MerchantID: mid.UUID(), PriceMigrationID: id.UUID()})
 	if err != nil {
 		return nil, err
-	}
-	action, err := s.admitMigrationCancel(ctx, id, len(rows))
-	if err != nil {
-		return nil, err
-	}
-	completed := false
-	if action != nil {
-		defer func() {
-			if !completed {
-				_ = s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "")
-			}
-		}()
 	}
 	if _, err = s.db.Gen(ctx).CancelPriceMigration(ctx, gen.CancelPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()}); err != nil {
 		return nil, err
@@ -809,11 +799,5 @@ func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigr
 		return nil, err
 	}
 	out.PriceMigration = *migration
-	if action != nil {
-		if err = s.finishMigrationAdmission(ctx, *action, destructive.OutcomeSucceeded, id.String()); err != nil {
-			return nil, err
-		}
-	}
-	completed = true
 	return out, nil
 }

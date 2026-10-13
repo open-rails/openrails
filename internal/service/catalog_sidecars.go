@@ -91,7 +91,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 	_, err := catalogCommand(ctx, s, "catalog/billing", struct {
 		Desired SyncCatalogSidecarsRequest
 		Options CatalogMutationOptions
-	}{desired, opts}, "", false, sidecarPlan(desired, opts), func(ctx context.Context, s *Service) (struct{}, error) {
+	}{desired, opts}, "", sidecarPlan(desired, opts), func(ctx context.Context, s *Service) (struct{}, error) {
 		return struct{}{}, s.syncCatalogSidecarsCommand(ctx, desired, opts)
 	})
 	return err

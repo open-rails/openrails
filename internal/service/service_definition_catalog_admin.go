@@ -125,7 +125,7 @@ func (s *Service) HydratePrices(ctx context.Context, products []billing.Product)
 func (s *Service) ActivateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	archived := false
 	req := UpdateProductRequest{Archived: &archived}
-	return catalogCommand(ctx, s, "product/"+id.String(), req, "", false, productEditPlan(id, req), func(ctx context.Context, s *Service) (*billing.Product, error) {
+	return catalogCommand(ctx, s, "product/"+id.String(), req, "", productEditPlan(id, req), func(ctx context.Context, s *Service) (*billing.Product, error) {
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 			return scoped.activateProduct(ctx, id)
 		})
@@ -172,7 +172,7 @@ func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*b
 func (s *Service) DeactivateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	archived := true
 	req := UpdateProductRequest{Archived: &archived}
-	return catalogCommand(ctx, s, "product/"+id.String(), req, "", false, productEditPlan(id, req), func(ctx context.Context, s *Service) (*billing.Product, error) {
+	return catalogCommand(ctx, s, "product/"+id.String(), req, "", productEditPlan(id, req), func(ctx context.Context, s *Service) (*billing.Product, error) {
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 			return scoped.deactivateProduct(ctx, id)
 		})
@@ -326,7 +326,7 @@ func (s *Service) propagatePriceActiveToStripeCommitted(ctx context.Context, pri
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
 func (s *Service) ActivatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
-	return catalogCommand(ctx, s, "price/"+id.String(), struct{ Archived bool }{false}, "", false, func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
+	return catalogCommand(ctx, s, "price/"+id.String(), struct{ Archived bool }{false}, "", func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
 		archived := false
 		return priceEditPlan(id, UpdatePriceRequest{Archived: &archived})(ctx, s, state)
 	}, func(ctx context.Context, s *Service) (*billing.Price, error) { return s.activatePriceCommand(ctx, id) })
@@ -408,7 +408,7 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
 func (s *Service) DeactivatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
-	return catalogCommand(ctx, s, "price/"+id.String(), struct{ Archived bool }{true}, "", false, func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
+	return catalogCommand(ctx, s, "price/"+id.String(), struct{ Archived bool }{true}, "", func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
 		archived := true
 		return priceEditPlan(id, UpdatePriceRequest{Archived: &archived})(ctx, s, state)
 	}, func(ctx context.Context, s *Service) (*billing.Price, error) {

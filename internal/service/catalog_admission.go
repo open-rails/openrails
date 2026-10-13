@@ -25,13 +25,10 @@ import (
 
 type catalogAdmissionKey struct{}
 type catalogAdmission struct {
-	before  catalogState
-	targets map[catalogObject]bool
-	action  *destructive.Action
-	// unstarted: refused before its write ran, so no provider call was made.
-	unstarted bool
-	finished  bool
-	external  bool
+	before   catalogState
+	targets  map[catalogObject]bool
+	action   *destructive.Action
+	finished bool
 }
 
 type catalogClassification func(context.Context, *Service, catalogState) ([]catalogObject, error)
@@ -41,9 +38,9 @@ type catalogClassification func(context.Context, *Service, catalogState) ([]cata
 // rechecks the admitted targets and its actual changed targets; nested effects
 // reuse this admission instead of spending another unit. A concurrent edit
 // that moves the plan releases the admission as no-effect and plans again.
-func catalogCommand[T any](ctx context.Context, s *Service, target string, terms any, origin string, external bool, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
+func catalogCommand[T any](ctx context.Context, s *Service, target string, terms any, origin string, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
 	for attempt := 1; ; attempt++ {
-		out, err = catalogCommandOnce(ctx, s, target, terms, origin, external, plan, write)
+		out, err = catalogCommandOnce(ctx, s, target, terms, origin, plan, write)
 		if !errors.Is(err, errCatalogSnapshotMoved) {
 			return out, err
 		}
@@ -53,7 +50,7 @@ func catalogCommand[T any](ctx context.Context, s *Service, target string, terms
 	}
 }
 
-func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, terms any, origin string, external bool, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
+func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, terms any, origin string, plan catalogClassification, write func(context.Context, *Service) (T, error)) (out T, err error) {
 	if _, ok := ctx.Value(catalogAdmissionKey{}).(*catalogAdmission); ok {
 		return write(ctx, s)
 	}
@@ -77,7 +74,7 @@ func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, t
 		for _, obj := range objects {
 			targets[obj] = true
 		}
-		return &catalogAdmission{before: before, targets: targets, external: external}, nil
+		return &catalogAdmission{before: before, targets: targets}, nil
 	})
 	if err != nil {
 		return out, err
@@ -134,13 +131,11 @@ func catalogCommandOnce[T any](ctx context.Context, s *Service, target string, t
 	if scope.action != nil && !scope.finished {
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		// A local catalog effect commits only with its FinishTx, so an unfinished
-		// local command changed nothing; a provider call may have.
-		outcome := destructive.OutcomeUncertain
-		if !scope.external || scope.unstarted {
-			outcome = destructive.OutcomeNoEffect
-		}
-		err = errors.Join(err, s.rt.DestructiveAdmissions.Finish(finish, mid.UUID(), scope.action.ID, outcome, ""))
+		// The counted effect is the catalog commit, which carries its FinishTx;
+		// a provider call before it only finds or creates an unlinked remote
+		// object. An unfinished command changed nothing and releases its unit.
+		// A commit whose reply was lost already recorded success, which stands.
+		err = errors.Join(err, s.rt.DestructiveAdmissions.Finish(finish, mid.UUID(), scope.action.ID, destructive.OutcomeNoEffect, ""))
 	}
 	return out, err
 }

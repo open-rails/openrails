@@ -79,7 +79,6 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 			return err
 		}
 		if admission != nil && !sameCatalogTargets(admission, scoped.catalogBefore) {
-			admission.unstarted = true
 			return errCatalogSnapshotMoved
 		}
 		var callErr error
@@ -117,7 +116,7 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		}
 		if admission != nil && admission.action != nil {
 			outcome := destructive.OutcomeSucceeded
-			if len(affected) == 0 && !admission.external {
+			if len(affected) == 0 {
 				outcome = destructive.OutcomeNoEffect
 			}
 			if err := s.rt.DestructiveAdmissions.FinishTx(ctx, tx, mid.UUID(), admission.action.ID, outcome, ""); err != nil {
