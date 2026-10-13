@@ -124,7 +124,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 
 				// A restored merchant stays readonly until the operator arms its one
 				// live copy, the source being stopped for good.
-				out, err = operator(target, "--test-mode", "sandbox", "merchant", "arm", "--merchant", "id:"+mid.String(), "--by", "e2e handoff")
+				out, err = operator(target, "merchant", "arm", "--merchant", "id:"+mid.String(), "--by", "e2e handoff")
 				require.NoError(t, err, out)
 
 				// Re-enter provider credentials through the normal constructor only
