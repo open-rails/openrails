@@ -1,17 +1,15 @@
 DROP TABLE billing.document_sequences;
 
-ALTER TABLE billing.orders DROP CONSTRAINT orders_number_check, DROP CONSTRAINT orders_complete_check;
-ALTER TABLE billing.orders ALTER COLUMN number TYPE bigint USING CASE WHEN number ~ '^[0-9]{1,18}$' THEN number::bigint END;
-
 CREATE SEQUENCE billing.order_number_seq AS bigint START 1001 CACHE 64;
 COMMENT ON SEQUENCE billing.order_number_seq IS 'Source of orders.number, one per schema, starting at 1001. A number is taken when an order completes; nextval never blocks and is not rolled back, so numbers may skip or arrive out of order. Unique per merchant by orders_number_key. A restore raises it past the restored numbers.';
-SELECT setval('billing.order_number_seq'::regclass, GREATEST(1000, COALESCE((SELECT max(number) FROM billing.orders), 0)));
--- Completed orders whose old number was not numeric are numbered now, in completion order.
-UPDATE billing.orders o SET number = n.number
-FROM (SELECT merchant_id, id, nextval('billing.order_number_seq'::regclass) AS number
-      FROM (SELECT merchant_id, id FROM billing.orders WHERE status = 'complete' AND number IS NULL ORDER BY completed_at, id) c) n
-WHERE o.merchant_id = n.merchant_id AND o.id = n.id;
+SELECT setval('billing.order_number_seq'::regclass, GREATEST(1000, COALESCE((SELECT max(number::bigint) FROM billing.orders WHERE number ~ '^[0-9]{1,18}$'), 0)));
 
+-- A completed order whose old number was not numeric takes the next one.
+ALTER TABLE billing.orders DROP CONSTRAINT orders_number_check, DROP CONSTRAINT orders_complete_check;
+ALTER TABLE billing.orders ALTER COLUMN number TYPE bigint USING CASE
+    WHEN number IS NULL THEN NULL
+    WHEN number ~ '^[0-9]{1,18}$' THEN number::bigint
+    ELSE nextval('billing.order_number_seq'::regclass) END;
 ALTER TABLE billing.orders
     ADD CONSTRAINT orders_number_check CHECK (number >= 1),
     ADD CONSTRAINT orders_complete_check CHECK ((status = 'complete') = (number IS NOT NULL AND completed_at IS NOT NULL));

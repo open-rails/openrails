@@ -397,7 +397,7 @@ func TestDestructiveAdmissionActivityThresholdPlan(t *testing.T) {
  FROM billing.customers c CROSS JOIN generate_series(1,2)n WHERE c.merchant_id=$1
 ), orders AS (
  INSERT INTO billing.orders(merchant_id,id,customer_id,origin,status,payment_status,currency,total,number,payment_id,expires_at,completed_at)
- SELECT $1,order_id,customer_id,'merchant','complete','succeeded','USD',1000000,order_id::text,payment_id,paid_at,paid_at FROM bills
+ SELECT $1,order_id,customer_id,'merchant','complete','succeeded','USD',1000000,(row_number() OVER ()),payment_id,paid_at,paid_at FROM bills
 )
 INSERT INTO billing.payments(merchant_id,id,customer_id,order_id,channel,transaction_id,amount,list_amount,currency,status,purchased_at)
 SELECT $1,payment_id,customer_id,order_id,'manual',payment_id::text,1000000,1000000,'USD','succeeded',paid_at FROM bills`, mid)

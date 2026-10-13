@@ -248,7 +248,7 @@ func TestOrderOneCallBuy(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, id, events.Items[0].Order.OrderID.String())
-	require.Equal(t, bought.body["number"], *events.Items[0].Order.Number)
+	require.Equal(t, bought.body["number"], float64(*events.Items[0].Order.Number))
 	require.Equal(t, billing.OrderComplete, events.Items[0].Order.Status)
 	require.Equal(t, billing.OrderPaymentSucceeded, events.Items[0].Order.PaymentStatus)
 
