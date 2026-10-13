@@ -118,6 +118,12 @@ and name) and, when offered, `GET /v1/me/payment-methods`. It opens
 nothing else, and the API's own origin does not accept it. Past the
 pay URL's expiry it answers `410 pay_url_expired`.
 
+After the secret, the fragment may carry the checkout's fallbacks
+(`#<secret>&fallbacks=<JSON>`, as billing-ui's `EmbeddedPayment` and
+`withPaymentFallbacks` add them). The page validates and bounds them, keeps
+them for the tab, and keeps those PSPs back as billing-ui's own checkout does;
+the server never sees them.
+
 The customer pays with a new card in the PSP's own fields, charged and saved
 in one request, with a saved card when offered, or with Apple Pay or Google
 Pay (below). The page never takes a card number itself. A bank's challenge runs in the page. Reads and pays under one
