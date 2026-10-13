@@ -264,7 +264,7 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 	require.ErrorContains(t, err, "is missing")
 	require.Zero(t, chain.submits)
 	_, err = verifySolanaCatalogReference(solanaCtx(), plan, chain, req, nil)
-	require.ErrorContains(t, err, "separate provider workflow")
+	require.ErrorContains(t, err, "plan_pda or plan_id is required")
 
 	for name, corrupt := range map[string]func([]byte){
 		"foreign owner": func(raw []byte) { foreign := solanago.NewWallet().PublicKey(); copy(raw[1:33], foreign[:]) },
@@ -278,5 +278,28 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 		require.Error(t, err, name)
 		require.Zero(t, chain.submits, name)
 	}
+	require.Zero(t, chain.submits)
+}
+
+// unsignedChain is a deployment with no Solana signer to own plans.
+type unsignedChain struct{ *fakeChain }
+
+func (unsignedChain) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
+	return solanago.PublicKey{}, fmt.Errorf("no Solana signer is configured")
+}
+
+// Without a signer to own the plan, catalog application refuses the recurring
+// price by name, before any submission.
+func TestCatalogSolanaPlanNeedsASigner(t *testing.T) {
+	chain := newFakeChain(map[string]uint8{usdcMint: 6})
+	tokens := recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}})
+	svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
+		SolanaPlanService: recurring.NewPlanServiceWithReader(unsignedChain{chain}, chain, tokens)}}
+	terms := recurringTerms(23_000_000)
+	check := catalogReferenceCheck{key: "monthly", productKey: "premium", priceID: terms.PriceID,
+		request: billing.CreatePriceParams{Currency: "USD", UnitAmount: terms.UnitAmount, BillingIntervalHours: terms.BillingIntervalHours}}
+	_, err := svc.findOrPublishCatalogSolanaPlan(solanaCtx(), check, nil)
+	require.ErrorContains(t, err, `price "monthly" of product "premium": a recurring Solana price needs the Solana signer`)
+	require.ErrorContains(t, err, "no Solana signer is configured")
 	require.Zero(t, chain.submits)
 }

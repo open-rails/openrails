@@ -302,7 +302,9 @@ Omitted products, prices and fields keep their stored values. Use `archived: tru
 to retire an entry and `archived: false` to restore it. `prune: true` explicitly
 opts into removing omitted products/prices that only documents set: deleted
 when nothing ever referred to them, archived otherwise.
-The apply makes no provider writes. It may read a provider to verify an explicit
+The apply's one provider write publishes the on-chain plan of a recurring
+Solana price declared without one, before anything local is written
+([Solana](rails/solana.md)). Otherwise it only reads a provider to verify a
 reference; a provider that cannot answer fails the apply, and running it again
 retries.
 

@@ -1,8 +1,9 @@
 // Package solanafake is a loopback Solana JSON-RPC node for sandbox tests
 // (provider_sandbox.solana_rpc_url). It serves declared mints, token accounts,
-// plans and subscription authorities, and lands signed transactions as the
-// chain would: signatures must verify, token moves apply all-or-nothing, v0
-// transactions need opting in, and each commitment sees only what reached it.
+// plans and subscription authorities, and lands signed transactions, plan
+// creation among them, as the chain would: signatures must verify, token moves
+// apply all-or-nothing, v0 transactions need opting in, and each commitment
+// sees only what reached it.
 package solanafake
 
 import (
@@ -309,14 +310,20 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 		saved[addr] = acct.amount
 	}
 	var failure any
-	var created []string
+	var created, createdTokens []string
 	for i, inst := range tx.Message.Instructions {
-		authority, err := n.apply(tx, inst)
-		if authority != "" {
-			created = append(created, authority)
+		account, token, err := n.apply(tx, inst, blockTime)
+		if account != "" {
+			created = append(created, account)
+		}
+		if token != "" {
+			createdTokens = append(createdTokens, token)
 		}
 		if err != nil {
 			failure = map[string]any{"InstructionError": []any{i, map[string]any{"Custom": 1}}}
+			for _, addr := range createdTokens {
+				delete(n.tokens, addr)
+			}
 			for addr, amount := range saved {
 				n.tokens[addr].amount = amount
 			}
@@ -342,33 +349,82 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 	return sig, nil
 }
 
-// apply executes one instruction's effect, returning the address of a
-// subscription authority it created; n.mu held.
-func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction) (string, error) {
+// apply executes one instruction's effect, returning the address of a program
+// account and of a token account it created; n.mu held.
+func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction, blockTime time.Time) (string, string, error) {
 	program, err := tx.ResolveProgramIDIndex(inst.ProgramIDIndex)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	accounts, err := inst.ResolveInstructionAccounts(&tx.Message)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	data := inst.Data
 	switch {
 	case program.Equals(solanago.TokenProgramID) && len(data) >= 9 && data[0] == 3 && len(accounts) >= 2: // Transfer
-		return "", n.move(accounts[0].PublicKey, accounts[1].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
+		return "", "", n.move(accounts[0].PublicKey, accounts[1].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(solanago.TokenProgramID) && len(data) >= 9 && data[0] == 12 && len(accounts) >= 3: // TransferChecked
-		return "", n.move(accounts[0].PublicKey, accounts[2].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
+		return "", "", n.move(accounts[0].PublicKey, accounts[2].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(subscriptions.ProgramID) && len(data) >= 9 && data[0] == 10 && len(accounts) >= 5: // transfer_subscription
-		return "", n.move(accounts[3].PublicKey, accounts[4].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
+		return "", "", n.move(accounts[3].PublicKey, accounts[4].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(subscriptions.ProgramID) && len(data) == 1 && data[0] == 0 && len(accounts) >= 2: // initialize_subscription_authority
 		authority := make([]byte, 106)
 		binary.LittleEndian.PutUint64(authority[98:], n.height)
 		address := accounts[1].PublicKey.String()
 		n.accounts[address] = account{owner: subscriptions.ProgramID, data: authority}
-		return address, nil
+		return address, "", nil
+	case program.Equals(subscriptions.ProgramID) && len(data) == createPlanDataSize && data[0] == 7 && len(accounts) >= 3: // create_plan
+		address, err := n.createPlan(accounts, data, blockTime)
+		return address, "", err
+	case program.Equals(subscriptions.AssociatedTokenProgramID) && len(data) == 1 && data[0] == 1 && len(accounts) >= 4: // CreateIdempotent
+		ata := accounts[1].PublicKey.String()
+		if n.tokens[ata] != nil {
+			return "", "", nil
+		}
+		n.tokens[ata] = &tokenAccount{owner: accounts[2].PublicKey, mint: accounts[3].PublicKey}
+		return "", ata, nil
 	}
-	return "", nil
+	return "", "", nil
+}
+
+// createPlanDataSize is create_plan's data: discriminator, plan id, mint,
+// amount, period hours, created_at, end_ts, destinations, pullers, metadata.
+const createPlanDataSize = 1 + 8 + 32 + 8 + 8 + 8 + 8 + 4*32 + 4*32 + 128
+
+// createPlan stores the merchant's plan at its program address, stamped with
+// the cluster clock as the program does; an occupied address fails. n.mu held.
+func (n *Node) createPlan(accounts []*solanago.AccountMeta, data []byte, blockTime time.Time) (string, error) {
+	owner := accounts[0].PublicKey
+	address, bump, err := subscriptions.DerivePlanPDA(owner, binary.LittleEndian.Uint64(data[1:9]))
+	if err != nil || !accounts[0].IsSigner || !address.Equals(accounts[1].PublicKey) {
+		return "", errors.New("create_plan refused: not the owner's plan address")
+	}
+	if _, taken := n.accounts[address.String()]; taken {
+		return "", errors.New("create_plan refused: account already in use")
+	}
+	plan := make([]byte, 0, subscriptions.PlanAccountSize)
+	plan = append(append(plan, 1), owner[:]...)
+	plan = append(append(plan, bump, subscriptions.PlanStatusActive), data[1:57]...)
+	plan = binary.LittleEndian.AppendUint64(plan, uint64(blockTime.Unix()))
+	plan = append(plan, data[65:]...)
+	n.accounts[address.String()] = account{owner: subscriptions.ProgramID, data: plan}
+	return address.String(), nil
+}
+
+// Account is the program account stored at address.
+func (n *Node) Account(address solanago.PublicKey) ([]byte, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	acct, ok := n.accounts[address.String()]
+	return acct.data, ok
+}
+
+// Transactions counts the landed transactions that name address.
+func (n *Node) Transactions(address solanago.PublicKey) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.byAddr[address.String()])
 }
 
 func (n *Node) move(from, to solanago.PublicKey, amount uint64) error {

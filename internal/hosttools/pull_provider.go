@@ -395,12 +395,13 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	// #699/#788: pulls arm from the merchant's configuration, with the same
 	// semantics as the server's River pulls: a declared account with a
 	// missing credential is a rail NOT armed, loudly.
-	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, opts.MerchantManifestOverlays)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, opts.MerchantManifestOverlays)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("pull-provider: merchant configuration unavailable, so no rail can be armed: %w", err)
 	}
-	cleanup = func() { closeConfig(); _ = database.Close() }
+	merchantsSvc := opened.Service
+	cleanup = func() { opened.Close(); _ = database.Close() }
 	stripeClients := opts.StripeClients
 	if stripeClients == nil {
 		stripeClients = stripeapi.NewFactory(nil)

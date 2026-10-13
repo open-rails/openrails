@@ -221,7 +221,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	}
 	if pdaText == "" {
 		if declaredPlanID == nil {
-			return nil, apperr.Invalidf("an existing Solana plan_pda or explicit plan_id is required; provision it through the separate provider workflow")
+			return nil, apperr.Invalidf("a Solana plan_pda or plan_id is required")
 		}
 		// The program address depends only on the selected merchant and this
 		// explicit provider ID, never on mutable catalog labels or money terms.
@@ -240,7 +240,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, apperr.Invalidf("Solana plan %s is missing; provision it through the separate provider workflow before applying this artifact", pdaText)
+		return nil, apperr.Invalidf("Solana plan %s is missing; declare psps.solana without plan_pda and plan_id to publish one", pdaText)
 	}
 	account, err := subscriptions.DecodePlanAccount(raw)
 	if err != nil {
@@ -277,7 +277,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if account.Amount != amount {
 		return nil, apperr.Invalidf("Solana plan amount does not match the catalog")
 	}
-	out := map[string]string{solanaKeyPlanPDA: pdaText, solanaKeyPlanID: strconv.FormatUint(account.PlanID, 10), solanaKeyMint: account.Mint.String(), solanaKeyAmountBaseUnits: strconv.FormatUint(account.Amount, 10), solanaKeyPeriodHours: strconv.FormatUint(account.PeriodHours, 10), solanaKeyCreatedAt: strconv.FormatInt(account.CreatedAt, 10), solanaKeyMerchant: owner.String(), solanaKeyMintSymbol: token}
+	out := map[string]string{solanaKeyPlanPDA: pdaText, solanaKeyPlanID: strconv.FormatUint(account.PlanID, 10), solanaKeyMint: account.Mint.String(), solanaKeyAmountBaseUnits: strconv.FormatUint(account.Amount, 10), solanaKeyPeriodHours: strconv.FormatUint(account.PeriodHours, 10), solanaKeyCreatedAt: strconv.FormatInt(account.CreatedAt, 10), solanaKeyMerchant: owner.String(), solanaKeyMintSymbol: token, solanaKeyToken: token}
 	for key, value := range link {
 		if key == models.RailKeyRail || key == models.RailKeyProvider || key == solanaKeyToken || key == solanaKeyPlanID {
 			continue

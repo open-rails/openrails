@@ -415,6 +415,19 @@ func priceDeterministicID(productID uuid.UUID, key string, amount int64, currenc
 	)
 }
 
+// newPriceID is the id a price with req's complete terms at key takes when no
+// stored price already holds them.
+func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) uuid.UUID {
+	id := priceDeterministicID(productID, key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
+	if req.CustomerAmount != nil {
+		id = uuidutil.DeterministicID(id, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
+	}
+	if req.Quantity != nil {
+		id = uuidutil.DeterministicID(id, "quantity", strconv.Itoa(req.Quantity.Min), strconv.Itoa(req.Quantity.Max))
+	}
+	return id
+}
+
 // priceRequestCycleDays returns the billing cadence in days, independently of
 // the access window. A nil interval means a one-time price.
 func priceRequestCycleDays(req billing.CreatePriceParams) *int {
@@ -498,13 +511,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
 	key, _ := resolvePriceKey(product, req)
-	priceID := priceDeterministicID(req.ProductID.UUID(), key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
-	if req.CustomerAmount != nil {
-		priceID = uuidutil.DeterministicID(priceID, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
-	}
-	if req.Quantity != nil {
-		priceID = uuidutil.DeterministicID(priceID, "quantity", strconv.Itoa(req.Quantity.Min), strconv.Itoa(req.Quantity.Max))
-	}
+	priceID := newPriceID(req.ProductID.UUID(), key, req)
 	existing, err := prices.FindByTerms(ctx, req, key)
 	if err == nil {
 		priceID = existing.ID

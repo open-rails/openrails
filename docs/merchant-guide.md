@@ -169,7 +169,7 @@ apply loudly:
               stripe: {lookup_key: premium}         # find-or-create at a chosen key
               mobius: {plan_id: premium}            # NMI recurring plan; find-or-create
               ccbill: {flex_id: abc-123, recurring_billing_option_id: "0000007498"}  # operator-owned, unvalidated
-              solana: {}                            # recurring defaults to USDC; {token: USD1} overrides
+              solana: {}                            # recurring: apply publishes the plan, USDC unless {token: USD1}
               # solana: {plan_pda: "..."}           # alternatively attach and resolve the token on-chain
 ```
 
@@ -181,8 +181,11 @@ openrails catalog apply catalog.yaml --merchant your-merchant
 
 Without Vault, `--merchant-manifest PATH` loads the merchant's configuration and
 overlays as the provider tools do; otherwise the conventional merchant manifest
-path is used. With Vault it reads Vault and fails if Vault is unavailable. Recurring Solana references use public account and
-chain reads; catalog application does not construct a signer or submit a plan.
+path is used. With Vault it reads Vault and fails if Vault is unavailable. A recurring
+Solana price declared without `plan_pda` or `plan_id` has its plan published by the
+apply, signed by the Solana signer that owns it, before anything local is written; with
+`provider_write_mode` limited or readonly the apply binds a plan already on chain and
+otherwise refuses the price by name.
 
 The returned receipt's `application_id` is generated as `sha256:<content digest>`.
 It records what committed and whether the call replayed, not whether later edits
@@ -196,7 +199,7 @@ Provider support for individual catalog operations (batch applications reject un
 | stripe | auto-creates Products, Prices, and entitlement Features (`lookup_key` = the entitlement string); financial terms are immutable, so amount changes re-mint a new price and archive the old |
 | nmi PSPs | recurring `plan_id` found-or-created; otherwise link-only |
 | ccbill | link-only: you supply `flex_id` + `recurring_billing_option_id` from the CCBill admin |
-| solana | recurring plans default to USDC and are found-or-created; `token: USD1` selects USD1; `plan_pda` attaches an existing plan and resolves its token on-chain |
+| solana | a recurring price's plan is published or reattached, in USDC by default (DUSD on devnet), `token: USD1` selecting USD1; new terms are a new price with a new plan; `plan_pda` attaches an existing plan and resolves its token on-chain |
 
 A link-only price pushed without its ids is still created in OpenRails and recorded as
 `pending_manual_link`, with a `pending_manual_actions` entry telling you what to PATCH

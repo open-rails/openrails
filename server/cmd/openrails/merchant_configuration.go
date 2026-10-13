@@ -138,11 +138,12 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	if err != nil {
 		return nil, cleanup, err
 	}
-	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
 	if err != nil {
 		return nil, cleanup, err
 	}
-	cleanup = func() { closeConfig(); database.Close() }
+	merchantsSvc := opened.Service
+	cleanup = func() { opened.Close(); database.Close() }
 	rt := &app.Runtime{DB: database, Config: cfg, Merchants: merchantsSvc, MerchantConfig: merchantsSvc.Config(), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return nil, cleanup, err

@@ -322,11 +322,12 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	// Resolve the declared targets ONCE, before any row moves: an undeclared
 	// custodian or a PSP that charges through someone else's vault is a
 	// declaration error, and finding it on row 4000 is worthless.
-	configuration, closeConfig, err := boot.OneOffMerchants(ctx, opts.Config, database, merchantID, nil, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, opts.Config, database, merchantID, nil, opts.MerchantManifestPath, nil)
 	if err != nil {
 		return res, fmt.Errorf("custody migration: merchant configuration: %w", err)
 	}
-	defer closeConfig()
+	defer opened.Close()
+	configuration := opened.Service
 	custodian, ok, err := configuration.CustodianScopeByKey(ctx, merchantID, custodianKey)
 	if err != nil {
 		return res, fmt.Errorf("custody migration: resolve custodian %q: %w", custodianKey, err)

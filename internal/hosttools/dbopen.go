@@ -47,9 +47,9 @@ func bindMerchantConfig(ctx context.Context, cfg *config.Config, database *db.DB
 		database.SetMerchantConfig(given)
 		return func() {}, nil
 	}
-	_, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, merchantID, nil, "", nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, merchantID, nil, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("merchant configuration unavailable: %w", err)
 	}
-	return closeConfig, nil
+	return opened.Close, nil
 }

@@ -148,10 +148,11 @@ completes with the subscription on its line. A signature settles one order
 only, across every merchant and PSP.
 
 - Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
-  Declaring `psps: {solana: {}}` creates or
-  reattaches a USDC plan by default. Use `solana: {token: USD1}` to select
-  USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its
-  configured token from the on-chain mint:
+  Declaring `psps: {solana: {}}` makes `catalog apply` publish the price's
+  plan, owned and signed by the Solana signer, in USDC by default (DUSD on
+  devnet), and bind it; without a signer the apply refuses the price. Use `solana: {token: USD1}` to select USD1 instead, or
+  supply `plan_pda` to attach an existing plan and resolve its configured token
+  from the on-chain mint. A one-time price needs no plan:
 
   ```yaml
   prices:
@@ -171,6 +172,16 @@ only, across every merchant and PSP.
   `plan_pda` instead attaches an existing Plan and must be supplied without
   `token`, because its mint is authoritative on-chain. `mint_symbol` is stored
   snapshot metadata and is not manifest input.
+
+- **Publishing on apply.** The plan is published before anything local is
+  written, so a failed publish leaves the catalog unchanged. Its id derives
+  from the price and mint: re-applying, or applying again after a failed
+  commit, reattaches the same plan, and a plan already on chain with other
+  terms is refused. Plans are immutable, so new terms are a new price with its
+  own plan; the old plan stays bound to the archived price its subscribers
+  hold. Publishing is a catalog provider write: under `provider_write_mode`
+  limited or readonly, apply binds a plan already on chain and otherwise
+  refuses the price, naming it and the mode.
 
 - **Stablecoins only**: recurring plans are limited to an allowlist (currently
   `USDC`, `USD1`). On-chain plan amounts are immutable, so only a stablecoin

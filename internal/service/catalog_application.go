@@ -18,10 +18,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// ApplyCatalog applies a catalog document as the apply manager. It never
-// invokes provider network writes; unsupported provider-link changes fail
-// before local mutation. An object whose named field an edit set differently
-// is skipped and reported unless params.Force.
+// ApplyCatalog applies a catalog document as the apply manager. Its only
+// provider write publishes the Solana plan of a recurring price declared
+// without one, before local mutation; other provider-link changes fail before
+// local mutation. An object whose named field an edit set differently is
+// skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	return s.applyCatalog(ctx, document, params.Force, "")
 }

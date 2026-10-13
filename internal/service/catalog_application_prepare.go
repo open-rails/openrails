@@ -29,6 +29,9 @@ type catalogReferenceCheck struct {
 	account                   merchants.PSPScope
 	request                   billing.CreatePriceParams
 	link                      map[string]string
+	// priceID is the stored id the price commits under; a published Solana
+	// plan derives from it.
+	priceID uuid.UUID
 }
 type catalogApplicationPreparation struct {
 	replay   *billing.CatalogApplicationReceipt
@@ -66,9 +69,11 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 	return revision, &receipt, nil
 }
 
-// Prepare only observes remote references. Snapshot collection and the final
-// local commit each fence the merchant, but no transaction spans provider I/O.
-// A committed retry returns before resolving targets or contacting a provider.
+// Prepare observes remote references and publishes the Solana plans recurring
+// prices declare without one. Snapshot collection and the final local commit
+// each fence the merchant, but no transaction spans provider I/O, so a failed
+// publish leaves the catalog untouched. A committed retry returns before
+// resolving targets or contacting a provider.
 func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogReadLocked(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
@@ -177,7 +182,8 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				declaredRails := make([]string, 0, len(names))
 				for _, key := range names {
 					link := links[key]
-					if supplied := decl.PSPs.Value[key]; len(supplied) > 0 {
+					supplied := decl.PSPs.Value[key]
+					if len(supplied) > 0 {
 						link = supplied
 					}
 					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))
@@ -227,7 +233,17 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					}
 					verificationRequest := request
 					verificationRequest.Archived = verificationRequest.Archived || product.Archived
-					out.checks = append(out.checks, catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
+					check := catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest}
+					if rail == string(models.RailSolana) {
+						link = solanaCatalogLink(links[key], supplied, same)
+						if publishesSolanaPlan(request, link) {
+							if check.priceID, err = scoped.catalogPriceStorageID(ctx, product.ID, request, current, same); err != nil {
+								return nil, err
+							}
+						}
+					}
+					check.link = cloneStringMap(link)
+					out.checks = append(out.checks, check)
 				}
 				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
 					if err := requireSellablePrice(priceKey, request, declaredRails, accounts); err != nil {
@@ -242,7 +258,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		return prepared, err
 	}
 	// A pinned connection carries scope only; it does not hold a transaction or
-	// authored merchant lock while these strictly read-only provider calls run.
+	// authored merchant lock while these provider calls run.
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -251,6 +267,11 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 	for _, check := range prepared.checks {
 		link := cloneStringMap(check.link)
 		delete(link, "psp_id")
+		if check.account.Rail == string(models.RailSolana) && publishesSolanaPlan(check.request, link) {
+			if link, err = s.findOrPublishCatalogSolanaPlan(ctx, check, link); err != nil {
+				return nil, err
+			}
+		}
 		verified, err := s.verifyCatalogProviderReference(ctx, check.provider, check.account.Rail, check.account.AccountID, check.productKey, check.request, link)
 		if err != nil {
 			return nil, err
@@ -263,6 +284,23 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		prepared.links[[2]string{check.productKey, check.key}][check.provider] = verified
 	}
 	return prepared, nil
+}
+
+// catalogPriceStorageID is the stored id a declared price commits under: the
+// current price's when the terms are unchanged, else the new terms' id.
+func (s *Service) catalogPriceStorageID(ctx context.Context, productID billing.ProductID, req billing.CreatePriceParams, current *billing.Price, same bool) (uuid.UUID, error) {
+	if current == nil || !same {
+		return newPriceID(productID.UUID(), req.Key, req), nil
+	}
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	stored, err := prices.GetByPublicID(ctx, current.ID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return stored.ID, nil
 }
 
 func catalogPriceLinks(price *billing.Price) map[string]map[string]string {

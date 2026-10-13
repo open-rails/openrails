@@ -1,10 +1,13 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -14,10 +17,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -336,6 +342,84 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	out[solanaKeyCreatedAt] = strconv.FormatInt(acct.CreatedAt, 10)
 	out[solanaKeyMerchant] = acct.Owner.String()
 	out[solanaKeyMintSymbol] = symbol
+	return out, nil
+}
+
+func solanaPlanReferenced(link map[string]string) bool {
+	return strings.TrimSpace(link[solanaKeyPlanPDA]) != "" || strings.TrimSpace(link[solanaKeyPlanID]) != ""
+}
+
+// publishesSolanaPlan: catalog application finds or publishes the plan of a
+// recurring price that names none. One-time prices settle by direct transfer.
+func publishesSolanaPlan(req billing.CreatePriceParams, link map[string]string) bool {
+	return req.BillingIntervalHours != nil && !solanaPlanReferenced(link)
+}
+
+// solanaCatalogLink is the Solana reference a catalog declaration applies. One
+// naming no plan keeps the plan bound to unchanged terms; new terms take a new
+// plan, since plan terms are immutable, in the bound plan's token.
+func solanaCatalogLink(stored, supplied map[string]string, same bool) map[string]string {
+	if solanaPlanReferenced(supplied) {
+		return supplied
+	}
+	out := map[string]string{}
+	if same && solanaPlanReferenced(stored) {
+		maps.Copy(out, stored)
+	} else {
+		for _, key := range []string{models.RailKeyRail, models.RailKeyProvider, models.RailKeyPSPID} {
+			if v := stored[key]; v != "" {
+				out[key] = v
+			}
+		}
+		if token := cmp.Or(stored[solanaKeyToken], stored[solanaKeyMintSymbol]); token != "" {
+			out[solanaKeyToken] = token
+		}
+	}
+	maps.Copy(out, supplied)
+	return out
+}
+
+// findOrPublishCatalogSolanaPlan finds or publishes the plan of a recurring
+// price declared without one, returning its reference for verification. The
+// plan id derives from the stored price id and mint, so re-applying after a
+// failed commit reattaches the same plan, and differing on-chain terms are
+// refused. Publishing is a catalog provider write: limited and readonly modes
+// only attach a plan already published.
+func (s *Service) findOrPublishCatalogSolanaPlan(ctx context.Context, check catalogReferenceCheck, link map[string]string) (map[string]string, error) {
+	price := fmt.Sprintf("price %q of product %q", check.key, check.productKey)
+	if check.request.Archived {
+		return nil, apperr.Invalidf("%s: an archived price publishes no Solana plan; reference an existing plan_pda or apply the price active", price)
+	}
+	if s.rt == nil || s.rt.SolanaPlanService == nil {
+		return nil, fmt.Errorf("%s: Solana recurring is not configured, so its plan cannot be published", price)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The plan's owner is the Solana signer: the plan's address derives from
+	// it, and it signs the publication.
+	if _, err := s.rt.SolanaPlanService.MerchantAddress(ctx, mid); err != nil {
+		return nil, fmt.Errorf("%s: a recurring Solana price needs the Solana signer that owns its plan, and none is available: %w", price, err)
+	}
+	req := check.request
+	ids, err := (&solanaAdapter{svc: s}).Attach(ctx, link, autoCreateContext{
+		PriceID: check.priceID, UnitAmount: req.UnitAmount, Currency: req.Currency,
+		BillingCycleDays: priceRequestCycleDays(req), BillingIntervalHours: req.BillingIntervalHours,
+		RemoteWritesDisabled: s.catalogRemoteWritesDisabled(),
+	})
+	if errors.Is(err, errRemoteWritesDisabled) {
+		return nil, apperr.Conflictf("%s: its Solana plan is not published, and provider_write_mode=%s publishes no catalog provider objects; apply it with provider_write_mode=full", price, config.GetProviderWriteMode(s.rt.Config))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: Solana plan: %w", price, err)
+	}
+	out := map[string]string{solanaKeyPlanID: ids[solanaKeyPlanID], solanaKeyToken: ids[solanaKeyToken]}
+	for _, key := range []string{models.RailKeyRail, models.RailKeyProvider} {
+		if v := link[key]; v != "" {
+			out[key] = v
+		}
+	}
 	return out, nil
 }
 

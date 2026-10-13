@@ -17,7 +17,7 @@ exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings; it never creates/updates provider objects or queues provider work. Changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
+| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings. Its one provider write publishes the on-chain plan of a recurring Solana price declared without one, before the local commit ([Solana](rails/solana.md)); it updates no provider object and queues no provider work. Other changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; **`pull-provider`** as the manual batch truth-pull |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
@@ -1257,7 +1257,8 @@ no real money can move in any mode):
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
 | Usage order collection, Solana pulls | yes | no | no |
-| `catalog apply` local changes + existing binding verification | yes — no provider writes | yes — no provider writes | yes — no provider writes |
+| `catalog apply` local changes + existing binding verification | yes | yes | yes |
+| `catalog apply` publishing a recurring Solana plan | yes | no — binds a plan already on chain, else refuses the price | no — same |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |
 

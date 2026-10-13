@@ -68,21 +68,24 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	if err != nil {
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
-	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
 	if err != nil {
 		return fail(fmt.Errorf("catalog runtime merchant configuration: %w", err))
 	}
 	previous := cleanup
-	cleanup = func() { closeConfig(); previous() }
-	rt.Merchants, rt.MerchantConfig = merchantsSvc, merchantsSvc.Config()
+	cleanup = func() { opened.Close(); previous() }
+	rt.Merchants, rt.MerchantConfig = opened.Service, opened.Service.Config()
 	rt.Merchants.StripeClients = rt.StripeClients
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
-	// Catalog application verifies existing plans. This graph never constructs
-	// a signer, signing submitter, subscription lifecycle, poller, or worker fleet.
-	readConfig := *cfg
-	readConfig.ProviderWriteMode = config.ProviderWriteModeReadOnly
-	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: &readConfig, MerchantsFn: func() *merchants.Service { return rt.Merchants }}
-	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants}, rt.SolanaRPCResolver.ChainReader(), rt.SolanaRPCResolver.RecurringTokens)
+	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg)}
+	// Catalog application publishes recurring plans only when catalog provider
+	// writes are allowed; otherwise it can resolve the merchant's address but
+	// never sign. It never builds a subscription lifecycle, poller or workers.
+	var submitter recurring.Submitter = catalogPlanAddressReader{merchants: rt.Merchants}
+	if !config.IsLimitedMode(cfg) {
+		submitter = recurring.NewSignerSubmitterWithResolver(recurring.NewSignerFromPSPs(opened.Service.Secrets(), opened.SolanaTransit, database, 0), rt.SolanaRPCResolver.Resolve)
+	}
+	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(submitter, rt.SolanaRPCResolver.ChainReader(), rt.SolanaRPCResolver.RecurringTokens)
 	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return fail(err)
 	}
@@ -93,9 +96,9 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	return rt, svc, cleanup, nil
 }
 
-// PlanService also serves publishing workflows, so its constructor accepts a
-// Submitter. This catalog-only adapter can resolve public account identity but
-// deliberately cannot sign or submit instructions, irrespective of write mode.
+// catalogPlanAddressReader resolves the merchant's public Solana address and
+// cannot sign: the catalog runtime's submitter while provider writes are
+// limited.
 type catalogPlanAddressReader struct {
 	merchants *merchants.Service
 }

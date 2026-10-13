@@ -72,31 +72,31 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB) (*M
 	return &Merchants{Service: svc, SolanaTransit: conn.SolanaTransit, Close: closeAll}, nil
 }
 
-// OneOffMerchants builds the merchants service a one-off process reads PSPs
+// OneOffMerchants builds the merchant configuration a one-off process reads PSPs
 // through: Vault when a KV mount is named; else the merchant's entry in the
 // manifest on disk fills a file source. No manifest and none at the
 // conventional path leaves the merchant without configuration: nothing arms.
-func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*merchants.Service, func(), error) {
+func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
 	opened, err := OpenMerchants(ctx, cfg, database)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	svc := opened.Service
 	if _, ok := svc.Config().Source().(*merchantdocs.FileSource); ok {
 		declaration, err := manifestEntry(ctx, svc, merchantID, manifest, manifestPath, overlays)
 		if err != nil {
 			opened.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		if declaration != nil {
 			req := ProvisionMerchantParams{Config: cfg, Database: database, Merchants: svc, SolanaTransit: opened.SolanaTransit}
 			if err := PutDeclaration(ctx, req, merchantID, *declaration); err != nil {
 				opened.Close()
-				return nil, nil, fmt.Errorf("merchant %s configuration: %w", merchantID, err)
+				return nil, fmt.Errorf("merchant %s configuration: %w", merchantID, err)
 			}
 		}
 	}
-	return svc, opened.Close, nil
+	return opened, nil
 }
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
