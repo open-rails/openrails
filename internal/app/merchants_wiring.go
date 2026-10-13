@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -20,6 +23,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/scim"
 	"github.com/open-rails/openrails/internal/vaultconn"
 )
@@ -41,7 +46,9 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 			prefix = r.Config.Vault.ScopePrefix
 		}
 		if source, err = merchantdocs.NewVaultSource(conn.KV, prefix); err != nil {
-			return err
+			// vault.scope_prefix is malformed, so Vault is unusable
+			// (vaultconn.Open): the default prefix is never read.
+			source, _ = merchantdocs.NewVaultSource(conn.KV, "")
 		}
 	}
 	cache := merchantdocs.NewCache(source)
@@ -55,7 +62,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	svc.WithDestructivePolicy(destructive.New(r.DB))
 	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
 	if err != nil {
-		return err
+		overlap = config.DefaultWebhookSecretOverlap
 	}
 	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap)
 	if r.NMIClients != nil {
@@ -66,62 +73,117 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		if err == nil {
 			r.followPSPPosture(id, previous, set)
 			r.followPaymentDomain(id, previous, set)
+			r.recordRefusedDocuments(ctx, id, previous, set)
 		}
 		return set, err
 	})
 	cache.SetAnnounce(r.announceMerchantConfig)
+	r.startConfigRealerts()
 	r.DB.SetMerchantConfig(svc)
 	r.ArmMerchantsService(svc)
 	r.ArmSolanaRecurringServices(svc.Secrets(), conn.SolanaTransit)
 	return nil
 }
 
-// EnsureMerchantsService readies merchant configuration for serving. With
-// Vault holding it, it waits (bounded by ctx) for Vault login and loads the
-// credential fingerprint key; it starts the listener that reloads a merchant
-// another replica edited. Idempotent.
+// EnsureMerchantsService readies merchant configuration for a one-off tool
+// that needs it now. With Vault holding it, it waits (bounded by ctx, else
+// 30s) for Vault login and the credential fingerprint key, and starts the
+// listener that reloads a merchant another replica edited. In a serving
+// process (ServeMerchantsService) it never waits: the background readies it.
 func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	if r == nil || r.Merchants == nil || r.MerchantConfig == nil {
 		return errors.New("initialize merchant services: merchant configuration is not wired")
 	}
-	r.configReady.Do(func() {
-		vault, ok := r.MerchantConfig.Source().(*merchantdocs.VaultSource)
-		if !ok {
-			return
-		}
-		if _, ok := ctx.Deadline(); !ok {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, awaitTimeout)
-			defer cancel()
-		}
-		if r.Vault.Auth != nil {
-			if err := r.Vault.Auth.Wait(ctx, awaitTimeout); err != nil {
-				r.configErr = fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
-				return
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	if r.configReady || r.configServing {
+		return nil
+	}
+	if err := r.readyMerchantConfig(ctx); err != nil {
+		return err
+	}
+	r.configReady = true
+	return nil
+}
+
+// ServeMerchantsService is EnsureMerchantsService for a serving process:
+// Vault unreachable never fails it. Merchant configuration then answers
+// unavailable, the refusal is reported (Refusals), and a background task
+// retries with capped backoff until Vault answers.
+func (r *Runtime) ServeMerchantsService(ctx context.Context) error {
+	if r == nil || r.Merchants == nil || r.MerchantConfig == nil {
+		return errors.New("initialize merchant services: merchant configuration is not wired")
+	}
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	if r.configReady || r.configServing {
+		return nil
+	}
+	wait, cancel := context.WithTimeout(ctx, serveAwait)
+	err := r.readyMerchantConfig(wait)
+	cancel()
+	if err == nil {
+		r.configReady = true
+		return nil
+	}
+	r.configServing = true
+	const subject = "vault.merchant_configuration"
+	r.MerchantConfig.Hold(err)
+	r.Refuse(subject, fmt.Errorf("%w; merchant configuration answers unavailable until Vault answers", err))
+	r.Go("merchant configuration", func(ctx context.Context) {
+		if retry.Forever(ctx, func(ctx context.Context) error {
+			if err := r.Vault.State(); err != nil {
+				return err
 			}
-		}
-		key, err := vault.FingerprintKey(ctx)
-		if err != nil {
-			r.configErr = fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
+			return r.readyMerchantConfig(ctx)
+		}, nil) != nil {
 			return
 		}
-		if err := r.MerchantConfig.SetDestructiveAdmissions(r.DestructiveAdmissions, key); err != nil {
-			r.configErr = fmt.Errorf("initialize configuration admission: %w", err)
-			return
-		}
-		fingerprints, err := merchants.NewCredentialFingerprinter(key)
-		if err != nil {
-			r.configErr = err
-			return
-		}
-		r.Merchants.WithCredentialFingerprinter(fingerprints)
-		if pool := r.DB.Pool(); pool != nil {
-			r.Go("merchant config notifications", func(ctx context.Context) {
-				r.MerchantConfig.Listen(ctx, pool, r.DB.DataPool().Schema())
-			})
-		}
+		r.configMu.Lock()
+		r.configReady = true
+		r.configMu.Unlock()
+		r.MerchantConfig.Release()
+		r.Unrefuse(subject)
 	})
-	return r.configErr
+	return nil
+}
+
+// readyMerchantConfig arms the Vault-held configuration: the fingerprint key
+// for the admission gate and duplicate detection, and the edit listener.
+// Nothing to do for a file.
+func (r *Runtime) readyMerchantConfig(ctx context.Context) error {
+	vault, ok := r.MerchantConfig.Source().(*merchantdocs.VaultSource)
+	if !ok {
+		return nil
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, awaitTimeout)
+		defer cancel()
+	}
+	if r.Vault.Auth != nil {
+		if err := r.Vault.Auth.Wait(ctx, awaitTimeout); err != nil {
+			return fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
+		}
+	}
+	key, err := vault.FingerprintKey(ctx)
+	if err != nil {
+		return fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
+	}
+	if err := r.MerchantConfig.SetDestructiveAdmissions(r.DestructiveAdmissions, key); err != nil {
+		return fmt.Errorf("initialize configuration admission: %w", err)
+	}
+	fingerprints, err := merchants.NewCredentialFingerprinter(key)
+	if err != nil {
+		return err
+	}
+	r.Merchants.WithCredentialFingerprinter(fingerprints)
+	if pool := r.DB.Pool(); pool != nil {
+		r.Go("merchant config notifications", func(ctx context.Context) {
+			r.MerchantConfig.Listen(ctx, pool, r.DB.DataPool().Schema())
+		})
+	}
+	return nil
 }
 
 // announceMerchantConfig tells every replica to reload a merchant.
@@ -170,6 +232,142 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		return previous, err
 	}
 	return set, nil
+}
+
+// RefusedDocumentFindingType is the finding a merchant document the merchant
+// does not serve opens (the console's review queue), until it serves again.
+const RefusedDocumentFindingType = "consistency.merchant_config.not_served"
+
+// UndeclaredAccountFindingType is the finding an account no document
+// declares opens while it still holds cards in its vault or subscriptions
+// renewing on it.
+const UndeclaredAccountFindingType = "consistency.merchant_config.undeclared_account"
+
+// configFindings are the configuration problems a merchant's operator is
+// alerted to: each document the merchant does not serve, and each undeclared
+// account still holding billing.
+func configFindings(set merchantdocs.Set) []configFinding {
+	return []configFinding{
+		{RefusedDocumentFindingType, "The merchant does not serve its %s document: %s. Correct it; it serves once it checks.", set.Rejected},
+		{UndeclaredAccountFindingType, "%s: %s.", set.Undeclared},
+	}
+}
+
+type configFinding struct {
+	findingType, action string
+	open                map[string]string
+}
+
+// recordRefusedDocuments keeps one finding open per configuration problem,
+// naming why, alerts the merchant's operator through the finding channels
+// (alert webhooks, alert email) once per episode, and closes the findings of
+// problems that are gone. A failure is logged: the state itself is served
+// from memory.
+func (r *Runtime) recordRefusedDocuments(ctx context.Context, id billing.MerchantID, previous, set merchantdocs.Set) {
+	if maps.Equal(previous.Rejected, set.Rejected) && maps.Equal(previous.Undeclared, set.Undeclared) && len(previous.Revisions()) > 0 {
+		return
+	}
+	ctx = merchant.WithID(ctx, id)
+	var opened []gen.BillingReconciliationFinding
+	err := r.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		q := r.DB.Gen(ctx)
+		for _, kind := range configFindings(set) {
+			for _, subject := range slices.Sorted(maps.Keys(kind.open)) {
+				why := kind.open[subject]
+				action := fmt.Sprintf(kind.action, subject, why)
+				evidence, err := json.Marshal(map[string]string{"subject": subject, "reason": why})
+				if err != nil {
+					return err
+				}
+				row, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+					MerchantID: id.UUID(), FindingType: kind.findingType, SubjectKey: subject,
+					Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
+				})
+				if err != nil {
+					return err
+				}
+				opened = append(opened, row)
+			}
+			findingType := kind.findingType
+			listed, err := q.ListReconciliationFindings(ctx, gen.ListReconciliationFindingsParams{MerchantID: id.UUID(), FindingType: &findingType, PageLimit: 1000})
+			if err != nil {
+				return err
+			}
+			for _, f := range listed {
+				if _, open := kind.open[f.SubjectKey]; open || f.ResolvedAt != nil {
+					continue
+				}
+				if _, err := q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: id.UUID(), FindingType: kind.findingType, SubjectKey: f.SubjectKey}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: recording what is not served failed")
+		}
+		return
+	}
+	if len(opened) > 0 {
+		// Deliveries retry over the network: never inside a configuration load.
+		r.Go("configuration alerts", func(bg context.Context) { r.alertConfigFindings(merchant.WithID(bg, id), opened) })
+	}
+}
+
+// alertConfigFindings notifies the merchant's operator of each finding not
+// yet notified in its episode.
+func (r *Runtime) alertConfigFindings(ctx context.Context, findings []gen.BillingReconciliationFinding) {
+	if r.AlertService == nil {
+		return
+	}
+	for _, f := range findings {
+		if err := r.AlertService.NotifyFinding(ctx, reconcile.FindingRecordFromRow(f)); err != nil && ctx.Err() == nil {
+			log.WithError(err).WithField("finding_id", f.ID.String()).Warn("merchant config: alerting the operator failed; the finding stays in the console")
+		}
+	}
+}
+
+// configRealert is how often an unresolved undeclared account alerts again.
+const configRealert = 24 * time.Hour
+
+// RealertConfiguration re-evaluates each loaded merchant's undeclared
+// accounts (a declaration or an ended subscription resolves one) and alerts
+// again for those still unresolved since configRealert.
+func (r *Runtime) RealertConfiguration(ctx context.Context) {
+	if r == nil || r.MerchantConfig == nil || r.DB == nil {
+		return
+	}
+	for id := range r.MerchantConfig.Undeclared() {
+		if _, err := r.MerchantConfig.Reload(ctx, id); err != nil {
+			continue
+		}
+		mctx := merchant.WithID(ctx, id)
+		var due []gen.BillingReconciliationFinding
+		err := r.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+			var err error
+			due, err = r.DB.Gen(ctx).RearmConfigFindingNotifications(ctx, gen.RearmConfigFindingNotificationsParams{
+				MerchantID: id.UUID(), FindingType: UndeclaredAccountFindingType, NotifiedBefore: r.Clock.Now().Add(-configRealert)})
+			return err
+		})
+		if err != nil {
+			if ctx.Err() == nil {
+				log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: re-alerting undeclared accounts failed")
+			}
+			continue
+		}
+		r.alertConfigFindings(mctx, due)
+	}
+}
+
+// startConfigRealerts re-alerts unresolved undeclared accounts hourly.
+func (r *Runtime) startConfigRealerts() {
+	r.Go("configuration re-alerts", func(ctx context.Context) {
+		for retry.Sleep(ctx, time.Hour) {
+			r.RealertConfiguration(ctx)
+		}
+	})
 }
 
 // DanglingPolicyFindingType is the finding a customer assignment to a billing
@@ -227,6 +425,10 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service) {
 	}
 }
 
-// awaitTimeout bounds how long boot waits on Vault holding merchant
+// awaitTimeout bounds how long a one-off tool waits on Vault holding merchant
 // configuration when the caller's context sets no deadline.
 const awaitTimeout = 30 * time.Second
+
+// serveAwait bounds how long a serving process's boot waits on Vault holding
+// merchant configuration before it serves without it.
+const serveAwait = 5 * time.Second

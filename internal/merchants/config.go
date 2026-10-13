@@ -73,6 +73,7 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 		}
 		if doc, ok := set.PSPs[strings.ToLower(row.Key)]; ok && row.SupersededAt == nil && pspDocNames(doc.Value, row) {
 			p := doc.Value
+			scope.Declared = true
 			scope.Environment = p.Environment
 			scope.Settings, scope.Archived, scope.Signer, scope.secrets = p.Settings, p.Archived, p.Signer, normalizedKeys(p.Secrets)
 			scope.Revision = doc.Revision

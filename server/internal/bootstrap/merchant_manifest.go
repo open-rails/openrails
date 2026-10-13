@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -217,6 +218,10 @@ func (j StaticJWKConfig) authkitJWK() iam.JWK {
 	}
 }
 
+// ErrNotProvisioned marks a merchant a serving process could not provision
+// (ReconcileOptions.Refuse): it is retried.
+var ErrNotProvisioned = errors.New("the merchant is not provisioned")
+
 // ReconcileOptions are how a manifest provisions its merchants.
 type ReconcileOptions struct {
 	// Insert registers a merchant the manifest names that does not exist.
@@ -230,6 +235,11 @@ type ReconcileOptions struct {
 	WrapTransit func(slug string, transit solana.TransitClient) solana.TransitClient
 	// DeferPSP skips a PSP whose account cannot be derived now.
 	DeferPSP func(rail string, err error) bool
+	// Refuse, set by a serving process, takes what cannot be served: a
+	// merchant that cannot be provisioned is reported to it and the others
+	// proceed, and a document the merchant does not serve is refused alone.
+	// Unset (an operator command), the first of either fails the call.
+	Refuse func(subject string, err error)
 }
 
 // ProvisionMerchantParams provisions one manifest merchant (#527).
@@ -246,6 +256,9 @@ type ProvisionMerchantParams struct {
 	Slug          string
 	Merchant      MerchantConfig
 	Insert        bool
+	// Tolerate refuses a document the merchant cannot serve alone, instead
+	// of failing.
+	Tolerate bool
 }
 
 // ReconcileMerchantManifestData provisions the merchants a manifest declares:
@@ -264,9 +277,15 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	if manifest.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
-	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
-		if err := config.RefuseDeclarationBesideVault(cfg, slug, manifest.Merchants[slug].MerchantDeclaration); err != nil {
-			return fmt.Errorf("merchant bootstrap: %w", err)
+	merchantsDeclared := maps.Clone(manifest.Merchants)
+	for _, slug := range sortedMerchantKeys(merchantsDeclared) {
+		mt := merchantsDeclared[slug]
+		if err := config.RefuseDeclarationBesideVault(cfg, slug, mt.MerchantDeclaration); err != nil {
+			if opts.Refuse == nil {
+				return fmt.Errorf("merchant bootstrap: %w", err)
+			}
+			opts.Refuse("merchants."+slug+".declaration", fmt.Errorf("%w; Vault's configuration serves", err))
+			merchantsDeclared[slug] = MerchantConfig{MerchantDeclaration: config.MerchantDeclaration{Slug: mt.Slug}, RemoteApplication: mt.RemoteApplication}
 		}
 	}
 	release, err := lockMerchantManifestBootstrap(ctx, cp)
@@ -307,8 +326,13 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
 			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,
-			SolanaTransit: signer, DeferPSP: opts.DeferPSP, Slug: slug, Merchant: manifest.Merchants[slug], Insert: opts.Insert,
+			SolanaTransit: signer, DeferPSP: opts.DeferPSP, Slug: slug, Merchant: merchantsDeclared[slug], Insert: opts.Insert,
+			Tolerate: opts.Refuse != nil,
 		})
+		if err != nil && opts.Refuse != nil {
+			opts.Refuse("merchants."+slug, fmt.Errorf("%w; %w", err, ErrNotProvisioned))
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -322,8 +346,10 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
-	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
-		return nil, err
+	if !req.Tolerate {
+		if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
+			return nil, err
+		}
 	}
 	if req.Database == nil || req.Merchants == nil {
 		return nil, fmt.Errorf("merchant provisioning requires the database and the merchant configuration")
@@ -345,12 +371,15 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 			id = tn.ID
 		}
 	}
-	tn, err := merchantbootstrap.ProvisionMerchant(ctx, merchantbootstrap.ProvisionMerchantParams{
+	tn, refused, err := merchantbootstrap.ProvisionMerchant(ctx, merchantbootstrap.ProvisionMerchantParams{
 		MerchantID: id, Config: req.Config, Database: req.Database, Merchants: req.Merchants,
 		Slug: slug, Merchant: mt.MerchantDeclaration, SolanaTransit: req.SolanaTransit, DeferPSP: req.DeferPSP,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(refused) > 0 && !req.Tolerate {
+		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, merchantbootstrap.Rejected(refused))
 	}
 	return tn, nil
 }

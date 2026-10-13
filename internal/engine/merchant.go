@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -15,9 +16,10 @@ import (
 )
 
 // upsertMerchantConfig provisions one declared merchant before HTTP routes or
-// workers can observe a partially configured runtime. With tolerateVault, a
-// Solana vault_transit signer whose Vault is unavailable reuses the identity
-// stored for it, or (none stored yet) leaves only that PSP unprovisioned; the
+// workers can observe a partially configured runtime. A document it cannot
+// serve is refused alone (the cache reports it). With tolerateVault, a Solana
+// vault_transit signer whose Vault is unavailable reuses the identity stored
+// for it, or (none stored yet) leaves only that PSP unprovisioned; the
 // returned flag says Vault must still confirm it.
 func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDeclaration, tolerateVault bool) (billing.MerchantID, bool, error) {
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
@@ -52,7 +54,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDecl
 		req.DeferPSP = fallback.Defers
 	}
 
-	tn, err := boot.ProvisionMerchant(ctx, req)
+	tn, _, err := boot.ProvisionMerchant(ctx, req)
 	if err != nil {
 		return billing.MerchantID{}, false, fmt.Errorf("openrails: upsert merchant config: %w", err)
 	}
@@ -80,7 +82,7 @@ func approveSolanaSigner(ctx context.Context, a *app.App, declaration config.Mer
 
 // confirmSigner re-runs the declaration once Vault authenticates, arming a
 // deferred Solana Transit PSP or re-deriving a stored identity from Vault,
-// with capped full-jitter backoff until it succeeds.
+// with capped full-jitter backoff until Vault confirms it.
 func confirmSigner(application *app.App, declaration config.MerchantDeclaration) {
 	rt := application.Runtime
 	rt.Go("solana transit signer", func(ctx context.Context) {
@@ -88,7 +90,10 @@ func confirmSigner(application *app.App, declaration config.MerchantDeclaration)
 			if err := rt.Vault.State(); err != nil {
 				return err
 			}
-			_, _, err := upsertMerchantConfig(ctx, application, declaration, false)
+			_, pending, err := upsertMerchantConfig(ctx, application, declaration, true)
+			if err == nil && pending {
+				err = errors.New("openrails: the Solana Transit signer still awaits Vault")
+			}
 			return err
 		}, func(attempt int, err error) {
 			if attempt == 0 {

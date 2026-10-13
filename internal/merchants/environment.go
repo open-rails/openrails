@@ -52,3 +52,9 @@ func merchantEnvironmentClass(environments ...string) string {
 	}
 	return config.EnvironmentTest
 }
+
+// EnvironmentRefusal is why a PSP in environment cannot join this
+// deployment, whose PSPs are all live or all non-live; "" when it can.
+func (s *Service) EnvironmentRefusal(ctx context.Context, environment string) (string, error) {
+	return s.environmentRefusal(ctx, gen.New(s.pool), environment)
+}

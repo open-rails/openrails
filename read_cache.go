@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	"github.com/open-rails/helpers/cache"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // transport is how a handle reaches OpenRails, which sets what a read costs.
@@ -95,49 +97,52 @@ func (e loadError) Error() string { return e.err.Error() }
 func (e loadError) Unwrap() error { return e.err }
 
 // newReads builds t's caches under overrides; timeout bounds each load (zero:
-// the cache default).
-func newReads(t transport, overrides ReadCache, timeout time.Duration, handle func(billing.MerchantID) *Client) (*reads, error) {
-	policies, err := readPoliciesFor(t, overrides)
-	if err != nil {
-		return nil, err
-	}
+// the cache default). An override it cannot serve keeps its read's default
+// and is named in refused.
+func newReads(t transport, overrides ReadCache, timeout time.Duration, handle func(billing.MerchantID) *Client) (_ *reads, refused []config.Degradation, err error) {
+	policies, refused := readPoliciesFor(t, overrides)
 	r := &reads{handle: handle, answers: map[Read]*cache.Cache[readKey, answer]{}}
 	for read, policy := range policies {
 		options := cache.Options{Name: "openrails." + string(read) + "." + string(t), RefreshAfter: policy.RefreshAfter, MaxStale: policy.MaxStale, LoadTimeout: timeout}
 		if r.answers[read], err = cache.New(options, r.loadAnswers); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if read == ReadCatalog {
 			options.Name = "openrails.products." + string(t)
 			if r.products, err = cache.New(options, r.loadProducts); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
-	return r, nil
+	return r, refused, nil
 }
 
 // readPoliciesFor is t's default policies with overrides applied; a zero
-// override turns its read off.
-func readPoliciesFor(t transport, overrides ReadCache) (ReadCache, error) {
+// override turns its read off. An override naming no read, or whose bounds
+// are out of order, is ignored and named in refused.
+func readPoliciesFor(t transport, overrides ReadCache) (ReadCache, []config.Degradation) {
 	out := ReadCache{}
 	for read, policy := range readPolicies[t] {
 		out[read] = policy
 	}
-	for read, policy := range overrides {
+	var refused []config.Degradation
+	for _, read := range slices.Sorted(maps.Keys(overrides)) {
+		policy := overrides[read]
+		field := "read_cache." + string(read)
 		if _, ok := readPolicies[overHTTP][read]; !ok {
-			return nil, fmt.Errorf("openrails: ReadCache names an unknown read %q", read)
+			refused = append(refused, config.Degradation{Field: field, Err: fmt.Errorf("names an unknown read; ignored")})
+			continue
 		}
 		switch {
 		case policy == ReadPolicy{}:
 			delete(out, read)
 		case policy.RefreshAfter <= 0 || policy.MaxStale <= policy.RefreshAfter:
-			return nil, fmt.Errorf("openrails: ReadCache[%s] needs 0 < RefreshAfter < MaxStale", read)
+			refused = append(refused, config.Degradation{Field: field, Err: fmt.Errorf("needs 0 < RefreshAfter < MaxStale; the default applies")})
 		default:
 			out[read] = policy
 		}
 	}
-	return out, nil
+	return out, refused
 }
 
 // close releases the caches' background work; they keep answering.

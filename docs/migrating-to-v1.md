@@ -142,7 +142,7 @@ to match after the mapped price ID is supplied.
 
 | Before | After |
 |---|---|
-| `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `purchase`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
+| `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `purchase`, `payment`, `subscribe` and `webhook`; any other key is ignored and reported. A per-address ceiling belongs to the proxy |
 | `GET /`, `/healthz`, `/readyz`, `/health/ready?verbose=1`, 503 `not_ready` | `/health/live` and `/health/ready`; a failed readiness check is 503 `service_unavailable` and the failing dependency is logged, not answered |
 | Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | `/v1/config`'s `capabilities` list the groups `payment`, `customer`, `merchant`, `merchant_config`, `webhooks` |
 | Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are behind `billing.MerchantConfigManage` or `billing.RootConfigManage` |

@@ -145,7 +145,7 @@ const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
 SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
-       OR ($3::uuid IS NULL AND key = $4::text))
+       OR ($3::uuid IS NULL AND key = $4::text AND superseded_at IS NULL))
 `
 
 type ResolvePriceBindingPSPParams struct {
@@ -155,6 +155,8 @@ type ResolvePriceBindingPSPParams struct {
 	PspKey     string
 }
 
+// A label names the account it currently names: one whose label moved to
+// another account is superseded and bound only by its id.
 func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBindingPSPParams) ([]BillingPsp, error) {
 	rows, err := q.db.Query(ctx, resolvePriceBindingPSP,
 		arg.MerchantID,

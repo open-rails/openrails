@@ -24,9 +24,10 @@ func codeOf(err error) string {
 }
 
 // A declared merchant's settings are the configuration API's document,
-// validated the same way; a declaration the API would refuse refuses boot
-// before any merchant exists. Read from a file the configuration is the
-// file's: edits are refused and a changed file is what the next start serves.
+// validated the same way; settings the API would refuse refuse the merchant
+// document alone, named by the configuration probe, while the engine boots.
+// Read from a file the configuration is the file's: edits are refused and a
+// changed file is what the next start serves.
 func TestDeclaredMerchantSettings(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
@@ -52,14 +53,25 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		return n
 	}
 
-	_, _, err := boot("refused", billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "missing"}}}, nil)
-	require.ErrorContains(t, err, "undeclared policy")
-	_, _, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}}, nil)
-	require.ErrorContains(t, err, "profile.logo_url")
+	refused := func(settings billing.MerchantSettings, want string) {
+		t.Helper()
+		bill, _, err := boot("refused", settings, nil)
+		require.NoError(t, err, "refused settings never fail boot")
+		defer func() { _ = bill.Close(context.Background()) }()
+		var probe error
+		for _, p := range bill.Probes() {
+			if p.Name == "openrails_configuration" {
+				probe = p.Check(ctx)
+			}
+		}
+		require.ErrorContains(t, probe, "merchants.refused.merchant: settings: ")
+		require.ErrorContains(t, probe, want)
+	}
+	refused(billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "missing"}}}, "undeclared policy")
+	refused(billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}}, "profile.logo_url")
 	countryRouting := []billing.PSPRoutingRule{{Match: billing.PSPRoutingMatch{Country: "US"}, Prefer: []string{"nmi"}}}
-	_, _, err = boot("refused", billing.MerchantSettings{PSPRouting: &countryRouting}, nil)
-	require.ErrorContains(t, err, "match.country is not supported")
-	require.Zero(t, merchants(), "a refused declaration creates no merchant")
+	refused(billing.MerchantSettings{PSPRouting: &countryRouting}, "match.country is not supported")
+	require.Equal(t, 1, merchants(), "the merchant exists; only its document is refused")
 
 	grace, floor, threshold := 7, int64(5_000_000), int64(50_000_000)
 	routing := []billing.PSPRoutingRule{{Prefer: []string{"mobius"}}}
@@ -108,8 +120,8 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.Equal(t, 3, *after.Settings.ArrearsGraceDays, "the declaration carried the change")
 }
 
-// With Vault holding the configuration a file declaring any of it is refused
-// at startup, naming what it declares; the slug alone boots an empty
+// With Vault holding the configuration what a file declares beside the slug
+// is ignored and named at startup; the slug alone boots an empty
 // configuration staff fill in, at the revision they read, and an edit naming
 // a revision the configuration moved past is refused.
 func TestVaultMerchantSettings(t *testing.T) {
@@ -131,11 +143,14 @@ func TestVaultMerchantSettings(t *testing.T) {
 	}
 	slug := "vaulted-" + uuid.NewString()[:8]
 	grace := 7
-	_, _, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
-	require.ErrorContains(t, err, `merchant "`+slug+`" declares display_name, settings`)
-	var merchants int
-	require.NoError(t, w.pool.QueryRow(ctx, w.sql(`SELECT count(*) FROM billing.merchants`)).Scan(&merchants))
-	require.Zero(t, merchants, "a refused file creates no merchant")
+	declaring, _, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
+	require.NoError(t, err)
+	for _, p := range declaring.Probes() {
+		if p.Name == "openrails_configuration" {
+			require.ErrorContains(t, p.Check(ctx), "merchants."+slug+`.declaration: merchant "`+slug+`" declares display_name, settings`)
+		}
+	}
+	require.NoError(t, declaring.Close(ctx))
 
 	bill, client, err := boot(openrails.MerchantDeclaration{Slug: slug})
 	require.NoError(t, err)

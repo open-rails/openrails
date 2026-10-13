@@ -181,7 +181,8 @@ Name it with `redis.addr` (`REDIS_ADDR`) or a `redis://` or `rediss://` URL
 (`REDIS_URL`). `redis.username` (`REDIS_USERNAME`) is an ACL user. TLS comes
 from a `rediss://` URL or `redis.tls` (`REDIS_TLS`), and verifies the server
 against the system roots or `redis.ca_cert` (`REDIS_CA_CERT`, a PEM bundle). A
-declared Redis with invalid settings refuses boot. While it does not answer,
+declared Redis with invalid settings is turned off (`openrails_configuration`
+names why). While it does not answer,
 each pod keeps its limits in its own memory, `/metrics`
 (`openrails_dependency_up{dependency="redis"}`,
 `openrails_abuse_state_fallbacks_total`) and the error log report it, and

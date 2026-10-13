@@ -17,7 +17,7 @@ import (
 
 // An auth method mounted at the operator's own path (<owner>-<env>/approle):
 // OpenRails logs in there with vault.auth_mount, and the default path does
-// not serve it.
+// not serve it; a malformed mount leaves Vault unusable.
 func TestVaultLogsInAtItsAuthMount(t *testing.T) {
 	v := vaulttest.New(t)
 	root, ctx := v.Client(), t.Context()
@@ -56,11 +56,14 @@ func TestVaultLogsInAtItsAuthMount(t *testing.T) {
 	require.NoError(t, err)
 	require.Never(t, func() bool { return probe(t, elsewhere, "openrails_vault") == nil }, 2*time.Second, 100*time.Millisecond, "auth/approle is not this Vault's approle")
 
+	// A malformed mount leaves Vault unusable, named by its probe: never a
+	// boot failure.
 	for authMount, want := range map[string]string{
 		"auth/" + mount:     "the path after auth/",
 		v.Mount + "/../sys": "plain Vault path",
 	} {
-		_, err := connect(authMount)
-		require.ErrorContains(t, err, want)
+		refused, err := connect(authMount)
+		require.NoError(t, err)
+		require.ErrorContains(t, probe(t, refused, "openrails_vault"), want)
 	}
 }

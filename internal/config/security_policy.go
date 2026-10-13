@@ -81,15 +81,3 @@ func URLOrigin(raw string) (string, bool) {
 	}
 	return strings.ToLower(u.Scheme + "://" + u.Host), true
 }
-
-func validateSecurityPolicy(cfg *Config) error {
-	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
-		return err
-	}
-	for _, raw := range cfg.ReturnOrigins {
-		if err := ValidatePublicURL(strings.TrimSpace(raw), true, true); err != nil {
-			return fmt.Errorf("return_origins %q %w", raw, err)
-		}
-	}
-	return nil
-}

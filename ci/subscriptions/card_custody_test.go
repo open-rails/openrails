@@ -135,7 +135,8 @@ func TestPlatformCardCustody(t *testing.T) {
 }
 
 // Without a platform vault for the deployment's posture, platform custody is
-// refused: over the API, in a declaration, and in Vault directly.
+// refused: over the API, in a declaration (the merchant document alone), and
+// in Vault directly.
 func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
@@ -159,21 +160,26 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 	require.Equal(t, billing.CardCustodyMerchant, served.Merchant.Value.Settings.CardCustody, "the previous document keeps serving")
 	require.Empty(t, w.platformIdentities())
 
-	boot := func(cfg openrails.Config) error {
+	// Boot serves without what it refuses, and names it.
+	refused := func(cfg openrails.Config) error {
 		cfg.Database = openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}
 		cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly
 		bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
-		if err == nil {
-			_ = bill.Close(context.Background())
+		require.NoError(t, err, "a custody the deployment cannot serve never fails boot")
+		defer func() { _ = bill.Close(context.Background()) }()
+		for _, p := range bill.Probes() {
+			if p.Name == "openrails_configuration" {
+				return p.Check(ctx)
+			}
 		}
-		return err
+		return nil
 	}
 	declared := func(custody billing.CardCustody) map[string]openrails.MerchantDeclaration {
 		return map[string]openrails.MerchantDeclaration{"custody-" + uuid.NewString()[:8]: {DisplayName: "Custody", Settings: billing.MerchantSettings{CardCustody: custody}}}
 	}
-	require.ErrorContains(t, boot(openrails.Config{Merchants: declared(billing.CardCustodyPlatform)}), "no platform vault")
-	require.ErrorContains(t, boot(openrails.Config{Merchants: declared(billing.CardCustodyHosted)}), "reserved")
-	require.ErrorContains(t, boot(openrails.Config{PlatformVault: &openrails.PlatformVaultConfig{Kind: "basis_theory", TenantID: platformTenant}}), "vault.kv_mount")
+	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyPlatform)}), "no platform vault")
+	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyHosted)}), "reserved")
+	require.ErrorContains(t, refused(openrails.Config{PlatformVault: &openrails.PlatformVaultConfig{Kind: "basis_theory", TenantID: platformTenant}}), "vault.kv_mount")
 	vault := vaulttest.New(t)
-	require.ErrorContains(t, boot(openrails.Config{Vault: vault.Config(), PlatformVault: &openrails.PlatformVaultConfig{Kind: "hyperswitch", TenantID: platformTenant}}), "platform_vault.kind")
+	require.ErrorContains(t, refused(openrails.Config{Vault: vault.Config(), PlatformVault: &openrails.PlatformVaultConfig{Kind: "hyperswitch", TenantID: platformTenant}}), "platform_vault.kind")
 }

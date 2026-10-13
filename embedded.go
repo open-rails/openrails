@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -64,19 +65,22 @@ type Engine struct {
 // Config.Merchants declares and never changes a catalog: a catalog document
 // is an operator's ApplyCatalog. Vault login, PSP posture checks and Redis
 // recover in the background and fail only the features that need them (see
-// Probes).
+// Probes). It fails only on what the engine cannot serve without: the
+// database and its migrations, an unknown ProviderWriteMode, an invalid
+// River schema, live PSPs beside non-live ones or beside a test seam. Any
+// other setting, merchant or document that cannot be served is refused alone
+// and reported by Ready and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
-	if _, err := readPoliciesFor(inProcess, cfg.ReadCache); err != nil {
-		return nil, err
-	}
 	inner, err := engine.New(ctx, cfg, deps)
 	if err != nil {
 		return nil, err
 	}
 	e := &Engine{engine: inner, client: &http.Client{Transport: inner.Transport()}}
-	if e.reads, err = newReads(inProcess, cfg.ReadCache, 0, e.handle); err != nil {
+	var refused []config.Degradation
+	if e.reads, refused, err = newReads(inProcess, cfg.ReadCache, 0, e.handle); err != nil {
 		return nil, errors.Join(err, inner.Close(ctx))
 	}
+	inner.App.Runtime.RefuseDegraded(refused)
 	inner.App.Runtime.OnMerchantChange(e.reads.forget)
 	return e, nil
 }
@@ -175,7 +179,8 @@ func (e *Engine) Ready(ctx context.Context) error { return e.engine.Ready(ctx) }
 // Probe checks one optional dependency.
 type Probe struct {
 	// Name is stable for dashboards: openrails_vault, openrails_psp_posture,
-	// openrails_solana_signer_identity, openrails_job_progress.
+	// openrails_configuration, openrails_solana_signer_identity,
+	// openrails_job_progress.
 	Name string
 	// Check returns nil while the dependency is usable; it honors ctx.
 	Check func(context.Context) error
@@ -185,6 +190,10 @@ type Probe struct {
 // background, for the host's dependency supervisor. openrails_vault is a
 // live token lookup (only when OpenRails logs in to Vault itself).
 // openrails_psp_posture fails while a PSP is unverified or disarmed.
+// openrails_configuration fails while something configured is not served,
+// naming each with why: an optional setting turned off, a declared merchant
+// not provisioned yet, a merchant document refused (a PSP whose secret,
+// signer or declaration does not check).
 // openrails_solana_signer_identity fails while a Transit signer key no longer
 // matches its stored identity: the Solana rail refuses until an operator
 // approves it (openrails solana-signer approve). openrails_job_progress fails

@@ -7,10 +7,12 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND (cardinality(sqlc.arg(pric
 ORDER BY b.price_id, b.psp_id;
 
 -- name: ResolvePriceBindingPSP :many
+-- A label names the account it currently names: one whose label moved to
+-- another account is superseded and bound only by its id.
 SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text
   AND ((sqlc.narg(psp_id)::uuid IS NOT NULL AND id = sqlc.narg(psp_id)::uuid)
-       OR (sqlc.narg(psp_id)::uuid IS NULL AND key = sqlc.arg(psp_key)::text));
+       OR (sqlc.narg(psp_id)::uuid IS NULL AND key = sqlc.arg(psp_key)::text AND superseded_at IS NULL));
 
 -- name: DeletePricePSPBindings :exec
 DELETE FROM billing.price_psp_bindings

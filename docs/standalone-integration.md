@@ -97,7 +97,7 @@ A merchant's configuration (display name, settings, alert webhooks, PSPs and
 custodians, credentials included) lives in the merchant manifest or, when a KV
 mount is named, in Vault; never in PostgreSQL. With the manifest it is read at
 boot and the edit routes are not mounted. With Vault the manifest names
-merchants only (a manifest declaring configuration is refused at boot) and
+merchants only (configuration a manifest declares is ignored and reported) and
 staff edit configuration over HTTP at the revision they read. See
 [merchant configuration](merchant-configuration.md) and [vault.md](vault.md).
 

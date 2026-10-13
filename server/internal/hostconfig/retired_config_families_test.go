@@ -67,7 +67,6 @@ func TestRetiredAndUnknownInputsRefuseBoot(t *testing.T) {
 		{"OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open", []string{"billing_hot_path was removed"}},
 		{"CLICKHOUSE_HTTP_ADDR", "http://ch.example:8123", []string{"clickhouse config was removed (#735)"}},
 		{"DB_TYPO_FIELD", "x", []string{"unknown keys refuse boot", "typo_field"}},
-		{"CATALOG_RECONCILIATION_INTERVAL", "30minutes", []string{"catalog_reconciliation_interval"}},
 		{"AUTH_ISSUER", "https://x", []string{"auth.issuer was removed (#1185)", "auth.token.issuer"}},
 		{"AUTH_REQUEST_ORIGIN", "https://x", []string{"auth.resource.public_url"}},
 		{"AUTHKIT_KEYS_PATH", "/vault/auth", []string{"AUTH_KEYS_PATH"}},

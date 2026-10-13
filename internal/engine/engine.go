@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/service"
 )
 
@@ -35,8 +36,13 @@ type Engine struct {
 	App *app.App
 	svc *service.Service
 
-	// declared are Config.Merchants' ids, by slug.
+	// declMu guards declared, issuers and bySlug: a merchant whose
+	// provisioning failed at New joins them once a background retry succeeds.
+	declMu sync.RWMutex
+	// declared are Config.Merchants' provisioned ids, by slug.
 	declared map[string]billing.MerchantID
+	issuers  map[string]billing.MerchantID
+	bySlug   map[billing.MerchantID]config.MerchantDeclaration
 
 	mu          sync.Mutex
 	closed      bool
@@ -70,15 +76,19 @@ func Graph(client any) *app.App {
 // New builds the engine. It first creates or upgrades OpenRails' tables, this
 // month's partitions and River's tables (Migrate's work); the control plane's
 // AuthKit migrates itself as it is built. ctx bounds the wait for the
-// database; nothing else does. Only Postgres fails construction: Vault login,
-// PSP posture and Redis recover in the background (see Ready and Probes). It
-// never changes a catalog: a catalog document applies by an explicit
-// ApplyCatalog.
+// database; nothing else does. Only the database, an unknown provider write
+// mode, an invalid River schema and money-safety refusals (live beside
+// non-live PSPs, a test seam beside a live PSP) fail construction. Anything
+// else that cannot be served is refused alone and reported (Ready, Probes'
+// openrails_configuration): an optional setting, a declared merchant, one of
+// its documents. Vault login, PSP posture and Redis recover in the
+// background. It never changes a catalog: a catalog document applies by an
+// explicit ApplyCatalog.
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	declarations, err := validate(&cfg, deps)
+	declarations, refused, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -109,38 +119,34 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, declared: map[string]billing.MerchantID{}}
+	e := &Engine{App: application, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
 	}
 	rt := application.Runtime
+	rt.RefuseDegraded(refused)
 	// Client operations need the same provider and secret graph as the
 	// standalone server; neither workers nor routes are prerequisites.
-	if err := rt.EnsureMerchantsService(ctx); err != nil {
+	if err := rt.ServeMerchantsService(ctx); err != nil {
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	rt.Merchants.WithFakeProviders(seams(deps)...)
+	if err := refuseMixedEnvironments(ctx, application, declarations); err != nil {
+		return fail(err)
+	}
 	// Each declared merchant is provisioned before a route or a worker can
-	// see it; the issuer that binds its credentials is recorded with it.
-	ids := make([]billing.MerchantID, len(declarations))
-	issuers := map[string]billing.MerchantID{}
-	bySlug := map[billing.MerchantID]config.MerchantDeclaration{}
-	var signersPending []config.MerchantDeclaration
-	for i, m := range declarations {
+	// see it; the issuer that binds its credentials is recorded with it. One
+	// that cannot be is refused alone and retried in the background.
+	for _, m := range declarations {
 		id, pending, err := upsertMerchantConfig(ctx, application, m, true)
 		if err != nil {
-			return fail(err)
+			e.provisionLater(m, err)
+			continue
 		}
-		ids[i], e.declared[m.Slug], bySlug[id] = id, id, m
-		if m.Issuer != "" {
-			issuers[m.Issuer] = id
-		}
-		if pending {
-			signersPending = append(signersPending, m)
-		}
+		e.admit(m, id, pending, false)
 	}
-	rt.DeclareMerchants(ids, issuers)
+	e.publishDeclared()
 	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
 		return fail(fmt.Errorf("build billing periodic jobs: %w", err))
 	}
@@ -148,49 +154,140 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(err)
 	}
 	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
-		return approveSolanaSigner(ctx, application, bySlug[mid], mid, key)
-	}
-	for _, m := range signersPending {
-		confirmSigner(application, m)
+		e.declMu.RLock()
+		m := e.bySlug[mid]
+		e.declMu.RUnlock()
+		return approveSolanaSigner(ctx, application, m, mid, key)
 	}
 	rt.CheckBookIdentity(ctx)
+	ids := e.declaredIDs()
 	rt.PreloadMerchantConfig(ids...)
 	rt.StartProviderPosture(ids...)
 	return e, nil
 }
 
+// admit records a provisioned declared merchant. late is a merchant a
+// background retry provisioned after New: it is published and verified at
+// once.
+func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, pending, late bool) {
+	rt := e.App.Runtime
+	e.declMu.Lock()
+	e.declared[m.Slug], e.bySlug[id] = id, m
+	if m.Issuer != "" {
+		e.issuers[m.Issuer] = id
+	}
+	e.declMu.Unlock()
+	rt.NameMerchant(id, m.Slug)
+	if pending {
+		confirmSigner(e.App, m)
+	}
+	if late {
+		e.publishDeclared()
+		rt.Unrefuse(merchantSubject(m.Slug))
+		rt.PreloadMerchantConfig(id)
+		rt.StartProviderPosture(e.declaredIDs()...)
+	}
+}
+
+// provisionLater refuses a declared merchant whose provisioning failed and
+// retries it in the background with capped backoff until it succeeds.
+func (e *Engine) provisionLater(m config.MerchantDeclaration, err error) {
+	rt := e.App.Runtime
+	rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
+	rt.Go("provision merchant "+m.Slug, func(ctx context.Context) {
+		_ = retry.Forever(ctx, func(ctx context.Context) error {
+			id, pending, err := upsertMerchantConfig(ctx, e.App, m, true)
+			if err != nil {
+				rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
+				return err
+			}
+			e.admit(m, id, pending, true)
+			return nil
+		}, nil)
+	})
+}
+
+func merchantSubject(slug string) string { return "merchants." + slug }
+
+// publishDeclared hands the runtime the provisioned merchants and the
+// issuers bound to them.
+func (e *Engine) publishDeclared() {
+	e.declMu.RLock()
+	issuers := maps.Clone(e.issuers)
+	e.declMu.RUnlock()
+	e.App.Runtime.DeclareMerchants(e.declaredIDs(), issuers)
+}
+
+// declaredIDs are the provisioned declared merchants, in slug order.
+func (e *Engine) declaredIDs() []billing.MerchantID {
+	e.declMu.RLock()
+	defer e.declMu.RUnlock()
+	ids := make([]billing.MerchantID, 0, len(e.declared))
+	for _, slug := range slices.Sorted(maps.Keys(e.declared)) {
+		ids = append(ids, e.declared[slug])
+	}
+	return ids
+}
+
+// refuseMixedEnvironments refuses declarations whose PSPs another money
+// class already holds in the database: a deployment's PSPs are all live or
+// all non-live.
+func refuseMixedEnvironments(ctx context.Context, a *app.App, declarations []config.MerchantDeclaration) error {
+	checked := map[bool]bool{}
+	for _, m := range declarations {
+		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
+			p := m.PSPs[key]
+			live := config.LiveEnvironment(p.Environment)
+			if checked[live] || config.ValidatePSPEnvironment(key, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment) != nil {
+				continue
+			}
+			checked[live] = true
+			why, err := a.Runtime.Merchants.EnvironmentRefusal(ctx, p.Environment)
+			if err != nil {
+				return fmt.Errorf("openrails: check PSP environments: %w", err)
+			}
+			if why != "" {
+				return fmt.Errorf("openrails: Config.Merchants[%q].psps/%s: %s", m.Slug, strings.ToLower(strings.TrimSpace(key)), why)
+			}
+		}
+	}
+	return nil
+}
+
 // validate enforces what embedded construction must declare and seeds the
 // protective defaults the standalone loader applies; it returns
-// Config.Merchants in slug order. Every refusal happens before any resource
-// opens.
-func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, error) {
+// Config.Merchants in slug order, and the entries it refused alone. Every
+// fatal refusal happens before any resource opens.
+func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, []config.Degradation, error) {
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
 	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
 	case "":
-		return nil, fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
+		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
 	default:
-		return nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
+		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
 	}
-	declarations, err := config.DeclaredMerchants(cfg)
+	declarations, refused, err := config.DeclaredMerchants(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("openrails: %w", err)
+		return nil, nil, fmt.Errorf("openrails: %w", err)
 	}
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if live := declaredLive(declarations); live != "" {
 		if fakes := fakeProviders(cfg, deps); len(fakes) > 0 {
-			return nil, fmt.Errorf("openrails: %s is a test seam and is refused beside a live PSP (%s)", strings.Join(fakes, ", "), live)
+			return nil, nil, fmt.Errorf("openrails: %s is a test seam and is refused beside a live PSP (%s)", strings.Join(fakes, ", "), live)
 		}
 	}
-	if deps.Email != nil && cfg.SMTP != nil {
-		return nil, fmt.Errorf("openrails: set Deps.Email or Config.SMTP, not both")
-	}
-	if cfg.SMTP != nil && strings.TrimSpace(cfg.SMTP.Host) == "" {
-		return nil, fmt.Errorf("openrails: Config.SMTP.Host is required")
+	// Vault holds a merchant's configuration: what its declaration names
+	// beside its slug is ignored, and reported.
+	for i, m := range declarations {
+		if err := config.RefuseDeclarationBesideVault(cfg, m.Slug, m); err != nil {
+			refused = append(refused, config.Degradation{Field: merchantSubject(m.Slug) + ".declaration", Err: fmt.Errorf("%w; Vault's configuration serves", err)})
+			declarations[i] = config.MerchantDeclaration{Slug: m.Slug, Issuer: m.Issuer}
+		}
 	}
 	if !cfg.RateLimitsDisabled {
 		if cfg.RateLimits == nil {
@@ -200,7 +297,7 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 			cfg.Captcha = config.DefaultCaptcha()
 		}
 	}
-	return declarations, nil
+	return declarations, refused, nil
 }
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
@@ -258,8 +355,11 @@ func validRiverSchema(schema string) error {
 	return nil
 }
 
-// DeclaredMerchant is the merchant Config declares under slug.
+// DeclaredMerchant is the merchant Config declares under slug, once
+// provisioned.
 func (e *Engine) DeclaredMerchant(slug string) (billing.MerchantID, bool) {
+	e.declMu.RLock()
+	defer e.declMu.RUnlock()
 	id, ok := e.declared[billing.NormalizeMerchantSlug(slug)]
 	return id, ok && !id.IsZero()
 }

@@ -78,6 +78,10 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			cfg.Captcha = config.DefaultCaptcha()
 		}
 	}
+	// An optional setting that cannot be served is turned off and reported;
+	// only what the engine cannot serve without fails.
+	degraded := config.Degrade(cfg)
+	degraded = append(degraded, config.DegradeEmail(cfg, opts != nil && opts.EmailSender != nil)...)
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
@@ -162,6 +166,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)
 	}
+	runtime.RefuseDegraded(degraded)
 	runtime.startRedisMonitor()
 
 	app := &App{

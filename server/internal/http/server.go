@@ -209,7 +209,7 @@ func New(deps Dependencies) (*Server, error) {
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
 	// The Runtime owns credential construction and lifetime; HTTP assembly
 	// reuses its service instead of opening another store.
-	if err := deps.Runtime.EnsureMerchantsService(context.Background()); err != nil {
+	if err := deps.Runtime.ServeMerchantsService(context.Background()); err != nil {
 		return nil, err
 	}
 	s.merchants = deps.Runtime.Merchants

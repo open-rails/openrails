@@ -106,6 +106,9 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 	if !c.Writable() {
 		return Set{}, ErrReadOnly
 	}
+	if err := c.held(); err != nil {
+		return Set{}, err
+	}
 	c.mu.Lock()
 	admissions := c.admissions
 	key := append([]byte(nil), c.fingerprintKey...)

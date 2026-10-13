@@ -501,6 +501,39 @@ func (q *Queries) PSPExistsOnRail(ctx context.Context, arg PSPExistsOnRailParams
 	return exists, err
 }
 
+const pSPHeldBilling = `-- name: PSPHeldBilling :one
+SELECT
+    (SELECT count(*) FROM billing.payment_methods m
+     WHERE m.merchant_id = $1::uuid AND m.psp_id = $2::uuid
+       AND m.custodian = 'psp' AND m.status IN ('active', 'requires_action'))::bigint AS vaulted_methods,
+    (SELECT count(*) FROM billing.subscriptions s
+     WHERE s.merchant_id = $1::uuid AND s.psp_id = $2::uuid
+       AND s.collection_policy <> 'engine' AND s.status <> 'canceled' AND s.deleted_at IS NULL)::bigint AS provider_subscriptions,
+    (SELECT count(*) FROM billing.subscriptions s
+     WHERE s.merchant_id = $1::uuid AND s.psp_id = $2::uuid
+       AND s.collection_policy = 'engine' AND s.status <> 'canceled' AND s.deleted_at IS NULL)::bigint AS engine_subscriptions
+`
+
+type PSPHeldBillingParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+type PSPHeldBillingRow struct {
+	VaultedMethods        int64
+	ProviderSubscriptions int64
+	EngineSubscriptions   int64
+}
+
+// What needs the PSP's own account: cards in its vault, subscriptions it
+// bills itself, and OpenRails-run subscriptions renewing on it.
+func (q *Queries) PSPHeldBilling(ctx context.Context, arg PSPHeldBillingParams) (PSPHeldBillingRow, error) {
+	row := q.db.QueryRow(ctx, pSPHeldBilling, arg.MerchantID, arg.PspID)
+	var i PSPHeldBillingRow
+	err := row.Scan(&i.VaultedMethods, &i.ProviderSubscriptions, &i.EngineSubscriptions)
+	return i, err
+}
+
 const pSPOutsideEnvironments = `-- name: PSPOutsideEnvironments :one
 SELECT p.id, m.slug, p.key, p.rail, p.environment, p.account_id
 FROM billing.psps p

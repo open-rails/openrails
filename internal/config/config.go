@@ -4,12 +4,10 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"net/url"
 	"path"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -195,18 +193,6 @@ func ValidateLoopbackGatewayURL(raw string) error {
 	}
 	if !ip.IsLoopback() {
 		return fmt.Errorf("%w: host %q is not a loopback address", ErrProviderSandboxGateway, u.Hostname())
-	}
-	return nil
-}
-
-func validateProviderSandbox(cfg *Config) error {
-	for key, gateway := range map[string]string{"nmi_gateway_url": SandboxNMIGatewayURL(cfg), "stripe_api_url": SandboxStripeAPIURL(cfg), "solana_rpc_url": SandboxSolanaRPCURL(cfg), "ccbill_datalink_url": SandboxCCBillDataLinkURL(cfg)} {
-		if gateway == "" {
-			continue
-		}
-		if err := ValidateLoopbackGatewayURL(gateway); err != nil {
-			return fmt.Errorf("provider_sandbox.%s: %w", key, err)
-		}
 	}
 	return nil
 }
@@ -957,128 +943,67 @@ func CaptchaChallengeBuckets() []string {
 	return []string{"purchase", "payment-methods", "subscriptions"}
 }
 
-// Validate validates the billing configuration
+// Validate refuses what the engine cannot serve without: an unknown provider
+// write mode (#346), missing rate limits and the database. Every optional
+// setting is Degrade's: it is turned off with a reason, never refused.
 func Validate(cfg *Config) error {
-	// Credential posture never relaxes security validation.
-	// Provider write mode must be a known value — a typo (e.g. "redaonly") must
-	// never silently boot with full behavior (#346).
+	// A typo (e.g. "redaonly") must never silently boot with full behavior.
 	providerWriteMode := cfg.normalizedProviderWriteMode()
 	if !ValidProviderWriteModes[providerWriteMode] {
 		return fmt.Errorf("invalid provider_write_mode %q: must be one of full, limited, readonly", providerWriteMode)
 	}
-
-	// Malformed catalog_reconciliation_interval refuses to boot (#712): the old
-	// env knob silently fell back to 1h on a typo.
-	if _, _, err := CatalogReconciliationSchedule(cfg); err != nil {
-		return err
-	}
-
 	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
 		return fmt.Errorf("rate_limits is required unless rate_limits_disabled is explicitly set for a host-owned limiter")
 	}
-	if cfg.RateLimits != nil {
-		for bucket := range *cfg.RateLimits {
-			if !slices.Contains(RateLimitBuckets, bucket) {
-				return fmt.Errorf("rate_limits.%s is not a bucket (%s); a per-address ceiling belongs to the proxy in front of OpenRails", bucket, strings.Join(RateLimitBuckets, ", "))
-			}
-		}
-	}
-	if cfg.Redis != nil {
-		if _, err := RedisOptions(cfg.Redis); err != nil {
-			return err
-		}
-	}
-	if err := validateCaptcha(cfg.Captcha); err != nil {
-		return fmt.Errorf("captcha config validation failed: %w", err)
-	}
-
-	// #741/#761: an unknown llm.provider must never silently boot with one
-	// vendor's dialect pointed at another vendor's key.
-	if cfg.LLM != nil {
-		switch LLMProvider(cfg.LLM) {
-		case LLMProviderAnthropic, LLMProviderOpenAI:
-		default:
-			return fmt.Errorf("invalid llm.provider %q: must be %q or %q", cfg.LLM.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
-		}
-		// Same root-of-trust posture as the auth issuer: plaintext HTTP to
-		// the model endpoint (prompts + aggregate results in flight) is
-		// prohibited.
-		if base := strings.TrimSpace(cfg.LLM.BaseURL); base != "" {
-			u, err := url.Parse(base)
-			if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-				return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
-			}
-			if u.Scheme != "https" {
-				return fmt.Errorf("llm.base_url %q must use https", base)
-			}
-		}
-	}
-
-	// Always validate database configuration
 	if err := ValidateDatabase(cfg); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
-
-	if err := validateHyperSwitch(cfg); err != nil {
-		return err
-	}
-	if err := validateProviderSandbox(cfg); err != nil {
-		return err
-	}
-	if err := validateVault(cfg.Vault); err != nil {
-		return err
-	}
-	if err := validatePlatformVault(cfg); err != nil {
-		return err
-	}
-	for _, slug := range slices.Sorted(maps.Keys(cfg.Merchants)) {
-		if err := RefuseDeclarationBesideVault(cfg, slug, cfg.Merchants[slug]); err != nil {
-			return err
-		}
-	}
-	if err := validateSecurityPolicy(cfg); err != nil {
-		return err
-	}
-
-	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {
-		return fmt.Errorf("trusted_proxies config validation failed: %w", err)
-	}
-
-	if err := validateSourceCIDRs(cfg.CloudflareProxies); err != nil {
-		return fmt.Errorf("cloudflare_proxies config validation failed: %w", err)
-	}
-
-	if err := validateSourceCIDRs(cfg.CCBillWebhookIPAllowlist); err != nil {
-		return fmt.Errorf("ccbill_webhook_ip_allowlist config validation failed: %w", err)
-	}
-
 	return nil
 }
 
-// validateSourceCIDRs rejects a malformed CIDR at boot — a typo must never
-// silently no-op into an unintended trust posture (#746) — and, deliberately,
-// a /0 prefix. Both lists it guards feed transport-level authentication
-// (SEC-19): trusting 0.0.0.0/0 as a proxy makes every X-Forwarded-For
-// authoritative, and allowlisting ::/0 as a CCBill source accepts a forged
-// callback from anywhere — CCBill has no HMAC, so the source IP is its only
-// authentication. An operator who wants "everything" must say so one honest
-// CIDR at a time.
-func validateSourceCIDRs(cidrs []string) error {
-	for _, raw := range cidrs {
-		trimmed := strings.TrimSpace(raw)
-		_, ipNet, err := net.ParseCIDR(trimmed)
-		if err != nil {
-			return fmt.Errorf("invalid CIDR %q (expected e.g. \"10.0.0.0/8\"): %w", raw, err)
+// validateLLM refuses an unknown provider (#741/#761: one vendor's dialect
+// pointed at another's key) and a model endpoint over plaintext HTTP.
+func validateLLM(llm *LLMConfig) error {
+	if llm == nil {
+		return nil
+	}
+	switch LLMProvider(llm) {
+	case LLMProviderAnthropic, LLMProviderOpenAI:
+	default:
+		return fmt.Errorf("invalid llm.provider %q: must be %q or %q", llm.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
+	}
+	if base := strings.TrimSpace(llm.BaseURL); base != "" {
+		u, err := url.Parse(base)
+		if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
 		}
-		if ones, _ := ipNet.Mask.Size(); ones == 0 {
-			return fmt.Errorf("CIDR %q matches every address; enumerate the real ranges instead", raw)
+		if u.Scheme != "https" {
+			return fmt.Errorf("llm.base_url %q must use https", base)
 		}
 	}
 	return nil
 }
 
-// validateVault refuses a malformed merchant configuration path.
-func validateVault(vc *VaultConfig) error {
+// validateSourceCIDR refuses a malformed CIDR (#746) and, deliberately, a /0
+// prefix. The lists it guards feed transport-level authentication (SEC-19):
+// trusting 0.0.0.0/0 as a proxy makes every X-Forwarded-For authoritative,
+// and allowlisting ::/0 as a CCBill source accepts a forged callback from
+// anywhere (CCBill has no HMAC). Degrade drops such an entry, so the list
+// only ever trusts less.
+func validateSourceCIDR(raw string) error {
+	_, ipNet, err := net.ParseCIDR(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid CIDR %q (expected e.g. \"10.0.0.0/8\"): %w", raw, err)
+	}
+	if ones, _ := ipNet.Mask.Size(); ones == 0 {
+		return fmt.Errorf("CIDR %q matches every address; enumerate the real ranges instead", raw)
+	}
+	return nil
+}
+
+// ValidateVault refuses a malformed Vault auth mount or mount path: Vault is
+// then unusable (vaultconn.Open), never a boot failure.
+func ValidateVault(vc *VaultConfig) error {
 	if vc == nil {
 		return nil
 	}

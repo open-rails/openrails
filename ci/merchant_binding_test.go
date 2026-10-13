@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
+	"github.com/open-rails/openrails/internal/engine"
 )
 
 // retiredMerchantHeader is the request header that once named a merchant:
@@ -387,17 +388,24 @@ func TestTwoIssuersShareOneMerchant(t *testing.T) {
 }
 
 // An issuer binds its credentials to one merchant of an engine: declared by
-// two, New fails before opening anything; a merchant file never carries one.
-func TestIssuerDeclaredTwiceFailsNew(t *testing.T) {
+// two, it binds neither, both serve and the configuration probe says why; a
+// merchant file never carries one.
+func TestIssuerDeclaredTwiceBindsNeither(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		"a-" + uuid.NewString()[:8]: {Issuer: "https://shop.example"},
-		"b-" + uuid.NewString()[:8]: {Issuer: "https://shop.example"},
-	}
+	a, b := "a-"+uuid.NewString()[:8], "b-"+uuid.NewString()[:8]
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{a: {Issuer: "https://shop.example"}, b: {Issuer: "https://shop.example"}}
 	bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	require.Nil(t, bill)
-	require.ErrorContains(t, err, "an issuer binds its credentials to one merchant")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
+	for _, slug := range []string{a, b} {
+		_, err := bill.MerchantBySlug(slug)
+		require.NoError(t, err)
+		require.ErrorContains(t, probe(t, bill, "openrails_configuration"), "merchants."+slug+".issuer: ")
+	}
+	require.ErrorContains(t, probe(t, bill, "openrails_configuration"), "an issuer binds its credentials to one merchant, so it binds none")
+	_, bound := engine.Graph(bill).Runtime.IssuerMerchant("https://shop.example")
+	require.False(t, bound)
 	_, err = openrails.ParseMerchantDeclaration([]byte("slug: shop\nissuer: https://shop.example\n"))
 	require.ErrorContains(t, err, "issuer is not a merchant file's")
 }

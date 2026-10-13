@@ -3,6 +3,7 @@ package merchants
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -88,7 +89,10 @@ type PSPScope struct {
 	SignerChange string
 	// DuplicateAccount: another live PSP already declares this gateway
 	// account; no credential of this one is read.
-	DuplicateAccount  bool
+	DuplicateAccount bool
+	// Declared: a document names this account, so it has credentials. An
+	// undeclared one keeps its records and fails anything needing them.
+	Declared          bool
 	Revision          int64
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -109,6 +113,12 @@ func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 		return SecretRef{}, err
 	}
 	return SecretRef{Name: name}, nil
+}
+
+// ErrUndeclared is why an operation needing an undeclared PSP's credentials
+// fails.
+func (s PSPScope) ErrUndeclared() error {
+	return fmt.Errorf("%s account %s has no declared credentials", s.Rail, s.AccountID)
 }
 
 // Secret is the value of credential key, "" when the document holds none or

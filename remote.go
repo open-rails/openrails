@@ -16,8 +16,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -135,9 +137,11 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 		r.client = &http.Client{}
 	}
 	var err error
-	if r.reads, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(id billing.MerchantID) *Client { return r.handles[id] }); err != nil {
+	var refused []config.Degradation
+	if r.reads, refused, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(id billing.MerchantID) *Client { return r.handles[id] }); err != nil {
 		return nil, err
 	}
+	warnRefused(refused)
 	for id, credential := range opts.Credentials {
 		if id.IsZero() {
 			return nil, fmt.Errorf("openrails: RemoteOptions.Credentials holds a credential under the zero merchant ID")
@@ -192,10 +196,19 @@ func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...R
 	if err != nil {
 		return nil, fmt.Errorf("openrails: credential: %w", err)
 	}
-	if handle.reads, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(billing.MerchantID) *Client { return handle }); err != nil {
+	var refused []config.Degradation
+	if handle.reads, refused, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(billing.MerchantID) *Client { return handle }); err != nil {
 		return nil, err
 	}
+	warnRefused(refused)
 	return handle, nil
+}
+
+// warnRefused logs each RemoteOptions setting the client ignored.
+func warnRefused(refused []config.Degradation) {
+	for _, d := range refused {
+		log.WithField("subject", d.Field).WithError(d.Err).Warn("openrails: RemoteOptions setting ignored")
+	}
 }
 
 func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration, id billing.MerchantID, credential RemoteCredential) (*Client, error) {

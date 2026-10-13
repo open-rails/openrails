@@ -92,6 +92,9 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if err != nil {
 		return readFailure(err)
 	}
+	if ok && !account.Declared {
+		return unusable(account.ErrUndeclared())
+	}
 	if !ok || account.Archived {
 		return unusable(errors.New("archived account cannot admit a new engine renewal"))
 	}

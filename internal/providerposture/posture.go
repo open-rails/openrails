@@ -276,6 +276,26 @@ type Tracked struct {
 	mu     sync.Mutex
 	checks map[Key]Check
 	psps   map[uuid.UUID]trackedPSP
+	// refused are PSPs disarmed without a provider check (RefusePSP).
+	refused map[uuid.UUID]refusedPSP
+}
+
+type refusedPSP struct {
+	merchant uuid.UUID
+	status   Status
+}
+
+// RefusePSP records the merchant's pspID as not armed without asking its
+// provider: its credentials cannot be read, which purchase already refuses
+// on its own (credentials_missing). Unarmed reports it until a later AddPSP
+// or ForgetPSPs.
+func (t *Tracked) RefusePSP(merchantID, pspID uuid.UUID, k Key, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.refused == nil {
+		t.refused = map[uuid.UUID]refusedPSP{}
+	}
+	t.refused[pspID] = refusedPSP{merchant: merchantID, status: Status{Key: k, Verdict: Unknown, Err: err}}
 }
 
 type trackedPSP struct {
@@ -309,6 +329,7 @@ func (t *Tracked) AddPSP(merchantID, pspID uuid.UUID, k Key, check Check) {
 	}
 	t.checks[k] = check
 	t.psps[pspID] = trackedPSP{merchant: merchantID, key: k}
+	delete(t.refused, pspID)
 }
 
 // ForgetPSPs drops the merchant's recorded PSPs keep refuses: no longer live,
@@ -320,6 +341,11 @@ func (t *Tracked) ForgetPSPs(merchantID uuid.UUID, keep func(pspID uuid.UUID) bo
 		if p.merchant == merchantID && !keep(id) {
 			delete(t.psps, id)
 			delete(t.checks, p.key)
+		}
+	}
+	for id, p := range t.refused {
+		if p.merchant == merchantID && !keep(id) {
+			delete(t.refused, id)
 		}
 	}
 }
@@ -356,13 +382,16 @@ func (t *Tracked) Unarmed(r *Registry) []Status {
 	for k := range t.checks {
 		keys = append(keys, k)
 	}
-	t.mu.Unlock()
-	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 	var out []Status
+	for _, p := range t.refused {
+		out = append(out, p.status)
+	}
+	t.mu.Unlock()
 	for _, k := range keys {
 		if s, done := r.Lookup(k); done && !s.Armed() {
 			out = append(out, s)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out
 }

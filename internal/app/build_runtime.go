@@ -251,14 +251,16 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// One sender for all of OpenRails' email: the host's, else Config.SMTP.
 	var sender config.EmailSender
+	var smtpErr error
 	if overrides != nil && overrides.EmailSender != nil {
 		sender = overrides.EmailSender
 	} else if cfg.SMTP != nil {
 		smtp, err := email.NewSMTP(*cfg.SMTP)
 		if err != nil {
-			return nil, err
+			smtpErr = fmt.Errorf("%w; OpenRails sends no email", err)
+		} else {
+			sender = smtp
 		}
-		sender = smtp
 	}
 	// Operator alerts and AuthKit still use the deployment's sender.
 	alertEmailSender := alerting.NewMailSender(sender, merchantconfig.NewStore(database))
@@ -353,6 +355,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtimeRef = runtime
+	if smtpErr != nil {
+		runtime.Refuse("smtp", smtpErr)
+	}
+	if serviceInstances.HyperSwitchErr != nil {
+		runtime.Refuse("hyperswitch", serviceInstances.HyperSwitchErr)
+	}
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
 	moneyCharger.SetAdapterResolver(collectionResolver)
@@ -509,6 +517,8 @@ func nilRedis(c redis.UniversalClient) bool {
 }
 
 type servicesInstances struct {
+	// HyperSwitchErr is why the HyperSwitch deployment is not served.
+	HyperSwitchErr      error
 	SubscriptionService *subscriptions.SubscriptionService
 	// Idempotency claims request keys (#1099).
 	Idempotency *idempotency.Store
@@ -568,9 +578,10 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
+	var hyperSwitchErr error
 	if cfg.HyperSwitch != nil {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {
-			return nil, err
+			hyperSwitchErr = fmt.Errorf("%w; HyperSwitch collection is off", err)
 		}
 	}
 	metricsService := metrics.NewService(database)
@@ -731,6 +742,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, orderAttemptService, clock)
 
 	return &servicesInstances{
+		HyperSwitchErr:               hyperSwitchErr,
 		SubscriptionService:          subscriptionService,
 		ProductService:               productService,
 		PriceService:                 priceService,

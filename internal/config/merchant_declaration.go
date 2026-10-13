@@ -300,42 +300,60 @@ func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaratio
 }
 
 // DeclaredMerchants is cfg.Merchants in slug order, each named by its key,
-// after the checks that need no database: every key is a slug, an Issuer is
-// an absolute https URL (http on a loopback host) one merchant alone
-// declares, and every PSP names a rail and only its keys.
-func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
-	out := make([]MerchantDeclaration, 0, len(cfg.Merchants))
-	issuers := map[string]string{}
+// after the checks that need no database. One entry's mistake refuses that
+// entry alone, reported in refused: a key that is not a slug, or a Slug that
+// is not its key, refuses the merchant; an Issuer that is not an absolute
+// https URL (http on a loopback host), or that another entry declares too, is
+// bound to no merchant. Each PSP is checked as its merchant is provisioned.
+// Declared PSPs that mix live and non-live money refuse the deployment.
+func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degradation, err error) {
+	byIssuer := map[string][]string{}
 	for _, key := range slices.Sorted(maps.Keys(cfg.Merchants)) {
 		m := cfg.Merchants[key]
 		slug := billing.NormalizeMerchantSlug(key)
 		if err := billing.ValidateMerchantSlug(key); err != nil {
-			return nil, fmt.Errorf("Config.Merchants[%q]: %w", key, err)
+			refused = append(refused, Degradation{Field: "merchants." + key, Err: fmt.Errorf("%w; the merchant is not provisioned", err)})
+			continue
 		}
 		if m.Slug != "" && billing.NormalizeMerchantSlug(m.Slug) != slug {
-			return nil, fmt.Errorf("Config.Merchants[%q]: Slug %q is not its key", key, m.Slug)
+			refused = append(refused, Degradation{Field: "merchants." + key, Err: fmt.Errorf("Slug %q is not its key; the merchant is not provisioned", m.Slug)})
+			continue
 		}
 		m.Slug = slug
 		if m.Issuer = strings.TrimSpace(m.Issuer); m.Issuer != "" {
 			if err := validateIssuer(m.Issuer); err != nil {
-				return nil, fmt.Errorf("Config.Merchants[%q].Issuer: %w", key, err)
-			}
-			if other, taken := issuers[m.Issuer]; taken {
-				return nil, fmt.Errorf("Config.Merchants[%q].Issuer %q is also %q's: an issuer binds its credentials to one merchant", key, m.Issuer, other)
-			}
-			issuers[m.Issuer] = key
-		}
-		for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
-			if err := ValidatePSPDeclaration(psp, m.PSPs[psp]); err != nil {
-				return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
+				refused = append(refused, Degradation{Field: "merchants." + key + ".issuer", Err: fmt.Errorf("%w; no credential is bound to the merchant by issuer", err)})
+				m.Issuer = ""
+			} else {
+				byIssuer[m.Issuer] = append(byIssuer[m.Issuer], slug)
 			}
 		}
 		out = append(out, m)
 	}
-	if err := ValidateDeploymentEnvironments(DeclaredEnvironments(out)); err != nil {
-		return nil, fmt.Errorf("Config.Merchants: %w", err)
+	for i, m := range out {
+		if others := byIssuer[m.Issuer]; len(others) > 1 {
+			refused = append(refused, Degradation{Field: "merchants." + m.Slug + ".issuer", Err: fmt.Errorf("%q is declared by %s: an issuer binds its credentials to one merchant, so it binds none", m.Issuer, strings.Join(others, ", "))})
+			out[i].Issuer = ""
+		}
 	}
-	return out, nil
+	if err := ValidateDeploymentEnvironments(declaredValidEnvironments(out)); err != nil {
+		return nil, nil, fmt.Errorf("Config.Merchants: %w", err)
+	}
+	return out, refused, nil
+}
+
+// declaredValidEnvironments is DeclaredEnvironments without the PSPs whose
+// environment their rail does not have: those are refused on their own.
+func declaredValidEnvironments(merchants []MerchantDeclaration) map[string]string {
+	out := DeclaredEnvironments(merchants)
+	for _, m := range merchants {
+		for key, p := range m.PSPs {
+			if ValidatePSPEnvironment(key, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment) != nil {
+				delete(out, m.Slug+"/"+strings.ToLower(strings.TrimSpace(key)))
+			}
+		}
+	}
+	return out
 }
 
 // validateIssuer accepts an issuer identifier as tokens carry it (RFC 8414

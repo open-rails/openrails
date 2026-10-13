@@ -436,6 +436,19 @@ stores `psps.credential_fingerprint`, an HMAC of the credential under a random
 key Vault holds. Archiving the duplicate, or giving it its own credential,
 clears it.
 
+A PSP is its account (rail, money class, `account_id`); its key is only the
+label the configuration and the catalog name it by. Renaming the key keeps the
+PSP. Declaring the key with another account registers that account as a new
+PSP for new sales, and price bindings follow the key on the next catalog
+apply; the account it named keeps every record and, undeclared, has no
+credentials: whatever needs them (a renewal on a card in its vault, a refund
+of a payment it captured) fails on its own, naming it, and its webhooks are
+refused with a warning. While it holds cards in its vault or subscriptions it
+bills, readiness and `openrails_configuration` report it and a
+`consistency.merchant_config.undeclared_account` finding stays open; holding
+only history it is informational. Declaring the account again, under any
+key, re-arms it.
+
 Every provider intent is stamped at enqueue with the `psp_id` it was produced
 against, and the executor/verifier arm the rail client for **that** PSP row
 from its scoped secrets at drain time. A PSP whose credentials cannot be
@@ -1170,8 +1183,9 @@ liveness beat rather than from its start.
 public and carry no dependency detail: a failing check is logged and answers
 503 `service_unavailable`. There is no `/health`, `/healthz` or `/readyz`. Embedded hosts wire the same checks into
 their own handler. Readiness requires Postgres, the merchants service, the River producer and a
-locally managed River worker consumer; Redis, Vault and PSP posture are
-reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. An
+locally managed River worker consumer; Redis, Vault, PSP posture and
+`configuration` (every setting, merchant or merchant document boot refused
+instead of failing, with why) are reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. An
 embedded host's own River fleet (`WithRiverClient`) is outside that
 local-process check and is observed through the `openrails_job_progress` probe
 (the engine's `Probes`).

@@ -367,19 +367,18 @@ type ProvisionMerchantParams struct {
 
 // ProvisionMerchant registers a declared merchant and, with a file as the
 // source, puts its declaration in place: the declaration IS the
-// configuration. With Vault as the source a declaration names only the
-// merchant (its slug); Vault alone holds its configuration.
-func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
+// configuration. A document it cannot serve is refused alone and named in
+// refused, with why; the merchant serves the rest. With Vault as the source a
+// declaration names only the merchant (its slug); Vault alone holds its
+// configuration.
+func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *merchants.Merchant, refused map[string]string, _ error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
-	if err := ValidateMerchantDeclaration(req.Config, mt); err != nil {
-		return nil, err
-	}
 	if err := config.RefuseDeclarationBesideVault(req.Config, slug, mt); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if req.Database == nil || req.Merchants == nil || req.Merchants.Config() == nil {
-		return nil, fmt.Errorf("merchant provisioning requires the database and the merchant configuration")
+		return nil, nil, fmt.Errorf("merchant provisioning requires the database and the merchant configuration")
 	}
 	directory := req.Merchants
 	var tn *merchants.Merchant
@@ -396,32 +395,36 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 	case errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero() && req.Insert:
 		id, err := db.RegisterUnboundMerchant(ctx, req.Database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if tn, err = directory.Get(ctx, id); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	case errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero():
-		return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
+		return nil, nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
 	case err != nil:
-		return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
+		return nil, nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 	}
-	if err := PutDeclaration(ctx, req, tn.ID, mt); err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
+	if refused, err = PutDeclaration(ctx, req, tn.ID, mt); err != nil {
+		return nil, nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}
-	return tn, nil
+	return tn, refused, nil
 }
 
 // PutDeclaration puts a merchant's declared configuration in place when a
-// file is the source. With Vault as the source there is nothing to put: a
-// declaration naming configuration was refused before.
-func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing.MerchantID, mt config.MerchantDeclaration) error {
+// file is the source and returns each document the merchant does not serve,
+// with why: what its own checks refuse (ScopeDeclaration), a Solana PSP whose
+// signer cannot be read, and what the configuration's reconciliation
+// rejects. One refused document never refuses the others. With Vault as the
+// source there is nothing to put: a declaration naming configuration was
+// refused before.
+func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing.MerchantID, mt config.MerchantDeclaration) (map[string]string, error) {
 	cache := req.Merchants.Config()
 	source, ok := cache.Source().(*merchantdocs.FileSource)
 	if !ok {
-		return config.RefuseDeclarationBesideVault(req.Config, mt.Slug, mt)
+		return nil, config.RefuseDeclarationBesideVault(req.Config, mt.Slug, mt)
 	}
-	mt.PSPs = maps.Clone(mt.PSPs)
+	mt, refused := ScopeDeclaration(req.Config, mt)
 	if signer, ok := req.SolanaTransit.(*signeridentity.Transit); ok {
 		signer.Declare(mt.PSPs)
 	}
@@ -432,25 +435,63 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 		}
 		account, err := SolanaAccountID(ctx, entry.config, req.SolanaTransit)
 		if err != nil {
+			delete(mt.PSPs, entry.key)
 			if req.DeferPSP != nil && req.DeferPSP(entry.rail, err) {
 				log.WithError(err).WithField("psp", entry.key).Warn("merchant bootstrap: PSP deferred until its signer answers")
-				delete(mt.PSPs, entry.key)
+				refused[merchantdocs.PSPDoc(strings.ToLower(entry.key))] = "deferred until its signer answers: " + err.Error()
 				continue
 			}
-			return fmt.Errorf("psps.%s: %w", entry.key, err)
+			refused[merchantdocs.PSPDoc(strings.ToLower(entry.key))] = err.Error()
+			continue
 		}
 		accounts[strings.ToLower(entry.key)] = account
 	}
-	source.Put(id, merchantdocs.Declared(id, mt, accounts, time.Now().UTC()))
+	set := merchantdocs.Declared(id, mt, accounts, time.Now().UTC())
+	if _, ok := refused[merchantdocs.MerchantDoc]; ok {
+		set.Merchant, set.HasMerchant = merchantdocs.Doc[merchantdocs.Merchant]{}, false
+	}
+	if len(refused) > 0 {
+		set.Rejected = refused
+	}
+	source.Put(id, set)
 	set, err := cache.Reload(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(set.Rejected) > 0 {
-		return rejected(set.Rejected)
-	}
-	return nil
+	return set.Rejected, nil
 }
+
+// ScopeDeclaration is mt without what it cannot serve, and each document it
+// refused, with why: a PSP whose declaration does not check refuses that PSP
+// alone. Settings that do not normalize, or a card custody the deployment
+// cannot serve, refuse the merchant document and with it every PSP and
+// custodian, which never serve without their merchant's settings.
+func ScopeDeclaration(cfg *config.Config, mt config.MerchantDeclaration) (config.MerchantDeclaration, map[string]string) {
+	refused := map[string]string{}
+	mt.PSPs, mt.Custodians = maps.Clone(mt.PSPs), maps.Clone(mt.Custodians)
+	if err := validateMerchantDocument(cfg, mt); err != nil {
+		refused[merchantdocs.MerchantDoc] = err.Error()
+		for key := range mt.PSPs {
+			refused[merchantdocs.PSPDoc(strings.ToLower(strings.TrimSpace(key)))] = "the merchant document is not served"
+		}
+		for key := range mt.Custodians {
+			refused[merchantdocs.CustodianDoc(strings.ToLower(strings.TrimSpace(key)))] = "the merchant document is not served"
+		}
+		mt.PSPs, mt.Custodians = nil, nil
+		return mt, refused
+	}
+	for key, account := range mt.PSPs {
+		if err := validatePSPDeclaration(key, account); err != nil {
+			refused[merchantdocs.PSPDoc(strings.ToLower(strings.TrimSpace(key)))] = err.Error()
+			delete(mt.PSPs, key)
+		}
+	}
+	return mt, refused
+}
+
+// Rejected is the error an operator command answers for documents a
+// declaration does not serve.
+func Rejected(why map[string]string) error { return rejected(why) }
 
 func rejected(why map[string]string) error {
 	paths := make([]string, 0, len(why))
@@ -563,9 +604,22 @@ func StringPtrIfNotEmpty(v string) *string {
 	return &v
 }
 
+// ValidateMerchantDeclaration refuses a declaration any of whose documents
+// ScopeDeclaration would refuse: an operator command applies all of it or
+// nothing.
 func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclaration) error {
-	// Validate declarations before identity creation or seed-once suppression.
-	// An existing merchant must not turn malformed input into a successful boot.
+	if _, refused := ScopeDeclaration(cfg, mt); len(refused) > 0 {
+		if why, ok := refused[merchantdocs.MerchantDoc]; ok {
+			return errors.New(why)
+		}
+		return rejected(refused)
+	}
+	return nil
+}
+
+// validateMerchantDocument checks the merchant document a declaration names
+// before it is served.
+func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration) error {
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.Settings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
@@ -574,18 +628,22 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 	if cfg != nil {
 		vault = cfg.PlatformVault
 	}
-	if err := merchants.CardCustodyRefusal(vault, mt.Settings, declared.PSPs); err != nil {
+	return merchants.CardCustodyRefusal(vault, mt.Settings, declared.PSPs)
+}
+
+// validatePSPDeclaration checks one declared PSP: its rail, environment and
+// keys, a CCBill account's FlexForm salt and a Stripe publishable key's
+// environment.
+func validatePSPDeclaration(key string, account config.PSPConfig) error {
+	if err := config.ValidatePSPDeclaration(key, account); err != nil {
 		return err
 	}
-	for key, account := range mt.PSPs {
-		rail := NormalizeManifestRail(string(account.Rail))
-		// A CCBill account with inline credentials must sign its FlexForm links.
-		if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
-			return fmt.Errorf("psps.%s.secrets.salt is required", key)
-		}
-		if rail != string(models.RailStripe) {
-			continue
-		}
+	rail := NormalizeManifestRail(string(account.Rail))
+	// A CCBill account with inline credentials must sign its FlexForm links.
+	if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
+		return fmt.Errorf("psps.%s.secrets.salt is required", key)
+	}
+	if rail == string(models.RailStripe) {
 		if raw, ok := account.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
 			if err := config.ValidateStripePublishableKeyEnvironment(account.Environment, value); err != nil {

@@ -16,9 +16,9 @@ import (
 )
 
 // With Vault holding merchant configuration a manifest names merchants only:
-// startup refuses one that declares configuration, naming what it declares,
-// and provisions one that names the merchant alone, whose configuration staff
-// then set in Vault.
+// startup provisions a merchant whose entry declares configuration as if it
+// named the merchant alone, and reports what it ignored; staff then set its
+// configuration in Vault.
 func TestManifestBesideVaultNamesMerchantsOnly(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -41,10 +41,10 @@ merchants:
         account_id: test
         secrets: {security_key: test}
 `, shop))
-	err := serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, declaring, nil, "")
-	require.ErrorContains(t, err, fmt.Sprintf("merchant %q declares display_name, psps", shop))
-	_, err = graph.Runtime.Merchants.GetBySlug(t.Context(), shop)
-	require.Error(t, err, "a refused manifest provisions nothing")
+	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, declaring, nil, ""))
+	require.ErrorContains(t, graph.Runtime.RefusalState(), fmt.Sprintf("merchants.%s.declaration: merchant %q declares display_name, psps", shop, shop))
+	_, err := graph.Runtime.Merchants.GetBySlug(t.Context(), shop)
+	require.NoError(t, err, "the merchant is provisioned; Vault's configuration serves")
 
 	naming := write(fmt.Sprintf("version: 1\nmerchants:\n  %s: {}\n", shop))
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, naming, nil, ""))

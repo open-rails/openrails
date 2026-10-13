@@ -114,7 +114,9 @@ PSP charges.
 ```
 
 A document that fails validation is not served: the version before it keeps
-serving, and the rejection is logged.
+serving, the rejection is logged, the `openrails_configuration` probe names
+it and a `consistency.merchant_config.not_served` finding stays open until it
+serves.
 
 ## Revisions and edits
 

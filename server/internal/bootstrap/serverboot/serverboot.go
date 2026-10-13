@@ -4,6 +4,7 @@ package serverboot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -26,44 +27,63 @@ import (
 // Existing metadata and archive decisions survive restart. The conventional
 // path is optional; an explicitly supplied path must exist.
 //
-// Only Postgres can block it. A Vault Transit signer uses the runtime's own
-// client (logged in in the background): while Vault is down its PSP keeps the
-// stored identity, or on a first boot is deferred and provisioned in the
-// background once Vault answers; a changed Transit key fails closed until an
-// operator approves it (see ApproveSolanaSigner). Posture is verified in the
-// background; nmiProbeV5BaseURL is the test-only posture probe seam. overlays
-// are files in the manifest's shape merged over it in order.
+// Only Postgres and an unreadable manifest can fail it. A merchant it cannot
+// provision is refused alone (Runtime.Refusals) and retried in the
+// background; a document a merchant cannot serve is refused alone. With
+// Vault holding merchant configuration, it is served once Vault answers. A
+// Vault Transit signer uses the runtime's own client (logged in in the
+// background): while Vault is down its PSP keeps the stored identity, or on a
+// first boot is deferred and provisioned in the background once Vault
+// answers; a changed Transit key fails closed until an operator approves it
+// (see ApproveSolanaSigner). Posture is verified in the background;
+// nmiProbeV5BaseURL is the test-only posture probe seam. overlays are files in
+// the manifest's shape merged over it in order.
 func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string, nmiProbeV5BaseURL string) error {
 	rt := application.Runtime
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
 	}
-	// With Vault holding merchant configuration, startup needs it reachable.
-	if err := rt.EnsureMerchantsService(ctx); err != nil {
+	if err := rt.ServeMerchantsService(ctx); err != nil {
 		return err
 	}
-	slugs, pending, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, true)
+	pass := &bootPass{rt: rt}
+	slugs, pending, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, true, pass.refuse)
 	if err != nil {
 		return err
 	}
+	pass.settle()
 	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
 		return approveSolanaSigner(ctx, cfg, application, cp, path, overlays, mid, key)
 	}
-	if pending {
-		rt.Go("solana transit signer", func(ctx context.Context) {
+	if pending || len(pass.unprovisioned) > 0 {
+		rt.Go("merchant manifest", func(ctx context.Context) {
 			err := retry.Forever(ctx, func(ctx context.Context) error {
-				if err := rt.Vault.State(); err != nil {
+				if pending {
+					if err := rt.Vault.State(); err != nil {
+						return err
+					}
+				}
+				next := &bootPass{rt: rt, previous: pass.refused}
+				var err error
+				if _, pending, err = reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, true, next.refuse); err != nil {
 					return err
 				}
-				_, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false)
-				return err
+				next.settle()
+				pass = next
+				switch {
+				case len(next.unprovisioned) > 0:
+					return fmt.Errorf("merchants %s are not provisioned", strings.Join(next.unprovisioned, ", "))
+				case pending:
+					return fmt.Errorf("the Solana Transit signer still awaits Vault")
+				}
+				return nil
 			}, func(attempt int, err error) {
 				if attempt == 0 {
-					log.WithError(err).Warn("merchant startup: Solana Transit signer awaits Vault; retrying in the background")
+					log.WithError(err).Warn("merchant startup: retrying in the background")
 				}
 			})
 			if err == nil {
-				log.Info("merchant startup: Solana Transit signer confirmed by Vault")
+				log.Info("merchant startup: every merchant the manifest declares is provisioned")
 			}
 		})
 	}
@@ -74,6 +94,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	for _, slug := range slugs {
 		if m, err := rt.Merchants.GetBySlug(ctx, slug); err == nil {
 			declared = append(declared, m.ID)
+			rt.NameMerchant(m.ID, slug)
 		}
 	}
 	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
@@ -81,6 +102,35 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	rt.PreloadMerchantConfig(declared...)
 	rt.StartProviderPosture(declared...)
 	return nil
+}
+
+// bootPass collects what one manifest pass refused.
+type bootPass struct {
+	rt       *app.Runtime
+	previous map[string]bool
+	refused  map[string]bool
+	// unprovisioned are the merchants the pass could not provision.
+	unprovisioned []string
+}
+
+func (p *bootPass) refuse(subject string, err error) {
+	if p.refused == nil {
+		p.refused = map[string]bool{}
+	}
+	p.refused[subject] = true
+	if errors.Is(err, bootstrap.ErrNotProvisioned) {
+		p.unprovisioned = append(p.unprovisioned, strings.TrimPrefix(subject, "merchants."))
+	}
+	p.rt.Refuse(subject, err)
+}
+
+// settle clears what the previous pass refused and this one served.
+func (p *bootPass) settle() {
+	for subject := range p.previous {
+		if !p.refused[subject] {
+			p.rt.Unrefuse(subject)
+		}
+	}
 }
 
 // approveSolanaSigner accepts the identity Vault now reports for key and
@@ -93,7 +143,7 @@ func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *a
 	if _, err := signeridentity.Approve(ctx, rt.DB, rt.Merchants, rt.Vault.SolanaTransit, mid, key); err != nil {
 		return err
 	}
-	if _, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false); err != nil {
+	if _, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false, nil); err != nil {
 		return err
 	}
 	rt.ReportSignerKeyChange(nil)
@@ -102,7 +152,9 @@ func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *a
 
 // reconcileBootMerchantManifest reports whether a Solana Transit signer fell
 // back to its stored identity (or was deferred) because Vault did not answer.
-func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlayPaths []string, tolerateVault bool) ([]string, bool, error) {
+// refuse, when set, takes what a serving process serves without
+// (bootstrap.ReconcileOptions.Refuse).
+func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlayPaths []string, tolerateVault bool, refuse func(string, error)) ([]string, bool, error) {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
@@ -133,7 +185,7 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if rt.Merchants == nil {
 		return nil, false, fmt.Errorf("merchant startup requires the merchant configuration")
 	}
-	opts := bootstrap.ReconcileOptions{Insert: true, Merchants: rt.Merchants}
+	opts := bootstrap.ReconcileOptions{Insert: true, Merchants: rt.Merchants, Refuse: refuse}
 	var signers []*signeridentity.Transit
 	if rt.Vault != nil && rt.Vault.SolanaTransit != nil {
 		opts.SolanaTransit = rt.Vault.SolanaTransit

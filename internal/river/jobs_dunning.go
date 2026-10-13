@@ -346,6 +346,7 @@ func (w *DunningWorker) processSubscription(
 			// Only the member can fix this: their renewal is an open order
 			// they pay with a usable card, on the dunning clock, under the
 			// merchant's dunning access policy.
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("renewal: the payment method cannot be charged; the member pays the renewal order")
 			opened := w.EngineCollections.OpenDueRenewalOrder(ctx, sub.ID, w.now())
 			reason, code := "payment_method_unusable", "payment_method_unusable"
 			if errors.Is(err, charge.ErrAgreementRequired) {

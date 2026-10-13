@@ -148,6 +148,9 @@ func (a *NMIArmer) RequireSecret(ctx context.Context, mid billing.MerchantID, sc
 	if err != nil {
 		return "", fmt.Errorf("merchant %s rail %s: secret %s backend failed: %w", mid.String(), scope.Rail, name, err)
 	}
+	if !found && !scope.Declared {
+		return "", fmt.Errorf("merchant %s: %w", mid.String(), scope.ErrUndeclared())
+	}
 	if !found {
 		return "", fmt.Errorf("merchant %s rail %s: secret %s missing (#725: a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
 	}

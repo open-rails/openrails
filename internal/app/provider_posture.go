@@ -106,6 +106,18 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 
 const postureCheckTimeout = 30 * time.Second
 
+// refuseCredentials records a PSP whose credentials cannot be read as not
+// armed, so the posture probe names why, and reports whether that verdict is
+// known: configuration that is only unavailable for now is retried.
+func (r *Runtime) refuseCredentials(mid billing.MerchantID, scope merchants.PSPScope, err error) bool {
+	if errors.Is(err, merchants.ErrConfigUnavailable) {
+		return false
+	}
+	key := providerposture.Key{Rail: scope.Rail, MerchantID: mid.UUID(), PSPID: scope.ID, AccountID: scope.AccountID}
+	r.providerPosture.RefusePSP(mid.UUID(), scope.ID, key, fmt.Errorf("psp %s: credentials unavailable: %w", scope.Key, err))
+	return true
+}
+
 // verifiesPosture reports whether the PSP's environment is proven with its
 // provider at load: every NMI account, and every non-live PSP.
 func verifiesPosture(scope merchants.PSPScope) bool {
@@ -130,7 +142,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		client, err := armer.NMIClient(ctx, mid, scope)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
-			return !errors.Is(err, merchants.ErrConfigUnavailable)
+			return r.refuseCredentials(mid, scope, err)
 		}
 		if client.LoopbackFixture && !client.Live() {
 			return true
@@ -143,7 +155,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: Stripe credentials unavailable; PSP disarmed")
-			return !errors.Is(err, merchants.ErrConfigUnavailable)
+			return r.refuseCredentials(mid, scope, err)
 		}
 		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
 	case string(models.RailSolana):

@@ -19,6 +19,20 @@ ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
 
+-- name: PSPHeldBilling :one
+-- What needs the PSP's own account: cards in its vault, subscriptions it
+-- bills itself, and OpenRails-run subscriptions renewing on it.
+SELECT
+    (SELECT count(*) FROM billing.payment_methods m
+     WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.psp_id = sqlc.arg(psp_id)::uuid
+       AND m.custodian = 'psp' AND m.status IN ('active', 'requires_action'))::bigint AS vaulted_methods,
+    (SELECT count(*) FROM billing.subscriptions s
+     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.psp_id = sqlc.arg(psp_id)::uuid
+       AND s.collection_policy <> 'engine' AND s.status <> 'canceled' AND s.deleted_at IS NULL)::bigint AS provider_subscriptions,
+    (SELECT count(*) FROM billing.subscriptions s
+     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.psp_id = sqlc.arg(psp_id)::uuid
+       AND s.collection_policy = 'engine' AND s.status <> 'canceled' AND s.deleted_at IS NULL)::bigint AS engine_subscriptions;
+
 -- name: SupersedePSP :exec
 -- The PSP's key now names another account: it drains and releases its
 -- gateway account's fingerprint.

@@ -39,7 +39,10 @@ type Connection struct {
 
 // Open connects to Vault when the configuration names it (cfg.Vault) or the
 // host lends a client. Login runs in the background; a caller that needs
-// Vault now awaits it. Without Vault nothing is opened.
+// Vault now awaits it. Without Vault nothing is opened. A configuration Login
+// refuses (no token, an unknown auth method, a malformed mount) leaves Vault
+// unusable, never an error: its operations refuse, State reports why and a
+// KV mount keeps naming Vault as the merchant configuration's source.
 func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*Connection, error) {
 	if cfg == nil || (cfg.Vault == nil && borrowed == nil) {
 		return &Connection{}, nil
@@ -51,17 +54,23 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	conn := &Connection{}
 	client := borrowed
 	mount := config.MerchantConfigKVMount(cfg)
-	if client == nil {
+	err := config.ValidateVault(vc)
+	if err == nil && client == nil {
 		authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-		var err error
-		client, conn.Auth, err = vault.Login(authCtx, vaultConfig(vc))
-		if err != nil {
+		if client, conn.Auth, err = vault.Login(authCtx, vaultConfig(vc)); err != nil {
 			cancel()
-			return nil, fmt.Errorf("vault login: %w", err)
+		} else {
+			conn.closeAuth = cancel
+			if mount != "" {
+				go verifyCapabilities(authCtx, client, conn.Auth, mount, vc.ScopePrefix)
+			}
 		}
-		conn.closeAuth = cancel
-		if mount != "" {
-			go verifyCapabilities(authCtx, client, conn.Auth, mount, vc.ScopePrefix)
+	}
+	if err != nil {
+		log.WithError(err).Error("vault: configuration refused; Vault-backed merchant configuration and signing are unavailable")
+		conn.Auth = vault.Unusable(err)
+		if client, err = vaultapi.NewClient(&vaultapi.Config{}); err != nil {
+			return nil, fmt.Errorf("vault client: %w", err)
 		}
 	}
 	transitMount := vc.TransitMount

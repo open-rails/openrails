@@ -52,7 +52,7 @@ unless one can be enrolled: a 16, 24 or 32-byte `totp.key` beside `keys.json`
 under `auth.keys.path`, or an email or SMS sender.
 
 `rate_limits` names the limited buckets (`purchase`, `payment`, `subscribe`,
-`webhook`; any other key refuses boot) and defaults to the built-in limits;
+`webhook`; any other key is ignored and reported) and defaults to the built-in limits;
 `rate_limits_disabled` declares that the host supplies rate limiting instead
 ([rate limiting](rate-limiting.md)).
 

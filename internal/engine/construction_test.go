@@ -14,45 +14,21 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// Every refusal below happens before bootstrap: the configs carry no database,
-// so reaching it would fail with a different error.
+// Every fatal refusal below happens before bootstrap: the configs carry no
+// database, so reaching it would fail with a different error.
 func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 	sandbox := config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	live := config.Config{ProviderWriteMode: config.ProviderWriteModeFull, Merchants: map[string]config.MerchantDeclaration{"shop": {PSPs: map[string]config.PSPConfig{
 		"stripe": {Rail: billing.RailStripe, Environment: config.EnvironmentLive, AccountID: "acct_1"},
 	}}}}
-	psps := func(environments ...string) func(*config.Config) {
-		return func(c *config.Config) {
-			declared := map[string]config.PSPConfig{}
-			for i, environment := range environments {
-				declared[[]string{"mobius", "wallet"}[i]] = config.PSPConfig{Rail: []billing.Rail{billing.RailNMI, billing.RailSolana}[i], Environment: environment, AccountID: "1"}
-			}
-			c.Merchants = map[string]config.MerchantDeclaration{"shop": {PSPs: declared}}
-		}
-	}
-	with := func(base config.Config, edit func(*config.Config)) config.Config { edit(&base); return base }
 	var seam http.RoundTripper = http.DefaultTransport
 	for name, tc := range map[string]struct {
 		cfg  config.Config
 		deps config.Deps
 		want string
 	}{
-		"merchant key not a slug": {with(sandbox, func(c *config.Config) { c.Merchants = map[string]config.MerchantDeclaration{"Not A Slug": {}} }), config.Deps{}, `Config.Merchants["Not A Slug"]`},
-		"slug not its key":        {with(sandbox, func(c *config.Config) { c.Merchants = map[string]config.MerchantDeclaration{"a": {Slug: "b"}} }), config.Deps{}, `Slug "b" is not its key`},
-		"issuer declared twice": {with(sandbox, func(c *config.Config) {
-			c.Merchants = map[string]config.MerchantDeclaration{"a": {Issuer: "https://shop.example"}, "b": {Issuer: "https://shop.example"}}
-		}), config.Deps{}, "an issuer binds its credentials to one merchant"},
-		"issuer over http": {with(sandbox, func(c *config.Config) {
-			c.Merchants = map[string]config.MerchantDeclaration{"a": {Issuer: "http://shop.example"}}
-		}), config.Deps{}, "must be https"},
-		"issuer with query": {with(sandbox, func(c *config.Config) {
-			c.Merchants = map[string]config.MerchantDeclaration{"a": {Issuer: "https://shop.example?x=1"}}
-		}), config.Deps{}, "without query or fragment"},
-		"issuer not a URL":              {with(sandbox, func(c *config.Config) { c.Merchants = map[string]config.MerchantDeclaration{"a": {Issuer: "shop"}} }), config.Deps{}, "not an absolute URL"},
 		"river schema injection":        {with(sandbox, func(c *config.Config) { c.Database.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
 		"derived river schema too long": {with(sandbox, func(c *config.Config) { c.Database.Schema = strings.Repeat("b", 42) }), config.Deps{}, "set Config.Database.RiverSchema"},
-		"environment undeclared":        {with(sandbox, psps("")), config.Deps{}, "psps.mobius.environment is required"},
-		"environment the rail lacks":    {with(sandbox, psps(config.EnvironmentLive, config.EnvironmentTest)), config.Deps{}, `solana has no "test" environment`},
 		"live beside non-live":          {with(sandbox, psps(config.EnvironmentLive, config.EnvironmentSandbox)), config.Deps{}, "a deployment is all live or all non-live: live PSPs shop/mobius beside non-live PSPs shop/wallet (sandbox)"},
 		"loopback gateway beside live": {with(live, func(c *config.Config) {
 			c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: "http://127.0.0.1:9"}
@@ -71,21 +47,77 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 	}
 }
 
+// One merchant's mistake refuses that merchant, or its issuer, alone; a PSP
+// is checked as its merchant is provisioned, so a PSP whose environment its
+// rail lacks never joins the live/non-live check.
+func TestValidateRefusesOneMerchantAlone(t *testing.T) {
+	sandbox := config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+	merchants := func(m map[string]config.MerchantDeclaration) func(*config.Config) {
+		return func(c *config.Config) { c.Merchants = m }
+	}
+	for name, tc := range map[string]struct {
+		edit    func(*config.Config)
+		served  []string
+		refused map[string]string
+	}{
+		"merchant key not a slug": {merchants(map[string]config.MerchantDeclaration{"Not A Slug": {}, "shop": {}}), []string{"shop"}, map[string]string{"merchants.Not A Slug": "the merchant is not provisioned"}},
+		"slug not its key":        {merchants(map[string]config.MerchantDeclaration{"a": {Slug: "b"}}), nil, map[string]string{"merchants.a": `Slug "b" is not its key`}},
+		"issuer declared twice": {merchants(map[string]config.MerchantDeclaration{"a": {Issuer: "https://shop.example"}, "b": {Issuer: "https://shop.example"}}), []string{"a", "b"},
+			map[string]string{"merchants.a.issuer": "an issuer binds its credentials to one merchant, so it binds none", "merchants.b.issuer": `"https://shop.example" is declared by a, b`}},
+		"issuer over http":           {merchants(map[string]config.MerchantDeclaration{"a": {Issuer: "http://shop.example"}}), []string{"a"}, map[string]string{"merchants.a.issuer": "must be https"}},
+		"issuer with query":          {merchants(map[string]config.MerchantDeclaration{"a": {Issuer: "https://shop.example?x=1"}}), []string{"a"}, map[string]string{"merchants.a.issuer": "without query or fragment"}},
+		"issuer not a URL":           {merchants(map[string]config.MerchantDeclaration{"a": {Issuer: "shop"}}), []string{"a"}, map[string]string{"merchants.a.issuer": "not an absolute URL"}},
+		"environment undeclared":     {psps(""), []string{"shop"}, nil},
+		"environment the rail lacks": {psps(config.EnvironmentLive, config.EnvironmentTest), []string{"shop"}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := with(sandbox, tc.edit)
+			declared, refused, err := validate(&cfg, config.Deps{})
+			require.NoError(t, err)
+			var slugs []string
+			for _, m := range declared {
+				slugs = append(slugs, m.Slug)
+				if _, unbound := tc.refused["merchants."+m.Slug+".issuer"]; unbound {
+					require.Empty(t, m.Issuer, "a refused issuer binds no merchant")
+				}
+			}
+			require.Equal(t, tc.served, slugs)
+			require.Len(t, refused, len(tc.refused))
+			for _, d := range refused {
+				require.Contains(t, tc.refused, d.Field)
+				require.ErrorContains(t, d.Err, tc.refused[d.Field])
+			}
+		})
+	}
+}
+
+func with(base config.Config, edit func(*config.Config)) config.Config { edit(&base); return base }
+
+func psps(environments ...string) func(*config.Config) {
+	return func(c *config.Config) {
+		declared := map[string]config.PSPConfig{}
+		for i, environment := range environments {
+			declared[[]string{"mobius", "wallet"}[i]] = config.PSPConfig{Rail: []billing.Rail{billing.RailNMI, billing.RailSolana}[i], Environment: environment, AccountID: "1"}
+		}
+		c.Merchants = map[string]config.MerchantDeclaration{"shop": {PSPs: declared}}
+	}
+}
+
 func TestEmbeddedDefaults(t *testing.T) {
 	cfg0 := &config.Config{ProviderWriteMode: " Full "}
-	_, err := validate(cfg0, config.Deps{})
+	_, _, err := validate(cfg0, config.Deps{})
 	require.NoError(t, err)
 	require.Equal(t, config.DefaultRateLimits(), cfg0.RateLimits, "an embedded surface never ships unthrottled")
 	require.Equal(t, config.CaptchaProviderTurnstile, config.CaptchaProvider(cfg0.Captcha))
 
 	custom := &config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}}
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited, RateLimits: custom}
-	_, err = validate(cfg, config.Deps{})
+	_, _, err = validate(cfg, config.Deps{})
 	require.NoError(t, err)
 	require.Same(t, custom, cfg.RateLimits)
 
 	cfg = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, RateLimitsDisabled: true}
-	_, err = validate(cfg, config.Deps{})
+	_, _, err = validate(cfg, config.Deps{})
 	require.NoError(t, err)
 	require.Nil(t, cfg.RateLimits, "an explicit opt-out stays a passthrough")
 	require.Nil(t, cfg.Captcha)

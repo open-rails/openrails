@@ -91,7 +91,14 @@ type Set struct {
 	Custodians  map[string]Doc[Custodian]
 	// Rejected names each document that loaded but is not served, with why.
 	Rejected map[string]string
+	// Undeclared names each account of the merchant no document declares
+	// that still holds what only it can serve (cards in its vault,
+	// subscriptions it bills), with what (UndeclaredAccount).
+	Undeclared map[string]string
 }
+
+// UndeclaredAccount names an undeclared account within a merchant's set.
+func UndeclaredAccount(rail, accountID string) string { return "accounts/" + rail + "/" + accountID }
 
 // Clone copies s deeply enough that the copy's maps can change.
 func (s Set) Clone() Set {
@@ -99,6 +106,7 @@ func (s Set) Clone() Set {
 	out.PSPs = maps.Clone(s.PSPs)
 	out.Custodians = maps.Clone(s.Custodians)
 	out.Rejected = maps.Clone(s.Rejected)
+	out.Undeclared = maps.Clone(s.Undeclared)
 	if out.PSPs == nil {
 		out.PSPs = map[string]Doc[PSP]{}
 	}

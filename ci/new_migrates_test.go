@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
@@ -73,27 +74,27 @@ func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 	require.NoError(t, client.Close(t.Context()))
 }
 
-// A misspelled PSP setting or secret refuses New, naming the PSP, the key and
-// the keys its rail takes, before anything is migrated.
-func TestNewRefusesUnknownPSPKeys(t *testing.T) {
+// A misspelled PSP setting or secret refuses that PSP alone, naming it, the
+// key and the keys its rail takes: New serves the merchant without it.
+func TestUnknownPSPKeysRefuseThatPSPAlone(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
-	for want, psp := range map[string]openrails.PSPConfig{
-		`openrails: Config.Merchants["host-one"].psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
-			Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"},
-		},
-		`openrails: Config.Merchants["host-one"].psps.p.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`: {
-			Rail: "stripe", AccountID: "acct_1", Secrets: map[string]string{"secret_kye": "sk_test_1"},
-		},
-	} {
-		_, err := openrails.New(t.Context(), openrails.Config{
-			ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			Merchants:         map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{"p": psp}}},
-		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
-		require.EqualError(t, err, want)
-	}
-	var found *string
-	require.NoError(t, pool.QueryRow(t.Context(), "SELECT to_regclass('billing.merchants')::text").Scan(&found))
-	require.Nil(t, found, "refused before migrating")
+	bill, err := openrails.New(t.Context(), openrails.Config{
+		ProviderWriteMode: openrails.ProviderWritesReadOnly,
+		Merchants: map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{
+			"p": {Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"}},
+			"q": {Rail: "stripe", AccountID: "acct_1", Secrets: map[string]string{"secret_kye": "sk_test_1"}},
+		}}},
+	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = bill.Close(context.Background()) })
+	refused := probe(t, bill, "openrails_configuration")
+	require.ErrorContains(t, refused, `merchants.host-one.psps/p: psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, tokenization_key, tokenization_url, webhook_overlap_expires_at)`)
+	require.ErrorContains(t, refused, `merchants.host-one.psps/q: psps.q.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`)
+	shop, err := bill.MerchantBySlug("host-one")
+	require.NoError(t, err)
+	psps, err := shop.ListPSPs(t.Context(), billing.PSPListParams{})
+	require.NoError(t, err)
+	require.Empty(t, psps.Items, "neither refused PSP is registered")
 }
 
 // Replicas boot together on an empty database: each New migrates, migratekit

@@ -91,13 +91,22 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL, "an explicit URL beats the parts")
 
-	for key, value := range map[string]string{"CATALOG_EDITS": "maybe", "TRUSTED_PROXIES": "0.0.0.0/0", "DATABASE_SCHEMA": "bad schema", "DB_SCHEMA": "billing"} {
+	for key, value := range map[string]string{"CATALOG_EDITS": "maybe", "DATABASE_SCHEMA": "bad schema", "DB_SCHEMA": "billing"} {
 		t.Run("refuses "+key, func(t *testing.T) {
 			t.Setenv(key, value)
 			_, err := Load("")
 			require.Error(t, err)
 		})
 	}
+	t.Run("drops a TRUSTED_PROXIES entry trusting everything", func(t *testing.T) {
+		t.Setenv("TRUSTED_PROXIES", "0.0.0.0/0,10.0.0.0/8")
+		cfg, err := Load("")
+		require.NoError(t, err, "the engine serves without it")
+		degraded := billing.Degrade(cfg.Config)
+		require.Len(t, degraded, 1)
+		require.ErrorContains(t, degraded[0].Err, "matches every address")
+		require.Equal(t, []string{"10.0.0.0/8"}, cfg.TrustedProxies)
+	})
 }
 
 func TestEnvKeyRouting(t *testing.T) {
@@ -296,17 +305,26 @@ func TestRedisSettings(t *testing.T) {
 	t.Setenv("REDIS_URL", "rediss://cache.example:6380/2")
 	t.Setenv("REDIS_USERNAME", "openrails")
 	t.Setenv("REDIS_PASSWORD", "s3cret")
+	// Redis is optional: one that cannot be served is turned off at boot.
+	degradedRedis := func(want string) {
+		t.Helper()
+		cfg, err := Load("")
+		require.NoError(t, err)
+		degraded := billing.Degrade(cfg.Config)
+		require.Len(t, degraded, 1)
+		require.Equal(t, "redis", degraded[0].Field)
+		require.ErrorContains(t, degraded[0].Err, want)
+		require.Nil(t, cfg.Redis)
+	}
 	t.Setenv("REDIS_CA_CERT", "not a certificate")
-	_, err = Load("")
-	require.ErrorContains(t, err, "redis.ca_cert holds no PEM certificate")
+	degradedRedis("redis.ca_cert holds no PEM certificate")
 	unsetenv(t, "REDIS_CA_CERT")
 	cfg, err = Load("")
 	require.NoError(t, err)
 	require.Equal(t, &billing.RedisConfig{URL: "rediss://cache.example:6380/2", Username: "openrails", Password: "s3cret"}, cfg.Redis)
 
 	t.Setenv("REDIS_ADDR", "cache:6379")
-	_, err = Load("")
-	require.ErrorContains(t, err, "redis.addr and redis.url are exclusive")
+	degradedRedis("redis.addr and redis.url are exclusive")
 	unsetenv(t, "REDIS_URL")
 	t.Setenv("REDIS_TLS", "true")
 	cfg, err = Load("")
@@ -314,6 +332,5 @@ func TestRedisSettings(t *testing.T) {
 	require.Equal(t, &billing.RedisConfig{Addr: "cache:6379", Username: "openrails", Password: "s3cret", TLS: true}, cfg.Redis)
 
 	unsetenv(t, "REDIS_ADDR")
-	_, err = Load("")
-	require.ErrorContains(t, err, "redis: set redis.addr (REDIS_ADDR) or redis.url (REDIS_URL)")
+	degradedRedis("redis: set redis.addr (REDIS_ADDR) or redis.url (REDIS_URL)")
 }

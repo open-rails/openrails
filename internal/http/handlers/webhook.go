@@ -160,6 +160,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	var found bool
 	creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
+		warnUndeclaredWebhook(provider, accountID)
 		rejectWebhook(r)
 		return
 	}
@@ -441,6 +442,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	var found bool
 	keys, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
+		warnUndeclaredWebhook(provider, accountID)
 		rejectWebhook(r)
 		return false
 	}
@@ -725,6 +727,13 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 // rejectWebhook answers an unknown account, an unconfigured secret and a bad
 // signature identically, so a webhook route never reveals which provider
 // accounts a deployment serves.
+// warnUndeclaredWebhook says why an event for one of the merchant's accounts
+// is refused: no declared credentials verify it, so it is never recorded.
+func warnUndeclaredWebhook(rail, accountID string) {
+	log.WithFields(log.Fields{"rail": rail, "account_id": accountID}).
+		Warn("webhook refused: the account has no declared webhook signing secret (undeclared or missing), so its events are not recorded")
+}
+
 func rejectWebhook(r *httprequest.Request) {
 	r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
 }

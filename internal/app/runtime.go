@@ -73,6 +73,8 @@ type Runtime struct {
 	// signerIdentity records a Vault Transit key that no longer matches its
 	// stored Solana identity.
 	signerIdentity dependencyState
+	// refusals are what the engine serves without (Refuse).
+	refusals refusals
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
 	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
 	ApproveSolanaSigner func(ctx context.Context, merchantID billing.MerchantID, key string) error
@@ -176,8 +178,10 @@ type Runtime struct {
 	// MerchantConfig is every merchant's configuration, from a file or
 	// Vault, cached in memory.
 	MerchantConfig *merchantdocs.Cache
-	configReady    sync.Once
-	configErr      error
+	// configMu guards configReady and configServing (EnsureMerchantsService).
+	configMu      sync.Mutex
+	configReady   bool
+	configServing bool
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
 	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).

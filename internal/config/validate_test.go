@@ -16,49 +16,22 @@ func validConfig() *Config {
 	}
 }
 
-func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
+// Validate refuses only what the engine cannot serve without.
+func TestValidateRefusesWhatCannotBeServed(t *testing.T) {
 	require.NoError(t, Validate(validConfig()))
 	for name, row := range map[string]struct {
 		edit func(*Config)
 		want string // "" = accepted
 	}{
-		"write mode omitted":         {func(c *Config) { c.ProviderWriteMode = "" }, ""},
-		"write mode padded":          {func(c *Config) { c.ProviderWriteMode = " Limited " }, ""},
-		"write mode typo":            {func(c *Config) { c.ProviderWriteMode = "redaonly" }, "must be one of full, limited, readonly"},
-		"write mode legacy test":     {func(c *Config) { c.ProviderWriteMode = "test" }, "must be one of full, limited, readonly"},
-		"rate limits omitted":        {func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
-		"rate limits host-owned":     {func(c *Config) { c.RateLimits, c.RateLimitsDisabled = nil, true }, ""},
-		"per-address ceiling":        {func(c *Config) { c.RateLimits = &RateLimitsConfig{"default": {RequestsPerMinute: 300}} }, "rate_limits.default is not a bucket"},
-		"captcha disabled":           {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
-		"captcha half pair":          {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
-		"captcha unsupported":        {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},
-		"reconcile typo":             {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
-		"db missing":                 {func(c *Config) { c.DB = nil }, "database configuration is required"},
-		"db url undeterminable":      {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
-		"db schema injection":        {func(c *Config) { c.Database.Schema = "bill;drop" }, "not a valid Postgres identifier"},
-		"vault kv mount":             {func(c *Config) { c.Vault = &VaultConfig{KVMount: "kv"} }, ""},
-		"vault kv mount escapes":     {func(c *Config) { c.Vault = &VaultConfig{KVMount: "kv/../sys"} }, "plain Vault path"},
-		"vault transit only":         {func(c *Config) { c.Vault = &VaultConfig{TransitMount: "transit"} }, ""},
-		"vault auth mount":           {func(c *Config) { c.Vault = &VaultConfig{AuthMethod: "kubernetes", AuthMount: "openrails-prod/k8s"} }, ""},
-		"vault auth mount with auth": {func(c *Config) { c.Vault = &VaultConfig{AuthMethod: "approle", AuthMount: "auth/approle2"} }, "the path after auth/"},
-		"vault auth mount for token": {func(c *Config) { c.Vault = &VaultConfig{Token: "t", AuthMount: "k8s"} }, `not "token"`},
-		"llm default provider":       {func(c *Config) { c.LLM = &LLMConfig{APIKey: "k"} }, ""},
-		"llm unknown provider":       {func(c *Config) { c.LLM = &LLMConfig{Provider: "gemini", APIKey: "k"} }, `invalid llm.provider "gemini"`},
-		"llm relative base":          {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "api.openai.com/v1"} }, "invalid llm.base_url"},
-		"llm non-http base":          {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "ftp://host/v1"} }, "invalid llm.base_url"},
-		"llm plaintext loopback":     {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "http://localhost:11434/v1"} }, "must use https"},
-		"llm https compatible":       {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "https://api.groq.com/openai/v1"} }, ""},
-		"trusted proxy typo":         {func(c *Config) { c.TrustedProxies = []string{"10.0.0.0/8", "not-a-cidr"} }, "trusted_proxies"},
-		"trusted proxy bare ip":      {func(c *Config) { c.TrustedProxies = []string{"10.0.0.5"} }, "trusted_proxies"},
-		"trusted proxy everything":   {func(c *Config) { c.TrustedProxies = []string{"0.0.0.0/0"} }, "matches every address"},
-		"trusted proxy wide but /1":  {func(c *Config) { c.TrustedProxies = []string{"0.0.0.0/1", "192.168.0.0/16"} }, ""},
-		"cloudflare everything v6":   {func(c *Config) { c.CloudflareProxies = []string{"::/0"} }, "cloudflare_proxies"},
-		"ccbill allowlist typo":      {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"definitely-not-a-cidr"} }, "ccbill_webhook_ip_allowlist"},
-		"ccbill allowlist open":      {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"0.0.0.0/0"} }, "ccbill_webhook_ip_allowlist"},
-		"ccbill allowlist loopback":  {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32"} }, ""},
-		"return origin plaintext":    {func(c *Config) { c.ReturnOrigins = []string{"http://shop.example"} }, "must use HTTPS"},
-		"return origin with path":    {func(c *Config) { c.ReturnOrigins = []string{"https://shop.example/app"} }, "without a path"},
-		"secret overlap beyond week": {func(c *Config) { c.WebhookSecretOverlap = "169h" }, "webhook"},
+		"write mode omitted":     {func(c *Config) { c.ProviderWriteMode = "" }, ""},
+		"write mode padded":      {func(c *Config) { c.ProviderWriteMode = " Limited " }, ""},
+		"write mode typo":        {func(c *Config) { c.ProviderWriteMode = "redaonly" }, "must be one of full, limited, readonly"},
+		"write mode legacy test": {func(c *Config) { c.ProviderWriteMode = "test" }, "must be one of full, limited, readonly"},
+		"rate limits omitted":    {func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
+		"rate limits host-owned": {func(c *Config) { c.RateLimits, c.RateLimitsDisabled = nil, true }, ""},
+		"db missing":             {func(c *Config) { c.DB = nil }, "database configuration is required"},
+		"db url undeterminable":  {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
+		"db schema injection":    {func(c *Config) { c.Database.Schema = "bill;drop" }, "not a valid Postgres identifier"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig()
@@ -71,6 +44,94 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An optional setting that would not validate is turned off, set back to its
+// default or loses the entry, and named; a trust or allow list only shrinks.
+// Validate then accepts what is left.
+func TestDegradeTurnsOffWhatCannotBeServed(t *testing.T) {
+	require.Empty(t, Degrade(validConfig()))
+	for name, row := range map[string]struct {
+		edit  func(*Config)
+		field string // "" = served as written
+		want  string
+		after func(*testing.T, *Config)
+	}{
+		"per-address ceiling": {func(c *Config) {
+			c.RateLimits = &RateLimitsConfig{"default": {RequestsPerMinute: 300}, "purchase": {RequestsPerMinute: 5}}
+		},
+			"rate_limits.default", "not a bucket", func(t *testing.T, c *Config) {
+				require.Equal(t, RateLimitsConfig{"purchase": {RequestsPerMinute: 5}}, *c.RateLimits)
+			}},
+		"redis exclusive": {func(c *Config) { c.Redis = &RedisConfig{Addr: "cache:6379", URL: "redis://cache:6379"} }, "redis", "redis.addr and redis.url are exclusive",
+			func(t *testing.T, c *Config) { require.Nil(t, c.Redis) }},
+		"captcha disabled": {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, "", "", nil},
+		"captcha half pair": {func(c *Config) { c.Captcha.SecretKey = "secret" }, "captcha", "BOTH site_key and secret_key",
+			func(t *testing.T, c *Config) { require.False(t, CaptchaEnabled(c.Captcha)) }},
+		"captcha unsupported": {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "captcha", "unsupported provider",
+			func(t *testing.T, c *Config) { require.False(t, CaptchaEnabled(c.Captcha)) }},
+		"reconcile typo": {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval", "the default 1h applies",
+			func(t *testing.T, c *Config) { require.Empty(t, c.CatalogReconciliationInterval) }},
+		"llm default provider": {func(c *Config) { c.LLM = &LLMConfig{APIKey: "k"} }, "", "", nil},
+		"llm unknown provider": {func(c *Config) { c.LLM = &LLMConfig{Provider: "gemini", APIKey: "k"} }, "llm", `invalid llm.provider "gemini"`,
+			func(t *testing.T, c *Config) { require.Nil(t, c.LLM) }},
+		"llm relative base":      {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "api.openai.com/v1"} }, "llm", "invalid llm.base_url", nil},
+		"llm non-http base":      {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "ftp://host/v1"} }, "llm", "invalid llm.base_url", nil},
+		"llm plaintext loopback": {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "http://localhost:11434/v1"} }, "llm", "must use https", nil},
+		"llm https compatible":   {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "https://api.groq.com/openai/v1"} }, "", "", nil},
+		"trusted proxy typo": {func(c *Config) { c.TrustedProxies = []string{"10.0.0.0/8", "not-a-cidr"} }, "trusted_proxies", "invalid CIDR",
+			func(t *testing.T, c *Config) { require.Equal(t, []string{"10.0.0.0/8"}, c.TrustedProxies) }},
+		"trusted proxy bare ip":     {func(c *Config) { c.TrustedProxies = []string{"10.0.0.5"} }, "trusted_proxies", "invalid CIDR", nil},
+		"trusted proxy everything":  {func(c *Config) { c.TrustedProxies = []string{"0.0.0.0/0"} }, "trusted_proxies", "matches every address", func(t *testing.T, c *Config) { require.Empty(t, c.TrustedProxies) }},
+		"trusted proxy wide but /1": {func(c *Config) { c.TrustedProxies = []string{"0.0.0.0/1", "192.168.0.0/16"} }, "", "", nil},
+		"cloudflare everything v6":  {func(c *Config) { c.CloudflareProxies = []string{"::/0"} }, "cloudflare_proxies", "matches every address", nil},
+		"ccbill allowlist typo":     {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"definitely-not-a-cidr"} }, "ccbill_webhook_ip_allowlist", "invalid CIDR", nil},
+		"ccbill allowlist open": {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"0.0.0.0/0", "127.0.0.1/32"} }, "ccbill_webhook_ip_allowlist", "matches every address",
+			func(t *testing.T, c *Config) { require.Equal(t, []string{"127.0.0.1/32"}, c.CCBillWebhookIPAllowlist) }},
+		"ccbill allowlist loopback": {func(c *Config) { c.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32"} }, "", "", nil},
+		"return origin plaintext":   {func(c *Config) { c.ReturnOrigins = []string{"http://shop.example"} }, "return_origins", "must use HTTPS", func(t *testing.T, c *Config) { require.Empty(t, c.ReturnOrigins) }},
+		"return origin with path":   {func(c *Config) { c.ReturnOrigins = []string{"https://shop.example/app"} }, "return_origins", "without a path", nil},
+		"secret overlap beyond week": {func(c *Config) { c.WebhookSecretOverlap = "169h" }, "webhook_secret_overlap", "the default 24h0m0s applies",
+			func(t *testing.T, c *Config) { require.Empty(t, c.WebhookSecretOverlap) }},
+		"hyperswitch plaintext": {func(c *Config) {
+			c.HyperSwitch = &HyperSwitchConfig{APIBaseURL: "http://hs.example", SDKURL: "https://sdk.example"}
+		}, "hyperswitch", "requires HTTPS",
+			func(t *testing.T, c *Config) { require.Nil(t, c.HyperSwitch) }},
+		"platform vault without kv": {func(c *Config) { c.PlatformVault = &PlatformVaultConfig{Kind: "basis_theory", TenantID: "t"} }, "platform_vault", "needs vault.kv_mount",
+			func(t *testing.T, c *Config) { require.Nil(t, c.PlatformVault) }},
+		"sandbox gateway not loopback": {func(c *Config) {
+			c.ProviderSandbox = &ProviderSandboxConfig{NMIGatewayURL: "http://10.0.0.5:9", StripeAPIURL: "http://127.0.0.1:2"}
+		}, "provider_sandbox.nmi_gateway_url", "not a loopback address",
+			func(t *testing.T, c *Config) {
+				require.Equal(t, ProviderSandboxConfig{StripeAPIURL: "http://127.0.0.1:2"}, *c.ProviderSandbox)
+			}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			row.edit(cfg)
+			degraded := Degrade(cfg)
+			require.NoError(t, Validate(cfg))
+			if row.field == "" {
+				require.Empty(t, degraded)
+				return
+			}
+			require.Len(t, degraded, 1, "%v", degraded)
+			require.Equal(t, row.field, degraded[0].Field)
+			require.ErrorContains(t, degraded[0].Err, row.want)
+			require.Empty(t, Degrade(cfg), "what is left serves")
+			if row.after != nil {
+				row.after(t, cfg)
+			}
+		})
+	}
+	host := validConfig()
+	host.SMTP = &SMTPConfig{Host: "smtp.example"}
+	require.Equal(t, "smtp", DegradeEmail(host, true)[0].Field)
+	require.Nil(t, host.SMTP, "the host's sender wins")
+	hostless := validConfig()
+	hostless.SMTP = &SMTPConfig{}
+	require.ErrorContains(t, DegradeEmail(hostless, false)[0].Err, "Config.SMTP.Host is required")
+	require.Nil(t, hostless.SMTP)
 }
 
 // Mount paths land in route patterns and the console's <base href> (#1127).
@@ -135,13 +196,16 @@ func TestScalarParsingBoundaries(t *testing.T) {
 }
 
 // Sandbox gateways receive provider credentials, so the destination must be a
-// literal loopback IP (no resolver); they are fake providers, which a live PSP
-// never sits beside.
+// literal loopback IP (no resolver); any other is dropped. They are fake
+// providers, which a live PSP never sits beside.
 func TestProviderSandboxGatewaysAreLiteralLoopbackOnly(t *testing.T) {
 	validate := func(sandbox ProviderSandboxConfig) error {
 		cfg := validConfig()
 		cfg.ProviderSandbox = &sandbox
-		return Validate(cfg)
+		if degraded := Degrade(cfg); len(degraded) > 0 {
+			return degraded[0].Err
+		}
+		return nil
 	}
 	both := func(dest string) map[string]ProviderSandboxConfig {
 		return map[string]ProviderSandboxConfig{"stripe": {StripeAPIURL: dest}, "nmi": {NMIGatewayURL: dest}}
@@ -201,9 +265,10 @@ func TestPSPEnvironments(t *testing.T) {
 	require.Equal(t, EnvironmentLive, EnvironmentClass(EnvironmentLive))
 }
 
-// The custody deployment is host-owned: secure transport only, and no tenant
-// setting can redirect it.
+// The custody deployment is host-owned: secure transport only (any other is
+// turned off), and no tenant setting can redirect it.
 func TestHyperSwitchEndpointsAreHostOwnedAndSecure(t *testing.T) {
+	served := func(cfg *Config) bool { return len(Degrade(cfg)) == 0 && cfg.HyperSwitch != nil }
 	for _, row := range []struct {
 		name string
 		url  string
@@ -221,12 +286,12 @@ func TestHyperSwitchEndpointsAreHostOwnedAndSecure(t *testing.T) {
 	} {
 		cfg := validConfig()
 		cfg.HyperSwitch = &HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: row.url, SDKURL: row.url}
-		require.Equal(t, row.ok, Validate(cfg) == nil, row.name)
+		require.Equal(t, row.ok, served(cfg), row.name)
 	}
 	cfg := validConfig()
 	cfg.HyperSwitch = &HyperSwitchConfig{APIBaseURL: "https://vault.example.test", SDKURL: "https://sdk.example.test"}
-	require.NoError(t, Validate(cfg))
+	require.True(t, served(cfg))
 	cfg.HyperSwitch.AllowLoopbackHTTP = false
 	cfg.HyperSwitch.SDKURL = "http://127.0.0.1:9099"
-	require.Error(t, Validate(cfg), "loopback HTTP needs the explicit exception")
+	require.False(t, served(cfg), "loopback HTTP needs the explicit exception")
 }

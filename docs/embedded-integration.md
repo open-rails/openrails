@@ -150,15 +150,24 @@ client, err := bill.MerchantBySlug(cfg.Merchant.Slug) // your merchant's handle:
 if err != nil { return err }
 ```
 
-Only Postgres (including the migrations `New` applies first) can fail `New`;
-it starts no workers and never changes the catalog. Vault login, PSP posture
-checks and Redis reconnect in the background (capped full-jitter backoff,
-forever); until then only their features answer 503. `Ready` is the readiness
-check (Postgres, the merchant directory, River). Register `Probes` with the host's
-`github.com/open-rails/helpers/deps` supervisor:
+`New` fails only on what the engine cannot serve without: Postgres and the
+migrations it applies first, an unset or unknown `ProviderWriteMode`, an
+invalid River schema, and money safety (live PSPs beside non-live ones or
+beside a test seam). It starts no workers and never changes the catalog.
+Anything else that cannot be served is refused alone and the rest serves: an
+optional setting (Redis, captcha, LLM, SMTP, a trusted proxy, ...) is turned off;
+a merchant whose slug is invalid is not provisioned; one PSP, custodian or
+merchant document that does not check (a misspelled key, a missing secret, a
+Solana Transit signer without Vault) is not served; a merchant document that
+does not check takes its PSPs with it. Vault login, PSP posture checks and
+Redis reconnect in the background (capped full-jitter backoff, forever); until
+then only their features answer 503. `Ready` is the readiness check (Postgres,
+the merchant directory, River). Register `Probes` with the host's
+`github.com/open-rails/helpers/deps` supervisor; `openrails_configuration`
+names everything not served, and why:
 
 ```go
-for _, p := range bill.Probes() { // openrails_vault, openrails_psp_posture, openrails_job_progress, ...
+for _, p := range bill.Probes() { // openrails_vault, openrails_psp_posture, openrails_configuration, openrails_job_progress, ...
     sup.Add(p.Name, deps.Optional, p.Check, nil)
 }
 ```

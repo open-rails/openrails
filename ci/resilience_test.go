@@ -233,9 +233,14 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	require.False(t, armed, "a first boot without Vault leaves only the Solana rail disarmed")
 	_, err := sign(t, rt)
 	require.ErrorIs(t, err, vault.ErrUnavailable)
+	require.ErrorContains(t, probe(t, rt, "openrails_configuration"), ".psps/solana: deferred until its signer answers")
+	mid := engine.Graph(rt).Runtime.DeclaredMerchants()[0]
+	require.Contains(t, notServedFindings(t, f, mid), "psps/solana", "the console's review queue names the deferred PSP")
 
 	fake.SetUp(true)
 	require.Eventually(t, func() bool { _, ok := routedPSP(t, rt, "solana"); return ok }, 30*time.Second, 50*time.Millisecond, "the Solana rail arms once Vault answers")
+	require.NoError(t, probe(t, rt, "openrails_configuration"))
+	require.Empty(t, notServedFindings(t, f, mid), "its finding resolves once it serves")
 	require.NoError(t, probe(t, rt, "openrails_vault"))
 	signature, err := sign(t, rt)
 	require.NoError(t, err)

@@ -90,7 +90,11 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, m
 		}
 		if declaration != nil {
 			req := ProvisionMerchantParams{Config: cfg, Database: database, Merchants: svc, SolanaTransit: opened.SolanaTransit}
-			if err := PutDeclaration(ctx, req, merchantID, *declaration); err != nil {
+			refused, err := PutDeclaration(ctx, req, merchantID, *declaration)
+			if err == nil && len(refused) > 0 {
+				err = rejected(refused)
+			}
+			if err != nil {
 				opened.Close()
 				return nil, fmt.Errorf("merchant %s configuration: %w", merchantID, err)
 			}

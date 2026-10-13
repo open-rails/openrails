@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -27,6 +28,77 @@ type NotifyMerchantConfigParams struct {
 func (q *Queries) NotifyMerchantConfig(ctx context.Context, arg NotifyMerchantConfigParams) error {
 	_, err := q.db.Exec(ctx, notifyMerchantConfig, arg.Channel, arg.Payload)
 	return err
+}
+
+const rearmConfigFindingNotifications = `-- name: RearmConfigFindingNotifications :many
+UPDATE billing.reconciliation_findings
+SET notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = $2::text
+  AND psp_id IS NULL AND resolved_at IS NULL AND status = 'requires_review'
+  AND notified_at < $3::timestamptz
+RETURNING id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id
+`
+
+type RearmConfigFindingNotificationsParams struct {
+	MerchantID     uuid.UUID
+	FindingType    string
+	NotifiedBefore time.Time
+}
+
+// Open configuration findings of the type last notified before
+// notified_before: their notification re-arms, so they alert again while
+// unresolved.
+func (q *Queries) RearmConfigFindingNotifications(ctx context.Context, arg RearmConfigFindingNotificationsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, rearmConfigFindingNotifications, arg.MerchantID, arg.FindingType, arg.NotifiedBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingReconciliationFinding
+	for rows.Next() {
+		var i BillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
+			&i.Change,
+			&i.Source,
+			&i.EvidenceDigest,
+			&i.ApprovalRunID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveConfigFinding = `-- name: ResolveConfigFinding :execrows

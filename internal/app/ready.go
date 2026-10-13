@@ -23,9 +23,9 @@ type ReadinessDependency struct {
 
 // Ready is the readiness shared by the standalone /readyz and embedded
 // Runtime.Ready. Postgres, River (the host's fleet bound to RiverJobs, or
-// OpenRails' own running) are required. Redis, Vault and PSP
-// posture are reported from cached background state as optional (degraded)
-// entries; Ready never contacts them.
+// OpenRails' own running) are required. Redis, Vault, PSP posture and what
+// the configuration does not serve (Refusals) are reported from cached state
+// as optional (degraded) entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	if r == nil || r.riverClosed.Load() {
 		dep := ReadinessDependency{Name: "runtime", Err: fmt.Errorf("not initialized")}
@@ -73,6 +73,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		add("vault", true, r.Vault.State())
 	}
 	add("psp_posture", true, r.postureState())
+	add("configuration", true, r.RefusalState())
 
 	for _, d := range deps {
 		if !d.Available && !d.Optional {

@@ -154,6 +154,9 @@ func (s *MerchantsSource) requireSecret(ctx context.Context, mid billing.Merchan
 	if err != nil {
 		return "", fmt.Errorf("load %s secret %s: %w", scope.Rail, key, err)
 	}
+	if !found && !scope.Declared {
+		return "", fmt.Errorf("%w: %w", scope.ErrUndeclared(), ErrRailNotArmed)
+	}
 	if !found {
 		return "", fmt.Errorf("%s account %s: required secret %s is missing: %w", scope.Rail, scope.AccountID, key, ErrRailNotArmed)
 	}

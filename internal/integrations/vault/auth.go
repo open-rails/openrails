@@ -109,6 +109,13 @@ func Login(ctx context.Context, cfg Config) (*vaultapi.Client, *Supervisor, erro
 
 const requestTimeout = 10 * time.Second
 
+// Unusable is the Supervisor of a Vault whose configuration Login refused:
+// it never authenticates, so every Vault operation refuses with err (wrapped
+// in ErrNotAuthenticated) without a network call.
+func Unusable(err error) *Supervisor {
+	return &Supervisor{kick: make(chan struct{}, 1), err: fmt.Errorf("%w: %w", ErrNotAuthenticated, err)}
+}
+
 func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.Secret, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.AuthMethod)) {
 	case "approle":

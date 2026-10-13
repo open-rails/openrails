@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -32,7 +33,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		return loaded, nil
 	}
 	if versioned(previous) && maps.Equal(previous.Revisions(), loaded.Revisions()) {
-		loaded.Rejected = previous.Rejected
+		loaded.Rejected, loaded.Undeclared = previous.Rejected, previous.Undeclared
 		return keepServed(previous, loaded), nil
 	}
 	set := loaded.Clone()
@@ -62,15 +63,11 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 			return err
 		}
 		var declared []DeclaredCredential
+		var accepted []string
+		labels := map[pspIdentity]string{}
 		for _, key := range set.PSPKeys() {
 			p := set.PSPs[key].Value
 			if _, refused := set.Rejected[merchantdocs.PSPDoc(key)]; refused {
-				continue
-			}
-			if slices.ContainsFunc(rows, func(row gen.BillingPsp) bool {
-				return row.SupersededAt == nil && strings.EqualFold(row.Key, key) && !pspDocNames(p, row)
-			}) {
-				reject(merchantdocs.PSPDoc(key), "a PSP's account identity cannot change; add a separate PSP and keep this account for existing billing")
 				continue
 			}
 			if err := validatePSPDocument(key, p, set); err != nil {
@@ -83,6 +80,19 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), why)
 				continue
 			}
+			identity := docIdentity(p)
+			if other, ok := labels[identity]; ok {
+				reject(merchantdocs.PSPDoc(key), fmt.Sprintf("%s account %s is already declared as psps/%s; an account is one PSP", identity.rail, identity.account, other))
+				continue
+			}
+			labels[identity] = key
+			accepted = append(accepted, key)
+		}
+		if err := moveLabels(ctx, q, id, rows, labels); err != nil {
+			return err
+		}
+		for _, key := range accepted {
+			p := set.PSPs[key].Value
 			row, why, err := s.registerPSP(ctx, q, id, key, p)
 			if err != nil {
 				return err
@@ -98,6 +108,9 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				declared = append(declared, DeclaredCredential{PSPID: row.ID, Rail: p.Rail, Credential: strings.TrimSpace(p.Secrets[AccountCredentialKey(p.Rail)])})
 			}
 		}
+		if set.Undeclared, err = undeclaredBilling(ctx, q, id, rows, labels); err != nil {
+			return err
+		}
 		if s.fingerprints == nil {
 			sort.SliceStable(declared, func(a, b int) bool { return declared[a].PSPID.String() < declared[b].PSPID.String() })
 			return ReconcileDeclaredDuplicates(ctx, q, id.UUID(), declared, s.now())
@@ -111,6 +124,87 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		set.Rejected = nil
 	}
 	return keepServed(previous, set), nil
+}
+
+// pspIdentity is what a PSP is: its rail, money class and account. A label
+// (its key) is only how the merchant's configuration names it.
+type pspIdentity struct{ rail, class, account string }
+
+func docIdentity(p merchantdocs.PSP) pspIdentity {
+	return pspIdentity{normalizeProviderSecretType(p.Rail), config.EnvironmentClass(p.Environment), strings.TrimSpace(p.AccountID)}
+}
+
+func rowIdentity(row gen.BillingPsp) pspIdentity {
+	return pspIdentity{row.Rail, config.EnvironmentClass(row.Environment), row.AccountID}
+}
+
+// moveLabels frees each label the documents now give another account. A
+// current PSP its documents declare under another label steps aside for it;
+// one no document declares any more is superseded: it keeps every record and
+// has no credentials until a document declares its account again.
+func moveLabels(ctx context.Context, q *gen.Queries, id billing.MerchantID, rows []gen.BillingPsp, labels map[pspIdentity]string) error {
+	taken := map[string]pspIdentity{}
+	for identity, key := range labels {
+		taken[strings.ToLower(key)] = identity
+	}
+	for _, row := range rows {
+		if row.SupersededAt != nil {
+			continue
+		}
+		if key, ok := labels[rowIdentity(row)]; ok {
+			if !strings.EqualFold(row.Key, key) {
+				if _, err := q.RegisterPSP(ctx, gen.RegisterPSPParams{ID: row.ID, MerchantID: id.UUID(), Key: "~" + row.ID.String(), Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID}); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		next, ok := taken[strings.ToLower(row.Key)]
+		if !ok {
+			continue
+		}
+		if err := q.SupersedePSP(ctx, gen.SupersedePSPParams{MerchantID: id.UUID(), ID: row.ID}); err != nil {
+			return err
+		}
+		log.WithFields(log.Fields{"merchant_id": id.String(), "psp": row.Key, "rail": row.Rail, "account_id": row.AccountID, "declared_account_id": next.account}).
+			Warn("merchant config: a PSP's label names another account; the account it named keeps its records and has no declared credentials until a document declares it again")
+	}
+	return nil
+}
+
+// undeclaredBilling names each account of the merchant no document declares
+// that still holds what needs its own credentials: cards in its vault and
+// subscriptions renewing on it. Only historical payments on it is ordinary: a
+// refund of one fails on its own with the reason.
+func undeclaredBilling(ctx context.Context, q *gen.Queries, id billing.MerchantID, rows []gen.BillingPsp, labels map[pspIdentity]string) (map[string]string, error) {
+	var out map[string]string
+	for _, row := range rows {
+		if _, declared := labels[rowIdentity(row)]; declared {
+			continue
+		}
+		held, err := q.PSPHeldBilling(ctx, gen.PSPHeldBillingParams{MerchantID: id.UUID(), PspID: row.ID})
+		if err != nil {
+			return nil, err
+		}
+		if held.VaultedMethods+held.ProviderSubscriptions+held.EngineSubscriptions == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[merchantdocs.UndeclaredAccount(row.Rail, row.AccountID)] = undeclaredHolding(row, held)
+	}
+	return out, nil
+}
+
+// undeclaredHolding says what an undeclared account holds and how to fix it.
+func undeclaredHolding(row gen.BillingPsp, held gen.PSPHeldBillingRow) string {
+	why := fmt.Sprintf("%s account %s has no declared credentials but holds %d cards in its vault, %d subscriptions it bills itself and %d subscriptions OpenRails renews on it; declare the account's credentials under any PSP key",
+		row.Rail, row.AccountID, held.VaultedMethods, held.ProviderSubscriptions, held.EngineSubscriptions)
+	if held.ProviderSubscriptions > 0 {
+		why += ". The provider keeps charging the subscriptions it bills, but their renewals are not recorded and cancels and refunds cannot reach it"
+	}
+	return why
 }
 
 // versioned reports a set whose every document carries a Vault version: a

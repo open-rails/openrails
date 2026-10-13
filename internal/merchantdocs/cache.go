@@ -2,6 +2,8 @@ package merchantdocs
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +45,8 @@ type Cache struct {
 	entries        map[billing.MerchantID]*entry
 	admissions     *destructive.Admissions
 	fingerprintKey []byte
+	// hold refuses every load and write until Release.
+	hold error
 }
 
 type entry struct {
@@ -68,6 +72,69 @@ func NewCache(source Source) *Cache {
 
 // Source is where the configuration lives.
 func (c *Cache) Source() Source { return c.source }
+
+// Hold refuses every load and write with why until Release: the source is
+// not ready to serve (Vault has not answered, so neither the admission gate
+// nor the fingerprint key is set).
+func (c *Cache) Hold(why error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hold = why
+}
+
+// Release ends Hold.
+func (c *Cache) Release() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hold = nil
+}
+
+func (c *Cache) held() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hold == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrUnavailable, c.hold)
+}
+
+// Undeclared names, for each loaded merchant, its undeclared accounts that
+// still hold billing.
+func (c *Cache) Undeclared() map[billing.MerchantID]map[string]string {
+	c.mu.Lock()
+	entries := maps.Clone(c.entries)
+	c.mu.Unlock()
+	out := map[billing.MerchantID]map[string]string{}
+	for id, e := range entries {
+		e.mu.RLock()
+		if len(e.set.Undeclared) > 0 {
+			out[id] = maps.Clone(e.set.Undeclared)
+		}
+		e.mu.RUnlock()
+	}
+	return out
+}
+
+// Rejected names, for each loaded merchant, the documents it does not serve
+// and why, and its undeclared accounts that still hold billing.
+func (c *Cache) Rejected() map[billing.MerchantID]map[string]string {
+	c.mu.Lock()
+	entries := maps.Clone(c.entries)
+	c.mu.Unlock()
+	out := map[billing.MerchantID]map[string]string{}
+	for id, e := range entries {
+		e.mu.RLock()
+		if len(e.set.Rejected)+len(e.set.Undeclared) > 0 {
+			out[id] = maps.Clone(e.set.Rejected)
+			if out[id] == nil {
+				out[id] = map[string]string{}
+			}
+			maps.Copy(out[id], e.set.Undeclared)
+		}
+		e.mu.RUnlock()
+	}
+	return out
+}
 
 // Writable reports whether the configuration can change at runtime.
 func (c *Cache) Writable() bool { return c != nil && c.source.Writable() }
@@ -147,6 +214,9 @@ func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force
 	if loaded && !force {
 		return previous, nil
 	}
+	if err := c.held(); err != nil {
+		return previous, err
+	}
 	set, err := c.source.Load(ctx, id)
 	c.mu.Lock()
 	reconcile := c.reconcile
@@ -166,6 +236,11 @@ func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force
 	for path, why := range set.Rejected {
 		if previous.Rejected[path] != why {
 			log.WithFields(log.Fields{"merchant_id": id.String(), "document": path, "reason": why}).Error("merchant config: a document is not served")
+		}
+	}
+	for path, why := range set.Undeclared {
+		if previous.Undeclared[path] != why {
+			log.WithFields(log.Fields{"merchant_id": id.String(), "account": path, "reason": why}).Warn("merchant config: an undeclared account still holds billing")
 		}
 	}
 	e.set, e.loaded, e.checked = set, true, now
@@ -197,6 +272,9 @@ func (c *Cache) refresh(id billing.MerchantID, e *entry) {
 
 // write runs one document write, then reloads the merchant and announces it.
 func (c *Cache) write(ctx context.Context, id billing.MerchantID, put func() error) (Set, error) {
+	if err := c.held(); err != nil {
+		return Set{}, err
+	}
 	if err := put(); err != nil {
 		return Set{}, err
 	}
@@ -232,6 +310,9 @@ func (c *Cache) PutCustodian(ctx context.Context, id billing.MerchantID, key str
 
 // Delete removes every document of the merchant.
 func (c *Cache) Delete(ctx context.Context, id billing.MerchantID) error {
+	if err := c.held(); err != nil {
+		return err
+	}
 	if err := c.source.Delete(ctx, id); err != nil {
 		return err
 	}
