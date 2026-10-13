@@ -35,7 +35,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	// A second merchant in the same directory, provisioned by an engine that
 	// is gone before any handle is used.
 	other := f.config()
-	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B", Sandbox: true}}
+	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B"}}
 	provisioner, err := openrails.New(ctx, other, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	theirs, err := provisioner.MerchantBySlug(slug + "-b")
@@ -113,13 +113,14 @@ func TestEngineMerchantHandles(t *testing.T) {
 	// The local extension binds the same merchant as the common handle.
 	local, err := bill.LocalMerchant(elsewhere.MerchantID())
 	require.NoError(t, err)
-	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "000000"}})
+	reference := "rental/" + uuid.NewString()[:8]
+	bound, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	listed, err := elsewhere.ListPSPs(ctx, billing.PSPListParams{})
+	_, err = local.StartRunningChargeTx(ctx, bound, billing.StartRunningChargeParams{Reference: reference, CustomerID: customer, Currency: "USD", RatePerHour: 1_000_000})
 	require.NoError(t, err)
-	require.Len(t, listed.Items, 1)
-	require.Equal(t, psp.ID, listed.Items[0].ID)
-	none, err := shop.ListPSPs(ctx, billing.PSPListParams{})
+	require.NoError(t, bound.Commit(ctx))
+	_, err = elsewhere.GetRunningCharge(ctx, reference)
 	require.NoError(t, err)
-	require.Empty(t, none.Items)
+	_, err = shop.GetRunningCharge(ctx, reference)
+	require.ErrorIs(t, err, billing.ErrNotFound)
 }
