@@ -25,10 +25,10 @@ import (
 // maxTrustLevelBytes bounds a stored trust level.
 const maxTrustLevelBytes = 64
 
-// UpdateCustomer changes one customer's settings and answers the customer.
+// UpdateCustomer changes one customer's settings and returns the saved settings.
 // The change is validated whole before anything is written; a customer
 // OpenRails has not seen is created.
-func (s *Service) UpdateCustomer(ctx context.Context, customer identity.CustomerID, params billing.UpdateCustomerParams) (*billing.Customer, error) {
+func (s *Service) UpdateCustomer(ctx context.Context, customer identity.CustomerID, params billing.UpdateCustomerParams) (*billing.CustomerSettingsResult, error) {
 	if customer.IsZero() {
 		return nil, apperr.Invalidf("customer_id is required").WithParam("customer_id")
 	}
@@ -54,6 +54,7 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 			return nil, ErrBillingPolicyNotFound.WithParam("billing_policy")
 		}
 	}
+	out := billing.CustomerSettingsResult{ID: billing.CustomerID(customer)}
 	err = s.rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// A customer is the host's subject: one OpenRails has not billed yet
@@ -64,20 +65,20 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: change.customer, MerchantID: mid.UUID()}); err != nil {
 			return err
 		}
-		return change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC())
+		if err := change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC()); err != nil {
+			return err
+		}
+		settings, err := customerSettings(ctx, q, mid.UUID(), []uuid.UUID{change.customer})
+		if err != nil {
+			return err
+		}
+		out.Settings = settings[change.customer]
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.rt.DB.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: change.customer})
-	if err != nil {
-		return nil, err
-	}
-	out, err := s.customers(ctx, mid, []gen.BillingCustomer{row})
-	if err != nil {
-		return nil, err
-	}
-	return &out[0], nil
+	return &out, nil
 }
 
 // SetLowBalanceLine sets the customer's own low-balance line in a currency

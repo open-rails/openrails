@@ -4884,7 +4884,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Customer"
+                  "$ref": "#/components/schemas/CustomerSettingsResult"
                 }
               }
             }
@@ -15330,6 +15330,21 @@
           "low_balance_lines",
           "billing_policy",
           "invoice_profile"
+        ]
+      },
+      "CustomerSettingsResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/CustomerSettings"
+          }
+        },
+        "required": [
+          "id",
+          "settings"
         ]
       },
       "Dashboard": {

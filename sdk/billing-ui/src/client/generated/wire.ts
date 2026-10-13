@@ -755,6 +755,11 @@ export type CustomerSettings = {
   invoice_profile: InvoiceProfile | null
 }
 
+export type CustomerSettingsResult = {
+  id: string
+  settings: CustomerSettings
+}
+
 export type Dashboard = {
   widgets: DashboardWidget[]
   is_default: boolean

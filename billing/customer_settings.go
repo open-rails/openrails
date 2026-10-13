@@ -2,6 +2,12 @@ package billing
 
 import "github.com/open-rails/openrails/catalog"
 
+// CustomerSettingsResult confirms a customer's saved billing settings.
+type CustomerSettingsResult struct {
+	ID       CustomerID       `json:"id"`
+	Settings CustomerSettings `json:"settings"`
+}
+
 // CustomerSettings is the configuration a merchant keeps for one customer:
 // its credit lines, trust levels, low-balance lines, billing policy and
 // invoice terms. A field at its default is absent: a currency with no credit

@@ -11,6 +11,7 @@ import type {
   PSPRefresh,
   CreatePriceParams,
   Customer,
+  CustomerSettingsResult,
   ListPage,
   MerchantConfigurationState,
   Meter,
@@ -642,10 +643,9 @@ export function createEndpoints(client: AdminClient) {
   const getAdminAccess = (signal?: AbortSignal) =>
     api<AdminAccess>("/admin/access", { signal })
 
-  // updateCustomer changes only the settings params names and answers the
-  // customer.
+  // updateCustomer returns the customer's ID and saved settings.
   const updateCustomer = (customerId: string, params: UpdateCustomerParams) =>
-    api<Customer>(`/admin/customers/${customerId}`, {
+    api<CustomerSettingsResult>(`/admin/customers/${customerId}`, {
       method: "PATCH",
       body: params,
     })

@@ -54,14 +54,14 @@ func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, request
 }
 
 // UpdateCustomer changes one customer's settings, only the fields params
-// names, and answers the customer; a customer not billed yet is created. A
-// person needs a recent sign-in for it.
-func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error) {
+// names, and returns its ID and saved settings; a customer not billed yet is
+// created. A person needs a recent sign-in for it.
+func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams, requestOptions ...RequestOption) (*billing.CustomerSettingsResult, error) {
 	path, err := customerIDPath(id)
 	if err != nil {
 		return nil, err
 	}
-	var out billing.Customer
+	var out billing.CustomerSettingsResult
 	if err := c.do(ctx, http.MethodPatch, path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
