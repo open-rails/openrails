@@ -16,8 +16,10 @@ on:
 permissions:
   contents: read
 
+# A merged pull request's closed event carries the base ref, so pull requests
+# group by number; otherwise merging one cancels master's own run.
 concurrency:
-  group: validate-${{ github.ref }}
+  group: validate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

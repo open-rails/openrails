@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sdk-${{ github.ref }}
+  group: sdk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
