@@ -1492,7 +1492,7 @@ func (q *Queries) UnlockUsageMonthlyCollection(ctx context.Context, merchantID u
 const usageRecoveryAccounts = `-- name: UsageRecoveryAccounts :many
 SELECT p.id, p.rail FROM billing.psps p
 WHERE p.merchant_id = $1::uuid AND p.rail IN ('nmi', 'stripe')
-  AND (p.environment = 'live') = (SELECT environment = 'live' FROM billing.psps WHERE merchant_id = p.merchant_id AND id = $2::uuid)
+  AND p.live = (SELECT live FROM billing.psps WHERE merchant_id = p.merchant_id AND id = $2::uuid)
 ORDER BY p.id
 `
 

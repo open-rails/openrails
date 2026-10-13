@@ -12,34 +12,33 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
-// Only plain-SPL stablecoins can back an immutable on-chain plan amount; the
-// zero-config accepted token must be one, or that merchant can't rebill.
+// A recurring plan bills in USDC alone: its amount is immutable, so only a
+// stablecoin keeps its value. Testnet has no USDC, so no plan.
 func TestRecurringAllowlist(t *testing.T) {
 	for sym, want := range map[string]bool{
-		"USDC": true, " usdc ": true, "USD1": true, "DUSD": true,
-		"PYUSD": false, "USDG": false, "USDT": false, "SOL": false, "": false,
+		"USDC": true, " usdc ": true,
+		"USD1": false, "DUSD": false, "PYUSD": false, "USDT": false, "SOL": false, "": false,
 	} {
 		require.Equal(t, want, IsRecurringStablecoinSymbol(sym), sym)
 	}
 	require.True(t, IsRecurringStablecoinSymbol(solanatokens.PreferredStablecoin))
-	require.False(t, IsRecurringStablecoinSymbol("SOL"), "a default-accepted SOL never rebills")
 
 	for _, network := range []string{"mainnet", "devnet"} {
 		mint, err := ResolveRecurringMint("USDC", network)
 		require.NoError(t, err)
-		require.Equal(t, solanatokens.ForNetwork(network)["USDC"].Mint, mint)
+		require.Equal(t, solanatokens.Accepted(network)["USDC"].Mint, mint)
 	}
-	_, err := ResolveRecurringMint("USD1", "devnet")
-	require.Error(t, err, "USD1 has no devnet mint")
+	_, err := ResolveRecurringMint("USDC", "testnet")
+	require.ErrorContains(t, err, "has no configured mint", "testnet has no USDC")
 
-	_, err = ResolveRecurringMint("PYUSD", "mainnet")
+	_, err = ResolveRecurringMint("SOL", "mainnet")
 	var typed ErrTokenNotRecurringEligible
 	require.ErrorAs(t, err, &typed)
-	require.Equal(t, "PYUSD", typed.Symbol)
+	require.Equal(t, "SOL", typed.Symbol)
 
 	mint, err := ResolveRecurringMintFromTokens("usdc", map[string]config.TokenConfig{"USDC": {Mint: testDevnetUSDCMint}})
 	require.NoError(t, err)
-	require.Equal(t, testDevnetUSDCMint, mint, "the configured mint wins over the registry")
+	require.Equal(t, testDevnetUSDCMint, mint)
 	_, err = ResolveRecurringMintFromTokens("USDC", map[string]config.TokenConfig{"USDC": {Mint: " "}})
 	require.Error(t, err)
 }

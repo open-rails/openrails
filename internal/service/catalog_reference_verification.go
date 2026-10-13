@@ -37,8 +37,8 @@ func (s *Service) verifyCatalogProviderReference(ctx context.Context, providerKe
 		if s.rt == nil {
 			return nil, fmt.Errorf("Solana catalog reader is unavailable")
 		}
-		// Recurring PlanService resolves the merchant's configured signer. It must
-		// not verify a primary wallet and then bind the result to a secondary PSP.
+		// PlanService pays the merchant's active treasury. It must not verify
+		// against one PSP and bind the result to another.
 		if accountID != "" && s.rt.RailConfigs != nil {
 			primary, resolveErr := s.rt.RailConfigs.RailConfig(ctx, "solana", "")
 			if resolveErr != nil {
@@ -179,7 +179,7 @@ type catalogReferenceChainReader interface {
 }
 
 func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
-	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant); err != nil {
+	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant, solanaKeyTreasury); err != nil {
 		return nil, err
 	}
 	if req.BillingIntervalHours == nil {
@@ -205,9 +205,15 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if err != nil {
 		return nil, err
 	}
-	owner, err := plan.MerchantAddress(ctx, mid)
-	if err != nil {
-		return nil, fmt.Errorf("resolve Solana merchant: %w", err)
+	// The plan's owner: the one its reference names, else the cranker that
+	// publishes new plans.
+	var owner solanago.PublicKey
+	if text := strings.TrimSpace(link[solanaKeyMerchant]); text != "" {
+		if owner, err = solanago.PublicKeyFromBase58(text); err != nil {
+			return nil, apperr.Invalidf("invalid Solana merchant_address")
+		}
+	} else if owner, err = plan.Publisher(ctx); err != nil {
+		return nil, fmt.Errorf("resolve the Solana cranker: %w", err)
 	}
 	pdaText := strings.TrimSpace(link[solanaKeyPlanPDA])
 	selectedToken := strings.ToUpper(strings.TrimSpace(link[solanaKeyToken]))
@@ -254,7 +260,13 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		return nil, err
 	}
 	if account.Owner != owner || derived != pda || account.Bump != bump {
-		return nil, apperr.Invalidf("Solana plan does not belong to the selected merchant and program address")
+		return nil, apperr.Invalidf("Solana plan is not owned by %s at its program address", owner)
+	}
+	if err := plan.Owns(ctx, owner); err != nil {
+		return nil, apperr.Invalidf("Solana plan %s: %v", pdaText, err)
+	}
+	if err := plan.PaysInto(ctx, mid, pda, account.Destinations); err != nil {
+		return nil, apperr.Invalidf("%v", err)
 	}
 	if account.PeriodHours != uint64(*req.BillingIntervalHours) || account.EndTs != 0 || (!req.Archived && account.Status != subscriptions.PlanStatusActive) {
 		return nil, apperr.Invalidf("Solana plan period, expiry or active state does not match the catalog")
@@ -278,6 +290,9 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		return nil, apperr.Invalidf("Solana plan amount does not match the catalog")
 	}
 	out := map[string]string{solanaKeyPlanPDA: pdaText, solanaKeyPlanID: strconv.FormatUint(account.PlanID, 10), solanaKeyMint: account.Mint.String(), solanaKeyAmountBaseUnits: strconv.FormatUint(account.Amount, 10), solanaKeyPeriodHours: strconv.FormatUint(account.PeriodHours, 10), solanaKeyCreatedAt: strconv.FormatInt(account.CreatedAt, 10), solanaKeyMerchant: owner.String(), solanaKeyMintSymbol: token, solanaKeyToken: token}
+	if !account.Destinations[0].IsZero() {
+		out[solanaKeyTreasury] = account.Destinations[0].String()
+	}
 	for key, value := range link {
 		if key == models.RailKeyRail || key == models.RailKeyProvider || key == solanaKeyToken || key == solanaKeyPlanID {
 			continue

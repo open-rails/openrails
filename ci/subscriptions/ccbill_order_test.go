@@ -16,7 +16,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/openrailstest"
 )
 
@@ -40,17 +39,16 @@ func openCCBillShop(t *testing.T) *ccbillShop {
 	t.Helper()
 	directory := &openrailstest.UserInfo{}
 	w := prepareWorld(t, 12)
-	fake, signer := withSolana(t, w)
+	sol := withSolana(t, w)
 	solana := w.declare
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		solana(psps)
 		delete(psps, "stripe")
-		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig()
+		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, ClientAccnum: ccbillAccnum, ClientSubacc: ccbillSubacc, Salt: "e2e-ccbill-salt"}.PSPConfig()
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
-	plan, err := fake.Plan(signer.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
-	require.NoError(t, err)
+	plan := sol.plan(t, 4242, 23_000_000)
 	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000

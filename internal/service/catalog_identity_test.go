@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -64,9 +65,12 @@ func TestProviderPriceIdentity(t *testing.T) {
 	for _, other := range []uuid.UUID{sibling, trial} {
 		require.NotEqual(t, internalStripeLookupKey(base), internalStripeLookupKey(other))
 		require.NotEqual(t, nmiDeterministicPlanID(base), nmiDeterministicPlanID(other))
-		require.NotEqual(t, solanaPlanID(base, "mint"), solanaPlanID(other, "mint"))
+		treasury := solanago.NewWallet().PublicKey()
+		require.NotEqual(t, solanaPlanID(base, "mint", treasury), solanaPlanID(other, "mint", treasury))
 	}
 	require.Equal(t, internalStripeLookupKey(base), internalStripeLookupKey(base))
+	first, second := solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey()
+	require.NotEqual(t, solanaPlanID(base, "mint", first), solanaPlanID(base, "mint", second), "a new treasury takes a new plan")
 	product := &models.Product{ID: productID, Key: "pro"}
 	legacy := &models.Price{ID: uuid.New(), ProductID: productID, Key: "monthly", Amount: 10_000_000, Currency: "USD",
 		PSPLinks: map[string]map[string]string{"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_legacy"}}}

@@ -105,7 +105,7 @@ func TestDestructiveConfigurationLostReplyReusesAdmission(t *testing.T) {
 	require.NotNil(t, rt.DestructiveAdmissions)
 	client := w.client[embedded]
 	grace := 9
-	request := billing.UpdateMerchantConfigurationParams{Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace}}
+	request := billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{ArrearsGraceDays: &grace}}
 	lose.Store(true)
 	_, err = client.UpdateMerchantConfiguration(t.Context(), request)
 	require.Error(t, err)
@@ -115,8 +115,8 @@ func TestDestructiveConfigurationLostReplyReusesAdmission(t *testing.T) {
 	require.EqualValues(t, 1, before)
 	got, err := client.UpdateMerchantConfiguration(t.Context(), request)
 	require.NoError(t, err)
-	require.NotNil(t, got.Settings.ArrearsGraceDays)
-	require.Equal(t, 9, *got.Settings.ArrearsGraceDays)
+	require.NotNil(t, got.MerchantSettings.ArrearsGraceDays)
+	require.Equal(t, 9, *got.MerchantSettings.ArrearsGraceDays)
 	var count, pending int64
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*),count(*) FILTER(WHERE state IN ('reserved','started','uncertain')) FROM "+w.schema+".destructive_actions WHERE origin='host'").Scan(&count, &pending))
 	require.EqualValues(t, 1, count, "lost response replay uses the original logical command")

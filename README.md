@@ -103,13 +103,13 @@ Next, configure your merchant. This contains secrets that allow OpenRails to tal
 # merchant.yaml
 slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
+sandbox: true # its PSPs move no money; a live merchant omits it
 psps:
   paykings: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
-    environment: sandbox # live (real money), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
-    account_id: "000000" # the NMI dashboard's "Gateway ID"
-    settings:
-      tokenization_key: your-public-tokenization-key # the browser's card fields use it
+    environment: sandbox # live (real money; the default), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
+    gateway_id: "000000" # the NMI dashboard's Gateway ID
+    tokenization_key: your-public-tokenization-key # the browser's card fields use it
     secrets:
       security_key: your-private-security-key
       webhook_signing_secret: your-webhook-signing-key
@@ -1465,16 +1465,15 @@ version: 1
 merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
     display_name: OnlyDemo
+    sandbox: true # its PSPs move no money; a live merchant omits it
     api_host: localhost # the Host its public routes (the catalog, purchase) answer on
-    settings:
-      profile:
-        from_email: billing@onlydemo.example # merchant sender identity
+    profile:
+      from_email: billing@onlydemo.example # merchant sender identity
     psps:
       mobius: # your name for this account; any key you like
         rail: nmi
-        account_id: "000000" # the NMI dashboard's "Gateway ID"
-        settings:
-          tokenization_key: your-public-tokenization-key # the browser's card fields use it
+        gateway_id: "000000" # the NMI dashboard's Gateway ID
+        tokenization_key: your-public-tokenization-key # the browser's card fields use it
         secrets:
           security_key: your-private-security-key
           webhook_signing_secret: your-webhook-signing-key
@@ -1786,11 +1785,12 @@ build yourself, badly, under deadline:
   before any retry. A charge is never blind-retried; a credential swap can never fire a
   stale queue against the wrong account.
 - **Environments that can't lie.** Every PSP declares whether it moves real money
-  (`environment: live | test | sandbox`), and OpenRails proves it with the provider
+  (its rail's `environment`: `live | test | sandbox`, Solana's `mainnet | devnet | testnet`), and OpenRails proves it with the provider
   before the PSP is used: a Stripe key's prefix must agree, every NMI account is asked
   whether it is in test mode (a sandbox.nmi.com account is probed with a card only a
   simulator approves), and a Solana PSP pays on the network its environment names. A
-  deployment is all live or all non-live; mixing is refused at boot.
+  merchant is live or a sandbox (`sandbox: true`), and a PSP that disagrees with its
+  merchant is refused; one deployment serves both kinds side by side.
 - **Your users never pay for our malfunction.** Access is closed by *evidence* — a
   confirmed cancellation, a terminal decline, exhausted dunning — never by the clock
   alone. A lost webhook, a dead pipe, or stale data parks the subscription for

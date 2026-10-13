@@ -480,11 +480,10 @@ func TestSolanaFiatCents(t *testing.T) {
 		{usdc, 6, 1_234_567, 0, false}, {usdc, 6, 9_999, 0, false}, {usdc, 9, 1_000_000_000, 100, true},
 		{usdc, 9, 1_000_000, 0, false}, {usdc, 2, 100, 100, true}, {usdc, 0, 1, 0, false},
 		{usdc, 19, 1, 0, false}, {usdc, 2, math.MaxUint64, 0, false},
-		{"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB", 6, 5_000_000, 500, true},
-		{"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", 6, 5_000_000, 500, true},
-		{"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH", 6, 5_000_000, 500, true},
-		{"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6, 1_000_000, 100, true},
-		{"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", 6, 1_000_000, 0, false}, // devnet USDC: not registry
+		{"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", 6, 1_000_000, 100, true}, // devnet USDC
+		// Only USDC is accepted: other stablecoins are not money here.
+		{"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB", 6, 5_000_000, 0, false},
+		{"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6, 1_000_000, 0, false},
 		{"So11111111111111111111111111111111111111112", 9, 1_000_000_000, 0, false},
 		{"", 6, 1_000_000, 0, false},
 	} {

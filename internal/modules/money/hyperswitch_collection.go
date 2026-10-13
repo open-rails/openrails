@@ -86,7 +86,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if !ok || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(scope.Environment) {
+	if !ok || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(scope.Rail, scope.Environment) {
 		return nil, fmt.Errorf("HyperSwitch collection custody does not match the accepted account")
 	}
 	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)

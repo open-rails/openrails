@@ -30,5 +30,10 @@ func ProvisionMerchant(ctx context.Context, cp *controlplane.ControlPlane, req b
 			return nil, fmt.Errorf("control plane provision %q: display name: %w", slug, err)
 		}
 	}
+	if created && req.Sandbox {
+		if err := cp.SetMerchantSandbox(ctx, m.ID); err != nil {
+			return nil, fmt.Errorf("control plane provision %q: sandbox: %w", slug, err)
+		}
+	}
 	return &billing.ProvisionMerchantResult{MerchantID: m.ID, GroupID: m.PermissionGroupID, Created: created}, nil
 }

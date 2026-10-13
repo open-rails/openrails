@@ -70,7 +70,7 @@ func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, custody Custo
 		return HyperSwitchBinding{}, err
 	}
 	row := accounts.BillingCustodian
-	if accounts.BillingPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != config.EnvironmentClass(accounts.BillingPsp.Environment) {
+	if accounts.BillingPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != config.EnvironmentClass(accounts.BillingPsp.Rail, accounts.BillingPsp.Environment) {
 		return HyperSwitchBinding{}, ErrInstrumentChanged
 	}
 	scope, ok, err := custody.CustodianScopeByID(ctx, billing.MerchantID(method.MerchantID), row.ID)

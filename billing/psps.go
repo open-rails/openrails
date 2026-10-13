@@ -15,36 +15,76 @@ const (
 )
 
 // PSP is one merchant account on a rail: mobius and paykings are two PSPs on
-// nmi. Credential values are never returned.
+// nmi. Its rail decides its fields (RailDefinition). Credential values are
+// never returned.
 type PSP struct {
 	ID PSPID `json:"id"`
 	// Key is the merchant's name for the PSP: the key a price's psps and
 	// purchase's payment.rail name it by. A key names one PSP for good.
 	Key  string `json:"key"`
 	Rail Rail   `json:"rail"`
-	// Environment is whether the PSP moves real money: live, test (the
-	// provider's own system, no money moves) or sandbox (the provider's
-	// separate sandbox system). Its money class (live, or test and sandbox
-	// together) is part of the PSP's identity.
+	// Environment is the rail's own (RailDefinition.Environments): nmi live,
+	// test or sandbox; stripe live or test; ccbill live or sandbox; solana
+	// mainnet, devnet or testnet. Live and mainnet move real money.
 	Environment string `json:"environment"`
-	// AccountID is the operator-declared account on the rail; it never
-	// changes.
-	AccountID string `json:"account_id"`
 	// Archived PSPs take no new work and keep serving what they already
 	// carry until it drains.
 	Archived bool `json:"archived"`
 	// OpenObligations counts the subscriptions and operations still bound to
 	// the PSP; an archived PSP with none is drained.
 	OpenObligations int64 `json:"open_obligations"`
-	// Settings are the PSP's declared non-secret values, such as the public
-	// keys a browser uses: publishable_key (stripe), tokenization_key (nmi).
-	Settings    map[string]any           `json:"settings"`
+	PSPFields
 	Credentials map[string]PSPCredential `json:"credentials"`
 	// Revision advances with every change; an update may name the revision
 	// it read.
 	Revision  int64     `json:"revision"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PSPAccount is a PSP's account in its rail's own terms
+// (RailDefinition.AccountFields); a PSP sets only its rail's. It never
+// changes.
+type PSPAccount struct {
+	// GatewayID is an NMI PSP's account: the dashboard's Gateway ID.
+	GatewayID string `json:"gateway_id,omitempty"`
+	// AccountID is a Stripe PSP's account, acct_….
+	AccountID string `json:"account_id,omitempty"`
+	// ClientAccnum and ClientSubacc are a CCBill PSP's account and
+	// subaccount numbers.
+	ClientAccnum string `json:"client_accnum,omitempty"`
+	ClientSubacc string `json:"client_subacc,omitempty"`
+	// Treasury is a Solana PSP's account: the address every payment to the
+	// merchant lands in.
+	Treasury string `json:"treasury,omitempty"`
+}
+
+// Fields are the account's fields by name.
+func (a PSPAccount) Fields() map[string]string {
+	return map[string]string{"gateway_id": a.GatewayID, "account_id": a.AccountID, "client_accnum": a.ClientAccnum, "client_subacc": a.ClientSubacc, "treasury": a.Treasury}
+}
+
+// PSPFields are a PSP's own non-secret fields. A rail takes its own:
+// gateway_id, custodian, tokenization_key, tokenization_url, card_entry and
+// webhook_overlap_expires_at on nmi; account_id, publishable_key and
+// webhook_overlap_expires_at on stripe; client_accnum and client_subacc on
+// ccbill; treasury on solana.
+type PSPFields struct {
+	PSPAccount
+	// Custodian is the key of the custodian holding the PSP's cards; empty
+	// when the PSP holds its own.
+	Custodian string `json:"custodian,omitempty"`
+	// TokenizationKey is NMI's public Collect.js key; TokenizationURL
+	// overrides the script URL.
+	TokenizationKey string `json:"tokenization_key,omitempty"`
+	TokenizationURL string `json:"tokenization_url,omitempty"`
+	// CardEntry is browser or server.
+	CardEntry string `json:"card_entry,omitempty"`
+	// PublishableKey is Stripe's public key for embedded Elements.
+	PublishableKey string `json:"publishable_key,omitempty"`
+	// WebhookOverlapExpiresAt is when a rotated-out webhook signing secret
+	// stops verifying.
+	WebhookOverlapExpiresAt *time.Time `json:"webhook_overlap_expires_at,omitempty"`
 }
 
 // PSPCredential is one credential slot of a PSP: its state, never its value.
@@ -65,27 +105,32 @@ type PSPListParams struct {
 	PageRequest
 }
 
-// CreatePSPParams arms a new PSP. Environment is required: live, test or
-// sandbox, as the rail has them, and a deployment's PSPs are all live or all
-// non-live. Credentials are write-only and are checked with the provider,
-// against the environment, before anything is stored. Repeating a create that
-// took effect returns the PSP it made.
+// CreatePSPParams arms a new PSP. Its rail decides its fields: its account
+// fields (RailDefinition.AccountFields), and the public keys nmi
+// (tokenization_key) and stripe (publishable_key) take. Environment is the
+// rail's own; omitted, its real-money one. A sandbox merchant's PSPs move no
+// money, a live merchant's real money. Credentials are write-only
+// and are checked with the provider, against the environment, before
+// anything is stored. Repeating a create that took effect returns the PSP it
+// made.
 type CreatePSPParams struct {
-	Key         string            `json:"key"`
-	Rail        Rail              `json:"rail"`
-	Environment string            `json:"environment"`
-	AccountID   string            `json:"account_id"`
-	Settings    map[string]any    `json:"settings"`
-	Credentials map[string]string `json:"credentials"`
+	Key         string `json:"key"`
+	Rail        Rail   `json:"rail"`
+	Environment string `json:"environment,omitempty"`
+	PSPAccount
+	TokenizationKey string            `json:"tokenization_key,omitempty"`
+	PublishableKey  string            `json:"publishable_key,omitempty"`
+	Credentials     map[string]string `json:"credentials"`
 }
 
-// UpdatePSPParams changes a PSP's settings, rotates its credentials or
+// UpdatePSPParams changes a PSP's public keys, rotates its credentials or
 // archives it. ExpectedRevision, when set, is the revision the caller read: a
 // PSP changed since is refused with revision_mismatch. Omitted credentials and
-// settings keep their values.
+// keys keep their values; an empty key removes it.
 type UpdatePSPParams struct {
 	ExpectedRevision *int64            `json:"expected_revision"`
-	Settings         map[string]any    `json:"settings"`
+	TokenizationKey  *string           `json:"tokenization_key,omitempty"`
+	PublishableKey   *string           `json:"publishable_key,omitempty"`
 	Credentials      map[string]string `json:"credentials"`
 	// RetireWebhookOverlap refuses the rotated-out webhook signing secret at
 	// once instead of at the end of its overlap.
@@ -104,19 +149,25 @@ type UpdatePSPParams struct {
 type PSPDeclaration struct {
 	Key  string
 	Rail Rail
-	// Environment is required: live, test or sandbox, as the rail has them.
+	// Environment is the rail's own; omitted, its real-money one.
 	Environment string
-	AccountID   string
+	PSPAccount
 }
 
-// RailDefinition is a rail a merchant can arm a PSP on, with the credential
-// slots a PSP on it takes.
+// RailDefinition is a rail a merchant can arm a PSP on: the fields and
+// credentials a PSP on it takes over the API, and its environments.
 type RailDefinition struct {
-	Rail           Rail     `json:"rail"`
-	DisplayName    string   `json:"display_name"`
+	Rail        Rail   `json:"rail"`
+	DisplayName string `json:"display_name"`
+	// AccountFields name a PSP's account in the rail's own terms: gateway_id
+	// on nmi, account_id on stripe, client_accnum and client_subacc on
+	// ccbill, treasury on solana. A create requires each.
+	AccountFields []string `json:"account_fields"`
+	// Fields are the other PSP fields a create takes.
+	Fields         []string `json:"fields"`
 	CredentialKeys []string `json:"credential_keys"`
-	SettingKeys    []string `json:"setting_keys"`
-	// Environments are the environments a PSP on the rail may declare.
+	// Environments are the environments a PSP on the rail may declare, its
+	// real-money one, the default, first.
 	Environments []string `json:"environments"`
 }
 

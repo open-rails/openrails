@@ -234,7 +234,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	// outright. The email is not needed to vault a card, so a non-live PSP
 	// omits it rather than block every sandbox purchase.
 	vaultEmail := req.Email
-	if !config.LiveEnvironment(scope.Environment) {
+	if !config.LiveEnvironment(scope.Rail, scope.Environment) {
 		vaultEmail = ""
 	}
 	vaultData := nmi.CreateCustomerVaultData{

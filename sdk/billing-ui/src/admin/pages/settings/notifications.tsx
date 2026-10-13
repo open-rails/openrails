@@ -101,14 +101,14 @@ function NotificationEmailSection({
 }) {
   const { id: adminId, text: adminText } = useAdminUI()
 
-  const email = configuration.settings.alert_email ?? ""
+  const email = configuration.alert_email ?? ""
   const edit = useConfigurationEdit(configuration)
   const form = useForm({
     defaultValues: { email },
     // An empty address clears the email channel.
     onSubmit: ({ value }) =>
       edit.save(
-        { settings: { alert_email: value.email.trim() } },
+        { alert_email: value.email.trim() },
         value.email.trim() ? "Alert email saved" : "Alert email cleared",
         "Save alert email"
       ),

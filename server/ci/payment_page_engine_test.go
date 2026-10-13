@@ -26,10 +26,10 @@ func TestEmbeddedEnginePaymentPage(t *testing.T) {
 	cfg.PublicBillingBaseURL = "https://api.e2e.test"
 	cfg.ReturnOrigins = []string{"https://shop.e2e.test"}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {Sandbox: true,
 		DisplayName: "Shared pay", Issuer: "https://identity.e2e.test",
-		Settings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
-		PSPs:     map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},
+		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
+		PSPs:             map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},
 	}}
 	publisher, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	for _, origin := range []string{"http://pay.e2e.test", "https://api.e2e.test", "https://identity.e2e.test", "https://pay.e2e.test/path"} {

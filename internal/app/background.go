@@ -72,15 +72,3 @@ func (d *dependencyState) observed() (bool, error) {
 	defer d.mu.Unlock()
 	return d.set, d.err
 }
-
-// ReportSignerKeyChange records that a Vault Transit signer key no longer
-// matches its stored Solana identity (nil once an operator approves it).
-func (r *Runtime) ReportSignerKeyChange(err error) {
-	r.signerIdentity.record(err)
-}
-
-// SignerIdentityState is nil unless a Transit signer key change awaits approval.
-func (r *Runtime) SignerIdentityState() error {
-	_, err := r.signerIdentity.observed()
-	return err
-}

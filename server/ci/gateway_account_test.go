@@ -40,11 +40,11 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 	// tokens, which reads GET /v1/me/config.
 	publish := func(account string) string {
 		slug := "seller-" + uuid.NewString()[:8]
-		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
+		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Sandbox: true, Slug: slug})
 		require.NoError(t, err)
-		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", AccountID: account,
-			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
-			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
+		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: account},
+			TokenizationKey: "e2e-tokenization",
+			Credentials:     map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 		require.NoError(t, err)
 		login := newIssuerKey(t, "https://"+slug+".e2e.test")
 		trust(t, srv, m.MerchantID, login.app(t, "viewer", nil))

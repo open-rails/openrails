@@ -132,19 +132,16 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	rt.Merchants.WithFakeProviders(seams(deps)...)
-	if err := refuseMixedEnvironments(ctx, application, declarations); err != nil {
-		return fail(err)
-	}
 	// Each declared merchant is provisioned before a route or a worker can
 	// see it; the issuer that binds its credentials is recorded with it. One
 	// that cannot be is refused alone and retried in the background.
 	for _, m := range declarations {
-		id, pending, err := upsertMerchantConfig(ctx, application, m, true)
+		id, err := upsertMerchantConfig(ctx, application, m)
 		if err != nil {
 			e.provisionLater(m, err)
 			continue
 		}
-		e.admit(m, id, pending, false)
+		e.admit(m, id, false)
 	}
 	e.publishDeclared()
 	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
@@ -152,12 +149,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
-	}
-	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
-		e.declMu.RLock()
-		m := e.bySlug[mid]
-		e.declMu.RUnlock()
-		return approveSolanaSigner(ctx, application, m, mid, key)
 	}
 	rt.CheckBookIdentity(ctx)
 	ids := e.declaredIDs()
@@ -169,7 +160,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 // admit records a provisioned declared merchant. late is a merchant a
 // background retry provisioned after New: it is published and verified at
 // once.
-func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, pending, late bool) {
+func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, late bool) {
 	rt := e.App.Runtime
 	e.declMu.Lock()
 	e.declared[m.Slug], e.bySlug[id] = id, m
@@ -178,9 +169,6 @@ func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, pend
 	}
 	e.declMu.Unlock()
 	rt.NameMerchant(id, m.Slug)
-	if pending {
-		confirmSigner(e.App, m)
-	}
 	if late {
 		e.publishDeclared()
 		rt.Unrefuse(merchantSubject(m.Slug))
@@ -196,12 +184,12 @@ func (e *Engine) provisionLater(m config.MerchantDeclaration, err error) {
 	rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 	rt.Go("provision merchant "+m.Slug, func(ctx context.Context) {
 		_ = retry.Forever(ctx, func(ctx context.Context) error {
-			id, pending, err := upsertMerchantConfig(ctx, e.App, m, true)
+			id, err := upsertMerchantConfig(ctx, e.App, m)
 			if err != nil {
 				rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 				return err
 			}
-			e.admit(m, id, pending, true)
+			e.admit(m, id, true)
 			return nil
 		}, nil)
 	})
@@ -227,31 +215,6 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 		ids = append(ids, e.declared[slug])
 	}
 	return ids
-}
-
-// refuseMixedEnvironments refuses declarations whose PSPs another money
-// class already holds in the database: a deployment's PSPs are all live or
-// all non-live.
-func refuseMixedEnvironments(ctx context.Context, a *app.App, declarations []config.MerchantDeclaration) error {
-	checked := map[bool]bool{}
-	for _, m := range declarations {
-		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
-			p := m.PSPs[key]
-			live := config.LiveEnvironment(p.Environment)
-			if checked[live] || config.ValidatePSPEnvironment(key, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment) != nil {
-				continue
-			}
-			checked[live] = true
-			why, err := a.Runtime.Merchants.EnvironmentRefusal(ctx, p.Environment)
-			if err != nil {
-				return fmt.Errorf("openrails: check PSP environments: %w", err)
-			}
-			if why != "" {
-				return fmt.Errorf("openrails: Config.Merchants[%q].psps/%s: %s", m.Slug, strings.ToLower(strings.TrimSpace(key)), why)
-			}
-		}
-	}
-	return nil
 }
 
 // validate enforces what embedded construction must declare and seeds the
@@ -301,7 +264,7 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 }
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
-// only a deployment with no live PSP may use them.
+// no live PSP is declared beside them.
 func fakeProviders(cfg *config.Config, deps config.Deps) []string {
 	out := append(config.FakeProviders(cfg), seams(deps)...)
 	slices.Sort(out)
@@ -325,10 +288,11 @@ func seams(deps config.Deps) []string {
 
 // declaredLive names a live PSP the declarations declare, or "".
 func declaredLive(declarations []config.MerchantDeclaration) string {
-	environments := config.DeclaredEnvironments(declarations)
-	for _, name := range slices.Sorted(maps.Keys(environments)) {
-		if config.LiveEnvironment(environments[name]) {
-			return name
+	for _, m := range declarations {
+		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
+			if p := m.PSPs[key]; config.LiveEnvironment(string(p.Rail), p.Environment) {
+				return m.Slug + "/" + strings.ToLower(strings.TrimSpace(key))
+			}
 		}
 	}
 	return ""

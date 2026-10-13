@@ -174,6 +174,7 @@ export const zh: BillingUiMessageBundle = {
     resource_not_found: "该项目已不存在。",
     resource_conflict: "内容已发生变化。请刷新后重试。",
     rate_limit_exceeded: "请求过多，请稍后再试。",
+    provider_writes_disabled: "本网站目前已暂停收款。",
     service_unavailable: "计费服务暂时不可用，请稍后再试。",
     internal_error: "我们这边出了问题，请重试。",
     card_declined: "银行卡被拒绝。",

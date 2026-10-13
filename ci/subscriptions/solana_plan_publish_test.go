@@ -23,13 +23,15 @@ import (
 )
 
 // On a fresh database, applying a catalog publishes the plan a recurring
-// `solana: {}` price needs and binds it. Plans are immutable: re-applying binds
+// `solana: {}` price needs and binds it: owned by the deployment's cranker,
+// paying only into the merchant's treasury. Plans are immutable: re-applying binds
 // the same plan, and new terms are a new price with its own plan. Publishing is
 // a catalog provider write, so limited and readonly modes refuse it by name and
 // change nothing, yet still bind a plan already on chain.
 func TestCatalogApplyPublishesSolanaPlan(t *testing.T) {
 	w := prepareWorld(t, 12)
-	fake, merchant := withSolana(t, w)
+	sol := withSolana(t, w)
+	fake := sol.fake
 	w.start()
 	ctx := t.Context()
 	product := "plans-" + uuid.NewString()[:8]
@@ -65,7 +67,7 @@ products:
 		cfg := &config.Config{ProviderWriteMode: mode, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}}
 		w.cfg(cfg)
 		return hosttools.ApplyMerchantCatalog(ctx, hosttools.CatalogApplyOptions{Config: cfg, PGXPool: w.pool, Merchant: w.slug, Manifest: raw,
-			MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}}})
+			MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps}}}})
 	}
 	monthly := func() *billing.Price {
 		price, err := priceByKey(ctx, w.client[remote], product, "monthly")
@@ -81,13 +83,14 @@ products:
 		require.True(t, ok, "price %s binds a plan on chain: %v", price.ID, ids)
 		plan, err := subscriptions.DecodePlanAccount(raw)
 		require.NoError(t, err)
-		require.Equal(t, merchant.PublicKey(), plan.Owner)
-		require.Equal(t, solanafake.DevnetDUSDMint, plan.Mint.String(), "a sandbox PSP publishes in DUSD")
+		require.Equal(t, sol.cranker.PublicKey(), plan.Owner, "the deployment's cranker owns the plan")
+		require.Equal(t, [4]solanago.PublicKey{sol.treasury}, plan.Destinations, "the treasury is the plan's only destination")
+		require.Equal(t, solanafake.DevnetUSDCMint, plan.Mint.String(), "a devnet PSP publishes in devnet USDC")
 		require.Equal(t, []uint64{amount, monthHours}, []uint64{plan.Amount, plan.PeriodHours})
 		require.Equal(t, subscriptions.PlanStatusActive, plan.Status)
 		require.Equal(t, strconv.FormatUint(plan.PlanID, 10), ids["plan_id"])
 		require.Equal(t, strconv.FormatInt(plan.CreatedAt, 10), ids["created_at"], "the binding carries the chain's clock")
-		require.Equal(t, "DUSD", ids["token"])
+		require.Equal(t, "USDC", ids["token"])
 		return pda
 	}
 

@@ -25,7 +25,7 @@ func (s *Service) PlatformCardCustodian(ctx context.Context, id billing.Merchant
 	if err != nil {
 		return nil, err
 	}
-	if merchantconfig.CardCustody(set.Merchant.Value.Settings) != billing.CardCustodyPlatform {
+	if merchantconfig.CardCustody(set.Merchant.Value.MerchantSettings) != billing.CardCustodyPlatform {
 		return nil, nil
 	}
 	c, ok, err := s.CustodianScopeByKey(ctx, id, config.PlatformCustodianKey)

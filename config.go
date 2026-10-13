@@ -38,8 +38,10 @@ type (
 	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
 	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
-	// PSPSignerConfig selects how a Solana PSP signs.
-	PSPSignerConfig = config.PSPSignerConfig
+	// PSPs is MerchantDeclaration.PSPs: the merchant's PSPs by key.
+	PSPs = config.PSPs
+	// Custodians is MerchantDeclaration.Custodians: its custodians by key.
+	Custodians = config.Custodians
 	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: the
 	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
@@ -66,6 +68,10 @@ type (
 	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails
 	// opens when Deps.Vault is nil.
 	VaultConfig = config.VaultConfig
+	// SolanaConfig is Config.Solana: the deployment's Solana crankers.
+	SolanaConfig = config.SolanaConfig
+	// SolanaCrankerConfig is one of SolanaConfig.Crankers.
+	SolanaCrankerConfig = config.SolanaCrankerConfig
 	// LLMConfig is Config.LLM: the model behind the console's natural-language
 	// features.
 	LLMConfig = config.LLMConfig
@@ -116,15 +122,23 @@ type (
 	ReadCache = config.ReadCache
 )
 
+// A PSP's environment is its rail's own; omitted, it is the rail's
+// real-money one.
 const (
-	// EnvironmentLive is a PSP that moves real money.
+	// EnvironmentLive moves real money on nmi, stripe and ccbill.
 	EnvironmentLive = config.EnvironmentLive
-	// EnvironmentTest is a PSP on the provider's own system that moves no
-	// money: an NMI account in test mode, Stripe test keys.
+	// EnvironmentTest is the provider's own system moving no money: an NMI
+	// account in test mode, Stripe test keys.
 	EnvironmentTest = config.EnvironmentTest
-	// EnvironmentSandbox is a PSP on the provider's separate sandbox system:
-	// sandbox.nmi.com, CCBill's sandbox, Solana devnet.
+	// EnvironmentSandbox is the provider's separate sandbox system:
+	// sandbox.nmi.com, CCBill's sandbox.
 	EnvironmentSandbox = config.EnvironmentSandbox
+	// EnvironmentMainnet is Solana's real-money network.
+	EnvironmentMainnet = config.EnvironmentMainnet
+	// EnvironmentDevnet is Solana's devnet.
+	EnvironmentDevnet = config.EnvironmentDevnet
+	// EnvironmentTestnet is Solana's testnet.
+	EnvironmentTestnet = config.EnvironmentTestnet
 
 	// ProviderWritesFull is normal operation.
 	ProviderWritesFull = config.ProviderWriteModeFull

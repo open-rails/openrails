@@ -200,9 +200,10 @@ func (s *OrderAttemptService) quoteSolana(ctx context.Context, total int64, curr
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrOrderAttemptValidation, err)
 	}
-	recipient, err := solanamodule.ResolveRecipientWallet(ctx, s.db, s.config)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: %v", ErrOrderAttemptValidation, err)
+	// The PSP's treasury is the Solana Pay recipient: the payment lands there.
+	recipient := strings.TrimSpace(rail.AccountID)
+	if recipient == "" {
+		return nil, time.Time{}, fmt.Errorf("%w: the Solana PSP has no treasury", ErrOrderAttemptValidation)
 	}
 	expires := quotedAt.Add(defaultOrderAttemptTTL)
 	state := map[string]any{"token_symbol": token, "token_mint": cfg.Mint, "token_decimals": strconv.Itoa(decimals), "recipient": recipient}

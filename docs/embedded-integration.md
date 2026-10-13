@@ -276,17 +276,21 @@ rail's slots as fields, so a misspelled one fails to compile; `PSPConfig()`
 returns the declaration, and an empty field is an omitted key. A PSP missing a
 required secret is declared but not armed, in Go as in YAML.
 
-| Rail | Secrets (required first) | Settings |
-| --- | --- | --- |
-| `stripe` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key`, `webhook_overlap_expires_at` |
-| `nmi` | `security_key`, `webhook_signing_secret`; `webhook_signing_secret_previous` | `tokenization_key`, `tokenization_url`, `card_entry`, `webhook_overlap_expires_at` |
-| `ccbill` | `salt`; `datalink_username`, `datalink_password` | |
-| `solana` | `private_key` (or `signer: {mode: vault_transit, key: …}`) | `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet` |
+A PSP's rail decides its fields; everything but `secrets` sits flat on the
+PSP:
 
-A `settings` or `secrets` key outside its rail's row, in YAML or in a
-`PSPConfig` built by hand, is refused by the parser and by `openrails.New`,
-naming the PSP, the key and the keys the rail takes. A standalone manifest
-refuses it the same way.
+| Rail | Account | Secrets (required first) | Other fields |
+| --- | --- | --- | --- |
+| `stripe` | `account_id` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key`, `webhook_overlap_expires_at` |
+| `nmi` | `gateway_id` | `security_key`, `webhook_signing_secret`; `webhook_signing_secret_previous` | `custodian`, `tokenization_key`, `tokenization_url`, `card_entry`, `webhook_overlap_expires_at` |
+| `ccbill` | `client_accnum`, `client_subacc` | `salt`; `datalink_username`, `datalink_password` | |
+| `solana` | `treasury` | `rpc_url` | |
+
+A field or secret outside its rail's row, in YAML or in a `PSPConfig` built by
+hand, is refused by the parser and by `openrails.New`, naming the PSP, the
+field and the fields the rail takes. A standalone manifest refuses it the same
+way. Solana rebilling also needs `Config.Solana.Crankers`
+([rails/solana.md](rails/solana.md)).
 
 The merchant's configuration lives in `Config.Merchants` or in Vault, never in
 the database ([merchant configuration](merchant-configuration.md)). Declared in

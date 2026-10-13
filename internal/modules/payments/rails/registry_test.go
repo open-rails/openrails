@@ -63,10 +63,37 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		require.Equal(t, c.activeCancel, CancelModeFor(&models.Subscription{Rail: c.rail, Status: models.StatusActive}, time.Now()), c.rail)
 	}
 
-	// Required keys gate arming; the Solana signer is operator-only.
-	k, ok := CredentialKeyFor(models.RailSolana, " PRIVATE_KEY ")
+	// Required keys gate arming; the Solana RPC endpoint is operator-only and
+	// no PSP holds a signing key.
+	k, ok := CredentialKeyFor(models.RailSolana, " RPC_URL ")
 	require.True(t, ok)
 	require.False(t, k.MerchantWritable)
+	_, ok = CredentialKeyFor(models.RailSolana, "private_key")
+	require.False(t, ok)
+	for rail, environments := range map[models.Rail][]string{models.RailNMI: {"live", "test", "sandbox"}, models.RailStripe: {"live", "test"}, models.RailCCBill: {"live", "sandbox"}, models.RailSolana: {"mainnet", "devnet", "testnet"}} {
+		require.Equal(t, environments, Environments(rail), rail)
+		require.Equal(t, environments[0], DefaultEnvironment(rail), rail)
+		for _, environment := range environments {
+			require.Equal(t, environment == environments[0], LiveEnvironment(rail, environment), "%s %s", rail, environment)
+		}
+		require.Equal(t, AccountFields(rail), Fields(rail)[:len(AccountFields(rail))], rail)
+	}
+	// Each rail names its account in its own terms; the account they join to
+	// is the identity ids and webhook paths have always used.
+	for rail, row := range map[models.Rail]struct {
+		fields  map[string]string
+		account string
+	}{
+		models.RailNMI:    {map[string]string{"gateway_id": "1233466"}, "1233466"},
+		models.RailStripe: {map[string]string{"account_id": "acct_1AbC"}, "acct_1AbC"},
+		models.RailCCBill: {map[string]string{"client_accnum": "945280", "client_subacc": "0000"}, "945280-0000"},
+		models.RailSolana: {map[string]string{"treasury": "CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w"}, "CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w"},
+	} {
+		require.Equal(t, row.account, Account(rail, row.fields), rail)
+		require.Equal(t, row.fields, AccountParts(rail, row.account), rail)
+	}
+	require.Equal(t, "945280-", Account(models.RailCCBill, map[string]string{"client_accnum": "945280"}), "a missing part stays missing")
+	require.Empty(t, Account(models.RailCCBill, nil))
 	k, ok = CredentialKeyFor(models.RailStripe, "webhook_signing_secret_previous")
 	require.True(t, ok)
 	require.False(t, k.Required, "the rollover secret is optional")

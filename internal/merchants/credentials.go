@@ -262,9 +262,6 @@ func (s *Service) PSPIdentities(ctx context.Context, id billing.MerchantID, rail
 			continue
 		}
 		scope := PSPScope{ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID, Key: row.Key, CreatedAt: row.CreatedAt}
-		if row.PendingSignerPublicKey != nil {
-			scope.SignerChange = *row.PendingSignerPublicKey
-		}
 		out = append(out, scope)
 	}
 	return out, nil
@@ -428,15 +425,15 @@ var ErrPSPOwnedByAnotherMerchant = apperr.New(http.StatusConflict, "psp_exists",
 // account_id) and derives its deterministic id from it (#662). It is the
 // SINGLE place this canonicalization lives — the same normalization the
 // ownership guard and secret layer use (lower(rail); the declared environment;
-// account_id trimmed). test and sandbox are one money class: the id is derived
-// from the class, so a PSP re-declared between them keeps its id. Every writer
-// stores the returned nRail/nEnv/nAccount: the row holds the declared
-// environment beside the class-derived id.
+// account_id trimmed). Every non-live environment is one money class: the id
+// is derived from the class, so a PSP re-declared between them keeps its id.
+// Every writer stores the returned nRail/nEnv/nAccount: the row holds the
+// declared environment beside the class-derived id.
 func PSPNaturalKey(rail, environment, accountID string) (id uuid.UUID, nRail, nEnv, nAccount string) {
 	nRail = normalizeProviderSecretType(rail)
-	nEnv = normalizePSPEnvironment(environment)
+	nEnv = normalizePSPEnvironment(nRail, environment)
 	nAccount = strings.TrimSpace(accountID)
-	id = uuidutil.DeterministicID(uuidutil.DeterministicNamespace, nRail, config.EnvironmentClass(nEnv), nAccount)
+	id = uuidutil.DeterministicID(uuidutil.DeterministicNamespace, nRail, config.EnvironmentClass(nRail, nEnv), nAccount)
 	return id, nRail, nEnv, nAccount
 }
 
@@ -465,11 +462,11 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 		return nil
 	}
 	rail = normalizeProviderSecretType(rail)
-	environment = normalizePSPEnvironment(environment)
+	environment = normalizePSPEnvironment(rail, environment)
 	if environment == "" {
-		return errors.New("merchants: PSP environment must be live, test or sandbox")
+		return fmt.Errorf("merchants: PSP environment must be one of %s's (%s)", rail, strings.Join(rails.Environments(models.Rail(rail)), ", "))
 	}
-	owner, found, err := resolvePSPOwner(ctx, q, rail, environment, accountID)
+	owner, found, err := resolvePSPOwner(ctx, q, rail, config.LiveEnvironment(rail, environment), accountID)
 	if err != nil || !found {
 		return err
 	}
@@ -485,26 +482,30 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 // from the account row.
 //
 // This is a genuinely cross-merchant read — inbound webhooks have no
-// merchant context yet — by the global (rail, environment, account_id) key.
+// merchant context yet — by the global (rail, money class, account_id) key.
 func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, accountID string) (PSPIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return PSPIdentity{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
-	environment = normalizePSPEnvironment(environment)
+	environment = normalizePSPEnvironment(rail, environment)
 	if environment == "" {
-		return PSPIdentity{}, false, errors.New("merchants: PSP environment must be live, test or sandbox")
+		return PSPIdentity{}, false, fmt.Errorf("merchants: PSP environment must be one of %s's (%s)", rail, strings.Join(rails.Environments(models.Rail(rail)), ", "))
 	}
-	return resolvePSPOwner(ctx, gen.New(s.pool), rail, environment, strings.TrimSpace(accountID))
+	return resolvePSPOwner(ctx, gen.New(s.pool), rail, config.LiveEnvironment(rail, environment), strings.TrimSpace(accountID))
 }
 
 // ResolvePSPByAccount resolves an account globally by rail and account_id in
 // either money class: an inbound webhook names no environment. The same
 // account_id live and non-live is ambiguous and refused.
 func (s *Service) ResolvePSPByAccount(ctx context.Context, rail, accountID string) (PSPIdentity, bool, error) {
+	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
+		return PSPIdentity{}, false, nil
+	}
+	rail = normalizeProviderSecretType(rail)
 	var found []PSPIdentity
-	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
-		owner, ok, err := s.ResolvePSPByIdentity(ctx, rail, environment, accountID)
+	for _, live := range []bool{true, false} {
+		owner, ok, err := resolvePSPOwner(ctx, gen.New(s.pool), rail, live, strings.TrimSpace(accountID))
 		if err != nil {
 			return PSPIdentity{}, false, err
 		}
@@ -528,11 +529,11 @@ func (s *Service) ResolvePSPByAccount(ctx context.Context, rail, accountID strin
 // resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
 // made. q may be bound to anything (pool, merchant-pinned conn, tx): the
 // definer function is what supplies cross-merchant visibility, not the handle.
-func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, accountID string) (PSPIdentity, bool, error) {
+func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail string, live bool, accountID string) (PSPIdentity, bool, error) {
 	row, err := q.ResolvePSPOwnerByRailIdentity(ctx, gen.ResolvePSPOwnerByRailIdentityParams{
-		Rail:        rail,
-		Environment: environment,
-		AccountID:   accountID,
+		Rail:      rail,
+		Live:      live,
+		AccountID: accountID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPIdentity{}, false, nil
@@ -573,23 +574,34 @@ func (p LiveRailPresence) String() string {
 	}
 }
 
-// ProbeLivePSPs reports whether ANY merchant holds a live PSP on any rail,
-// archived and superseded ones included: whether this deployment is live.
-// Deliberately cross-merchant: webhook ingestion has no merchant yet.
-func (s *Service) ProbeLivePSPs(ctx context.Context) (LiveRailPresence, error) {
+// ProbeLiveAccount reports whether the PSPs account names on rail move real
+// money: absent only when such a PSP exists and none does. Webhook ingestion
+// has no merchant yet, so it asks by account.
+func (s *Service) ProbeLiveAccount(ctx context.Context, rail, account string) (LiveRailPresence, error) {
 	if s == nil || s.pool == nil {
 		return LiveRailUnknown, errors.New("merchants: pgx pool is required")
 	}
-	for _, d := range rails.All() {
-		present, err := gen.New(s.pool).PSPExistsOnRail(ctx, gen.PSPExistsOnRailParams{Rail: string(d.Rail), Environment: config.EnvironmentLive})
-		if err != nil {
-			return LiveRailUnknown, fmt.Errorf("merchants: probe live %s PSPs: %w", d.Rail, err)
-		}
-		if present {
-			return LiveRailPresent, nil
-		}
+	rail, account = normalizeProviderSecretType(rail), strings.TrimSpace(account)
+	if _, live, err := resolvePSPOwner(ctx, gen.New(s.pool), rail, true, account); err != nil || live {
+		return LiveRailPresent, err
+	}
+	if _, found, err := resolvePSPOwner(ctx, gen.New(s.pool), rail, false, account); err != nil || !found {
+		return LiveRailUnknown, err
 	}
 	return LiveRailAbsent, nil
+}
+
+// ProbeLiveMerchant reports whether the merchant is live: absent for a
+// sandbox merchant.
+func (s *Service) ProbeLiveMerchant(ctx context.Context, id billing.MerchantID) (LiveRailPresence, error) {
+	set, err := s.Config().Get(ctx, id)
+	if err != nil {
+		return LiveRailUnknown, err
+	}
+	if set.HasMerchant && set.Merchant.Value.Sandbox {
+		return LiveRailAbsent, nil
+	}
+	return LiveRailPresent, nil
 }
 
 // CountActivePSPsForRail is how many PSPs the merchant has live for new work

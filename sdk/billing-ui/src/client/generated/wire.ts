@@ -534,8 +534,13 @@ export type CreatePSPParams = {
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
   environment?: string
+  gateway_id?: string
   account_id?: string
-  settings?: Record<string, unknown> | null
+  client_accnum?: string
+  client_subacc?: string
+  treasury?: string
+  tokenization_key?: string
+  publishable_key?: string
   credentials?: Record<string, string> | null
 }
 
@@ -1174,23 +1179,7 @@ export type MatrixCell = {
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
-  settings: MerchantSettings
-  platform_vault: PlatformVaultState
-}
-
-export type MerchantPaymentPageSettings = {
-  embed_origins?: string[]
-}
-
-export type MerchantProfile = {
-  logo_url?: string
-  from_email?: string
-  support_url?: string
-  subscribe_url?: string
-  billing_url?: string
-}
-
-export type MerchantSettings = {
+  sandbox: boolean
   profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string
@@ -1208,6 +1197,19 @@ export type MerchantSettings = {
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
+  platform_vault: PlatformVaultState
+}
+
+export type MerchantPaymentPageSettings = {
+  embed_origins?: string[]
+}
+
+export type MerchantProfile = {
+  logo_url?: string
+  from_email?: string
+  support_url?: string
+  subscribe_url?: string
+  billing_url?: string
 }
 
 export type Meter = {
@@ -1540,10 +1542,19 @@ export type PSP = {
   key: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   environment: string
-  account_id: string
   archived: boolean
   open_obligations: number
-  settings: Record<string, unknown> | null
+  gateway_id?: string
+  account_id?: string
+  client_accnum?: string
+  client_subacc?: string
+  treasury?: string
+  custodian?: string
+  tokenization_key?: string
+  tokenization_url?: string
+  card_entry?: string
+  publishable_key?: string
+  webhook_overlap_expires_at?: string
   credentials: Record<string, PSPCredential> | null
   revision: number
   created_at: string
@@ -1972,8 +1983,9 @@ export type Quantity = {
 export type RailDefinition = {
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   display_name: string
+  account_fields: string[]
+  fields: string[]
   credential_keys: string[]
-  setting_keys: string[]
   environments: string[]
 }
 
@@ -2311,13 +2323,31 @@ export type UpdateCustomerParams = {
 
 export type UpdateMerchantConfigurationParams = {
   expected_revision?: number | null
-  settings?: MerchantSettings
   display_name?: string
+  sandbox?: boolean
+  profile?: MerchantProfile
+  collection_threshold?: string
+  monthly_floor?: string
+  billing_period_boundary?: string
+  alert_email?: string
+  reprice_notice_window_days?: number
+  provider_refund_access?: string
+  arrears_grace_days?: number
+  arrears_delinquency_floor?: string
+  psp_routing?: PSPRoutingRule[]
+  dunning_policy?: DunningPolicy
+  payment_page?: MerchantPaymentPageSettings
+  balance_notices?: BalanceNoticeSettings
+  card_custody?: "hosted" | "merchant" | "platform"
+  billing_policies?: BillingPolicy[]
+  billing_policy_bindings?: BillingPolicyBinding[]
+  delegated_invoker_wasted_spend_limits?: BudgetWindow[]
 }
 
 export type UpdatePSPParams = {
   expected_revision?: number | null
-  settings?: Record<string, unknown> | null
+  tokenization_key?: string
+  publishable_key?: string
   credentials?: Record<string, string> | null
   retire_webhook_overlap?: boolean
   archived?: boolean

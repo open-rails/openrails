@@ -40,7 +40,7 @@ func TestPSPRoutingRejectsCountry(t *testing.T) {
 				{Prefer: []string{"nmi"}},
 			}
 			_, err := client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				Settings: &billing.MerchantSettings{PSPRouting: &rules},
+				MerchantSettings: &billing.MerchantSettings{PSPRouting: &rules},
 			})
 			require.NoError(t, err)
 			checkRouting("nmi") // USD falls through to the final rule.
@@ -48,7 +48,7 @@ func TestPSPRoutingRejectsCountry(t *testing.T) {
 			rules[0].Prefer = []string{"nmi"}
 			rules[1].Prefer = []string{"stripe"}
 			before, err := client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				Settings: &billing.MerchantSettings{PSPRouting: &rules},
+				MerchantSettings: &billing.MerchantSettings{PSPRouting: &rules},
 			})
 			require.NoError(t, err)
 			checkRouting("nmi")
@@ -61,7 +61,7 @@ func TestPSPRoutingRejectsCountry(t *testing.T) {
 				{Prefer: []string{"nmi"}},
 			}
 			_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-				ExpectedRevision: &before.Revision, Settings: &billing.MerchantSettings{PSPRouting: &unsupported},
+				ExpectedRevision: &before.Revision, MerchantSettings: &billing.MerchantSettings{PSPRouting: &unsupported},
 			})
 			require.Equal(t, "invalid_param", codeOf(err), "%v", err)
 			require.ErrorContains(t, err, "match.country is not supported")
@@ -78,7 +78,7 @@ func TestPSPRoutingRejectsCountry(t *testing.T) {
 			}
 
 			w.editDoc("merchant", func(doc map[string]any) {
-				doc["settings"].(map[string]any)["psp_routing"] = unsupported
+				doc["psp_routing"] = unsupported
 			})
 			served, err := engine.Graph(w.rt).Runtime.MerchantConfig.Get(ctx, client.MerchantID())
 			require.NoError(t, err)

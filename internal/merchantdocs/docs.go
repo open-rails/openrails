@@ -6,6 +6,7 @@
 package merchantdocs
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"regexp"
@@ -14,15 +15,19 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // Merchant is the merchant document: what an operator sets on the merchant
 // itself.
 type Merchant struct {
-	DisplayName   string                   `json:"display_name,omitempty"`
-	Settings      billing.MerchantSettings `json:"settings"`
-	AlertWebhooks []AlertWebhook           `json:"alert_webhooks,omitempty"`
-	Secrets       MerchantSecrets          `json:"secrets,omitzero"`
+	DisplayName string `json:"display_name,omitempty"`
+	// Sandbox makes the merchant a sandbox: its PSPs move no money.
+	Sandbox bool `json:"sandbox,omitempty"`
+	// MerchantSettings are the merchant's settings, beside display_name.
+	billing.MerchantSettings
+	AlertWebhooks []AlertWebhook  `json:"alert_webhooks,omitempty"`
+	Secrets       MerchantSecrets `json:"secrets,omitzero"`
 }
 
 // MerchantSecrets are the merchant's own credentials.
@@ -43,36 +48,75 @@ type AlertWebhook struct {
 	UpdatedAt time.Time                  `json:"updated_at"`
 }
 
-// PSP is one PSP document: the merchant's account on a rail.
+// PSP is one PSP document: the merchant's account on a rail. Its JSON is
+// flat (config.PSPDocument): the rail's fields beside rail, environment and
+// archived, credentials under secrets.
 type PSP struct {
-	Rail        string `json:"rail"`
-	Environment string `json:"environment"`
-	AccountID   string `json:"account_id"`
-	Archived    bool   `json:"archived,omitempty"`
+	Rail        string
+	Environment string
+	// AccountID is the rail's account field: account_id, or a Solana PSP's
+	// treasury.
+	AccountID string
 	// Custodian is the key of the custodian holding this PSP's cards; ""
 	// means the PSP holds its own.
-	Custodian string            `json:"custodian,omitempty"`
-	Signer    *Signer           `json:"signer,omitempty"`
-	Settings  map[string]any    `json:"settings,omitempty"`
-	Secrets   map[string]string `json:"secrets,omitempty"`
+	Custodian string
+	Archived  bool
+	// Settings are the rail's other fields.
+	Settings map[string]any
+	Secrets  map[string]string
 }
 
-// Signer selects how a Solana PSP signs: local_keypair or vault_transit with
-// the Transit key's name.
-type Signer struct {
-	Mode string `json:"mode,omitempty"`
-	Key  string `json:"key,omitempty"`
+// MarshalJSON writes the flat document.
+func (p PSP) MarshalJSON() ([]byte, error) {
+	return json.Marshal(config.PSPDocument(p).Fields())
+}
+
+// UnmarshalJSON reads the flat document, refusing a field its rail does not
+// take.
+func (p *PSP) UnmarshalJSON(raw []byte) error {
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	d, err := config.DecodePSPDocument(fields)
+	if err != nil {
+		return err
+	}
+	*p = PSP(d)
+	return nil
 }
 
 // Custodian is one custodian document: the merchant's account with a card
-// custodian.
+// custodian. Its JSON is flat like a PSP's.
 type Custodian struct {
-	Kind        string            `json:"kind"`
-	Environment string            `json:"environment"`
-	AccountID   string            `json:"account_id"`
-	Archived    bool              `json:"archived,omitempty"`
-	Settings    map[string]any    `json:"settings,omitempty"`
-	Secrets     map[string]string `json:"secrets,omitempty"`
+	Kind string
+	// Environment is the custodian's money class: live or test.
+	Environment string
+	AccountID   string
+	Archived    bool
+	// Settings are the kind's own fields.
+	Settings map[string]any
+	Secrets  map[string]string
+}
+
+// MarshalJSON writes the flat document.
+func (c Custodian) MarshalJSON() ([]byte, error) {
+	return json.Marshal(config.CustodianDocument(c).Fields())
+}
+
+// UnmarshalJSON reads the flat document, refusing a field its kind does not
+// take.
+func (c *Custodian) UnmarshalJSON(raw []byte) error {
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	d, err := config.DecodeCustodianDocument(fields, true)
+	if err != nil {
+		return err
+	}
+	*c = Custodian(d)
+	return nil
 }
 
 // Doc is one document with its revision: its Vault KV version, 0 in a file.

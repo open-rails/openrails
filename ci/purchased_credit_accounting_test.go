@@ -42,7 +42,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	storedPrice, err := catalog.NewPriceService(database).GetByPublicID(ctx, price.ID)
 	require.NoError(t, err)
-	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "credit-stripe", Rail: "stripe", Environment: "test", AccountID: "acct_credit_test"})
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "credit-stripe", Rail: "stripe", Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_credit_test"}})
 	require.NoError(t, err)
 	start := time.Now().UTC().Truncate(time.Microsecond)
 	expiry := start.Add(365 * 24 * time.Hour)

@@ -24,7 +24,7 @@ func TestCustodianCaptureUsesThePaymentMethodResource(t *testing.T) {
 	})
 	w.custodians = map[string]openrails.CustodianConfig{"hs": {Kind: "hyperswitch", AccountID: hs.account, Settings: map[string]any{"public_api_key": "pk_capture", "profile_id": "pro_capture"}, Secrets: map[string]string{"api_key": "hs_capture_key"}}}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "nmi-capture", SecurityKey: "nmi-capture-key", WebhookSigningSecret: "capture-webhook-key", Custodian: "hs"}.PSPConfig()
+		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "nmi-capture", SecurityKey: "nmi-capture-key", WebhookSigningSecret: "capture-webhook-key", Custodian: "hs"}.PSPConfig()
 	}
 	w.start()
 	vault := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})

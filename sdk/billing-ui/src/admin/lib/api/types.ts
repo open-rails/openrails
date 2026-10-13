@@ -201,7 +201,6 @@ export interface FindingsGauges {
 export type {
   AlertWebhook,
   MerchantConfigurationState,
-  MerchantSettings,
   PSP,
   RailDefinition,
 } from "#orck/client/generated/wire"

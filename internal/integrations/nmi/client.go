@@ -430,7 +430,7 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 }
 
 // Live reports whether the client's PSP moves real money.
-func (c *NMIClient) Live() bool { return config.LiveEnvironment(c.Environment) }
+func (c *NMIClient) Live() bool { return config.LiveEnvironment("nmi", c.Environment) }
 
 func (c *NMIClient) GetWebhookSecret() string {
 	return c.WebhookSecret

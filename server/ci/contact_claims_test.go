@@ -53,13 +53,14 @@ func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 merchants:
   %s:
     display_name: Claims
+    sandbox: true
     psps:
       nmi:
         rail: nmi
         environment: sandbox
-        account_id: test
+        gateway_id: test
         secrets: {security_key: test, webhook_signing_secret: test}
-        settings: {tokenization_key: test}
+        tokenization_key: test
 `, shop)), 0o600))
 	graph, plane := operator.Of(srv)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, manifest, nil, ""))

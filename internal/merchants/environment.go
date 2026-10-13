@@ -1,15 +1,10 @@
 package merchants
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // WithFakeProviders names the fake providers this deployment wires (loopback
@@ -21,40 +16,24 @@ func (s *Service) WithFakeProviders(names ...string) *Service {
 	return s
 }
 
-// environmentRefusal is why a PSP in environment cannot join this deployment,
-// whose PSPs are all live or all non-live; "" when it can.
-func (s *Service) environmentRefusal(ctx context.Context, q *gen.Queries, environment string) (string, error) {
-	class := []string{config.EnvironmentTest, config.EnvironmentSandbox}
-	if config.LiveEnvironment(environment) {
-		if len(s.fakeProviders) > 0 {
-			return fmt.Sprintf("a live PSP never talks to a fake provider (%s)", strings.Join(s.fakeProviders, ", ")), nil
-		}
-		class = []string{config.EnvironmentLive}
+// environmentRefusal is why a PSP on rail in environment cannot serve its
+// merchant: a sandbox merchant's PSPs move no money, a live one's real money,
+// and a live PSP never talks to a fake provider. "" when it can.
+func (s *Service) environmentRefusal(psp, rail, environment string, sandbox bool) string {
+	if err := config.ValidatePSPMoneyClass(psp, rail, environment, sandbox); err != nil {
+		return err.Error()
 	}
-	row, err := q.PSPOutsideEnvironments(ctx, class)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+	if config.LiveEnvironment(rail, environment) && len(s.fakeProviders) > 0 {
+		return fmt.Sprintf("a live PSP never talks to a fake provider (%s)", strings.Join(s.fakeProviders, ", "))
 	}
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("a deployment's PSPs are all live or all non-live: %s's PSP %s (%s %s) is %s, this one %s",
-		row.Slug, row.Key, row.Rail, row.AccountID, row.Environment, environment), nil
+	return ""
 }
 
-// merchantEnvironmentClass is the money class of a merchant's PSP documents,
-// which its custodians record: live when they are, test otherwise.
-func merchantEnvironmentClass(environments ...string) string {
-	for _, environment := range environments {
-		if config.LiveEnvironment(environment) {
-			return config.EnvironmentLive
-		}
+// merchantClass is the money class of a merchant's custodians: test for a
+// sandbox merchant, live otherwise.
+func merchantClass(sandbox bool) string {
+	if sandbox {
+		return config.ClassTest
 	}
-	return config.EnvironmentTest
-}
-
-// EnvironmentRefusal is why a PSP in environment cannot join this
-// deployment, whose PSPs are all live or all non-live; "" when it can.
-func (s *Service) EnvironmentRefusal(ctx context.Context, environment string) (string, error) {
-	return s.environmentRefusal(ctx, gen.New(s.pool), environment)
+	return config.ClassLive
 }

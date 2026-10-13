@@ -30,15 +30,18 @@ import (
 
 // A Solana subscription activates only from its first payment: the prepared,
 // merchant co-signed bundle, signed by the purchase's wallet and landed within
-// the purchase's validity, pulling the full first period to the merchant. Any
+// the purchase's validity, pulling the full first period into the merchant's
+// treasury. Any
 // other signature grants nothing.
 
 const solanaPlanAmount = 23_000_000
 
 type solanaShop struct {
 	w        *world
+	sol      *solanaDeployment
 	fake     *solanafake.Node
-	merchant solanago.PrivateKey
+	cranker  solanago.PrivateKey
+	treasury solanago.PublicKey
 	mint     solanago.PublicKey
 	price    string
 	key      string
@@ -47,13 +50,12 @@ type solanaShop struct {
 func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
 	t.Helper()
 	w := prepareWorld(t, 12)
-	fake, merchant := withSolana(t, w)
+	sol := withSolana(t, w)
 	for _, f := range before {
 		f(w)
 	}
 	w.start()
-	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, solanaPlanAmount, monthHours)
-	require.NoError(t, err)
+	plan := sol.plan(t, 4242, solanaPlanAmount)
 	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
@@ -66,9 +68,8 @@ func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
         plan_id: "4242"
 `, plan))
 	require.NoError(t, err)
-	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)
-	fake.Fund(merchant.PublicKey(), mint, 0)
-	return &solanaShop{w: w, fake: fake, merchant: merchant, mint: mint, price: priceID(t, w, key, key+"-monthly"), key: key}
+	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)
+	return &solanaShop{w: w, sol: sol, fake: sol.fake, cranker: sol.cranker, treasury: sol.treasury, mint: mint, price: priceID(t, w, key, key+"-monthly"), key: key}
 }
 
 type solanaBuyer struct {
@@ -124,7 +125,7 @@ func (s *solanaShop) order(t *testing.T, b *solanaBuyer) billing.OrderID {
 	order, err := billing.ParseOrderID(created.body["id"].(string))
 	require.NoError(t, err)
 	paid := b.order(http.MethodPost, "/orders/"+order.String()+"/pay", "sol-"+uuid.NewString(),
-		map[string]any{"payment": map[string]any{"token_symbol": "DUSD"}, "expected_total": created.body["total"]})
+		map[string]any{"payment": map[string]any{"token_symbol": "USDC"}, "expected_total": created.body["total"]})
 	require.Equal(t, http.StatusOK, paid.status, "%v", paid.body)
 	require.Equal(t, "requires_action", paymentOf(paid)["status"], "%v", paid.body)
 	action := paymentOf(paid)["next_action"].(map[string]any)
@@ -285,7 +286,7 @@ func build(t *testing.T, ixs []solanago.Instruction, signers ...solanago.Private
 func (s *solanaShop) withPull(t *testing.T, c *solanaPurchase, b *solanaBuyer, amount uint64, receiver solanago.PublicKey) *solanago.Transaction {
 	t.Helper()
 	var ixs []solanago.Instruction
-	for _, ix := range instructions(t, c.bundle, b.wallet.PublicKey(), s.merchant.PublicKey()) {
+	for _, ix := range instructions(t, c.bundle, b.wallet.PublicKey(), s.cranker.PublicKey()) {
 		if !isPull(ix) {
 			ixs = append(ixs, ix)
 			continue
@@ -293,16 +294,16 @@ func (s *solanaShop) withPull(t *testing.T, c *solanaPurchase, b *solanaBuyer, a
 		accounts := ix.Accounts()
 		ixs = append(ixs, subscriptions.BuildTransferSubscription(subscriptions.TransferSubscriptionParams{
 			SubscriptionPDA: accounts[0].PublicKey, PlanPDA: accounts[1].PublicKey, SubscriptionAuthority: accounts[2].PublicKey,
-			DelegatorATA: accounts[3].PublicKey, ReceiverATA: receiver, Caller: s.merchant.PublicKey(), Mint: s.mint,
+			DelegatorATA: accounts[3].PublicKey, ReceiverATA: receiver, Caller: s.cranker.PublicKey(), Mint: s.mint,
 			TokenProgram: solanago.TokenProgramID, EventAuthority: accounts[8].PublicKey, Amount: amount, Delegator: b.wallet.PublicKey(),
 		}))
 	}
-	return build(t, ixs, b.wallet, s.merchant)
+	return build(t, ixs, b.wallet, s.cranker)
 }
 
 func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 	s := openSolanaShop(t)
-	merchantATA, _, err := solanago.FindAssociatedTokenAddress(s.merchant.PublicKey(), s.mint)
+	treasuryATA, _, err := solanago.FindAssociatedTokenAddress(s.treasury, s.mint)
 	require.NoError(t, err)
 
 	var paid struct {
@@ -318,7 +319,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", done.Status, "%+v", done)
 		require.NotNil(t, done.SubscriptionID)
-		require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.merchant.PublicKey(), s.mint))
+		require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.treasury, s.mint), "the first period landed in the treasury")
 
 		s.w.advance(time.Minute)
 		require.True(t, b.entitled(s.key))
@@ -348,7 +349,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 		// Paying the amount by a plain transfer is not the merchant's pull either.
 		from, _, _ := solanago.FindAssociatedTokenAddress(b.wallet.PublicKey(), s.mint)
-		ixs = append(ixs, token.NewTransferInstruction(solanaPlanAmount, from, merchantATA, b.wallet.PublicKey(), nil).Build())
+		ixs = append(ixs, token.NewTransferInstruction(solanaPlanAmount, from, treasuryATA, b.wallet.PublicKey(), nil).Build())
 		sig = s.land(t, build(t, ixs, b.wallet), s.w.clock.Now())
 		_, err = b.confirm(c, sig)
 		requireRefused(t, err, http.StatusBadRequest, "invalid_param")
@@ -360,12 +361,12 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		// nothing recorded); the attacker asks the order's transaction for that
 		// wallet and confirms with a made-up signature, then the victim's.
 		victim := s.buyer(t, true)
-		plan, bump, _ := subscriptions.DerivePlanPDA(s.merchant.PublicKey(), 4242)
+		plan, bump, _ := subscriptions.DerivePlanPDA(s.cranker.PublicKey(), 4242)
 		sub, _, _ := subscriptions.DeriveSubscriptionPDA(plan, victim.wallet.PublicKey())
 		authority, _, _ := subscriptions.DeriveSubscriptionAuthority(victim.wallet.PublicKey(), s.mint)
 		events, _, _ := subscriptions.DeriveEventAuthority()
 		victimSubscribe := s.land(t, build(t, []solanago.Instruction{subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
-			Subscriber: victim.wallet.PublicKey(), Merchant: s.merchant.PublicKey(), PlanPDA: plan, SubscriptionPDA: sub,
+			Subscriber: victim.wallet.PublicKey(), Merchant: s.cranker.PublicKey(), PlanPDA: plan, SubscriptionPDA: sub,
 			SubscriptionAuthorityPDA: authority, EventAuthority: events, PlanID: 4242, PlanBump: bump, ExpectedMint: s.mint,
 			ExpectedAmount: solanaPlanAmount, ExpectedPeriodHours: monthHours, ExpectedCreatedAt: 1_700_000_000, ExpectedSubscriptionAuthInitID: 42,
 		})}, victim.wallet), s.w.clock.Now())
@@ -399,7 +400,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		c := s.purchase(t, b, b.wallet.PublicKey())
 		elsewhere := s.fake.Fund(solanago.NewWallet().PublicKey(), s.mint, 0)
 		for _, tx := range []*solanago.Transaction{
-			s.withPull(t, c, b, solanaPlanAmount-1, merchantATA),
+			s.withPull(t, c, b, solanaPlanAmount-1, treasuryATA),
 			s.withPull(t, c, b, solanaPlanAmount, elsewhere),
 		} {
 			sig := s.land(t, tx, s.w.clock.Now())

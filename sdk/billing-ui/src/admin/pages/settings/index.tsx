@@ -192,7 +192,7 @@ function MerchantProfileForm({
   const { id: adminId, text: adminText } = useAdminUI()
 
   // The merchant's one name is the configuration's display_name.
-  const profile = configuration.settings.profile
+  const profile = configuration.profile
   const current = () => ({
     displayName: configuration.display_name,
     fromEmail: profile?.from_email ?? "",
@@ -208,14 +208,12 @@ function MerchantProfileForm({
       edit.save(
         {
           display_name: value.displayName.trim(),
-          settings: {
-            profile: {
-              from_email: value.fromEmail || undefined,
-              support_url: value.supportURL || undefined,
-              subscribe_url: value.subscribeURL || undefined,
-              billing_url: value.billingURL || undefined,
-              logo_url: value.logoURL || undefined,
-            },
+          profile: {
+            from_email: value.fromEmail || undefined,
+            support_url: value.supportURL || undefined,
+            subscribe_url: value.subscribeURL || undefined,
+            billing_url: value.billingURL || undefined,
+            logo_url: value.logoURL || undefined,
           },
         },
         "Profile saved",
@@ -378,6 +376,14 @@ function MerchantProfileForm({
             value={configuration.display_name}
           />
           <SettingDetail
+            label={adminText("Money")}
+            value={adminText(
+              configuration.sandbox
+                ? "Sandbox: its PSPs move no money"
+                : "Live: its PSPs move real money"
+            )}
+          />
+          <SettingDetail
             label={adminText("From email")}
             value={profile?.from_email}
           />
@@ -415,13 +421,13 @@ function RepriceNoticeWindowForm({
 }) {
   const { id: adminId, text: adminText } = useAdminUI()
 
-  const days = configuration.settings.reprice_notice_window_days ?? 30
+  const days = configuration.reprice_notice_window_days ?? 30
   const edit = useConfigurationEdit(configuration)
   const form = useForm({
     defaultValues: { days: String(days) },
     onSubmit: ({ value }) =>
       edit.save(
-        { settings: { reprice_notice_window_days: Number(value.days) } },
+        { reprice_notice_window_days: Number(value.days) },
         "Notice window saved",
         "Save notice window"
       ),
@@ -672,7 +678,7 @@ function PSPRow({
         <div className="grid min-w-0 leading-tight">
           <span className="font-medium">{psp.key}</span>
           <span className="truncate text-xs text-muted-foreground">
-            {railName} · {psp.account_id}
+            {railName} · {pspAccount(psp)}
           </span>
         </div>
       </TableCell>
@@ -832,7 +838,7 @@ export function RotateCredentialsDialog({
             <AdminMessage id={"Rotate "} />
             {psp.key}
             <AdminMessage id={" credentials · "} />
-            {psp.account_id}
+            {pspAccount(psp)}
           </DialogTitle>
           <DialogDescription>
             <AdminMessage
@@ -916,22 +922,37 @@ export function RotateCredentialsDialog({
   )
 }
 
-// Where the account ID comes from differs per rail, and the merchant reads it
-// off a different dashboard each time. Naming that is the only way this field
-// is answerable without a support ticket.
-function accountIDHint(rail: string): string | undefined {
-  switch (rail) {
-    case "nmi":
-      return "The Gateway ID shown in your NMI dashboard."
-    case "stripe":
-      return "Your Stripe account ID. It starts with acct_."
-    case "ccbill":
-      return "Your account and sub-account joined with a dash, such as 999999-0000."
-    case "solana":
-      return "Taken from your signing key, so whatever you enter here is ignored."
-    default:
-      return undefined
-  }
+// Each rail names its account in its own terms, read off its own dashboard.
+// Naming where is the only way the field is answerable without a support
+// ticket.
+const ACCOUNT_FIELDS: Record<string, { label: string; hint: string }> = {
+  gateway_id: {
+    label: "Gateway ID",
+    hint: "The Gateway ID shown in your NMI dashboard.",
+  },
+  account_id: {
+    label: "Account ID",
+    hint: "Your Stripe account ID. It starts with acct_.",
+  },
+  client_accnum: {
+    label: "Client account number",
+    hint: "Your CCBill account number, such as 945280.",
+  },
+  client_subacc: {
+    label: "Client subaccount",
+    hint: "Your CCBill subaccount number, such as 0000.",
+  },
+  treasury: {
+    label: "Treasury",
+    hint: "The Solana address your payments land in.",
+  },
+}
+
+// The PSP's account as its rail names it; CCBill's two numbers read as one.
+function pspAccount(psp: PSP): string {
+  if (psp.client_accnum)
+    return `${psp.client_accnum}-${psp.client_subacc ?? ""}`
+  return psp.gateway_id ?? psp.account_id ?? psp.treasury ?? ""
 }
 
 // What each environment means for money, in the merchant's words.
@@ -939,6 +960,9 @@ const ENVIRONMENT_LABELS: Record<string, string> = {
   live: "Live: real money",
   test: "Test: the provider's own system, no money moves",
   sandbox: "Sandbox: the provider's separate sandbox",
+  mainnet: "Mainnet: real money",
+  devnet: "Devnet: Solana's development network",
+  testnet: "Testnet: Solana's test network",
 }
 
 const RAIL_NAMES: Record<string, string> = {
@@ -993,7 +1017,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
       rail: "",
       environment: "",
       key: "",
-      accountID: "",
+      account: {} as Record<string, string>,
       credentials: {} as Record<string, string>,
     },
     onSubmit: async ({ value }) => {
@@ -1003,11 +1027,17 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
       try {
         if ((selectedMerchant() ?? "") !== merchant)
           throw new Error("Merchant changed; reopen this form")
+        const definition = railDefinitions.find((d) => d.rail === value.rail)
         await createPSP.mutateAsync({
           key: value.key.trim().toLowerCase(),
           rail: value.rail as PSP["rail"],
           environment: value.environment,
-          account_id: value.accountID.trim(),
+          ...Object.fromEntries(
+            (definition?.account_fields ?? []).map((name) => [
+              name,
+              (value.account[name] ?? "").trim(),
+            ])
+          ),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
         form.reset()
@@ -1077,10 +1107,16 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                     value={field.state.value || null}
                     onValueChange={(value) => {
                       field.handleChange(value ?? "")
-                      // Each rail asks for different credentials and has its
-                      // own environments, so neither carries over.
+                      // Each rail names its account, asks for credentials and
+                      // has environments of its own, so none carries over; its
+                      // real-money environment is the default.
+                      form.setFieldValue("account", {})
                       form.setFieldValue("credentials", {})
-                      form.setFieldValue("environment", "")
+                      form.setFieldValue(
+                        "environment",
+                        railDefinitions.find((d) => d.rail === value)
+                          ?.environments[0] ?? ""
+                      )
                     }}
                   >
                     <SelectTrigger
@@ -1196,32 +1232,35 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
             </form.Field>
             <form.Subscribe selector={(state) => state.values.rail}>
               {(rail) => (
-                <form.Field
-                  name="accountID"
-                  validators={{
-                    onChange: ({ value }) =>
-                      value.trim()
-                        ? undefined
-                        : "Enter the provider account ID",
-                  }}
-                >
+                <form.Field name="account">
                   {(field) => (
-                    <Field
-                      label={adminText("Account ID")}
-                      id={"pv-acct"}
-                      hint={accountIDHint(rail)}
-                    >
-                      <Input
-                        id={adminId("pv-acct")}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(event) =>
-                          field.handleChange(event.target.value)
-                        }
-                        aria-invalid={field.state.meta.errors.length > 0}
-                      />
-                      <FormFieldErrors errors={field.state.meta.errors} />
-                    </Field>
+                    <>
+                      {railDefinitions
+                        .find((d) => d.rail === rail)
+                        ?.account_fields.map((name) => (
+                          <Field
+                            key={name}
+                            label={adminText(
+                              ACCOUNT_FIELDS[name]?.label ??
+                                credentialLabel(name)
+                            )}
+                            id={`pv-account-${name}`}
+                            hint={ACCOUNT_FIELDS[name]?.hint}
+                          >
+                            <Input
+                              id={adminId(`pv-account-${name}`)}
+                              value={field.state.value[name] ?? ""}
+                              onBlur={field.handleBlur}
+                              onChange={(event) =>
+                                field.handleChange({
+                                  ...field.state.value,
+                                  [name]: event.target.value,
+                                })
+                              }
+                            />
+                          </Field>
+                        ))}
+                    </>
                   )}
                 </form.Field>
               )}
@@ -1269,20 +1308,13 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                   state.values.rail,
                   state.values.environment,
                   state.values.key,
-                  state.values.accountID,
+                  state.values.account,
                   state.canSubmit,
                   state.isSubmitting,
                 ] as const
               }
             >
-              {([
-                rail,
-                environment,
-                key,
-                accountID,
-                canSubmit,
-                isSubmitting,
-              ]) => (
+              {([rail, environment, key, account, canSubmit, isSubmitting]) => (
                 <>
                   <Button
                     type="button"
@@ -1297,7 +1329,11 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                       !rail ||
                       !environment ||
                       !key.trim() ||
-                      !accountID.trim() ||
+                      !railDefinitions
+                        .find((d) => d.rail === rail)
+                        ?.account_fields.every((name) =>
+                          (account[name] ?? "").trim()
+                        ) ||
                       !canSubmit ||
                       isSubmitting
                     }

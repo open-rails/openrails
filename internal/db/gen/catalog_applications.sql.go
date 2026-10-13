@@ -89,7 +89,7 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 }
 
 const lockCatalogApplicationPSP = `-- name: LockCatalogApplicationPSP :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
 `
 
 type LockCatalogApplicationPSPParams struct {
@@ -109,12 +109,12 @@ func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalog
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }

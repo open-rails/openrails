@@ -62,14 +62,14 @@ func TestPaymentPageRegistersItsHostForWallets(t *testing.T) {
 	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "https://"+serverHost+paymentpage.ApplePayDomainAssociationPath, nil))
 	require.Equal(t, http.StatusNotFound, res.Code, "only the payment origin serves it")
 
-	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})
+	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Sandbox: true, Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})
 	require.NoError(t, err)
 	shop, ctx := handle(t, srv, entry.MerchantID), merchant.WithID(t.Context(), entry.MerchantID)
 	stripe.SeedPaymentMethodDomain("acct_known", paymentHost, false)
 	declare := func(key, account string) billing.PSPID {
-		psp, err := shop.CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, Environment: "test", AccountID: account,
-			Settings:    map[string]any{"publishable_key": "pk_test_" + key},
-			Credentials: map[string]string{"secret_key": "sk_test_" + account, "webhook_signing_secret": "whsec_" + key}})
+		psp, err := shop.CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: account},
+			PublishableKey: "pk_test_" + key,
+			Credentials:    map[string]string{"secret_key": "sk_test_" + account, "webhook_signing_secret": "whsec_" + key}})
 		require.NoError(t, err)
 		return psp.ID
 	}
@@ -121,7 +121,7 @@ func TestPaymentPageRegistersItsHostForWallets(t *testing.T) {
 	// shows in a frame only when the framing page's domain is. Loopback
 	// sites are not.
 	_, err = shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
+		MerchantSettings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
 	require.NoError(t, err)
 	for _, psp := range []billing.PSPID{fresh, known} {
 		require.Eventually(t, func() bool {

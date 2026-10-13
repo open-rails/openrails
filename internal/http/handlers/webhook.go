@@ -351,18 +351,34 @@ func ccbillWebhookIPAllowed(r *httprequest.Request, clientIP string) bool {
 	if r == nil || r.State == nil {
 		return iputil.IsValidCCBillIP(clientIP)
 	}
-	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, livePSPProbe(r), clientIP)
+	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, ccbillAccountProbe(r), clientIP)
 }
 
-// livePSPProbe binds the deployment's live-PSP probe to the request; a var so
-// handler tests can stub the DB-backed merchants service. Returning nil (no
-// merchants service) fails every gate on it closed.
+// ccbillAccountProbe asks whether the CCBill account the webhook names moves
+// real money; a var so handler tests can stub it. Returning nil (no merchants
+// service) fails the gate closed.
+var ccbillAccountProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
+	if r.State.Merchants == nil {
+		return nil
+	}
+	account := strings.TrimSpace(r.Param("account_id"))
+	return func(ctx context.Context) (merchants.LiveRailPresence, error) {
+		return r.State.Merchants.ProbeLiveAccount(ctx, "ccbill", account)
+	}
+}
+
+// livePSPProbe asks whether the request's merchant is live; a var so handler
+// tests can stub it. Returning nil fails every gate on it closed.
 var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 	if r.State.Merchants == nil {
 		return nil
 	}
 	return func(ctx context.Context) (merchants.LiveRailPresence, error) {
-		return r.State.Merchants.ProbeLivePSPs(ctx)
+		id, err := merchant.Require(ctx)
+		if err != nil {
+			return merchants.LiveRailUnknown, err
+		}
+		return r.State.Merchants.ProbeLiveMerchant(ctx, id)
 	}
 }
 

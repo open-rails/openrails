@@ -72,6 +72,11 @@ type ConfirmTierChangeInput struct {
 	// the subscription_pda of the new row.
 	NewSubscriptionPDA string
 
+	// NewPlanOwner and NewTreasury are the new plan's owner and destination,
+	// from the new price's Solana rail config.
+	NewPlanOwner string
+	NewTreasury  string
+
 	// New plan terms (canonical, from the new price's Solana rail config).
 	NewPlanID          uint64
 	NewMintSymbol      string
@@ -374,18 +379,18 @@ func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, payment *la
 			return 0, err
 		}
 	}
-	var keys [5]solanago.PublicKey
-	for i, v := range []string{oldRow.SubscriberWallet, oldRow.MerchantAddress, s.newMint(ctx, oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA} {
+	var keys [6]solanago.PublicKey
+	for i, v := range []string{oldRow.SubscriberWallet, in.NewPlanOwner, s.newMint(ctx, oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA, in.NewTreasury} {
 		if keys[i], err = solanago.PublicKeyFromBase58(v); err != nil {
 			return 0, fmt.Errorf("recurring: stored solana subscription %s is malformed: %w", oldRow.SubscriptionPDA, err)
 		}
 	}
-	subscriber, merchantKey, mint, oldPlan, oldSub := keys[0], keys[1], keys[2], keys[3], keys[4]
+	subscriber, owner, mint, oldPlan, oldSub, treasury := keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]
 	if err := payment.cancels(subscriber, oldPlan, oldSub); err != nil {
 		return 0, err
 	}
 	terms := subscription{
-		subscriber: subscriber, merchant: merchantKey, mint: mint, planID: in.NewPlanID,
+		subscriber: subscriber, owner: owner, treasury: treasury, mint: mint, planID: in.NewPlanID,
 		amount: in.NewAmountBaseUnits, periodHours: in.NewPeriodHours, createdAt: in.NewPlanCreatedAt,
 	}
 	_, newSub, _, err := terms.addresses()
@@ -441,16 +446,18 @@ func (s *ConfirmTierChangeService) newMint(ctx context.Context, oldRow *models.S
 	return oldRow.Mint
 }
 
-// buildNewRow assembles the NEW solana_subscriptions row. It derives the new plan
-// PDA from the old row's merchant + the new plan id.
+// buildNewRow assembles the NEW solana_subscriptions row: the new plan, its
+// owner and the treasury it pays.
 func (s *ConfirmTierChangeService) buildNewRow(ctx context.Context, oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
 	mintStr := s.newMint(ctx, oldRow, in.NewMintSymbol)
 
-	planPDAStr := oldRow.PlanPDA
-	if merchant, perr := solanago.PublicKeyFromBase58(oldRow.MerchantAddress); perr == nil {
-		if newPlanPDA, _, derr := subscriptions.DerivePlanPDA(merchant, in.NewPlanID); derr == nil {
-			planPDAStr = newPlanPDA.String()
-		}
+	owner, err := parseKey("new plan owner", in.NewPlanOwner)
+	if err != nil {
+		return nil, err
+	}
+	newPlanPDA, _, err := subscriptions.DerivePlanPDA(owner, in.NewPlanID)
+	if err != nil {
+		return nil, err
 	}
 
 	return &models.SolanaSubscription{
@@ -459,8 +466,9 @@ func (s *ConfirmTierChangeService) buildNewRow(ctx context.Context, oldRow *mode
 		SubscriberWallet:         oldRow.SubscriberWallet,
 		AuthorityPDA:             oldRow.AuthorityPDA,
 		SubscriptionPDA:          newPDA,
-		PlanPDA:                  planPDAStr,
-		MerchantAddress:          oldRow.MerchantAddress,
+		PlanPDA:                  newPlanPDA.String(),
+		MerchantAddress:          in.NewPlanOwner,
+		Treasury:                 in.NewTreasury,
 		Mint:                     mintStr,
 		PlanCreatedAtFingerprint: in.NewPlanCreatedAt,
 		NextPullAt:               nextPullAt,

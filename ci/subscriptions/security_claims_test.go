@@ -19,15 +19,16 @@ func TestSecurityProviderAccountClaimsNeedProof(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
 	r := w.rival()
-	for _, account := range []string{"999999-0001", "999999-0000"} {
-		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "squat", Rail: billing.RailCCBill, Environment: "sandbox", AccountID: account})
+	for _, subacc := range []string{"0001", "0000"} {
+		account := "999999-" + subacc
+		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "squat", Rail: billing.RailCCBill, Environment: "sandbox", PSPAccount: billing.PSPAccount{ClientAccnum: "999999", ClientSubacc: subacc}})
 		require.Error(t, err, "an unproven claim of %s is refused", account)
 		require.NotEqual(t, "merchant_config_read_only", codeOf(err), "the claim itself is refused")
 	}
 	list, err := r.client.ListPSPs(t.Context(), billing.PSPListParams{Rail: billing.RailCCBill})
 	require.NoError(t, err)
 	for _, psp := range list.Items {
-		require.NotContains(t, []string{"999999-0001", "999999-0000"}, psp.AccountID)
+		require.NotContains(t, []string{"0001", "0000"}, psp.ClientSubacc)
 	}
 	// The operator-declared account keeps working for its merchant.
 	m := importCCBill(t, w)

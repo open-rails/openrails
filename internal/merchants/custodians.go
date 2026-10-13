@@ -176,7 +176,7 @@ func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, accountI
 	}
 	kind = custodians.Normalize(kind)
 	var rows []gen.ResolveCustodianOwnerByIdentityRow
-	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
+	for _, environment := range []string{config.ClassLive, config.ClassTest} {
 		row, err := gen.New(s.pool).ResolveCustodianOwnerByIdentity(ctx, gen.ResolveCustodianOwnerByIdentityParams{
 			Kind:        kind,
 			Environment: &environment,
@@ -222,7 +222,7 @@ func (s *Service) CustodianRoutePSPs(ctx context.Context, id billing.MerchantID,
 	}
 	var out []uuid.UUID
 	for _, p := range j.psps {
-		if !p.Archived && p.Rail == rail && config.EnvironmentClass(p.Environment) == custodian.Environment && p.CustodianID != nil && *p.CustodianID == custodianID {
+		if !p.Archived && p.Rail == rail && config.EnvironmentClass(p.Rail, p.Environment) == custodian.Environment && p.CustodianID != nil && *p.CustodianID == custodianID {
 			out = append(out, p.ID)
 		}
 	}

@@ -6,7 +6,7 @@ mount and it only signs.
 | Capability | What it is for | Setting |
 |---|---|---|
 | **Merchant configuration** | every merchant's display name, settings, alert webhooks, PSPs and custodians, credentials included | `vault.kv_mount` (a KV v2 mount) |
-| **Transit signing** | Solana `vault_transit` signers: Vault signs, the key never leaves | `vault.transit_mount` (default `transit`) |
+| **Transit signing** | Solana `vault_transit` crankers: Vault signs, the key never leaves | `vault.transit_mount` (default `transit`) |
 
 Without a KV mount the merchant's configuration is its file (`Config.Merchants`,
 or a standalone server's merchant manifest): read at startup and read-only.
@@ -23,7 +23,7 @@ With a KV mount named, Vault is the only source:
   starting from an empty configuration.
 - Automation writes the documents straight into Vault at the paths below.
 - A file that declares configuration beside Vault is refused at startup, naming
-  what it declares (`display_name`, `psps`, `custodians`, `settings`,
+  what it declares (`display_name`, `psps`, `custodians`, a setting,
   `alert_webhooks`, `secrets`). The declaration names the merchant only: its
   slug, an embedded host's `Issuer` and `Catalog`, and on the standalone server
   `remote_application`.
@@ -58,14 +58,16 @@ vault kv put -mount=kv openrails/merchants/$id/psps/mobius @mobius.json
 
 ## Document shapes
 
-Documents use the merchant manifest's spelling. Unknown fields are refused.
+Documents use the merchant manifest's spelling: flat, with only credentials
+nested under `secrets`. Unknown fields are refused.
 
 **`merchant`**
 
 ```json
 {
   "display_name": "Shop",
-  "settings": { "arrears_grace_days": 7, "profile": { "support_url": "https://shop.example/support" } },
+  "arrears_grace_days": 7,
+  "profile": { "support_url": "https://shop.example/support" },
   "alert_webhooks": [
     { "id": "0192f1c4-8d1e-7c3a-9a51-3b2f0c6d7e81", "name": "ops", "url": "https://hooks.example/alert", "format": "generic", "enabled": true }
   ],
@@ -73,7 +75,7 @@ Documents use the merchant manifest's spelling. Unknown fields are refused.
 }
 ```
 
-`settings` is the document [`GET /v1/merchant/configuration`](api/merchant-settings.md)
+Its settings are the fields [`GET /v1/merchant/configuration`](api/merchant-settings.md)
 returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 `discord` or `slack`.
 
@@ -86,19 +88,24 @@ returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
   "account_id": "1234567",
   "archived": false,
   "custodian": "",
-  "settings": { "tokenization_key": "…" },
+  "tokenization_key": "…",
   "secrets": { "security_key": "…", "webhook_signing_secret": "…" }
 }
 ```
 
-`environment` is `live`, `test` or `sandbox`, as the rail has them
-([PSP environments](psp-environments.md)); a document in the other money class
-than the deployment's PSPs is refused. `account_id` is the rail's own id ([merchant
-provisioning](merchant-provisioning.md) lists each rail's). A Solana PSP's
-`account_id` is its signer's public key, and its document carries
-`"signer": {"mode": "vault_transit", "key": "<transit key>"}` or a
-`private_key` secret. `custodian` names a custodian document whose cards this
-PSP charges.
+The rail decides the fields. `environment` is one of the rail's, its
+real-money one when omitted ([PSP environments](psp-environments.md)); a
+document in the other money class than its merchant (live, or `"sandbox":
+true` on the merchant document) is refused.
+`account_id` is the rail's own id ([merchant provisioning](merchant-provisioning.md)
+lists each rail's). A Solana PSP has `treasury` in its place and an optional
+`rpc_url` secret:
+
+```json
+{ "rail": "solana", "environment": "devnet", "treasury": "9hSR…BWBu", "secrets": { "rpc_url": "https://devnet.helius-rpc.com/?api-key=…" } }
+```
+
+`custodian` names a custodian document whose cards this PSP charges.
 
 **`custodians/<key>`**
 
@@ -108,7 +115,7 @@ PSP charges.
   "environment": "live",
   "account_id": "tenant-id",
   "archived": false,
-  "settings": { "public_api_key": "…" },
+  "public_api_key": "…",
   "secrets": { "api_key": "…" }
 }
 ```
@@ -177,28 +184,27 @@ path "kv/metadata/openrails/*" { capabilities = ["read", "delete", "list"] }
 A read-only token serves an existing configuration and refuses edits; the
 first start writes `credential_fingerprint_key`.
 
-**Transit signing**, scoped to the keys PSPs name as `signer.key`:
+**Transit signing**, scoped to the crankers' keys (`solana.crankers[].key`):
 
 ```hcl
-path "transit/sign/my-mainnet-signer" { capabilities = ["update"] }
-path "transit/keys/my-mainnet-signer" { capabilities = ["read"] }
+path "transit/sign/openrails-solana-cranker" { capabilities = ["update"] }
+path "transit/keys/openrails-solana-cranker" { capabilities = ["read"] }
 ```
 
 ## Solana Transit signing
 
-The `vault_transit` signer keeps the merchant's Ed25519 key inside Vault
-Transit ([rails/solana.md](rails/solana.md)). The operator creates the key;
-OpenRails never creates or exports it:
+A `vault_transit` cranker keeps its Ed25519 key inside Vault Transit
+([rails/solana.md](rails/solana.md)). The operator creates the key; OpenRails
+never creates or exports it:
 
 ```sh
-vault write -f transit/keys/my-mainnet-signer type=ed25519 exportable=false
+vault write -f transit/keys/openrails-solana-cranker type=ed25519 exportable=false
 ```
 
-OpenRails signs at `transit/sign/<key>` and reads the public key, which is the
-merchant's on-chain address and the PSP's `account_id`, from
-`transit/keys/<key>`. A key whose public key changes is refused until an
-operator approves the new identity (`openrails solana-signer approve`); the
-approval updates the PSP document's `account_id`.
+OpenRails signs at `transit/sign/<key>` and reads the public key, the
+cranker's on-chain address, from `transit/keys/<key>`. A cranker is pinned to
+the public key it first had: after `transit/keys/<key>/rotate` it is refused,
+so rotate by creating a new key and listing it first instead.
 
 ## Merchant purge
 

@@ -56,8 +56,11 @@ type SolanaSubscription struct {
 	AuthorityPDA     string `json:"authority_pda"`
 	SubscriptionPDA  string `json:"subscription_pda"`
 	PlanPDA          string `json:"plan_pda"`
-	MerchantAddress  string `json:"merchant_address"`
-	Mint             string `json:"mint"`
+	// MerchantAddress is the plan's owner: the cranker that pulls it.
+	MerchantAddress string `json:"merchant_address"`
+	// Treasury is the plan's destination: where every pull lands.
+	Treasury string `json:"treasury"`
+	Mint     string `json:"mint"`
 
 	// PlanCreatedAtFingerprint is the on-chain plan created_at snapshotted at
 	// subscribe time; a mismatch on pull means ghost-plan recreation.

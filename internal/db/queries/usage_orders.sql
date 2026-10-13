@@ -411,5 +411,5 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(transfer_id)::
 -- in this deployment's money class; unrelated rails cannot collect it.
 SELECT p.id, p.rail FROM billing.psps p
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.rail IN ('nmi', 'stripe')
-  AND (p.environment = 'live') = (SELECT environment = 'live' FROM billing.psps WHERE merchant_id = p.merchant_id AND id = sqlc.arg(routed_psp)::uuid)
+  AND p.live = (SELECT live FROM billing.psps WHERE merchant_id = p.merchant_id AND id = sqlc.arg(routed_psp)::uuid)
 ORDER BY p.id;

@@ -180,6 +180,7 @@ export const ko: BillingUiMessageBundle = {
     resource_not_found: "이 항목은 더 이상 존재하지 않습니다.",
     resource_conflict: "내용이 변경되었습니다. 새로고침 후 다시 시도하세요.",
     rate_limit_exceeded: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+    provider_writes_disabled: "이 사이트는 현재 결제가 중단되어 있습니다.",
     service_unavailable:
       "결제 기능을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
     internal_error: "시스템에 문제가 발생했습니다. 다시 시도하세요.",

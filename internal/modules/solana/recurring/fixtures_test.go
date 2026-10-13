@@ -34,19 +34,17 @@ func randKey(t *testing.T) solanago.PrivateKey {
 
 func randAddr(t *testing.T) string { return randKey(t).PublicKey().String() }
 
-type staticSecret string
-
-func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
-	return string(s), nil
-}
-
-// newCranker returns a keypair signer and a submitter resolving the SAME
-// merchant address the signer co-signs with.
+// newCranker returns the deployment's one listed cranker and its submitter.
 func newCranker(t *testing.T) (solanaint.Signer, Submitter, solanago.PublicKey) {
 	t.Helper()
 	key := randKey(t)
-	signer := solanaint.NewKeypairSigner(staticSecret(key.String()), 0)
-	return signer, NewSignerSubmitter(signer, nil), key.PublicKey()
+	signer := solanaint.NewKeypairSigner(key)
+	return signer, NewSignerSubmitter(NewCrankers(nil, Cranker{Name: "test", Signer: signer}), nil), key.PublicKey()
+}
+
+// treasuryOf is a fixed treasury resolver.
+func treasuryOf(treasury solanago.PublicKey) Treasury {
+	return func(context.Context, billing.MerchantID) (solanago.PublicKey, error) { return treasury, nil }
 }
 
 // chain fakes the RPC reads the prepare paths make. A nil authority means the
@@ -55,11 +53,17 @@ type chain struct {
 	authorityInitID *int64
 	balance         uint64
 	balanceErr      error
+	// planPDA holds plan: absent until a test publishes one.
+	planPDA solanago.PublicKey
+	plan    []byte
 }
 
 func withAuthority(initID int64) *int64 { return &initID }
 
-func (c chain) GetAccountData(context.Context, solanago.PublicKey) ([]byte, error) {
+func (c chain) GetAccountData(_ context.Context, address solanago.PublicKey) ([]byte, error) {
+	if address.Equals(c.planPDA) {
+		return c.plan, nil
+	}
 	if c.authorityInitID == nil {
 		return nil, nil
 	}

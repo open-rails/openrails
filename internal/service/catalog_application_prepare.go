@@ -157,6 +157,14 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					return nil, err
 				}
 				links := catalogPriceLinks(current)
+				// Bindings keyed by id belong to superseded PSPs: kept for the subscriptions they still renew.
+				retired := map[string]map[string]string{}
+				for key, link := range links {
+					if _, err := uuid.Parse(key); err == nil {
+						retired[key] = link
+						delete(links, key)
+					}
+				}
 				same := current != nil && samePriceTerms(*current, request)
 				// psps names every PSP the price is sold on; omitted keeps them.
 				wanted := map[string]bool{}
@@ -173,7 +181,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						wanted[key] = true
 					}
 				}
-				out.links[[2]string{product.Key, priceKey}] = map[string]map[string]string{}
+				out.links[[2]string{product.Key, priceKey}] = retired
 				names := make([]string, 0, len(wanted))
 				for key := range wanted {
 					names = append(names, key)
@@ -330,11 +338,16 @@ func catalogLinkContains(stored, declared map[string]string) bool {
 	}
 	return true
 }
+
 func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link map[string]string) (merchants.PSPScope, bool, error) {
 	var selected merchants.PSPScope
 	found := false
 	for _, row := range accounts {
 		rowKey := row.Key
+		// A superseded PSP's label names another account; only its id selects it.
+		if row.Superseded && link["psp_id"] != row.ID.String() {
+			continue
+		}
 		if rawID := link["psp_id"]; rawID != "" {
 			if row.ID.String() != rawID {
 				continue

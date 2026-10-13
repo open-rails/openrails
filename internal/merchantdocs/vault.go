@@ -98,6 +98,7 @@ func (v *VaultSource) Load(ctx context.Context, id billing.MerchantID) (Set, err
 			set.Rejected[pspDir+key] = err.Error()
 			continue
 		}
+		p.Environment = DefaultEnvironment(p.Rail, p.Environment)
 		set.PSPs[key] = Doc[PSP]{Value: p, Revision: doc.Version, UpdatedAt: doc.Updated}
 	}
 	keys, err = v.keys(ctx, base+custodianDir)

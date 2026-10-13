@@ -67,7 +67,7 @@ func TestCCBillUpgradeWire(t *testing.T) {
 		require.Error(t, err, "a currency CCBill cannot bill is never defaulted: %q", currency)
 	}
 	_, err = ccbillService(t, "999999/0000").processCCBillUpgrade(merchantCtx(), user, price("usd"), sub)
-	require.ErrorContains(t, err, "CCBill account_id uses a dash")
+	require.ErrorContains(t, err, `client_accnum must be CCBill's number, digits only (got "999999/0000")`)
 
 	missing := &PurchaseService{}
 	missing.SetMerchantSecretStore(merchants.SecretMap{})

@@ -60,7 +60,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 // documents, without credentials.
 func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclaration {
 	doc := set.Merchant.Value
-	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, Settings: doc.Settings}
+	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, Sandbox: doc.Sandbox, MerchantSettings: doc.MerchantSettings}
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}
@@ -76,11 +76,7 @@ func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclarati
 		if out.PSPs == nil {
 			out.PSPs = map[string]config.PSPConfig{}
 		}
-		entry := config.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
-		if p.Signer != nil && p.Signer.Mode != "" && p.Signer.Mode != "local_keypair" {
-			entry.Signer = &config.PSPSignerConfig{Mode: p.Signer.Mode, Key: p.Signer.Key}
-		}
-		out.PSPs[key] = entry
+		out.PSPs[key] = config.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
 	}
 	return out
 }

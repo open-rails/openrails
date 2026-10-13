@@ -150,12 +150,6 @@ func TestCalculateTokenQuote(t *testing.T) {
 		}
 	})
 
-	t.Run("custom symbol on a known USD mint gets parity (#360)", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "MYUSD", usdcMainnetMint, 6, 10_000_000, "usd", nil, nil, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
-		require.NoError(t, err)
-		require.Equal(t, uint64(10_000_000), q.Units)
-	})
-
 	t.Run("volatile token uses the live price", func(t *testing.T) {
 		q, err := CalculateTokenQuote(ctx, "SOL", WrappedSOLMint, 9, 15_000_000, "usd", nil, priceFeed{"SOL": 150}, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)

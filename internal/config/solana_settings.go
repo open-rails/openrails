@@ -1,251 +1,136 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"math"
-	"sort"
-	"strconv"
+	"net"
+	"net/url"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
-// Solana rail-account `settings` keys (#711). These are the per-merchant home
-// of the Solana runtime knobs: standalone operators declare them in the
-// merchant config manifest under merchants.<slug>.accounts.<key>.solana.settings,
-// and they are stored on the psps row (same mechanism as the
-// NMI tokenization_key). Store settings win over the embedded boot plane (#699).
-const (
-	SolanaSettingRPCProvider = "rpc_provider"
-	SolanaSettingRPCAPIKey   = "rpc_api_key"
-	SolanaSettingTokens      = "tokens"
-	// SolanaSettingRecipientWallet is consumed by the purchase money path (not
-	// parsed here); listed so strict manifest validation accepts it.
-	SolanaSettingRecipientWallet = "recipient_wallet"
-)
+// A Solana PSP is its treasury, the address every payment to the merchant
+// lands in, on the network its environment names. Its only secret is an
+// optional RPC endpoint.
+const SolanaSecretRPCURL = "rpc_url"
 
-// solanaKnownSettingKeys is the strict allowlist for manifest validation, the
-// rail registry's Solana setting keys: a typo'd key fails the push instead of
-// silently arming nothing.
-var solanaKnownSettingKeys = func() map[string]bool {
-	d, _ := rails.Lookup(models.RailSolana)
-	known := make(map[string]bool, len(d.SettingKeys))
-	for _, key := range d.SettingKeys {
-		known[key] = true
+// ValidateSolanaTreasury refuses a treasury that is not a Solana address.
+func ValidateSolanaTreasury(treasury string) error {
+	treasury = strings.TrimSpace(treasury)
+	if treasury == "" {
+		return errors.New("treasury is required: the Solana address the merchant's payments land in")
 	}
-	return known
-}()
-
-// SolanaAccountSettings is the typed view of a Solana rail-account settings
-// map. Nil/absent fields mean "not declared" (the boot plane or defaults apply).
-type SolanaAccountSettings struct {
-	RPCProvider string
-	RPCAPIKey   string
-	Tokens      map[string]TokenConfig
-}
-
-// IsZero reports whether no known setting was declared.
-func (s SolanaAccountSettings) IsZero() bool {
-	return s.RPCProvider == "" && s.RPCAPIKey == "" && len(s.Tokens) == 0
-}
-
-// ParseSolanaAccountSettings parses the known Solana runtime knobs out of a
-// rail-account settings map. Unknown keys are ignored (forward-compat for
-// stored rows); malformed values for KNOWN keys error loudly — a typo'd value
-// must never silently pick a behavior.
-func ParseSolanaAccountSettings(settings map[string]any) (SolanaAccountSettings, error) {
-	var out SolanaAccountSettings
-	if len(settings) == 0 {
-		return out, nil
-	}
-	if raw, ok := settings[SolanaSettingRPCProvider]; ok {
-		v, err := settingString(SolanaSettingRPCProvider, raw)
-		if err != nil {
-			return out, err
-		}
-		out.RPCProvider = strings.ToLower(v)
-	}
-	if raw, ok := settings[SolanaSettingRPCAPIKey]; ok {
-		v, err := settingString(SolanaSettingRPCAPIKey, raw)
-		if err != nil {
-			return out, err
-		}
-		out.RPCAPIKey = v
-	}
-	if raw, ok := settings[SolanaSettingTokens]; ok {
-		tokens, err := settingTokens(raw)
-		if err != nil {
-			return out, err
-		}
-		out.Tokens = tokens
-	}
-	switch out.RPCProvider {
-	case "", "helius", "public":
-	default:
-		return out, fmt.Errorf("solana settings: rpc_provider must be helius or public (got %q)", out.RPCProvider)
-	}
-	if out.RPCProvider == "public" && out.RPCAPIKey != "" {
-		return out, fmt.Errorf("solana settings: rpc_provider public cannot use rpc_api_key")
-	}
-	return out, nil
-}
-
-// ValidateSolanaAccountSettings is the strict manifest-push variant: values of
-// known keys must parse AND every key must be on the allowlist, so a typo'd
-// key (e.g. rpc_provder) fails the push loudly instead of being stored inert.
-func ValidateSolanaAccountSettings(settings map[string]any) error {
-	if _, err := ParseSolanaAccountSettings(settings); err != nil {
-		return err
-	}
-	var unknown []string
-	for key := range settings {
-		if !solanaKnownSettingKeys[strings.ToLower(strings.TrimSpace(key))] {
-			unknown = append(unknown, key)
-		}
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		known := make([]string, 0, len(solanaKnownSettingKeys))
-		for key := range solanaKnownSettingKeys {
-			known = append(known, key)
-		}
-		sort.Strings(known)
-		return fmt.Errorf("solana settings: unknown key(s) %s (known: %s)", strings.Join(unknown, ", "), strings.Join(known, ", "))
+	key, err := solanago.PublicKeyFromBase58(treasury)
+	if err != nil || key.IsZero() {
+		return fmt.Errorf("treasury %q is not a Solana address (a base58 32-byte public key)", treasury)
 	}
 	return nil
 }
 
-// ApplyTo overlays the declared RPC settings onto a boot-plane SolanaRailConfig
-// (store-wins, #699) and returns a NEW config; base is never mutated. A nil
-// base starts from an empty config (standalone: the store is the only plane).
-//
-// Tokens are NOT resolved here (or#881): a declaration selects built-in symbols
-// out of a per-NETWORK mint registry, which this layer cannot see. The caller
-// that knows the network resolves them —
-// internal/modules/solana/tokens.ResolveDeclared.
-func (s SolanaAccountSettings) ApplyTo(base *SolanaRailConfig) *SolanaRailConfig {
-	out := &SolanaRailConfig{}
-	if base != nil {
-		*out = *base
-		if base.Tokens != nil {
-			out.Tokens = make(map[string]TokenConfig, len(base.Tokens))
-			for k, v := range base.Tokens {
-				out.Tokens[k] = v
-			}
+// ValidateSolanaRPCURL refuses an rpc_url that is not an https URL (http only
+// on a loopback host of a non-live PSP). The URL usually carries the
+// provider's key, so no message repeats it.
+func ValidateSolanaRPCURL(environment, raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return errors.New("secrets.rpc_url is not an absolute URL")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		ip := net.ParseIP(u.Hostname())
+		if ip != nil && ip.IsLoopback() && !LiveEnvironment("solana", environment) {
+			return nil
 		}
 	}
-	if s.RPCProvider != "" {
-		out.RPCProvider = s.RPCProvider
-	}
-	if s.RPCAPIKey != "" {
-		out.RPCAPIKey = s.RPCAPIKey
-	}
-	return out
+	return errors.New("secrets.rpc_url must be https (http only on a loopback host of a non-live PSP)")
 }
 
-func settingString(key string, raw any) (string, error) {
-	v, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("solana settings: %s must be a string (got %T)", key, raw)
-	}
-	return strings.TrimSpace(v), nil
+// SolanaRailConfig is a Solana PSP's runtime configuration.
+type SolanaRailConfig struct {
+	// Network is the PSP's environment: mainnet, devnet or testnet.
+	Network string
+	// RPCURL is the PSP's own RPC endpoint, tried before the network's public
+	// one. A secret.
+	RPCURL string
+	// Tokens are the tokens the PSP accepts on Network, by symbol.
+	Tokens map[string]TokenConfig
 }
 
-// settingTokens decodes the tokens map. Values arrive as generic maps from
-// either the YAML manifest or the stored evidence JSON. It decodes SHAPE only —
-// mint semantics are network-dependent and belong to
-// internal/modules/solana/tokens.ResolveDeclared.
-func settingTokens(raw any) (map[string]TokenConfig, error) {
-	entries, err := settingAnyMap("tokens", raw)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]TokenConfig, len(entries))
-	for symbol, rawToken := range entries {
-		symbol = strings.ToUpper(strings.TrimSpace(symbol))
-		if symbol == "" {
-			return nil, fmt.Errorf("solana settings: tokens has an empty symbol key")
-		}
-		fields, err := settingAnyMap("tokens."+symbol, rawToken)
-		if err != nil {
-			return nil, err
-		}
-		var token TokenConfig
-		for key, value := range fields {
-			switch strings.ToLower(strings.TrimSpace(key)) {
-			case "mint":
-				if token.Mint, err = settingString("tokens."+symbol+".mint", value); err != nil {
-					return nil, err
-				}
-			case "name":
-				if token.Name, err = settingString("tokens."+symbol+".name", value); err != nil {
-					return nil, err
-				}
-			case "decimals":
-				// #817: retired. Decimals belong to the mint on-chain and are read
-				// from it; a merchant-declared copy could disagree and misprice by
-				// 10^n. Fail loudly rather than silently ignoring a stale key.
-				return nil, fmt.Errorf("solana settings: tokens.%s.decimals is no longer configurable — "+
-					"decimals are read from the SPL mint on-chain; remove this key", symbol)
-			default:
-				return nil, fmt.Errorf("solana settings: tokens.%s has unknown field %q (want mint, name)", symbol, key)
-			}
-		}
-		// A missing mint is NOT an error here: for a built-in symbol it is the
-		// correct declaration (or#881 — the mint comes from the registry), and
-		// which symbols are built-in depends on the network, which this layer
-		// does not know. solana/tokens.ResolveDeclared rules on it.
-		out[symbol] = token
-	}
-	return out, nil
+// Cranker modes.
+const (
+	CrankerVaultTransit = "vault_transit"
+	CrankerLocalKeypair = "local_keypair"
+)
+
+// SolanaConfig is the deployment's Solana configuration.
+type SolanaConfig struct {
+	// Crankers sign Solana rebilling, in order: the first publishes new plans,
+	// and each pulls the renewals of the plans it owns, whose owner is fixed
+	// on-chain. A plan no listed cranker owns cannot be pulled. Empty turns
+	// Solana rebilling off; one-time payments still work.
+	Crankers []SolanaCrankerConfig `yaml:"crankers" json:"crankers"`
 }
 
-func settingAnyMap(key string, raw any) (map[string]any, error) {
-	switch v := raw.(type) {
-	case map[string]any:
-		return v, nil
-	case map[any]any: // legacy YAML decoders
-		out := make(map[string]any, len(v))
-		for k, val := range v {
-			ks, ok := k.(string)
-			if !ok {
-				return nil, fmt.Errorf("solana settings: %s has a non-string key %v", key, k)
-			}
-			out[ks] = val
+// SolanaCrankerConfig is one cranker: a key that publishes and pulls plans and
+// pays their fees, on whichever network each Solana PSP names (it needs SOL
+// there). It never receives money: a plan pays only its merchant's treasury.
+type SolanaCrankerConfig struct {
+	// Mode is vault_transit (the key never leaves Vault Transit) or
+	// local_keypair.
+	Mode string `yaml:"mode" json:"mode"`
+	// Key names the Vault Transit key (vault_transit).
+	Key string `yaml:"key" json:"key"`
+	// PrivateKey is the base58 keypair (local_keypair). A secret.
+	PrivateKey string `yaml:"private_key" json:"private_key"`
+}
+
+// Name names the cranker without its secret: its pin's key.
+func (c SolanaCrankerConfig) Name() string {
+	if strings.TrimSpace(c.Mode) == CrankerVaultTransit {
+		return CrankerVaultTransit + ":" + strings.TrimSpace(c.Key)
+	}
+	if key, err := solanago.PrivateKeyFromBase58(strings.TrimSpace(c.PrivateKey)); err == nil {
+		return CrankerLocalKeypair + ":" + key.PublicKey().String()
+	}
+	return CrankerLocalKeypair
+}
+
+// SolanaCrankers are cfg's crankers in order; none when it declares none.
+func SolanaCrankers(cfg *Config) []SolanaCrankerConfig {
+	if cfg == nil || cfg.Solana == nil {
+		return nil
+	}
+	return cfg.Solana.Crankers
+}
+
+// validateSolanaCranker refuses a cranker that cannot sign, or one listed
+// before.
+func validateSolanaCranker(cfg *Config, listed []SolanaCrankerConfig, c SolanaCrankerConfig) error {
+	switch strings.TrimSpace(c.Mode) {
+	case CrankerVaultTransit:
+		if strings.TrimSpace(c.Key) == "" || c.PrivateKey != "" {
+			return errors.New("vault_transit names its Transit key and no private_key")
 		}
-		return out, nil
+		if cfg.Vault == nil {
+			return errors.New("vault_transit needs vault")
+		}
+	case CrankerLocalKeypair:
+		if c.Key != "" {
+			return errors.New("local_keypair takes private_key, not key")
+		}
+		if _, err := solanago.PrivateKeyFromBase58(strings.TrimSpace(c.PrivateKey)); err != nil {
+			return errors.New("private_key is not a base58 Solana keypair")
+		}
 	default:
-		return nil, fmt.Errorf("solana settings: %s must be a map (got %T)", key, raw)
+		return fmt.Errorf("mode must be %s or %s", CrankerVaultTransit, CrankerLocalKeypair)
 	}
-}
-
-func settingInt(key string, raw any) (int, error) {
-	switch v := raw.(type) {
-	case int:
-		return v, nil
-	case int64:
-		if v > math.MaxInt || v < math.MinInt {
-			return 0, fmt.Errorf("solana settings: %s exceeds platform int range (got %d)", key, v)
+	for _, other := range listed {
+		if other.Name() == c.Name() {
+			return fmt.Errorf("%s is listed twice", c.Name())
 		}
-		return int(v), nil
-	case uint64:
-		if v > math.MaxInt {
-			return 0, fmt.Errorf("solana settings: %s exceeds platform int range (got %d)", key, v)
-		}
-		return int(v), nil
-	case float64:
-		if v != float64(int(v)) {
-			return 0, fmt.Errorf("solana settings: %s must be an integer (got %v)", key, v)
-		}
-		return int(v), nil
-	case string:
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil {
-			return 0, fmt.Errorf("solana settings: %s must be an integer (got %q)", key, v)
-		}
-		return n, nil
-	default:
-		return 0, fmt.Errorf("solana settings: %s must be an integer (got %T)", key, raw)
 	}
+	return nil
 }

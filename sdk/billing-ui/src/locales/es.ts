@@ -187,6 +187,8 @@ export const es: BillingUiMessageBundle = {
       "Esto cambió mientras tanto. Actualiza e inténtalo de nuevo.",
     rate_limit_exceeded:
       "Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.",
+    provider_writes_disabled:
+      "Los pagos están desactivados en este sitio por ahora.",
     service_unavailable:
       "La facturación no está disponible temporalmente. Inténtalo pronto.",
     internal_error: "Algo falló de nuestro lado. Inténtalo de nuevo.",

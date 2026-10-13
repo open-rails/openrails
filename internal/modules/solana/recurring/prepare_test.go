@@ -21,14 +21,16 @@ func trailingInitID(ix solanago.CompiledInstruction) int64 {
 
 func newSubscribeSvc(t *testing.T, rpc chain) (*PrepareSubscribeService, solanago.PublicKey) {
 	t.Helper()
-	signer, submitter, merchantPub := newCranker(t)
-	svc := NewPrepareSubscribeService(submitter, signer, rpc, NetworkTokens("devnet", testTokens()))
+	_, submitter, merchantPub := newCranker(t)
+	rpc.planPDA, _, _ = subscriptions.DerivePlanPDA(merchantPub, 7)
+	svc := NewPrepareSubscribeService(submitter, rpc, NetworkTokens("devnet", testTokens()))
 	svc.authorityReadBackoff = time.Nanosecond
 	return svc, merchantPub
 }
 
-func subscribeInput(t *testing.T) PrepareSubscribeInput {
+func subscribeInput(t *testing.T, owner solanago.PublicKey) PrepareSubscribeInput {
 	return PrepareSubscribeInput{
+		Owner:            owner.String(),
 		MerchantID:       testMerchantID,
 		SubscriberWallet: randAddr(t),
 		PlanID:           7,
@@ -36,6 +38,7 @@ func subscribeInput(t *testing.T) PrepareSubscribeInput {
 		AmountBaseUnits:  10_000_000,
 		PeriodHours:      720,
 		PlanCreatedAt:    1_700_000_000,
+		Treasury:         testTreasury.String(),
 	}
 }
 
@@ -59,7 +62,7 @@ func TestPrepareSubscribeBundle(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, merchantPub := newSubscribeSvc(t, chain{authorityInitID: tc.authority, balance: 50_000_000})
-			in := subscribeInput(t)
+			in := subscribeInput(t, merchantPub)
 			if tc.reference {
 				in.Reference = randAddr(t)
 			}
@@ -88,7 +91,40 @@ func TestPrepareSubscribeBundle(t *testing.T) {
 			require.Equal(t, planPDA.String(), res.PlanPDA)
 			require.Equal(t, subPDA.String(), res.SubscriptionPDA)
 			require.Equal(t, testDevnetUSDCMint, res.Mint)
+
+			// The first period lands in the treasury, pulled by the cranker.
+			transfer := tx.Message.Instructions[subscribeAt+1]
+			receiver, _, _ := subscriptions.DeriveATA(testTreasury, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
+			require.True(t, tx.Message.AccountKeys[transfer.Accounts[4]].Equals(receiver))
+			require.True(t, tx.Message.AccountKeys[transfer.Accounts[5]].Equals(merchantPub))
 		})
+	}
+}
+
+// A plan paying another treasury is refused before anything is built: its
+// destination is immutable. One published before treasuries pays anywhere.
+func TestPrepareSubscribeRequiresThePlanToPayTheTreasury(t *testing.T) {
+	mint := solanago.MustPublicKeyFromBase58(testDevnetUSDCMint)
+	for name, row := range map[string]struct {
+		destination solanago.PublicKey
+		want        string
+	}{
+		"the treasury":      {testTreasury, ""},
+		"before treasuries": {solanago.PublicKey{}, ""},
+		"another treasury":  {randKey(t).PublicKey(), "not the merchant's treasury"},
+	} {
+		_, submitter, merchantPub := newCranker(t)
+		rpc := chain{authorityInitID: withAuthority(42), balance: 50_000_000}
+		rpc.planPDA, _, _ = subscriptions.DerivePlanPDA(merchantPub, 7)
+		rpc.plan = planBlob(merchantPub, mint, 10_000_000, 720, 1_700_000_000, row.destination)
+		svc := NewPrepareSubscribeService(submitter, rpc, NetworkTokens("devnet", testTokens()))
+		svc.authorityReadBackoff = time.Nanosecond
+		_, err := svc.Prepare(context.Background(), subscribeInput(t, merchantPub))
+		if row.want == "" {
+			require.NoError(t, err, name)
+		} else {
+			require.ErrorContains(t, err, row.want, name)
+		}
 	}
 }
 
@@ -109,8 +145,8 @@ func TestPrepareSubscribePreflight(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			svc, _ := newSubscribeSvc(t, tc.rpc)
-			res, err := svc.Prepare(context.Background(), subscribeInput(t))
+			svc, owner := newSubscribeSvc(t, tc.rpc)
+			res, err := svc.Prepare(context.Background(), subscribeInput(t, owner))
 			if !tc.wantError {
 				require.NoError(t, err)
 				require.Len(t, res.Transactions, 1)
@@ -125,7 +161,7 @@ func TestPrepareSubscribePreflight(t *testing.T) {
 }
 
 func TestPrepareSubscribeRejectsBadInput(t *testing.T) {
-	svc, _ := newSubscribeSvc(t, chain{authorityInitID: withAuthority(1), balance: 1 << 40})
+	svc, owner := newSubscribeSvc(t, chain{authorityInitID: withAuthority(1), balance: 1 << 40})
 	for name, mutate := range map[string]func(*PrepareSubscribeInput){
 		"ineligible token": func(in *PrepareSubscribeInput) { in.MintSymbol = "PYUSD" },
 		"zero amount":      func(in *PrepareSubscribeInput) { in.AmountBaseUnits = 0 },
@@ -133,20 +169,22 @@ func TestPrepareSubscribeRejectsBadInput(t *testing.T) {
 		"no wallet":        func(in *PrepareSubscribeInput) { in.SubscriberWallet = "" },
 		"bad reference":    func(in *PrepareSubscribeInput) { in.Reference = "not-base58!" },
 	} {
-		in := subscribeInput(t)
+		in := subscribeInput(t, owner)
 		mutate(&in)
 		_, err := svc.Prepare(context.Background(), in)
 		require.Error(t, err, name)
 	}
 }
 
-func tierChangeInput(t *testing.T) PrepareTierChangeInput {
+func tierChangeInput(t *testing.T, owner solanago.PublicKey) PrepareTierChangeInput {
 	return PrepareTierChangeInput{
+		NewPlanOwner:       owner.String(),
 		MerchantID:         testMerchantID,
 		SubscriberWallet:   randAddr(t),
 		MintSymbol:         "USDC",
 		OldPlanPDA:         randAddr(t),
 		OldSubscriptionPDA: randAddr(t),
+		Treasury:           testTreasury.String(),
 		NewPlanID:          99,
 		NewAmountBaseUnits: 50_000_000,
 		NewPeriodHours:     720,
@@ -172,9 +210,9 @@ func TestPrepareTierChangeBundle(t *testing.T) {
 		{"downgrade with reference", false, true, txShape{3, 1, 0, []int{5, 8}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			signer, _, merchantPub := newCranker(t)
-			svc := NewPrepareTierChangeService(signer, chain{authorityInitID: withAuthority(42), balance: 1 << 40}, NetworkTokens("devnet", testTokens()))
-			in := tierChangeInput(t)
+			_, submitter, merchantPub := newCranker(t)
+			svc := NewPrepareTierChangeService(submitter, chain{authorityInitID: withAuthority(42), balance: 1 << 40}, NetworkTokens("devnet", testTokens()))
+			in := tierChangeInput(t, merchantPub)
 			in.IsUpgrade = tc.upgrade
 			in.FirstChargeBaseUnits = 31_330_000
 			if tc.reference {
@@ -202,13 +240,13 @@ func TestPrepareTierChangeBundle(t *testing.T) {
 }
 
 func TestPrepareTierChangeRefusals(t *testing.T) {
-	signer, _, _ := newCranker(t)
+	_, submitter, owner := newCranker(t)
 	prepare := func(rpc chain, mutate func(*PrepareTierChangeInput)) error {
-		in := tierChangeInput(t)
+		in := tierChangeInput(t, owner)
 		in.IsUpgrade = true
 		in.FirstChargeBaseUnits = 31_330_000
 		mutate(&in)
-		_, err := NewPrepareTierChangeService(signer, rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), in)
+		_, err := NewPrepareTierChangeService(submitter, rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), in)
 		return err
 	}
 	funded := chain{authorityInitID: withAuthority(42), balance: 1 << 40}

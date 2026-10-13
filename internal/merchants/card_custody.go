@@ -61,12 +61,12 @@ func CardCustodyRefusal(vault *config.PlatformVaultConfig, settings billing.Merc
 
 // CheckCardCustody is CardCustodyRefusal, plus the merchant's identity in the
 // platform vault, which must name this deployment's tenant.
-func (s *Service) CheckCardCustody(ctx context.Context, id billing.MerchantID, settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
-	if err := s.CardCustodyRefusal(settings, psps); err != nil || merchantconfig.CardCustody(settings) != billing.CardCustodyPlatform {
+func (s *Service) CheckCardCustody(ctx context.Context, id billing.MerchantID, doc merchantdocs.Merchant, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
+	if err := s.CardCustodyRefusal(doc.MerchantSettings, psps); err != nil || merchantconfig.CardCustody(doc.MerchantSettings) != billing.CardCustodyPlatform {
 		return err
 	}
 	return s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id, pspsClass(psps))
+		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id, merchantClass(doc.Sandbox))
 	})
 }
 
@@ -106,15 +106,6 @@ func platformUnreachable(vault *config.PlatformVaultConfig, psps map[string]merc
 	return out
 }
 
-// pspsClass is the money class of PSP documents: live when they are.
-func pspsClass(psps map[string]merchantdocs.Doc[merchantdocs.PSP]) string {
-	environments := make([]string, 0, len(psps))
-	for _, doc := range psps {
-		environments = append(environments, doc.Value.Environment)
-	}
-	return merchantEnvironmentClass(environments...)
-}
-
 // platformIdentityRefusal refuses when the merchant's platform key names an
 // identity other than this deployment's vault partition in class.
 func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, id billing.MerchantID, class string) error {
@@ -137,14 +128,14 @@ func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, i
 // identity in the platform vault.
 func (s *Service) syncCardCustody(ctx context.Context, q *gen.Queries, id billing.MerchantID, previous merchantdocs.Set, set merchantdocs.Set, reject func(path, why string)) error {
 	doc := set.Merchant.Value
-	if !set.HasMerchant || merchantconfig.CardCustody(doc.Settings) != billing.CardCustodyPlatform {
+	if !set.HasMerchant || merchantconfig.CardCustody(doc.MerchantSettings) != billing.CardCustodyPlatform {
 		return nil
 	}
-	if _, err := merchantconfig.Normalize(doc.DisplayName, doc.Settings); err != nil {
+	if _, err := merchantconfig.Normalize(doc.DisplayName, doc.MerchantSettings); err != nil {
 		return nil // refused for its settings
 	}
 	changed := !previous.HasMerchant || !reflect.DeepEqual(previous.Merchant.Value, doc)
-	if err := s.CardCustodyRefusal(doc.Settings, set.PSPs); err != nil {
+	if err := s.CardCustodyRefusal(doc.MerchantSettings, set.PSPs); err != nil {
 		if changed || !errors.Is(err, ErrPlatformVaultUnreachable) {
 			reject(merchantdocs.MerchantDoc, err.Error())
 			return nil
@@ -153,7 +144,7 @@ func (s *Service) syncCardCustody(ctx context.Context, q *gen.Queries, id billin
 			reject(merchantdocs.PSPDoc(key), fmt.Sprintf("psp %s: %s", key, ErrPlatformVaultUnreachable.Message))
 		}
 	}
-	class := pspsClass(set.PSPs)
+	class := merchantClass(doc.Sandbox)
 	if err := s.platformIdentityRefusal(ctx, q, id, class); errors.Is(err, ErrPlatformVaultUnavailable) {
 		if changed {
 			reject(merchantdocs.MerchantDoc, err.Error())

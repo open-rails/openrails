@@ -25,7 +25,7 @@ func TestMerchantDunningPolicy(t *testing.T) {
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
 	got, err := w.client[embedded].GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, policy, got.Settings.DunningPolicy)
+	require.Equal(t, policy, got.MerchantSettings.DunningPolicy)
 
 	e := enroll(t, w, "nmi", embedded)
 	e.refreshBeforePeriodEnd()

@@ -17,15 +17,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
-// RPCEndpoint represents a single RPC endpoint with metadata.
+// RPCEndpoint is one RPC endpoint of a chain.
 type RPCEndpoint struct {
-	Name string // Human-readable name (e.g., "Helius", "Solana Public")
-	// URL is credential-free and safe to log: provider API keys are stripped
-	// into secret and re-attached at the transport.
+	Name string
+	// URL is the endpoint's origin, safe to log: the path and query, where
+	// providers put their keys, ride the transport only.
 	URL      string
-	Priority int // Lower = higher priority
+	Priority int
 
-	secret url.Values
+	target *url.URL
 }
 
 // RPCFallbackClient wraps multiple RPC clients and provides automatic failover.
@@ -38,140 +38,66 @@ type RPCFallbackClient struct {
 	failures map[int]time.Time // endpoint index -> next retry time
 	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
 	// chain mutations) with ErrProviderReadOnly; reads always pass.
-	readOnly        bool
-	loopbackFixture bool
+	readOnly bool
 }
 
-// RPCFallbackConfig holds configuration for building the fallback chain.
+// RPCFallbackConfig is a Solana PSP's RPC chain.
 type RPCFallbackConfig struct {
-	// CustomEndpoint bypasses the fallback chain entirely if set.
-	CustomEndpoint string
-
-	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to "helius".
-	RPCProvider string
-
-	// RPCAPIKey is the key for RPCProvider.
-	RPCAPIKey string
-
-	// Network determines which endpoints to use (mainnet, devnet).
+	// Network is the PSP's environment: mainnet, devnet or testnet.
 	Network string
+	// URL is the PSP's own endpoint (secrets.rpc_url), tried first; the
+	// network's public endpoint is its fallback.
+	URL string
+	// PublicURL replaces the network's public endpoint: a sandbox run's
+	// loopback node.
+	PublicURL string
 	// ReadOnly blocks transaction submission at the wire (mode=readonly).
 	ReadOnly bool
-	// LoopbackFixture marks an explicitly declared loopback fake RPC.
-	LoopbackFixture bool
 }
 
-// DefaultMainnetEndpoints returns the default RPC endpoints for mainnet.
-func DefaultMainnetEndpoints(heliusAPIKey string) []RPCEndpoint {
-	endpoints := []RPCEndpoint{}
-	priority := 0
-
-	// Helius (primary if API key provided)
-	if heliusAPIKey != "" {
-		endpoints = append(endpoints, newSecretEndpoint(
-			"Helius", "https://mainnet.helius-rpc.com/", priority, url.Values{"api-key": {heliusAPIKey}}))
-		priority++
+// PublicEndpoint is the free public RPC endpoint of network.
+func PublicEndpoint(network string) string {
+	switch network {
+	case "devnet":
+		return "https://api.devnet.solana.com"
+	case "testnet":
+		return "https://api.testnet.solana.com"
+	default:
+		return "https://api.mainnet-beta.solana.com"
 	}
-
-	// Solana public (fallback, rate-limited)
-	endpoints = append(endpoints, RPCEndpoint{
-		Name:     "Solana Public",
-		URL:      "https://api.mainnet-beta.solana.com",
-		Priority: priority,
-	})
-
-	return endpoints
-}
-
-// DefaultDevnetEndpoints returns the default RPC endpoints for devnet.
-func DefaultDevnetEndpoints(heliusAPIKey string) []RPCEndpoint {
-	endpoints := []RPCEndpoint{}
-	priority := 0
-
-	// Helius devnet (primary if API key provided)
-	if heliusAPIKey != "" {
-		endpoints = append(endpoints, newSecretEndpoint(
-			"Helius Devnet", "https://devnet.helius-rpc.com/", priority, url.Values{"api-key": {heliusAPIKey}}))
-		priority++
-	}
-
-	// Solana public devnet
-	endpoints = append(endpoints, RPCEndpoint{
-		Name:     "Solana Devnet",
-		URL:      "https://api.devnet.solana.com",
-		Priority: priority,
-	})
-
-	return endpoints
 }
 
 // NewRPCFallbackClient creates a new RPC client with fallback support.
 func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
-	network := strings.ToLower(cfg.Network)
+	network := strings.ToLower(strings.TrimSpace(cfg.Network))
 	if network == "" {
 		network = "mainnet"
 	}
-	rpcProvider := strings.ToLower(strings.TrimSpace(cfg.RPCProvider))
-	if rpcProvider == "" {
-		rpcProvider = "helius"
-	}
-	rpcAPIKey := strings.TrimSpace(cfg.RPCAPIKey)
-
 	var endpoints []RPCEndpoint
-
-	// A custom endpoint is used exclusively (no fallback). It may embed a key,
-	// which is split out like the built-in ones.
-	if cfg.CustomEndpoint != "" {
-		endpoints = []RPCEndpoint{newSecretEndpoint("Custom", cfg.CustomEndpoint, 0, nil)}
-		log.WithFields(log.Fields{
-			"endpoint": endpoints[0].URL,
-			"network":  network,
-		}).Info("Using custom RPC endpoint (fallback disabled)")
-	} else {
-		switch network {
-		case "devnet":
-			endpoints = DefaultDevnetEndpoints(rpcProviderAPIKey(rpcProvider, rpcAPIKey, "helius"))
-		case "mainnet", "mainnet-beta":
-			endpoints = DefaultMainnetEndpoints(rpcProviderAPIKey(rpcProvider, rpcAPIKey, "helius"))
-		default:
-			// Testnet uses Solana public only
-			endpoints = []RPCEndpoint{{
-				Name:     "Solana Testnet",
-				URL:      "https://api.testnet.solana.com",
-				Priority: 0,
-			}}
-		}
-
-		names := make([]string, len(endpoints))
-		for i, ep := range endpoints {
-			names[i] = ep.Name
-		}
-		log.WithFields(log.Fields{
-			"chain":   strings.Join(names, " → "),
-			"network": network,
-		}).Info("Initialized Solana RPC fallback chain")
+	if strings.TrimSpace(cfg.URL) != "" {
+		endpoints = append(endpoints, newSecretEndpoint("rpc_url", cfg.URL, len(endpoints)))
 	}
+	public := strings.TrimSpace(cfg.PublicURL)
+	if public == "" {
+		public = PublicEndpoint(network)
+	}
+	endpoints = append(endpoints, newSecretEndpoint("Solana "+network+" public", public, len(endpoints)))
 
+	names := make([]string, len(endpoints))
 	clients := make([]*rpc.Client, len(endpoints))
 	for i, ep := range endpoints {
+		names[i] = ep.Name
 		clients[i] = newEndpointClient(ep)
 	}
+	log.WithFields(log.Fields{"chain": strings.Join(names, " → "), "network": network}).Debug("Solana RPC chain")
 
 	return &RPCFallbackClient{
-		readOnly:        cfg.ReadOnly,
-		loopbackFixture: cfg.LoopbackFixture,
-		endpoints:       endpoints,
-		clients:         clients,
-		network:         network,
-		failures:        make(map[int]time.Time),
+		readOnly:  cfg.ReadOnly,
+		endpoints: endpoints,
+		clients:   clients,
+		network:   network,
+		failures:  make(map[int]time.Time),
 	}
-}
-
-func rpcProviderAPIKey(rpcProvider, rpcAPIKey, want string) string {
-	if rpcProvider == want {
-		return rpcAPIKey
-	}
-	return ""
 }
 
 // failureCooldown is how long we wait before retrying a failed endpoint.

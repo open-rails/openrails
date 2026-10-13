@@ -58,36 +58,58 @@ func (w *world) options(price billing.PriceID) map[string]billing.OrderPaymentOp
 	return out
 }
 
-// withSolana declares a Solana PSP whose signer owns plans on a loopback node.
-func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) {
-	fake := solanafake.New()
-	t.Cleanup(fake.Close)
-	signer := solanago.NewWallet().PrivateKey
+// solanaDeployment is a loopback devnet node, the deployment's cranker and
+// the merchant's treasury its Solana PSP pays into. crankers, when set, are
+// the listed crankers instead of cranker alone.
+type solanaDeployment struct {
+	fake     *solanafake.Node
+	cranker  solanago.PrivateKey
+	crankers []solanago.PrivateKey
+	treasury solanago.PublicKey
+}
+
+// plan publishes a USDC plan the cranker owns, paying into the treasury.
+func (s *solanaDeployment) plan(t *testing.T, id, amount uint64) solanago.PublicKey {
+	t.Helper()
+	plan, err := s.fake.Plan(s.cranker.PublicKey(), id, solanafake.DevnetUSDCMint, amount, monthHours, s.treasury)
+	require.NoError(t, err)
+	return plan
+}
+
+// withSolana declares a devnet Solana PSP paying into a treasury, and the
+// deployment's cranker owning its plans on a loopback node.
+func withSolana(t *testing.T, w *world) *solanaDeployment {
+	s := &solanaDeployment{fake: solanafake.New(), cranker: solanago.NewWallet().PrivateKey, treasury: solanago.NewWallet().PublicKey()}
+	t.Cleanup(s.fake.Close)
+	s.fake.Fund(s.treasury, solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint), 0)
 	previous := w.cfg
 	w.cfg = func(cfg *config.Config) {
 		if previous != nil {
 			previous(cfg)
 		}
-		cfg.ProviderSandbox = &config.ProviderSandboxConfig{SolanaRPCURL: fake.URL()}
+		cfg.ProviderSandbox = &config.ProviderSandboxConfig{SolanaRPCURL: s.fake.URL()}
+		listed := s.crankers
+		if listed == nil {
+			listed = []solanago.PrivateKey{s.cranker}
+		}
+		cfg.Solana = &config.SolanaConfig{}
+		for _, key := range listed {
+			cfg.Solana.Crankers = append(cfg.Solana.Crankers, config.SolanaCrankerConfig{Mode: config.CrankerLocalKeypair, PrivateKey: key.String()})
+		}
 		cfg.PublicBillingBaseURL = "https://e2e.test" + mountPrefix
 	}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		psps["solana"] = openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox,
-			PrivateKey:  signer.String(),
-			RPCProvider: "public",
-			Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
-		}.PSPConfig()
+		psps["solana"] = openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.String()}.PSPConfig()
 	}
-	return fake, signer
+	return s
 }
 
 func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
 	w := prepareWorld(t, 12)
-	fake, merchant := withSolana(t, w)
+	sol := withSolana(t, w)
 	w.start()
 
-	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
-	require.NoError(t, err)
+	plan := sol.plan(t, 4242, 23_000_000)
 	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000

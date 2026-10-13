@@ -179,7 +179,7 @@ func (e *Engine) Ready(ctx context.Context) error { return e.engine.Ready(ctx) }
 // Probe checks one optional dependency.
 type Probe struct {
 	// Name is stable for dashboards: openrails_vault, openrails_psp_posture,
-	// openrails_configuration, openrails_solana_signer_identity,
+	// openrails_configuration, openrails_solana_crankers,
 	// openrails_job_progress.
 	Name string
 	// Check returns nil while the dependency is usable; it honors ctx.
@@ -192,12 +192,11 @@ type Probe struct {
 // openrails_psp_posture fails while a PSP is unverified or disarmed.
 // openrails_configuration fails while something configured is not served,
 // naming each with why: an optional setting turned off, a declared merchant
-// not provisioned yet, a merchant document refused (a PSP whose secret,
-// signer or declaration does not check).
-// openrails_solana_signer_identity fails while a Transit signer key no longer
-// matches its stored identity: the Solana rail refuses until an operator
-// approves it (openrails solana-signer approve). openrails_job_progress fails
-// while the River fleet is stalled.
+// not provisioned yet, a merchant document refused (a PSP whose secret or
+// declaration does not check). openrails_solana_crankers fails while a listed
+// cranker cannot sign, or a plan with subscribers is owned by no listed
+// cranker: its renewals are not pulled. openrails_job_progress fails while the
+// River fleet is stalled.
 func (e *Engine) Probes() []Probe {
 	var out []Probe
 	for _, p := range e.engine.Probes() {

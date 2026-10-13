@@ -87,6 +87,7 @@ type tierChain struct {
 	fake       *solanafake.Node
 	rpc        *solanaint.RPCClient
 	signer     solanaint.Signer
+	submitter  Submitter
 	merchant   solanago.PublicKey
 	mint       solanago.PublicKey
 	subscriber solanago.PrivateKey
@@ -104,16 +105,17 @@ func newTierChain(t *testing.T) *tierChain {
 	fake := solanafake.New()
 	t.Cleanup(fake.Close)
 	fake.Mint(testDevnetUSDCMint, 6)
-	signer, _, merchantKey := newCranker(t)
+	signer, submitter, merchantKey := newCranker(t)
 	c := &tierChain{
-		fake:     fake,
-		rpc:      solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Endpoint: fake.URL(), Network: "devnet", LoopbackFixture: true}),
-		signer:   signer,
-		merchant: merchantKey,
-		mint:     solanago.MustPublicKeyFromBase58(testDevnetUSDCMint),
-		now:      time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+		fake:      fake,
+		rpc:       solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{PublicURL: fake.URL(), Network: "devnet"}),
+		signer:    signer,
+		submitter: submitter,
+		merchant:  merchantKey,
+		mint:      solanago.MustPublicKeyFromBase58(testDevnetUSDCMint),
+		now:       time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
 	}
-	fake.Fund(merchantKey, c.mint, 0)
+	fake.Fund(testTreasury, c.mint, 0)
 	return c.another(t)
 }
 
@@ -131,7 +133,7 @@ func (c *tierChain) another(t *testing.T) *tierChain {
 	o.old = &models.SolanaSubscription{
 		ID: uuid.New(), MerchantID: uuid.New(), SubscriptionID: uuid.New(),
 		SubscriberWallet: subscriber.String(), AuthorityPDA: authority.String(),
-		SubscriptionPDA: oldSub.String(), PlanPDA: oldPlan.String(), MerchantAddress: c.merchant.String(),
+		SubscriptionPDA: oldSub.String(), PlanPDA: oldPlan.String(), MerchantAddress: c.merchant.String(), Treasury: testTreasury.String(),
 		Mint: testDevnetUSDCMint, Status: models.SolanaSubscriptionActive,
 	}
 	return &o
@@ -141,9 +143,9 @@ func (c *tierChain) another(t *testing.T) *tierChain {
 // subscriber.
 func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput, *solanago.Transaction) {
 	t.Helper()
-	res, err := NewPrepareTierChangeService(c.signer, c.rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), PrepareTierChangeInput{
+	res, err := NewPrepareTierChangeService(c.submitter, c.rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), PrepareTierChangeInput{
 		MerchantID: testMerchantID, SubscriberWallet: c.old.SubscriberWallet, MintSymbol: "USDC",
-		OldPlanPDA: c.old.PlanPDA, OldSubscriptionPDA: c.old.SubscriptionPDA,
+		OldPlanPDA: c.old.PlanPDA, OldSubscriptionPDA: c.old.SubscriptionPDA, NewPlanOwner: c.merchant.String(), Treasury: c.old.Treasury,
 		NewPlanID: 99, NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
 		IsUpgrade: upgrade, FirstChargeBaseUnits: tierCharge,
 		FirstChargeMicros: tierFiatCharge, Currency: "USD",
@@ -152,7 +154,7 @@ func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput,
 	oldEnd := c.now.Add(14 * 24 * time.Hour)
 	return ConfirmTierChangeInput{
 		OldSubscriptionID: c.old.SubscriptionID, UserID: "00000000-0000-0000-0000-000000000001", NewPriceID: uuid.New(), NewProductID: uuid.New(),
-		NewSubscriptionPDA: res.NewSubscriptionPDA, NewPlanID: 99, NewMintSymbol: "USDC",
+		NewSubscriptionPDA: res.NewSubscriptionPDA, NewPlanOwner: c.merchant.String(), NewTreasury: c.old.Treasury, NewPlanID: 99, NewMintSymbol: "USDC",
 		NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
 		NewFiatAmount: 50_000_000, NewCurrency: "USD", IsUpgrade: upgrade, FirstChargeBaseUnits: tierCharge,
 		OldPeriodEndsAt: &oldEnd,
@@ -238,7 +240,7 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		wantNext, wantMeta := *in.OldPeriodEndsAt, map[string]any{"solana_tier_change": "downgrade"}
 		if upgrade {
 			wantNext, wantMeta = c.now.Add(720*time.Hour), map[string]any{"solana_tier_change": "upgrade", "solana_first_charge_base_units": uint64(tierCharge)}
-			require.Equal(t, uint64(tierCharge), c.fake.Balance(c.merchant, c.mint), "the upgrade charge moved")
+			require.Equal(t, uint64(tierCharge), c.fake.Balance(testTreasury, c.mint), "the upgrade charge landed in the treasury")
 		}
 		require.Len(t, life.creates, 1)
 		created := life.creates[0]
@@ -322,7 +324,7 @@ func TestConfirmTierChangeNeverMirrorsUnprovenSwitch(t *testing.T) {
 			message, err := tx.Message.MarshalBinary()
 			require.NoError(t, err)
 			require.Equal(t, c.merchant, tx.Message.AccountKeys[1])
-			tx.Signatures[1], err = c.signer.SignMessage(t.Context(), testMerchantID, message)
+			tx.Signatures[1], err = c.signer.SignMessage(t.Context(), message)
 			require.NoError(t, err)
 			in.Signature = c.land(t, signAs(t, tx, c.subscriber)).String()
 			return in

@@ -490,6 +490,17 @@ export const billingAdminMessages = {
     "Test: the provider's own system, no money moves",
   "Sandbox: the provider's separate sandbox":
     "Sandbox: the provider's separate sandbox",
+  "Mainnet: real money": "Mainnet: real money",
+  "Devnet: Solana's development network":
+    "Devnet: Solana's development network",
+  "Testnet: Solana's test network": "Testnet: Solana's test network",
+  Treasury: "Treasury",
+  "Gateway ID": "Gateway ID",
+  "Client account number": "Client account number",
+  "Client subaccount": "Client subaccount",
+  Money: "Money",
+  "Sandbox: its PSPs move no money": "Sandbox: its PSPs move no money",
+  "Live: its PSPs move real money": "Live: its PSPs move real money",
   "Pick a stored payment method": "Pick a stored payment method",
   "Pinned to an archived (prior) version":
     "Pinned to an archived (prior) version",

@@ -20,15 +20,14 @@ import (
 // attempt's reference and landing within its validity. The caller claims the
 // payment for its attempt and opens the membership in one transaction.
 type EnrollService struct {
-	chain     landedTxReader
-	submitter Submitter // for MerchantAddress
-	tokens    Tokens
-	now       func() time.Time
+	chain  landedTxReader
+	tokens Tokens
+	now    func() time.Time
 }
 
 // NewEnrollService builds an EnrollService.
-func NewEnrollService(chain landedTxReader, submitter Submitter, tokens Tokens) *EnrollService {
-	return &EnrollService{chain: chain, submitter: submitter, tokens: tokens, now: time.Now}
+func NewEnrollService(chain landedTxReader, tokens Tokens) *EnrollService {
+	return &EnrollService{chain: chain, tokens: tokens, now: time.Now}
 }
 
 // EnrollInput is the attempt whose first payment activates a subscription.
@@ -37,6 +36,11 @@ type EnrollInput struct {
 	// SubscriberWallet is the wallet the attempt expects to sign; it becomes
 	// the subscriber only once the landed payment proves it signed.
 	SubscriberWallet string
+
+	// Owner is the plan's owner, the cranker that published it; Treasury is
+	// the treasury it pays into.
+	Owner    string
+	Treasury string
 
 	// Plan terms (from the price's Solana rail config).
 	PlanID          uint64
@@ -73,9 +77,13 @@ func (s *EnrollService) Verify(ctx context.Context, in EnrollInput) (*Enrollment
 	if in.AmountBaseUnits == 0 || in.PeriodHours == 0 {
 		return nil, fmt.Errorf("recurring: invalid plan terms (amount/period)")
 	}
-	merchantKey, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
+	owner, err := parseKey("plan owner", in.Owner)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
+		return nil, err
+	}
+	treasury, err := parseKey("treasury", in.Treasury)
+	if err != nil {
+		return nil, err
 	}
 	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens.of(ctx))
 	if err != nil {
@@ -90,7 +98,7 @@ func (s *EnrollService) Verify(ctx context.Context, in EnrollInput) (*Enrollment
 		return nil, fmt.Errorf("recurring: invalid subscriber wallet: %w", err)
 	}
 	terms := subscription{
-		subscriber: subscriber, merchant: merchantKey, mint: mint, planID: in.PlanID,
+		subscriber: subscriber, owner: owner, treasury: treasury, mint: mint, planID: in.PlanID,
 		amount: in.AmountBaseUnits, periodHours: in.PeriodHours, createdAt: in.PlanCreatedAt,
 	}
 	planPDA, subPDA, saPDA, err := terms.addresses()
@@ -128,7 +136,8 @@ func (s *EnrollService) Verify(ctx context.Context, in EnrollInput) (*Enrollment
 	sig := payment.signature
 	return &Enrollment{Signature: sig, PeriodStart: start, PeriodEnd: end, Subscription: models.SolanaSubscription{
 		MerchantID:               in.MerchantID.UUID(),
-		MerchantAddress:          merchantKey.String(),
+		MerchantAddress:          owner.String(),
+		Treasury:                 treasury.String(),
 		Mint:                     mint.String(),
 		SubscriberWallet:         subscriber.String(),
 		PlanPDA:                  planPDA.String(),

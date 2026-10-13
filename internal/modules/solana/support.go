@@ -27,9 +27,9 @@ const stablecoinPegTolerance = 0.01
 // stablecoinPriceUSD returns a stablecoin's USD price and whether the $1 peg
 // holds. pegged=true: the caller converts by pure integer arithmetic. pegged=false
 // is the depeg failsafe: the live price is returned so the merchant still nets
-// the USD amount. Feedless stablecoins, a nil provider or a bad feed hold the peg.
+// the USD amount. A nil provider or a bad feed holds the peg.
 func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenPriceProvider) (priceUSD float64, pegged bool) {
-	if priceProvider == nil || solanatokens.IsFeedlessStablecoin(symbol) {
+	if priceProvider == nil {
 		return 1.0, true
 	}
 	p, err := priceProvider.PriceUSD(ctx, symbol)
@@ -260,13 +260,11 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 	if strings.TrimSpace(mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	// USD-pegged stablecoins are $1.00 unless the feed shows a depeg beyond
-	// tolerance, then the live price compensates. The check is mint-aware, so a
-	// custom symbol on a known USD-pegged mint gets parity pricing. Everything
-	// else (SOL, EURC, ...) requires a live price.
+	// USDC is $1.00 unless its feed shows a depeg beyond tolerance, then the
+	// live price compensates. SOL requires a live price.
 	var tokenPriceUSD float64
 	atPeg := false
-	if solanatokens.IsUSDPeggedToken(tokenSymbol, mint) {
+	if solanatokens.IsUSDC(tokenSymbol, mint) {
 		tokenPriceUSD, atPeg = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
 	} else {
 		if priceProvider == nil {

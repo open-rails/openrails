@@ -124,17 +124,3 @@ func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID billing.
 	}
 	return a.Runtime.OrderAttemptService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
 }
-
-// ApproveSolanaSigner accepts the Solana identity a Vault Transit signer key
-// now reports after it changed. Until then the Solana rail refuses and the
-// openrails_solana_signer_identity probe fails. Verify the new public key
-// (in the ERROR log and the probe) before calling.
-func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID billing.MerchantID, key string) error {
-	if err := initialized(a); err != nil {
-		return err
-	}
-	if a.Runtime.ApproveSolanaSigner == nil {
-		return fmt.Errorf("openrails: this engine cannot approve Solana signers")
-	}
-	return a.Runtime.ApproveSolanaSigner(ctx, merchantID, key)
-}

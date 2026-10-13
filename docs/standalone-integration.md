@@ -83,9 +83,11 @@ openrails run-server --config /etc/openrails/config.yaml \
   against the rails (see [operations.md](operations.md) for the full matrix;
   `limited` parks system-initiated writes like dunning, `readonly` blocks all
   provider writes at the wire). Declare it explicitly; unset internal policy fails closed to `readonly`.
-- Each PSP's `environment: live | test | sandbox` in the merchant manifest:
-  whether it moves real money, verified with the provider before use. A
-  deployment is all live or all non-live ([PSP environments](psp-environments.md)).
+- Each PSP's `environment` in the merchant manifest, one of its rail's
+  (omitted: its real-money one): whether it moves real money, verified with
+  the provider before use. It must agree with its merchant: live, or a sandbox
+  (`sandbox: true`) whose PSPs move no money
+  ([PSP environments](psp-environments.md)).
 - An `https` `auth.token.issuer`: the server's own AuthKit
   ([runtime configuration](runtime-configuration.md#authentication)).
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or

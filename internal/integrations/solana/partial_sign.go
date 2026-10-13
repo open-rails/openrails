@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/billing"
 )
 
 // blockhashGetter is the minimal RPC surface BuildPartiallySignedTx needs.
@@ -15,7 +14,7 @@ type blockhashGetter interface {
 }
 
 // BuildPartiallySignedTx assembles a transaction needing two or more signers,
-// signs only the co-signer's slot with the merchant key, and returns it base64
+// signs only the co-signer's slot with the cranker, and returns it base64
 // with the other slots empty for a wallet to complete and submit.
 //
 // It makes a recurring tier change one atomic transaction: [cancel(old) +
@@ -25,7 +24,7 @@ type blockhashGetter interface {
 //
 // feePayer is account index 0 and the wallet-side signer; cosigner must be a
 // required signer, else this errors.
-func BuildPartiallySignedTx(ctx context.Context, tenantID billing.MerchantID, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
+func BuildPartiallySignedTx(ctx context.Context, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
 	if cosigner == nil {
 		return "", fmt.Errorf("solana: cosigner is required")
 	}
@@ -41,7 +40,7 @@ func BuildPartiallySignedTx(ctx context.Context, tenantID billing.MerchantID, co
 		return "", fmt.Errorf("solana: build transaction: %w", err)
 	}
 
-	cosignerPub, err := cosigner.PublicKey(ctx, tenantID)
+	cosignerPub, err := cosigner.PublicKey(ctx)
 	if err != nil {
 		return "", fmt.Errorf("solana: resolve cosigner public key: %w", err)
 	}
@@ -61,7 +60,7 @@ func BuildPartiallySignedTx(ctx context.Context, tenantID billing.MerchantID, co
 	if err != nil {
 		return "", fmt.Errorf("solana: serialize transaction message: %w", err)
 	}
-	sig, err := cosigner.SignMessage(ctx, tenantID, msg)
+	sig, err := cosigner.SignMessage(ctx, msg)
 	if err != nil {
 		return "", fmt.Errorf("solana: cosign transaction: %w", err)
 	}

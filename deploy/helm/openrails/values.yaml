@@ -44,6 +44,12 @@ config:
   #   auth_method: kubernetes # mounts the ServiceAccount token
   #   k8s_role: openrails
   #   auth_mount: openrails-prod/k8s # where that auth method is mounted; default kubernetes
+  # Solana rebilling's crankers, in order: the first publishes new plans and
+  # each pulls the plans it owns; none turns rebilling off. A local_keypair
+  # belongs in a SOLANA_CRANKERS secret (a JSON list) instead.
+  # solana:
+  #   crankers:
+  #     - {mode: vault_transit, key: openrails-solana-cranker}
 
 # More files in /etc/openrails, each a YAML document or a string. The server
 # reads these names when present:

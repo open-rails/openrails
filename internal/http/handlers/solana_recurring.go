@@ -44,12 +44,25 @@ type resolvedTierChange struct {
 	firstChargeBaseUnits uint64
 }
 
+// newTreasury is where the new plan pays: the treasury it was published
+// with, or the subscription's own.
+func (r *resolvedTierChange) newTreasury() string {
+	if r.newTerms.treasury != "" {
+		return r.newTerms.treasury
+	}
+	return r.oldRow.Treasury
+}
+
 type solanaResolvedPlanTerms struct {
 	planID     uint64
 	mintSymbol string
 	amount     uint64
 	period     uint64
 	createdAt  int64
+	// owner is the plan's owner; treasury the destination it was published
+	// with.
+	owner    string
+	treasury string
 }
 
 func authorizeSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID) (*models.Subscription, error) {
@@ -198,7 +211,8 @@ func parseResolvedPlanTerms(cfg map[string]string) (solanaResolvedPlanTerms, boo
 	}
 	t.createdAt, _ = strconv.ParseInt(cfg["created_at"], 10, 64)
 	t.mintSymbol = strings.TrimSpace(cfg["mint_symbol"])
-	if t.mintSymbol == "" {
+	t.owner, t.treasury = strings.TrimSpace(cfg["merchant_address"]), strings.TrimSpace(cfg["treasury"])
+	if t.mintSymbol == "" || t.owner == "" {
 		return t, false
 	}
 	return t, true
@@ -289,6 +303,8 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 			MintSymbol:           resolved.newTerms.mintSymbol,
 			OldPlanPDA:           resolved.oldRow.PlanPDA,
 			OldSubscriptionPDA:   resolved.oldRow.SubscriptionPDA,
+			NewPlanOwner:         resolved.newTerms.owner,
+			Treasury:             resolved.newTreasury(),
 			NewPlanID:            resolved.newTerms.planID,
 			NewAmountBaseUnits:   resolved.newTerms.amount,
 			NewPeriodHours:       resolved.newTerms.period,
@@ -309,7 +325,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		return
 	}
 	// Derive the account without preparing or signing another payment.
-	merchantKey, err := solanago.PublicKeyFromBase58(resolved.oldRow.MerchantAddress)
+	merchantKey, err := solanago.PublicKeyFromBase58(resolved.newTerms.owner)
 	if err != nil {
 		r.InternalError("load Solana merchant address", err)
 		return
@@ -353,6 +369,8 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		NewPriceID:         resolved.newPrice.ID,
 		NewProductID:       resolved.newPrice.ProductID,
 		NewSubscriptionPDA: newPDA.String(),
+		NewPlanOwner:       resolved.newTerms.owner,
+		NewTreasury:        resolved.newTreasury(),
 		NewPlanID:          resolved.newTerms.planID,
 		NewMintSymbol:      resolved.newTerms.mintSymbol,
 		NewAmountBaseUnits: resolved.newTerms.amount,

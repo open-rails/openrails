@@ -27,12 +27,10 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
-// Devnet mints OpenRails' token registry pins.
+// Devnet mints of the tokens OpenRails accepts.
 const (
-	DevnetSOLMint   = "So11111111111111111111111111111111111111112"
-	DevnetUSDCMint  = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
-	DevnetDUSDMint  = "7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T"
-	DevnetPYUSDMint = "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM" // Token-2022
+	DevnetSOLMint  = "So11111111111111111111111111111111111111112"
+	DevnetUSDCMint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 )
 
 type tokenAccount struct {
@@ -58,6 +56,8 @@ type Node struct {
 	// stalled method.
 	gate    chan struct{}
 	stalled chan string
+	// network is the cluster getGenesisHash names: devnet unless set.
+	network string
 }
 
 type extensions struct {
@@ -111,19 +111,25 @@ type Transfer struct {
 	Garbled bool
 }
 
-// New starts a node holding the devnet registry mints.
+// New starts a devnet node holding the devnet mints.
 func New() *Node {
 	n := &Node{accounts: map[string]account{}, tokens: map[string]*tokenAccount{}, txs: map[string]*landed{}, byAddr: map[string][]string{}, height: 1_000,
-		token2022: map[string]*extensions{}, forgotten: map[string]int{}}
+		token2022: map[string]*extensions{}, forgotten: map[string]int{}, network: "devnet"}
 	n.Mint(DevnetSOLMint, 9)
 	n.Mint(DevnetUSDCMint, 6)
-	n.Mint(DevnetDUSDMint, 6)
-	n.Mint2022(DevnetPYUSDMint, 6)
 	n.server = httptest.NewServer(http.HandlerFunc(n.serve))
 	return n
 }
 
 func (n *Node) URL() string { return n.server.URL }
+
+// SetNetwork makes the node answer getGenesisHash as network's cluster:
+// mainnet, devnet or testnet.
+func (n *Node) SetNetwork(network string) {
+	n.mu.Lock()
+	n.network = network
+	n.mu.Unlock()
+}
 
 // Hold stalls every answer until release, as a node that stops responding;
 // stalled names each stalled method. A caller that gives up is let go.
@@ -224,8 +230,9 @@ func mintData(decimals byte) []byte {
 	return data
 }
 
-// Plan publishes an active, perpetual subscription plan at its program address.
-func (n *Node) Plan(owner solanago.PublicKey, planID uint64, mint string, amount, periodHours uint64) (solanago.PublicKey, error) {
+// Plan publishes an active, perpetual subscription plan at its program
+// address, paying only into destinations when it names any.
+func (n *Node) Plan(owner solanago.PublicKey, planID uint64, mint string, amount, periodHours uint64, destinations ...solanago.PublicKey) (solanago.PublicKey, error) {
 	address, bump, err := subscriptions.DerivePlanPDA(owner, planID)
 	if err != nil {
 		return solanago.PublicKey{}, err
@@ -246,6 +253,10 @@ func (n *Node) Plan(owner solanago.PublicKey, planID uint64, mint string, amount
 	binary.LittleEndian.PutUint64(data[off:], amount)
 	binary.LittleEndian.PutUint64(data[off+8:], periodHours)
 	binary.LittleEndian.PutUint64(data[off+16:], 1_700_000_000)
+	off += 32 // terms and end_ts
+	for _, d := range destinations {
+		off += copy(data[off:], d[:])
+	}
 	n.put(address.String(), subscriptions.ProgramID, data)
 	return address, nil
 }
@@ -366,7 +377,10 @@ func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction
 		return "", "", n.move(accounts[0].PublicKey, accounts[1].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(solanago.TokenProgramID) && len(data) >= 9 && data[0] == 12 && len(accounts) >= 3: // TransferChecked
 		return "", "", n.move(accounts[0].PublicKey, accounts[2].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
-	case program.Equals(subscriptions.ProgramID) && len(data) >= 9 && data[0] == 10 && len(accounts) >= 5: // transfer_subscription
+	case program.Equals(subscriptions.ProgramID) && len(data) >= 9 && data[0] == 10 && len(accounts) >= 6: // transfer_subscription
+		if err := n.mayPull(accounts[1].PublicKey, accounts[5].PublicKey, accounts[4].PublicKey); err != nil {
+			return "", "", err
+		}
 		return "", "", n.move(accounts[3].PublicKey, accounts[4].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(subscriptions.ProgramID) && len(data) == 1 && data[0] == 0 && len(accounts) >= 2: // initialize_subscription_authority
 		authority := make([]byte, 106)
@@ -386,6 +400,37 @@ func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction
 		return "", ata, nil
 	}
 	return "", "", nil
+}
+
+// mayPull refuses a pull the program would: its caller must be the plan's
+// owner, and its receiver's owner one of the plan's destinations when it
+// names any. A plan this node does not hold is not checked. n.mu held.
+func (n *Node) mayPull(planAddress, caller, receiver solanago.PublicKey) error {
+	stored, ok := n.accounts[planAddress.String()]
+	if !ok {
+		return nil
+	}
+	plan, err := subscriptions.DecodePlanAccount(stored.data)
+	if err != nil {
+		return err
+	}
+	if !plan.Owner.Equals(caller) {
+		return errors.New("transfer_subscription refused: Unauthorized")
+	}
+	named := false
+	for _, d := range plan.Destinations {
+		if d.IsZero() {
+			continue
+		}
+		named = true
+		if acct := n.tokens[receiver.String()]; acct != nil && acct.owner.Equals(d) {
+			return nil
+		}
+	}
+	if named {
+		return errors.New("transfer_subscription refused: UnauthorizedDestination")
+	}
+	return nil
 }
 
 // createPlanDataSize is create_plan's data: discriminator, plan id, mint,
@@ -790,6 +835,10 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 	case "getEpochInfo":
 		n.mu.Lock()
 		reply["result"] = map[string]any{"absoluteSlot": n.height, "blockHeight": n.height, "epoch": 5, "slotIndex": 0, "slotsInEpoch": 432_000, "transactionCount": nil}
+		n.mu.Unlock()
+	case "getGenesisHash":
+		n.mu.Lock()
+		reply["result"] = solanaint.GenesisHash(n.network)
 		n.mu.Unlock()
 	case "getBlockHeight":
 		n.mu.Lock()

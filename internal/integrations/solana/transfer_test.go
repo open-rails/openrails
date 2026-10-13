@@ -31,7 +31,7 @@ func transferChain(t *testing.T, tx *solanago.Transaction, meta map[string]any) 
 		}
 		return rpcFault{Code: -32601, Message: "unexpected " + method}
 	})
-	return NewRPCClientWithConfig(RPCClientConfig{Endpoint: url, Network: "devnet"})
+	return NewRPCClientWithConfig(RPCClientConfig{PublicURL: url, Network: "devnet"})
 }
 
 func keyIndex(t *testing.T, tx *solanago.Transaction, key solanago.PublicKey) int {

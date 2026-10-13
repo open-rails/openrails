@@ -54,7 +54,7 @@ func newChargeWorld(t *testing.T, notices ...billing.BalanceNoticeSettings) *cha
 		lines = notices[0]
 	}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"charges-" + uuid.NewString()[:8]: {
-		DisplayName: "Charges", Settings: billing.MerchantSettings{BalanceNotices: &lines},
+		DisplayName: "Charges", MerchantSettings: billing.MerchantSettings{BalanceNotices: &lines},
 	}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock})
 	database, err := db.NewWithPGXPool(f.pool, f.schema)

@@ -79,7 +79,7 @@ func TestVerifyPullMissingHistoryStaysUnresolved(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":%s}`, req.ID, result)
 	}))
 	defer server.Close()
-	h := &SolanaPullIntentHandler{Chain: solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Endpoint: server.URL, LoopbackFixture: true})}
+	h := &SolanaPullIntentHandler{Chain: solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{PublicURL: server.URL, Network: "devnet"})}
 	payload, err := json.Marshal(SolanaPullPayload{SubscriptionPDA: "subscription", RowID: uuid.New(), NextPullAt: time.Now()})
 	require.NoError(t, err)
 	intent := gen.BillingProviderIntent{Payload: payload, ResultEvidence: []byte(fmt.Sprintf(

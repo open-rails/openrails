@@ -110,6 +110,7 @@ type fileConfig struct {
 	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist"`
 
 	ProviderSandbox     *billing.ProviderSandboxConfig `koanf:"provider_sandbox"`
+	Solana              *billing.SolanaConfig          `koanf:"solana"`
 	HyperSwitch         *billing.HyperSwitchConfig     `koanf:"hyperswitch"`
 	PlatformVault       *billing.PlatformVaultConfig   `koanf:"platform_vault"`
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
@@ -239,6 +240,7 @@ func (f *fileConfig) config() (*Config, error) {
 			CloudflareProxies:             f.CloudflareProxies,
 			CCBillWebhookIPAllowlist:      f.CCBillWebhookIPAllowlist,
 			ProviderSandbox:               f.ProviderSandbox,
+			Solana:                        f.Solana,
 			HyperSwitch:                   f.HyperSwitch,
 			PlatformVault:                 f.PlatformVault,
 			EngineAdmissionHold:           f.EngineAdmissionHold,

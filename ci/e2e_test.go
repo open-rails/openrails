@@ -160,7 +160,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 func (f *fixture) runtimeDeclaring(t *testing.T, slug string, settings billing.MerchantSettings) *openrails.Client {
 	t.Helper()
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Settings: settings}}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, MerchantSettings: settings}}
 	_, shop := f.boot(t, cfg, openrails.Deps{Postgres: f.pool})
 	return shop
 }

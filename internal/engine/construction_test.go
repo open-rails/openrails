@@ -68,6 +68,8 @@ func TestValidateRefusesOneMerchantAlone(t *testing.T) {
 		"issuer not a URL":           {merchants(map[string]config.MerchantDeclaration{"a": {Issuer: "shop"}}), []string{"a"}, map[string]string{"merchants.a.issuer": "not an absolute URL"}},
 		"environment undeclared":     {psps(""), []string{"shop"}, nil},
 		"environment the rail lacks": {psps(config.EnvironmentLive, config.EnvironmentTest), []string{"shop"}, nil},
+		"another rail's environment": {psps(config.EnvironmentDevnet), []string{"shop"}, nil},
+		"live beside non-live":       {psps("", config.EnvironmentDevnet), []string{"shop"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := with(sandbox, tc.edit)
@@ -96,7 +98,7 @@ func psps(environments ...string) func(*config.Config) {
 	return func(c *config.Config) {
 		declared := map[string]config.PSPConfig{}
 		for i, environment := range environments {
-			declared[[]string{"mobius", "wallet"}[i]] = config.PSPConfig{Rail: []billing.Rail{billing.RailNMI, billing.RailSolana}[i], Environment: environment, AccountID: "1"}
+			declared[[]string{"mobius", "wallet"}[i]] = config.PSPConfig{Rail: []billing.Rail{billing.RailNMI, billing.RailSolana}[i], Environment: environment, AccountID: []string{"1", "CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w"}[i]}
 		}
 		c.Merchants = map[string]config.MerchantDeclaration{"shop": {PSPs: declared}}
 	}

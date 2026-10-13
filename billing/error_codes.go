@@ -36,6 +36,10 @@ const (
 	CodeRateLimitExceeded      = "rate_limit_exceeded"
 	CodeInternalError          = "internal_error"
 	CodeServiceUnavailable     = "service_unavailable"
+	// CodeProviderWritesDisabled: the merchant's provider writes are off
+	// (provider_write_mode, or the merchant's write posture); the message
+	// names why.
+	CodeProviderWritesDisabled = "provider_writes_disabled"
 	CodeIdempotencyKeyReused   = "idempotency_key_reused"
 	CodeIdempotencyKeyInUse    = "idempotency_key_in_use"
 	CodeInsufficientCredits    = "insufficient_credits"
@@ -158,6 +162,7 @@ var errorCodes = []ErrorCode{
 	{CodeRateLimitExceeded, 429, limit, "Too many requests; Retry-After says when to try again."},
 	{CodeInternalError, 500, fault, "OpenRails failed; request_id identifies the failure in its logs."},
 	{CodeServiceUnavailable, 503, fault, "A dependency is temporarily unavailable; retry."},
+	{CodeProviderWritesDisabled, 503, fault, "Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture)."},
 	{CodeIdempotencyKeyReused, 422, invalid, "The idempotency key already committed with different terms."},
 	{CodeIdempotencyKeyInUse, 409, invalid, "The request first sent with this Idempotency-Key is still running; retry once it finishes."},
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
@@ -341,7 +346,7 @@ var errorCodes = []ErrorCode{
 	{"psp_exists", 409, invalid, "The account is already a PSP, of this merchant or another; update it instead."},
 	{"psp_key_taken", 409, invalid, "Another live PSP holds the key."},
 	{"psp_credentials_rejected", 400, invalid, "The provider rejected the credentials, or answered that they are not in the PSP's declared environment."},
-	{"psp_environment_mixed", 409, invalid, "A deployment's PSPs are all live or all non-live; this PSP is the other."},
+	{"psp_environment_mixed", 409, invalid, "The PSP's environment disagrees with its merchant: a sandbox merchant's PSPs move no money, a live merchant's real money."},
 	{"psp_last_active", 409, invalid, "The PSP is the last active one on its rail; pass allow_last to archive it."},
 	{"psp_claim_requires_proof", 403, authz, "Claiming a provider account needs credentials that prove control of it."},
 	{"invalid_psp_reference", 400, invalid, "The PSP reference is invalid."},

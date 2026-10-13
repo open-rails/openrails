@@ -79,14 +79,13 @@ type PSPScope struct {
 	// Archived PSPs take no new work and drain: an archived document, an
 	// identity its key no longer names, or one no document names.
 	Archived bool
+	// Superseded: its label names another account now.
+	Superseded bool
 	// Custodian is the key of the custodian holding the instruments charged
 	// through this PSP, CustodianID its identity (or#880); "" and nil mean the
 	// PSP holds its own.
 	Custodian   string
 	CustodianID *uuid.UUID
-	Signer      *merchantdocs.Signer
-	// SignerChange is a pending, unapproved Transit signer public key.
-	SignerChange string
 	// DuplicateAccount: another live PSP already declares this gateway
 	// account; no credential of this one is read.
 	DuplicateAccount bool
@@ -201,6 +200,25 @@ func cleanSecretName(name string) string {
 type configSecrets struct{ service *Service }
 
 // Secrets is the merchant credential reader over the configuration.
+// OptionalPSPSecret is the PSP's secret key, "" when the PSP declares none.
+func (s *Service) OptionalPSPSecret(ctx context.Context, id billing.MerchantID, scope PSPScope, key string) (string, error) {
+	if !scope.HasSecret(key) {
+		return "", nil
+	}
+	ref, err := scope.SecretRef(key)
+	if err != nil {
+		return "", err
+	}
+	sec, err := ReadSecretRef(ctx, s.Secrets(), id, ref)
+	if errors.Is(err, ErrSecretNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(sec.Value), nil
+}
+
 func (s *Service) Secrets() MerchantSecretReader {
 	if s == nil || s.config == nil {
 		return nil

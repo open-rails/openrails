@@ -2,31 +2,18 @@ package tokens
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/currency"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
 
-// verifiedDecimals is each registry mint's on-chain precision, verified via
-// getAccountInfo. The runtime never reads it; it exists so a mistyped registry
-// address fails here.
-var verifiedDecimals = map[string]int{
-	"So11111111111111111111111111111111111111112":  9, // SOL
-	"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6, // USDC
-	"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": 6, // USDT
-	"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": 6, // PYUSD (Token-2022)
-	"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB":  6, // USD1
-	"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH": 6, // USDG (Token-2022)
-	"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU": 6, // USDC devnet
-	"CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM": 6, // PYUSD devnet
-	"7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T": 6, // DUSD devnet
-}
+// verifiedDecimals is each mint's on-chain precision, verified via
+// getAccountInfo, so a mistyped address fails here.
+var verifiedDecimals = map[string]int{SOLMint: 9, MainnetUSDCMint: 6, DevnetUSDCMint: 6}
 
 type verifiedMints map[string]int
 
@@ -40,60 +27,20 @@ func (v verifiedMints) GetAccountData(_ context.Context, addr solanago.PublicKey
 	return data, nil
 }
 
-// The registry is the one place a mint is written down. Every entry is a
-// verified, payable mint; the peg registry (the $1 parity trust anchor) agrees
-// with it; devnet never reuses a mainnet address except native SOL; and the
-// zero-config default exists on every network as a USD stablecoin.
-func TestRegistryIntegrity(t *testing.T) {
-	mainnet, devnet := DefaultSupportedTokens(), DefaultDevnetTokens()
-	for network, set := range map[string]map[string]config.TokenConfig{"mainnet": mainnet, "devnet": devnet} {
-		require.Equal(t, set, ForNetwork(network))
-		for symbol, token := range set {
-			pk, err := solanago.PublicKeyFromBase58(token.Mint)
+func TestAcceptedTokens(t *testing.T) {
+	for network, want := range map[string][]string{"mainnet": {SOL, USDC}, "devnet": {SOL, USDC}, "testnet": {SOL}} {
+		set := Accepted(network)
+		require.Len(t, set, len(want), network)
+		for _, symbol := range want {
+			pk, err := solanago.PublicKeyFromBase58(set[symbol].Mint)
 			require.NoError(t, err, "%s/%s", network, symbol)
 			d, err := solanaint.ReadMintDecimals(context.Background(), verifiedMints(verifiedDecimals), pk)
-			require.NoError(t, err, "%s/%s mint %s is not in the verified set", network, symbol, token.Mint)
+			require.NoError(t, err, "%s/%s", network, symbol)
 			require.NoError(t, config.ValidateTokenDecimals(symbol, d))
-		}
-		for _, symbol := range DefaultAcceptedSymbols {
-			require.NotEmpty(t, set[symbol].Mint, "%s/%s", network, symbol)
+			require.NotEmpty(t, DefaultPythPriceFeeds()[symbol], symbol)
 		}
 	}
-	require.Equal(t, []string{"SOL", "USDC"}, DefaultAcceptedSymbols, "nothing declared accepts SOL and USDC")
-
-	for _, sc := range knownStablecoins {
-		if token, ok := mainnet[sc.Symbol]; ok {
-			require.Equal(t, token.Mint, sc.Mint, "%s disagrees between registries", sc.Symbol)
-		}
-		got, ok := KnownStablecoinByMint(" " + sc.Mint + " ")
-		require.True(t, ok, sc.Symbol)
-		require.Equal(t, sc, got)
-		_, ok = KnownStablecoinByMint(strings.ToLower(sc.Mint))
-		require.False(t, ok, "%s: base58 is case-sensitive; a case-folded mint is another address", sc.Symbol)
-	}
-	for symbol, token := range devnet {
-		if symbol == "SOL" {
-			require.Equal(t, mainnet["SOL"].Mint, token.Mint)
-			continue
-		}
-		require.NotEqual(t, mainnet[symbol].Mint, token.Mint, symbol)
-	}
-}
-
-// Every settlable mainnet token is a recognized currency at its verified
-// on-chain precision, and every recognized crypto currency is settlable.
-func TestCurrencyRegistryMatchesSettlableTokens(t *testing.T) {
-	mainnet := DefaultSupportedTokens()
-	for symbol, token := range mainnet {
-		units, ok := currency.Lookup(symbol)
-		require.True(t, ok, "%s is settlable but not a recognized currency", symbol)
-		require.Equal(t, "crypto", units.Kind, symbol)
-		require.Equal(t, verifiedDecimals[token.Mint], units.Decimals, "%s registry precision differs from its mint", symbol)
-		require.Equal(t, units.Decimals, units.MinorDecimals, symbol)
-	}
-	for _, units := range currency.List() {
-		if units.Kind == "crypto" {
-			require.Contains(t, mainnet, units.Code, "%s is a recognized crypto currency without a settlable mint", units.Code)
-		}
-	}
+	require.NotEqual(t, Accepted("mainnet")[USDC].Mint, Accepted("devnet")[USDC].Mint)
+	require.True(t, IsUSDC("usdc", DevnetUSDCMint))
+	require.False(t, IsUSDC("USDC", SOLMint))
 }

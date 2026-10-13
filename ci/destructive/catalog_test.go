@@ -50,7 +50,7 @@ func TestDestructiveFailedProviderCatalogEditReleasesItsUnit(t *testing.T) {
 		Database:          openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ReturnOrigins:     []string{"https://e2e.test"},
-		Merchants: map[string]openrails.MerchantDeclaration{"failed-provider-edit": {DisplayName: "Failed provider edit",
+		Merchants: map[string]openrails.MerchantDeclaration{"failed-provider-edit": {Sandbox: true, DisplayName: "Failed provider edit",
 			PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_e2e",
 				Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}},
 	}

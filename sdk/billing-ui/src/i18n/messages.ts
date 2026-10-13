@@ -140,6 +140,37 @@ function errorCode(error: unknown): string | undefined {
   return undefined
 }
 
+// The operator's half of a refusal only the operator can fix (provider
+// writes switched off): logged to the console once per refusal, and shown
+// beside the customer's message on a local development host.
+const operatorLogged = new WeakSet<object>()
+
+function operatorDetail(error: unknown): string | undefined {
+  if (
+    !error ||
+    typeof error !== "object" ||
+    errorCode(error) !== "provider_writes_disabled"
+  )
+    return undefined
+  const detail = (error as { message?: unknown }).message
+  if (typeof detail !== "string" || !detail) return undefined
+  if (!operatorLogged.has(error)) {
+    operatorLogged.add(error)
+    console.warn(`OpenRails: ${detail}`)
+  }
+  return developmentHost() ? detail : undefined
+}
+
+function developmentHost(): boolean {
+  const host = globalThis.location?.hostname ?? ""
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host.endsWith(".localhost")
+  )
+}
+
 function isNetworkError(error: unknown): boolean {
   return error instanceof TypeError && /fetch|network/i.test(error.message)
 }
@@ -193,7 +224,8 @@ export function createTranslator(
             ? (error as { metadata?: MessageVars }).metadata
             : undefined
         const message = translate(`errors.${code}`, { ...metadata, ...vars })
-        if (message) return message
+        const detail = operatorDetail(error)
+        if (message) return detail ? `${message} ${detail}` : message
       }
       const fallback = isNetworkError(error)
         ? "errors.network"

@@ -6,50 +6,32 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-type activeSolanaPSP struct {
-	AccountID       string
-	RecipientWallet string
-}
-
-func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Config) (activeSolanaPSP, bool, error) {
+// Treasury is the ctx merchant's Solana treasury: its active Solana PSP's
+// account, where every payment to it lands.
+func Treasury(ctx context.Context, database *db.DB) (string, error) {
 	if database == nil {
-		return activeSolanaPSP{}, false, nil
+		return "", errors.New("solana: no database")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return activeSolanaPSP{}, false, nil
+		return "", err
 	}
 	scope, ok, err := merchants.Of(database).ActivePSPScope(ctx, tid, string(models.RailSolana))
 	if errors.Is(err, merchants.ErrNoActivePSP) || (err == nil && !ok) {
-		return activeSolanaPSP{}, false, nil
+		return "", fmt.Errorf("solana: merchant %s has no active Solana PSP, so no treasury", tid)
 	}
 	if err != nil {
-		return activeSolanaPSP{}, false, fmt.Errorf("solana: load active PSP: %w", err)
+		return "", fmt.Errorf("solana: load active PSP: %w", err)
 	}
-	accountID := strings.TrimSpace(scope.AccountID)
-	if accountID == "" {
-		return activeSolanaPSP{}, false, fmt.Errorf("solana: active PSP has empty account_id")
+	treasury := strings.TrimSpace(scope.AccountID)
+	if treasury == "" {
+		return "", fmt.Errorf("solana: active PSP %s has no treasury", scope.Key)
 	}
-	recipient := strings.TrimSpace(fmt.Sprint(scope.Settings["recipient_wallet"]))
-	if scope.Settings["recipient_wallet"] == nil || recipient == "" {
-		recipient = accountID
-	}
-	return activeSolanaPSP{AccountID: accountID, RecipientWallet: recipient}, true, nil
-}
-
-func ResolveRecipientWallet(ctx context.Context, database *db.DB, cfg *config.Config) (string, error) {
-	if account, ok, err := resolveActiveSolanaPSP(ctx, database, cfg); err != nil || ok {
-		if err != nil {
-			return "", err
-		}
-		return account.RecipientWallet, nil
-	}
-	return "", fmt.Errorf("merchant wallet not configured")
+	return treasury, nil
 }

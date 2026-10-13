@@ -37,7 +37,7 @@ type Catalog struct {
 	CardMonthlyPrice string `json:"card_monthly_price_id"`
 }
 
-func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (Catalog, error) {
+func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, cranker, treasury solanago.PublicKey) (Catalog, error) {
 	month := 720
 	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", billing.CreatePriceParams{
 		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, BillingIntervalHours: &month,
@@ -51,7 +51,7 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 	if err != nil {
 		return Catalog{}, err
 	}
-	pass, monthly, err := seedCrypto(ctx, c, chain, merchant)
+	pass, monthly, err := seedCrypto(ctx, c, chain, cranker, treasury)
 	if err != nil {
 		return Catalog{}, err
 	}
@@ -102,8 +102,8 @@ products:
 
 // seedCrypto applies Solana-sold prices the way a host's catalog does: a
 // one-time pass and a monthly membership on a published on-chain plan.
-func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (string, string, error) {
-	plan, err := chain.Plan(merchant, 1078, solanafake.DevnetDUSDMint, 4_990_000, 720)
+func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node, cranker, treasury solanago.PublicKey) (string, string, error) {
+	plan, err := chain.Plan(cranker, 1078, solanafake.DevnetUSDCMint, 4_990_000, 720, treasury)
 	if err != nil {
 		return "", "", err
 	}

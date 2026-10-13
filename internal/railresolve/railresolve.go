@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -239,18 +238,11 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 			WebhookSigningSecret: signing,
 		}
 	case models.RailSolana:
-		if scope.SignerChange != "" {
-			return nil, fmt.Errorf("solana account %s: signer now reports %s: %w", scope.AccountID, scope.SignerChange, vault.ErrSignerUnapproved)
-		}
-		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
+		rpcURL, _, err := s.secret(ctx, mid, scope, config.SolanaSecretRPCURL)
 		if err != nil {
 			return nil, err
 		}
-		solanaCfg, err := SolanaRailConfigFromSettings(settings, scope.Environment)
-		if err != nil {
-			return nil, fmt.Errorf("solana account %s: %w", scope.AccountID, err)
-		}
-		out.Solana = solanaCfg
+		out.Solana = SolanaRailConfig(scope.Environment, rpcURL)
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
 	}
@@ -385,20 +377,10 @@ func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID s
 	return s.custodianConfig(ctx, mid, custodian)
 }
 
-// SolanaRailConfigFromSettings materializes the runtime Solana config from a
-// rail account's declared settings: the network is the PSP environment's, the
-// token set is exactly what was declared (SOL and USDC when nothing is), and
-// the pricing policy then drops tokens that cannot function. A misdeclared
-// token set fails closed: the PSP does not arm.
-func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, environment string) (*config.SolanaRailConfig, error) {
-	network := config.SolanaNetwork(environment)
-	resolved, err := solanatokens.ResolveDeclared(network, settings.Tokens)
-	if err != nil {
-		return nil, err
-	}
-	out := settings.ApplyTo(&config.SolanaRailConfig{Network: network})
-	out.Tokens = solanatokens.NormalizeForNetwork(network, resolved)
-	return out, nil
+// SolanaRailConfig is a Solana PSP's runtime configuration: its environment
+// is its network, where it accepts SOL and USDC (SOL alone on testnet).
+func SolanaRailConfig(environment, rpcURL string) *config.SolanaRailConfig {
+	return &config.SolanaRailConfig{Network: environment, RPCURL: rpcURL, Tokens: solanatokens.Accepted(environment)}
 }
 
 // FixedSet is a static Source over an in-memory PSPSet — a

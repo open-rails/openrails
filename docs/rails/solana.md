@@ -3,99 +3,98 @@
 > Which flows are supported on this rail, and how well each one is verified:
 > [rail certification matrix](certification-matrix.md).
 
-Solana is the self-custody rail: there is no third-party PSP account. You receive
-funds directly into a wallet you control, and OpenRails signs recurring pulls with
-a merchant key you provide. One-time payments use Solana Pay; recurring
-subscriptions use the official on-chain Subscriptions Delegation Program
-(`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`).
+Solana is the self-custody rail: there is no third-party PSP account. Payments
+land directly in a wallet the merchant controls, its **treasury**. One-time
+payments use Solana Pay; recurring subscriptions use the official on-chain
+Subscriptions Delegation Program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`).
 
-### What you need
+### Treasury and crankers
 
-- **A receiving wallet you control.** Funds land in this wallet's associated
-  token accounts (ATAs).
-- **A signer for subscription pulls.** OpenRails must be able to sign
-  `transfer_subscription` transactions each billing period. Two modes:
-  - `local_keypair` — you provide the wallet's base58 private key as the
-    PSP secret `private_key`. It is held in the merchant secret
-    store and loaded into memory only to sign.
-  - `vault_transit` — the key lives in HashiCorp Vault Transit under the named
-    key; OpenRails sends the serialized transaction message to Vault for signing
-    and the private key never leaves Vault.
-- **SOL in the signer wallet for gas.** The merchant signer is the fee customer on
-  every pull (~5000 lamports each). A built-in monitor warns when the balance
-  drops below ~0.05 SOL.
-- Optionally, a **Helius RPC API key** (the default RPC provider).
+Two kinds of key, owned by different parties:
+
+- **Treasury** (the merchant's): the address every payment lands in, and the
+  Solana PSP's identity. OpenRails never holds its key.
+- **Crankers** (the deployment's): keys that publish the merchants' recurring
+  plans, pull each renewal and pay the fees. They never receive money: a
+  plan's only destination is the treasury it was published with, and the
+  program refuses a pull into anything else.
+
+So a SaaS operator runs its crankers for all its merchants, and each merchant
+brings only a treasury address. Without a cranker, Solana rebilling is off:
+one-time payments still work, recurring prices are not offered on Solana, and
+`catalog apply` refuses a recurring Solana price, saying why.
 
 ### PSP manifest entry
 
-Declared under `merchants.<slug>.psps.<key>` with `rail: solana`. Unlike other rails,
-`account_id` is **not** declared — the PSP identity is always
-derived from the signer's public key (a declared value is ignored with a warning).
+Declared under `merchants.<slug>.psps.<key>` with `rail: solana`:
 
 ```yaml
 psps:
   solana:
     rail: solana
-    signer: { mode: local_keypair }
-    settings:
-      # Optional destination wallet; defaults to the signer public key.
-      recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
-      rpc_provider: helius     # helius | public; empty defaults to helius
-      rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-      # tokens is OPTIONAL and IS the accepted set; omit it to accept USDC only.
-      tokens:
-        USDC: {}               # built-in symbol: SELECTED, mint from the registry.
-                               # Declaring `mint:` here is an ERROR.
-        MYTK: { name: My Token, mint: replace-with-spl-mint-address }
-                               # custom symbol: `mint:` is REQUIRED.
-                               # `decimals:` is rejected on both — read on-chain.
+    environment: devnet          # mainnet (default) | devnet | testnet
+    treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu   # required
     secrets:
-      private_key: replace-with-base58-private-key   # local_keypair mode only
-
-  # Alternative: Vault Transit signer — no private_key secret at all.
-  solana-vault:
-    rail: solana
-    signer: { mode: vault_transit, key: openrails-solana-<slug> }
+      # Optional: your RPC provider's endpoint, tried before the network's
+      # public one. It carries the provider's key, so it is a secret.
+      rpc_url: https://devnet.helius-rpc.com/?api-key=replace-with-helius-api-key
 ```
 
-`settings` and `secrets` keys are strictly validated: a typo'd key fails the
-manifest load loudly. Known settings: `rpc_provider`, `rpc_api_key`, `tokens`,
-`recipient_wallet`; the one secret is `private_key`.
+Those are all its fields; any other is refused. The environment is the
+network. Every endpoint the PSP uses, its `rpc_url` and the network's public
+endpoint, must report that network's genesis hash before the PSP arms; one on
+another network disarms it with a message naming the endpoint. The `rpc_url`
+never appears in a log, an error or a browser document. It must be https.
+`provider_sandbox.solana_rpc_url` replaces the public endpoint, for tests.
+
+### Crankers
+
+The crankers are deployment configuration: `solana.crankers` in the
+standalone server's `config.yaml` (or `SOLANA_CRANKERS`, a JSON list, from the
+environment or a mounted secret file), or `Config.Solana` for an embedded
+engine. They are an ordered list:
+
+```yaml
+solana:
+  crankers:
+    - mode: vault_transit        # the key never leaves Vault Transit (preferred)
+      key: openrails-solana-cranker
+    - mode: local_keypair
+      private_key: replace-with-base58-keypair   # a secret
+```
+
+- The **first** cranker publishes new plans. A plan's owner is fixed on-chain.
+- **Every** listed cranker pulls the renewals of the plans it owns. To move to
+  a new key, list it first and keep the old one listed while its plans have
+  subscribers.
+- A plan whose owner no listed cranker holds cannot be pulled: its renewals
+  fail with that reason and are never held against the subscriber, and the
+  `openrails_solana_crankers` probe warns with the subscriptions and plans
+  affected. A lost cranker key loses those renewals.
+- Each cranker is pinned to the public key it first had. A Vault Transit key
+  rotated since is refused, never silently used as another cranker; restore
+  the key, or create a new Transit key and list it.
+
+Crankers sign on whichever network each Solana PSP names, so each needs SOL
+there for fees (~5000 lamports a pull). A monitor warns below ~0.05 SOL.
+
+A treasury is frozen into each plan when it is published. Changing a PSP's
+treasury applies to one-time payments at once, and the next catalog apply
+(even of the same document) publishes new plans for recurring prices, so new
+subscriptions pay the new treasury; existing subscriptions keep paying the
+treasury their plan was published with.
+
+DEV lists its Transit key `openrails-solana-doujins` (address
+`CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w`) as its cranker; that address
+is also its treasury.
 
 #### Accepted tokens
 
-OpenRails ships a built-in mint registry, and it is the source of truth for a
-well-known token's on-chain identity:
-
-| network | built-in symbols |
-|---|---|
-| mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
-| devnet (`environment: sandbox`) | `SOL`, `USDC`, `PYUSD`, `DUSD` |
-
-The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
-accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
-two. Declare nothing and you accept **SOL and USDC**, each at its current
-price; both are on every network, and USDC is recurring-eligible, so a
-zero-configuration merchant can take one-off payments and rebill (rebilling is
-stablecoin-only). `GET /v1/me/config`
-(`payment.solana.tokens`) advertises exactly this set, never more.
-
-- **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
-  Declaring `mint:` is an error *even when the address is correct*: a mint you
-  can type is a mint you can mistype, and a wrong mint accepts payment in a
-  different token than the one you priced.
-- **Custom symbol** — `mint:` is required; there the mint *is* the token's
-  identity.
-- `DUSD` is an embedded host's devnet test stablecoin (`Dev USD`). It is not available
-  on mainnet and must never be configured in a live merchant manifest.
-- **`decimals`** — never configurable: read from the SPL mint on-chain.
-- **On a sandbox PSP** the devnet column applies. Devnet mints are
-  per-deployment artefacts with no canonical address, so a built-in symbol with
-  no devnet entry (`USDT`, `USD1`, `USDG`) is simply not built-in there —
-  declare it like any other ad-hoc devnet token, with an explicit `mint:`.
-
-A misdeclared token set is fail-closed: the manifest push is rejected, and a PSP
-whose stored settings are misdeclared does not arm.
+The accepted set is fixed by network: **SOL and USDC** on mainnet and devnet
+(Circle's devnet USDC, `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`), **SOL**
+on testnet. USDC is the recurring token. `GET /v1/me/config`
+(`payment.solana.tokens`) advertises exactly this set. Decimals are read from
+the mint on-chain.
 
 ### One-time payments (buyer's view)
 
@@ -111,7 +110,7 @@ merchant's accepted tokens to its customers in `payment.solana.tokens`.
    `payload` carries the quote: `token_symbol`, `token_amount`, `recipient`,
    `reference`, `quote_expires_at`.
 2. The wallet reads the label (`GET`), then posts its account (`POST`) and
-   signs the transaction OpenRails built: the quote's transfer to your wallet,
+   signs the transaction OpenRails built: the quote's transfer to the treasury,
    stamped with the reference and a memo. One transaction is offered at a time;
    once the quote expired with nothing landed, the wallet's request gets a fresh
    quote.
@@ -129,19 +128,19 @@ Recurring billing runs on the Subscriptions Delegation Program (`De1eg…`), a
 native on-chain program. The buyer signs (first time: an
 `init_subscription_authority` transaction, then) a `subscribe` transaction that
 delegates a spending allowance on their token account. OpenRails then pulls one
-plan-amount per period via `transfer_subscription` — the merchant signer signs
-and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
+plan-amount per period via `transfer_subscription`: the plan's cranker signs
+and pays gas; funds move from the subscriber's ATA to the treasury's ATA.
 
 A subscription is bought on an order of its one line, paid like a one-time
 order: `payment: {token_symbol}` (the plan's token) answers `solana_pay` with
 `payload.period_hours`, and the wallet's transaction request is answered with
 the subscribe transaction for its account: (`init_subscription_authority`
-for a first-timer,) `subscribe`, and a merchant-co-signed pull of the full
+for a first-timer,) `subscribe`, and a cranker-co-signed pull of the full
 first period, stamped with the order's reference.
 
 A subscription activates only from that first payment: signed by the wallet
 that asked for it, carrying the reference, subscribing to the plan's terms and
-pulling the full first period into the merchant's ATA, landed within the
+pulling the full first period into the treasury's ATA, landed within the
 offer's validity. OpenRails finds it on the reference, or reads it at once
 when `POST /v1/me/orders/{id}/confirm` names its `signature`; the order
 completes with the subscription on its line. A signature settles one order
@@ -149,10 +148,9 @@ only, across every merchant and PSP.
 
 - Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
   Declaring `psps: {solana: {}}` makes `catalog apply` publish the price's
-  plan, owned and signed by the Solana signer, in USDC by default (DUSD on
-  devnet), and bind it; without a signer the apply refuses the price. Use `solana: {token: USD1}` to select USD1 instead, or
-  supply `plan_pda` to attach an existing plan and resolve its configured token
-  from the on-chain mint. A one-time price needs no plan:
+  USDC plan, owned by the first cranker and paying the merchant's treasury,
+  and bind it. Supply `plan_pda` to attach an existing plan instead; a listed
+  cranker must own it and it must pay the treasury. A one-time price needs no plan:
 
   ```yaml
   prices:
@@ -162,31 +160,27 @@ only, across every merchant and PSP.
       billing_interval: 30 days
       psps:
         solana: {}
-        # Or select the token:  solana: {token: USD1}
-        # Or attach a plan:     solana: {plan_pda: 7Xy...PdA}
+        # Or attach a plan:  solana: {plan_pda: 7Xy...PdA}
   ```
 
 - `currency` is the price and ledger denomination, fiat or SOL; stablecoins
-  are Solana payment assets, and a price in one is refused. A recurring price has one immutable
-  Solana Plan and therefore one token. `token` selects creation of a new Plan;
-  `plan_pda` instead attaches an existing Plan and must be supplied without
-  `token`, because its mint is authoritative on-chain. `mint_symbol` is stored
-  snapshot metadata and is not manifest input.
+  are Solana payment assets, and a price in one is refused. A recurring price
+  has one immutable Solana plan. `mint_symbol` is stored snapshot metadata and
+  is not manifest input.
 
 - **Publishing on apply.** The plan is published before anything local is
   written, so a failed publish leaves the catalog unchanged. Its id derives
   from the price and mint: re-applying, or applying again after a failed
   commit, reattaches the same plan, and a plan already on chain with other
-  terms is refused. Plans are immutable, so new terms are a new price with its
-  own plan; the old plan stays bound to the archived price its subscribers
-  hold. Publishing is a catalog provider write: under `provider_write_mode`
-  limited or readonly, apply binds a plan already on chain and otherwise
-  refuses the price, naming it and the mode.
+  terms, or paying another treasury, is refused. Plans are immutable, so new
+  terms are a new price with its own plan; the old plan stays bound to the
+  archived price its subscribers hold. Publishing is a catalog provider write:
+  under `provider_write_mode` limited or readonly, apply binds a plan already
+  on chain and otherwise refuses the price, naming it and the mode.
 
-- **Stablecoins only**: recurring plans are limited to an allowlist (currently
-  `USDC`, `USD1`). On-chain plan amounts are immutable, so only a stablecoin
-  keeps a fixed base-unit amount ≈ a fixed fiat amount. One-off purchases are
-  unaffected and accept the full configured token set.
+- **USDC only**: on-chain plan amounts are immutable, so only a stablecoin
+  keeps a fixed base-unit amount ≈ a fixed fiat amount. One-time purchases
+  also accept SOL. Testnet has no USDC, so it offers no recurring.
 - **One pull per period, enforced twice.** The on-chain program independently
   caps pulls at one plan-amount per period (a second pull fails with
   `Custom:400` "period already paid"), so even a buggy biller cannot
@@ -213,32 +207,29 @@ only, across every merchant and PSP.
 
 ### Devnet testing
 
-The network is the PSP's declared `environment`: `sandbox` → **devnet**,
-`live` → mainnet. There is no independent network knob. The key is free text,
-e.g. `solana-devnet`:
+The network is the PSP's `environment`; a sandbox merchant (`sandbox: true`)
+declares `devnet`:
 
 ```yaml
-      solana-devnet:
+      solana:
         rail: solana
-        environment: sandbox
-        signer: { mode: vault_transit, key: openrails-solana }
+        environment: devnet
+        treasury: CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w
 ```
 
 To exercise the flows on devnet:
 
-- Fund the signer wallet with SOL for gas: `solana airdrop 1 <addr> --url devnet`.
-- For recurring, the subscriber wallet needs **real devnet USDC** (e.g. the
-  Circle faucet at faucet.circle.com) plus a little SOL — the recurring
-  allowlist resolves the configured USDC mint, so a self-minted token won't work.
+- Fund the crankers with SOL for gas: `solana airdrop 1 <addr> --url devnet`.
+- For recurring, the subscriber wallet needs **devnet USDC** (the Circle
+  faucet at faucet.circle.com) plus a little SOL.
 - Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; a
   subscription's order answers `next_action: solana_pay` and the wallet
   approves one transaction (a first-timer's folds
   `initialize_subscription_authority` in front of subscribe + first pull, using
   the program's `UNKNOWN_INIT_ID` same-slot check).
 
-Devnet money is fake: for a sandbox PSP the token-price provider falls back to
-$1.00 parity when live pricing is unavailable, so devnet never requires a price
-feed.
+Devnet and testnet money is fake: their token prices fall back to $1.00 parity
+when live pricing is unavailable, so they never require a price feed.
 
 ### Operational notes
 
@@ -246,7 +237,7 @@ feed.
   `provider_write_mode: limited` or `readonly` the pull worker skips its runs
   entirely. When you return to `full`, each subscription gets exactly one pull
   (see "missed periods" above) — there is no catch-up billing.
-- Keep the signer wallet topped up with SOL; the gas monitor warns below
+- Keep the crankers topped up with SOL; the gas monitor warns below
   ~0.05 SOL (~10k pulls of runway). A pull that fails for lack of gas is
   retried, not dunned.
 - Every pull is confirmed on-chain before being treated as success, and the

@@ -94,8 +94,7 @@ export function PriceChangeWizard({
     enabled: open,
   })
   const noticeWindowDays =
-    configuration?.settings.reprice_notice_window_days ??
-    DEFAULT_NOTICE_WINDOW_DAYS
+    configuration?.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
 
   const [now] = React.useState(() => new Date())
   const form = useForm({

@@ -38,7 +38,7 @@ func TestSecondDeclarationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		// The harness's "nmi" account again, under another account id.
-		psps["nmi-again"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-again", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
+		psps["nmi-again"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-nmi-again", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
 	}
 	w.start()
 	keys := armedKeys(customerConfig(t, w.rt))

@@ -85,7 +85,7 @@ func (v View) Posture(ctx context.Context, merchantID uuid.UUID) Posture {
 	}
 	process, _ := ParseMode(config.GetProviderWriteMode(v.Config))
 	if process == ReadOnly {
-		return Posture{ReadOnly, "provider_write_mode=readonly blocks all provider writes"}
+		return Posture{ReadOnly, "provider_write_mode=readonly blocks all provider writes: set provider_write_mode to full (or limited)"}
 	}
 	if v.DB == nil {
 		return Posture{ReadOnly, "write posture unreadable (no database wired)"}

@@ -61,11 +61,11 @@ func TestBillingPolicyRungs(t *testing.T) {
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{ExpectedRevision: &got.Revision,
-		Settings: &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{policy("tier", 20_000_000, 2), policy("fallback", 30_000_000, 3), policy("doomed", 5_000_000, 1)}}})
+		MerchantSettings: &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{policy("tier", 20_000_000, 2), policy("fallback", 30_000_000, 3), policy("doomed", 5_000_000, 1)}}})
 	require.ErrorIs(t, err, billing.ErrInvalid, "the own policy is assigned")
 	// An edit outside OpenRails can: its customers fall back and a finding opens.
 	w.editDoc("merchant", func(doc map[string]any) {
-		settings := doc["settings"].(map[string]any)
+		settings := doc
 		var kept []any
 		for _, p := range settings["billing_policies"].([]any) {
 			if p.(map[string]any)["name"] != "doomed" {

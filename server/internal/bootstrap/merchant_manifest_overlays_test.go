@@ -17,13 +17,15 @@ merchants:
       mobius:
         rail: nmi
         environment: sandbox
-        account_id: "999999"
-        settings: {tokenization_url: "https://secure.networkmerchants.com/token/Collect.js", tokenization_key: public-key}
+        gateway_id: "999999"
+        tokenization_url: "https://secure.networkmerchants.com/token/Collect.js"
+        tokenization_key: public-key
         secrets: {security_key: replace-with-live-nmi-security-key}
       ccbill:
         rail: ccbill
         environment: sandbox
-        account_id: "999999-0000"
+        client_accnum: "999999"
+        client_subacc: "0000"
 `
 
 func nmiSecret(value string) string {
@@ -53,10 +55,10 @@ merchants:
 		"undeclared psp":     "merchants: {host-one: {psps: {paykings: {secrets: {security_key: k}}}}}",
 		"misspelled secrets": "merchants: {host-one: {psps: {mobius: {secrtes: {security_key: k}}}}}",
 		"top-level catalogs": "catalogs: {x: 1}",
-		"account identity":   `merchants: {host-one: {psps: {mobius: {account_id: "attacker"}}}}`,
+		"account identity":   `merchants: {host-one: {psps: {mobius: {gateway_id: "attacker"}}}}`,
 		"rail":               "merchants: {host-one: {psps: {mobius: {rail: stripe}}}}",
 		"environment":        "merchants: {host-one: {psps: {mobius: {environment: live}}}}",
-		"processor settings": "merchants: {host-one: {psps: {mobius: {settings: {tokenization_key: attacker}}}}}",
+		"processor settings": "merchants: {host-one: {psps: {mobius: {tokenization_key: attacker}}}}",
 		"merchant profile":   "merchants: {host-one: {profile: {display_name: Attacker}}}",
 		"billing policy":     "merchants: {host-one: {billing_policies: {free: {kind: outstanding_cap}}}}",
 		"secrets not a map":  "merchants: {host-one: {psps: {mobius: {secrets: plain}}}}",

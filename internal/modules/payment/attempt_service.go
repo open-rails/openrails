@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,6 +27,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -189,16 +192,25 @@ func (s *OrderAttemptService) Clock() clockwork.Clock {
 
 func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
 	if s == nil || s.config == nil {
-		return fmt.Errorf("%w: provider writes are disabled", ErrOrderAttemptValidation)
+		return ProviderWritesDisabled("operating mode is unknown (no config wired)")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	if (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()).ReadOnly() {
-		return fmt.Errorf("%w: provider writes are disabled", ErrOrderAttemptValidation)
+	if posture := (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
+		return ProviderWritesDisabled(posture.Reason)
 	}
 	return nil
+}
+
+// ErrProviderWritesDisabled refuses a payment while the merchant's provider
+// writes are off; ProviderWritesDisabled names why.
+var ErrProviderWritesDisabled = apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off")
+
+// ProviderWritesDisabled is ErrProviderWritesDisabled naming its reason.
+func ProviderWritesDisabled(reason string) error {
+	return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so the merchant takes no payment: "+reason)
 }
 
 // priceHasSolanaRecurring reports whether a price carries a published Solana
@@ -223,6 +235,10 @@ type solanaPlanTerms struct {
 	amount     uint64
 	period     uint64
 	createdAt  int64
+	// owner is the plan's owner, the cranker that published it; treasury is
+	// the destination it was published with.
+	owner    string
+	treasury string
 }
 
 func parseSolanaPlanTerms(cfg map[string]string) (solanaPlanTerms, error) {
@@ -242,11 +258,33 @@ func parseSolanaPlanTerms(cfg map[string]string) (solanaPlanTerms, error) {
 	}
 	t.createdAt, _ = strconv.ParseInt(cfg["created_at"], 10, 64)
 	t.mintSymbol = strings.TrimSpace(cfg["mint_symbol"])
+	t.owner = strings.TrimSpace(cfg["merchant_address"])
+	t.treasury = strings.TrimSpace(cfg["treasury"])
+	if t.owner == "" {
+		return t, fmt.Errorf("%w: the price's Solana plan names no owner", ErrOrderAttemptValidation)
+	}
 	return t, nil
 }
 
-// solanaSignerAvailable refuses (503) while the Solana rail's signer is
-// unavailable or its identity change awaits approval (#1101).
+// solanaPlanOwned refuses a plan no listed cranker owns: its renewals could
+// not be pulled, so it is not sold.
+func (s *OrderAttemptService) solanaPlanOwned(ctx context.Context, terms solanaPlanTerms) error {
+	if s.solanaPrepareSubscribe == nil {
+		return fmt.Errorf("%w: %v", ErrOrderAttemptValidation, recurring.ErrNoCranker)
+	}
+	err := s.solanaPrepareSubscribe.Holds(ctx, terms.owner)
+	var changed *recurring.CrankerKeyChangedError
+	switch {
+	case errors.Is(err, recurring.ErrUnheldPlan):
+		return fmt.Errorf("%w: the price's Solana plan is owned by %s, which no listed cranker holds; it is not sold", ErrOrderAttemptValidation, terms.owner)
+	case errors.As(err, &changed):
+		return fmt.Errorf("%w: the price's Solana plan is not sold: %v", ErrOrderAttemptValidation, changed)
+	}
+	return err
+}
+
+// solanaSignerAvailable refuses (503) while the merchant's Solana
+// configuration is unavailable.
 func (s *OrderAttemptService) solanaSignerAvailable(ctx context.Context) error {
 	if _, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails); err != nil && errors.Is(err, vault.ErrUnavailable) {
 		return err
@@ -610,6 +648,8 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 		AmountBaseUnits:  terms.amount,
 		PeriodHours:      terms.period,
 		PlanCreatedAt:    terms.createdAt,
+		Owner:            getStringField(session.RailState, "plan_owner"),
+		Treasury:         getStringField(session.RailState, "treasury"),
 		Reference:        reference,
 	})
 	if err != nil {

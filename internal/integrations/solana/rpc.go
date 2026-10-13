@@ -20,44 +20,23 @@ type RPCClient struct {
 	fallback *RPCFallbackClient
 }
 
-// RPCClientConfig holds configuration for creating an RPC client.
+// RPCClientConfig is a Solana PSP's RPC chain.
 type RPCClientConfig struct {
-	// Endpoint is a custom RPC endpoint. If set, bypasses the fallback chain.
-	Endpoint string
-
-	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to "helius".
-	RPCProvider string
-
-	// RPCAPIKey is the key for RPCProvider.
-	RPCAPIKey string
-
-	// Network determines which endpoints to use (mainnet, devnet, testnet).
+	// Network is the PSP's environment: mainnet, devnet or testnet.
 	Network string
+	// URL is the PSP's own endpoint (secrets.rpc_url), tried before the
+	// network's public one.
+	URL string
+	// PublicURL replaces the network's public endpoint: a sandbox run's
+	// loopback node.
+	PublicURL string
 	// ReadOnly blocks transaction submission at the wire (mode=readonly).
 	ReadOnly bool
-	// LoopbackFixture marks an explicitly declared loopback fake RPC.
-	LoopbackFixture bool
 }
 
 // NewRPCClientWithConfig creates a new Solana RPC client with fallback support.
 func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
-	network := strings.ToLower(cfg.Network)
-	if network == "" {
-		network = "mainnet"
-	}
-
-	fallback := NewRPCFallbackClient(RPCFallbackConfig{
-		ReadOnly:        cfg.ReadOnly,
-		LoopbackFixture: cfg.LoopbackFixture,
-		CustomEndpoint:  cfg.Endpoint,
-		RPCProvider:     cfg.RPCProvider,
-		RPCAPIKey:       cfg.RPCAPIKey,
-		Network:         network,
-	})
-
-	return &RPCClient{
-		fallback: fallback,
-	}
+	return &RPCClient{fallback: NewRPCFallbackClient(RPCFallbackConfig(cfg))}
 }
 
 // GetBalance returns the SOL balance for an address.

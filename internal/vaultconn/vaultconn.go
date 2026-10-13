@@ -30,7 +30,8 @@ type Connection struct {
 	closeAuth context.CancelFunc
 	// KV is the merchant configuration mount; nil when none is named.
 	KV *vault.KVv2Adapter
-	// SolanaTransit signs for vault_transit Solana PSPs; nil without Vault.
+	// SolanaTransit signs for a vault_transit Solana cranker; nil without
+	// Vault.
 	SolanaTransit solanaint.TransitClient
 	// Auth supervises the owned login; nil without Vault or with a borrowed
 	// client.

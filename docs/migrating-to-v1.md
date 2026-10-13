@@ -131,7 +131,7 @@ to match after the mapped price ID is supplied.
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields |
-| `Config.TestMode` and its `Sandbox`/`Live` constants (`CredentialPosture`); NMI `settings.endpoint_deployment` | Removed: every PSP declares `environment: live \| test \| sandbox` (`openrails.EnvironmentLive`, …), and a deployment is all live or all non-live. An NMI `sandbox` PSP is a sandbox.nmi.com account |
+| `Config.TestMode` and its `Sandbox`/`Live` constants (`CredentialPosture`); NMI `settings.endpoint_deployment` | Removed: every PSP declares `environment: live \| test \| sandbox` (`openrails.EnvironmentLive`, …), its merchant's money class: a merchant is live or `sandbox: true`. An NMI `sandbox` PSP is a sandbox.nmi.com account |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | The fields are removed: they are the standalone server's own settings. `Config` and its sections carry `yaml` and `json` keys instead |
 | `AuthConfig.Naming merchant.NamingConfig` | `server.NamingConfig`, `server.FormerNamesConfig`, `server.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` takes no options; a credential is an `openrails.RemoteCredential` given to `openrails.NewRemote` |
@@ -180,7 +180,9 @@ The merchant declaration (`merchant_config.yaml`, `merchants.<slug>` in a
 standalone manifest) changes in two places.
 
 PSPs and custodians are no longer nested under their rail or kind, and neither
-are their secret overlays:
+are their secret overlays. They are flat: the rail (or kind) decides the
+fields, each rail names its account in its own terms, and only `secrets`
+nests:
 
 ```yaml
 # before
@@ -193,15 +195,15 @@ custodians:
 
 # after
 psps:
-  mobius: {rail: nmi, account_id: "000000", settings: {...}}
+  mobius: {rail: nmi, gateway_id: "000000", tokenization_key: ...}
 custodians:
-  vault-one: {kind: basis_theory, account_id: tenant-id}
+  vault-one: {kind: basis_theory, account_id: tenant-id, public_api_key: ...}
 ```
 
-The merchant's own settings move under one `settings:` block with the names and
-units of the configuration API. Omitted fields keep their stored values.
+The merchant's own settings sit flat on the merchant, with the names and units
+of the configuration API. Omitted fields keep their stored values.
 
-| Before | After (under `settings:`) |
+| Before | After |
 |---|---|
 | `profile:` | `profile:` |
 | `invoice.collection_threshold`, `invoice.monthly_floor`, `invoice.billing_period_boundary` | `collection_threshold`, `monthly_floor`, `billing_period_boundary` |

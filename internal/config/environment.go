@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
@@ -10,75 +9,81 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// A PSP's environment: whether its credentials move real money. Every PSP
-// declares one and OpenRails verifies it with the provider before use.
+// A PSP's environment is its rail's own: nmi live | test | sandbox, stripe
+// live | test, ccbill live | sandbox, solana mainnet | devnet | testnet. Each
+// rail's real-money environment is the default, and OpenRails verifies the
+// declared one with the provider before use.
 const (
-	// EnvironmentLive moves real money.
+	// EnvironmentLive moves real money (nmi, stripe, ccbill).
 	EnvironmentLive = "live"
 	// EnvironmentTest is the provider's real system with no money moving: an
 	// NMI account in test mode, Stripe test keys.
 	EnvironmentTest = "test"
 	// EnvironmentSandbox is the provider's separate sandbox system:
-	// sandbox.nmi.com, CCBill's sandbox, Solana devnet.
+	// sandbox.nmi.com, CCBill's sandbox.
 	EnvironmentSandbox = "sandbox"
+	// EnvironmentMainnet is Solana's real-money network.
+	EnvironmentMainnet = "mainnet"
+	// EnvironmentDevnet is Solana's devnet.
+	EnvironmentDevnet = "devnet"
+	// EnvironmentTestnet is Solana's testnet.
+	EnvironmentTestnet = "testnet"
 )
 
-// LiveEnvironment reports whether environment moves real money.
-func LiveEnvironment(environment string) bool { return environment == EnvironmentLive }
+// A money class is what a PSP's environment means for money: live, or test
+// for every environment that moves none. A PSP's identity and its custodians
+// use it; a sandbox merchant's PSPs are test, a live merchant's live.
+const (
+	ClassLive = "live"
+	ClassTest = "test"
+)
 
-// EnvironmentClass is the money class a custodian records beside its PSPs:
-// live, or test for both non-live environments.
-func EnvironmentClass(environment string) string {
-	if LiveEnvironment(environment) {
-		return EnvironmentLive
-	}
-	return EnvironmentTest
+// LiveEnvironment reports whether environment moves real money on rail.
+func LiveEnvironment(rail, environment string) bool {
+	return rails.LiveEnvironment(models.Rail(strings.ToLower(strings.TrimSpace(rail))), environment)
 }
 
-// ValidatePSPEnvironment refuses a missing environment and one the rail does
-// not have.
-func ValidatePSPEnvironment(psp, rail, environment string) error {
+// EnvironmentClass is the money class of a PSP on rail in environment.
+func EnvironmentClass(rail, environment string) string {
+	if LiveEnvironment(rail, environment) {
+		return ClassLive
+	}
+	return ClassTest
+}
+
+// ResolvePSPEnvironment is the environment a PSP on rail declares: its
+// rail's real-money one when omitted. One the rail does not have is refused,
+// naming the ones it has.
+func ResolvePSPEnvironment(psp, rail, environment string) (string, error) {
+	rail = strings.ToLower(strings.TrimSpace(rail))
 	accepted := rails.Environments(models.Rail(rail))
-	if strings.TrimSpace(environment) == "" {
-		return fmt.Errorf("psps.%s.environment is required: is the PSP live (real money) or not (%s)", psp, strings.Join(accepted, ", "))
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		return rails.DefaultEnvironment(models.Rail(rail)), nil
 	}
 	if !slices.Contains(accepted, environment) {
-		return fmt.Errorf("psps.%s.environment: %s has no %q environment (%s)", psp, rail, environment, strings.Join(accepted, ", "))
+		return "", fmt.Errorf("psps.%s.environment: %s has no %q environment (%s)", psp, rail, environment, strings.Join(accepted, ", "))
+	}
+	return environment, nil
+}
+
+// ValidatePSPMoneyClass refuses a PSP whose environment disagrees with its
+// merchant: a sandbox merchant's PSPs move no money, a live merchant's move
+// real money. A merchant's sandbox is its own merchant.
+func ValidatePSPMoneyClass(psp, rail, environment string, sandbox bool) error {
+	rail = strings.ToLower(strings.TrimSpace(rail))
+	live := LiveEnvironment(rail, environment)
+	switch {
+	case sandbox && live:
+		return fmt.Errorf("psps.%s.environment: %s moves real money, and the merchant is a sandbox (sandbox: true); its PSPs take %s", psp, environment, strings.Join(rails.Environments(models.Rail(rail))[1:], " or "))
+	case !sandbox && !live:
+		return fmt.Errorf("psps.%s.environment: %s moves no money, and the merchant is live; a sandbox is its own merchant, declared sandbox: true", psp, environment)
 	}
 	return nil
 }
 
-// ValidateDeploymentEnvironments refuses a deployment whose PSPs mix live and
-// non-live environments. environments names each PSP (merchant/key).
-func ValidateDeploymentEnvironments(environments map[string]string) error {
-	var live, other []string
-	for _, name := range slices.Sorted(maps.Keys(environments)) {
-		if LiveEnvironment(environments[name]) {
-			live = append(live, name)
-		} else {
-			other = append(other, name+" ("+environments[name]+")")
-		}
-	}
-	if len(live) > 0 && len(other) > 0 {
-		return fmt.Errorf("a deployment is all live or all non-live: live PSPs %s beside non-live PSPs %s", strings.Join(live, ", "), strings.Join(other, ", "))
-	}
-	return nil
-}
-
-// DeclaredEnvironments names the environment of every PSP the merchants
-// declare, as merchant/key.
-func DeclaredEnvironments(merchants []MerchantDeclaration) map[string]string {
-	out := map[string]string{}
-	for _, m := range merchants {
-		for key, p := range m.PSPs {
-			out[m.Slug+"/"+strings.ToLower(strings.TrimSpace(key))] = p.Environment
-		}
-	}
-	return out
-}
-
-// FakeProviders names what cfg wires that only a non-live deployment may
-// use: loopback provider gateways and an http HyperSwitch fixture.
+// FakeProviders names what cfg wires that no live PSP may sit beside:
+// loopback provider gateways and an http HyperSwitch fixture.
 func FakeProviders(cfg *Config) []string {
 	if cfg == nil {
 		return nil
@@ -94,13 +99,4 @@ func FakeProviders(cfg *Config) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-// SolanaNetwork is the network a Solana PSP in environment pays on: devnet
-// for sandbox, mainnet for live.
-func SolanaNetwork(environment string) string {
-	if environment == EnvironmentSandbox {
-		return "devnet"
-	}
-	return "mainnet"
 }

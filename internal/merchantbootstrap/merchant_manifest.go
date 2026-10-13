@@ -10,22 +10,18 @@ import (
 	"strings"
 	"time"
 
-	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
 	koanfyaml "github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/internal/signeridentity"
 )
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
@@ -255,6 +251,9 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
+	if src.Sandbox {
+		dst.Sandbox = true
+	}
 	if strings.TrimSpace(src.Secrets.SCIMToken) != "" {
 		dst.Secrets.SCIMToken = src.Secrets.SCIMToken
 	}
@@ -312,6 +311,9 @@ func MergePSPConfig(dst *config.PSPConfig, src config.PSPConfig) {
 	if strings.TrimSpace(string(src.Rail)) != "" {
 		dst.Rail = src.Rail
 	}
+	if strings.TrimSpace(src.Environment) != "" {
+		dst.Environment = src.Environment
+	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
 	}
@@ -320,9 +322,6 @@ func MergePSPConfig(dst *config.PSPConfig, src config.PSPConfig) {
 	}
 	if src.Archived {
 		dst.Archived = true
-	}
-	if src.Signer != nil {
-		dst.Signer = src.Signer
 	}
 	if len(src.Secrets) > 0 {
 		if dst.Secrets == nil {
@@ -357,12 +356,6 @@ type ProvisionMerchantParams struct {
 	Merchant  config.MerchantDeclaration
 	// Insert registers the merchant when it is missing.
 	Insert bool
-	// SolanaTransit reads a vault_transit Solana signer's public key.
-	SolanaTransit solana.TransitClient
-	// DeferPSP, when set, skips a PSP whose account cannot be derived now (a
-	// Transit signer Vault cannot answer) instead of failing; the caller
-	// provisions again later.
-	DeferPSP func(rail string, err error) bool
 }
 
 // ProvisionMerchant registers a declared merchant and, with a file as the
@@ -413,9 +406,8 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *mer
 
 // PutDeclaration puts a merchant's declared configuration in place when a
 // file is the source and returns each document the merchant does not serve,
-// with why: what its own checks refuse (ScopeDeclaration), a Solana PSP whose
-// signer cannot be read, and what the configuration's reconciliation
-// rejects. One refused document never refuses the others. With Vault as the
+// with why: what its own checks refuse (ScopeDeclaration) and what the
+// configuration's reconciliation rejects. One refused document never refuses the others. With Vault as the
 // source there is nothing to put: a declaration naming configuration was
 // refused before.
 func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing.MerchantID, mt config.MerchantDeclaration) (map[string]string, error) {
@@ -425,28 +417,7 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 		return nil, config.RefuseDeclarationBesideVault(req.Config, mt.Slug, mt)
 	}
 	mt, refused := ScopeDeclaration(req.Config, mt)
-	if signer, ok := req.SolanaTransit.(*signeridentity.Transit); ok {
-		signer.Declare(mt.PSPs)
-	}
-	accounts := map[string]string{}
-	for _, entry := range PspEntries(mt.PSPs) {
-		if entry.rail != string(models.RailSolana) {
-			continue
-		}
-		account, err := SolanaAccountID(ctx, entry.config, req.SolanaTransit)
-		if err != nil {
-			delete(mt.PSPs, entry.key)
-			if req.DeferPSP != nil && req.DeferPSP(entry.rail, err) {
-				log.WithError(err).WithField("psp", entry.key).Warn("merchant bootstrap: PSP deferred until its signer answers")
-				refused[merchantdocs.PSPDoc(strings.ToLower(entry.key))] = "deferred until its signer answers: " + err.Error()
-				continue
-			}
-			refused[merchantdocs.PSPDoc(strings.ToLower(entry.key))] = err.Error()
-			continue
-		}
-		accounts[strings.ToLower(entry.key)] = account
-	}
-	set := merchantdocs.Declared(id, mt, accounts, time.Now().UTC())
+	set := merchantdocs.Declared(id, mt, time.Now().UTC())
 	if _, ok := refused[merchantdocs.MerchantDoc]; ok {
 		set.Merchant, set.HasMerchant = merchantdocs.Doc[merchantdocs.Merchant]{}, false
 	}
@@ -481,10 +452,13 @@ func ScopeDeclaration(cfg *config.Config, mt config.MerchantDeclaration) (config
 		return mt, refused
 	}
 	for key, account := range mt.PSPs {
-		if err := validatePSPDeclaration(key, account); err != nil {
+		normalized, err := validatePSPDeclaration(key, account, mt.Sandbox)
+		if err != nil {
 			refused[merchantdocs.PSPDoc(strings.ToLower(strings.TrimSpace(key)))] = err.Error()
 			delete(mt.PSPs, key)
+			continue
 		}
+		mt.PSPs[key] = normalized
 	}
 	return mt, refused
 }
@@ -504,92 +478,6 @@ func rejected(why map[string]string) error {
 		parts = append(parts, path+": "+why[path])
 	}
 	return fmt.Errorf("declared configuration is not served: %s", strings.Join(parts, "; "))
-}
-
-type PspEntry struct {
-	key    string
-	rail   string
-	config config.PSPConfig
-}
-
-// PspEntries are the declared PSPs in key order.
-func PspEntries(in map[string]config.PSPConfig) []PspEntry {
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]PspEntry, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, PspEntry{key: key, rail: NormalizeManifestRail(string(in[key].Rail)), config: in[key]})
-	}
-	return out
-}
-
-// SolanaAccountID derives a Solana PSP's account id, its signer's public key:
-// a local keypair's, or the Vault Transit key's. A declared account_id is
-// ignored.
-func SolanaAccountID(ctx context.Context, account config.PSPConfig, transit solana.TransitClient) (string, error) {
-	if err := config.ValidateSolanaAccountSettings(account.Settings); err != nil {
-		return "", err
-	}
-	privateKey := ""
-	for key, value := range account.Secrets {
-		if strings.EqualFold(strings.TrimSpace(key), "private_key") {
-			privateKey = strings.TrimSpace(value)
-		}
-	}
-	mode := ""
-	if account.Signer != nil {
-		mode = strings.ToLower(strings.TrimSpace(account.Signer.Mode))
-	}
-	switch {
-	case mode == "vault_transit":
-		if privateKey != "" {
-			return "", fmt.Errorf("solana signer mode vault_transit cannot also set secrets.private_key")
-		}
-		key := strings.TrimSpace(account.Signer.Key)
-		if key == "" {
-			return "", fmt.Errorf("solana signer mode vault_transit requires key")
-		}
-		if transit == nil {
-			return "", fmt.Errorf("solana signer mode vault_transit requires a Vault connection")
-		}
-		return SolanaTransitPublicKey(ctx, transit, key)
-	case mode == "" || mode == "local_keypair":
-		if account.Signer != nil && strings.TrimSpace(account.Signer.Key) != "" {
-			return "", fmt.Errorf("solana signer mode local_keypair must not set key")
-		}
-		if privateKey == "" {
-			return "", fmt.Errorf("solana signer mode local_keypair requires secrets.private_key")
-		}
-		return SolanaLocalKeypairPublicKey(privateKey)
-	default:
-		return "", fmt.Errorf("solana signer mode must be local_keypair or vault_transit")
-	}
-}
-
-// SolanaLocalKeypairPublicKey parses the base58 private_key secret and returns its
-// Solana address (base58 public key).
-func SolanaLocalKeypairPublicKey(raw string) (string, error) {
-	key, err := solanago.PrivateKeyFromBase58(strings.TrimSpace(raw))
-	if err != nil {
-		return "", fmt.Errorf("solana signer mode local_keypair private_key: %w", err)
-	}
-	return key.PublicKey().String(), nil
-}
-
-// SolanaTransitPublicKey reads the Vault Transit Ed25519 key's public key and
-// returns its Solana address (base58). The private key never leaves Vault.
-func SolanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, key string) (string, error) {
-	raw, err := transit.PublicKey(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("solana vault transit signer %q public key: %w", key, err)
-	}
-	if len(raw) != 32 {
-		return "", fmt.Errorf("solana vault transit signer %q public key is %d bytes, want 32", key, len(raw))
-	}
-	return solanago.PublicKeyFromBytes(raw).String(), nil
 }
 
 func NormalizeManifestRail(raw string) string {
@@ -620,36 +508,41 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 // validateMerchantDocument checks the merchant document a declaration names
 // before it is served.
 func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration) error {
-	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.Settings); err != nil {
+	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.MerchantSettings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
-	declared := merchantdocs.Declared(billing.MerchantID{}, mt, nil, time.Time{})
+	declared := merchantdocs.Declared(billing.MerchantID{}, mt, time.Time{})
 	var vault *config.PlatformVaultConfig
 	if cfg != nil {
 		vault = cfg.PlatformVault
 	}
-	return merchants.CardCustodyRefusal(vault, mt.Settings, declared.PSPs)
+	return merchants.CardCustodyRefusal(vault, mt.MerchantSettings, declared.PSPs)
 }
 
-// validatePSPDeclaration checks one declared PSP: its rail, environment and
-// keys, a CCBill account's FlexForm salt and a Stripe publishable key's
-// environment.
-func validatePSPDeclaration(key string, account config.PSPConfig) error {
-	if err := config.ValidatePSPDeclaration(key, account); err != nil {
-		return err
+// validatePSPDeclaration checks one declared PSP and returns it in its
+// declared environment: its rail, fields and environment, which its merchant
+// must agree with, a CCBill account's FlexForm salt and a Stripe publishable
+// key's environment.
+func validatePSPDeclaration(key string, account config.PSPConfig, sandbox bool) (config.PSPConfig, error) {
+	account, err := config.NormalizePSPDeclaration(key, account)
+	if err != nil {
+		return account, err
+	}
+	if err := config.ValidatePSPMoneyClass(key, string(account.Rail), account.Environment, sandbox); err != nil {
+		return account, err
 	}
 	rail := NormalizeManifestRail(string(account.Rail))
 	// A CCBill account with inline credentials must sign its FlexForm links.
 	if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
-		return fmt.Errorf("psps.%s.secrets.salt is required", key)
+		return account, fmt.Errorf("psps.%s.secrets.salt is required", key)
 	}
 	if rail == string(models.RailStripe) {
 		if raw, ok := account.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
 			if err := config.ValidateStripePublishableKeyEnvironment(account.Environment, value); err != nil {
-				return fmt.Errorf("psps.%s.settings.publishable_key: %w", key, err)
+				return account, fmt.Errorf("psps.%s.publishable_key: %w", key, err)
 			}
 		}
 	}
-	return nil
+	return account, nil
 }

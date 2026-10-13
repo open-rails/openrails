@@ -175,9 +175,6 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return err
 	}
 	reconcileOpts.Merchants = graph.Runtime.Merchants
-	if graph.Runtime.Vault != nil {
-		reconcileOpts.SolanaTransit = graph.Runtime.Vault.SolanaTransit
-	}
 	return applyPushMerchantConfigManifest(ctx, cfg, cp, manifest, out, reconcileOpts)
 }
 

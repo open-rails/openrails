@@ -343,15 +343,15 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	}
 	var targetPSP *merchants.PSPScope
 	if !exp.PSP.isZero() {
-		environment := strings.TrimSpace(exp.PSP.Environment)
-		if environment == "" {
-			environment = "live"
+		environment, err := config.ResolvePSPEnvironment(exp.PSP.Rail, exp.PSP.Rail, exp.PSP.Environment)
+		if err != nil {
+			return res, fmt.Errorf("custody migration: PSP %s: %w", exp.PSP, err)
 		}
 		psp, ok, err := configuration.PSPScopeByAccountID(ctx, merchantID, exp.PSP.Rail, strings.TrimSpace(exp.PSP.AccountID))
 		if err != nil {
 			return res, fmt.Errorf("custody migration: resolve PSP %s: %w", exp.PSP, err)
 		}
-		if !ok || config.EnvironmentClass(psp.Environment) != config.EnvironmentClass(environment) {
+		if !ok || config.EnvironmentClass(psp.Rail, psp.Environment) != config.EnvironmentClass(exp.PSP.Rail, environment) {
 			return res, fmt.Errorf("custody migration: merchant declares no PSP %s", exp.PSP)
 		}
 		if psp.CustodianID == nil || *psp.CustodianID != custodian.ID {

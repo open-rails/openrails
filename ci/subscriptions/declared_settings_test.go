@@ -35,7 +35,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	boot := func(slug string, settings billing.MerchantSettings, vault *vaulttest.Vault) (*openrails.Engine, *openrails.Client, error) {
 		cfg := openrails.Config{
 			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Declared", Settings: settings}},
+			Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Declared", MerchantSettings: settings}},
 		}
 		if vault != nil {
 			cfg.Vault = vault.Config()
@@ -92,7 +92,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "Declared", got.DisplayName)
-	s := got.Settings
+	s := got.MerchantSettings
 	require.Equal(t, "billing@declared.example", s.Profile.FromEmail)
 	require.Equal(t, threshold, *s.CollectionThreshold)
 	require.Equal(t, "calendar_month", s.BillingPeriodBoundary)
@@ -108,7 +108,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	// next start serves what the file says.
 	grace = 3
 	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-		ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
+		ExpectedRevision: &got.Revision, MerchantSettings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
 	})
 	require.Equal(t, "method_not_allowed", codeOf(err), "%v", err)
 	require.NoError(t, bill.Close(ctx))
@@ -117,7 +117,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
 	after, err := again.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 3, *after.Settings.ArrearsGraceDays, "the declaration carried the change")
+	require.Equal(t, 3, *after.MerchantSettings.ArrearsGraceDays, "the declaration carried the change")
 }
 
 // With Vault holding the configuration what a file declares beside the slug
@@ -143,11 +143,11 @@ func TestVaultMerchantSettings(t *testing.T) {
 	}
 	slug := "vaulted-" + uuid.NewString()[:8]
 	grace := 7
-	declaring, _, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
+	declaring, _, err := boot(openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", MerchantSettings: billing.MerchantSettings{ArrearsGraceDays: &grace}})
 	require.NoError(t, err)
 	for _, p := range declaring.Probes() {
 		if p.Name == "openrails_configuration" {
-			require.ErrorContains(t, p.Check(ctx), "merchants."+slug+`.declaration: merchant "`+slug+`" declares display_name, settings`)
+			require.ErrorContains(t, p.Check(ctx), "merchants."+slug+`.declaration: merchant "`+slug+`" declares display_name, arrears_grace_days`)
 		}
 	}
 	require.NoError(t, declaring.Close(ctx))
@@ -157,20 +157,20 @@ func TestVaultMerchantSettings(t *testing.T) {
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Zero(t, got.Revision, "Vault holds nothing for the merchant yet")
-	require.Nil(t, got.Settings.ArrearsGraceDays)
+	require.Nil(t, got.MerchantSettings.ArrearsGraceDays)
 
 	name := "Vaulted Shop"
 	updated, err := client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-		ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace}, DisplayName: &name,
+		ExpectedRevision: &got.Revision, MerchantSettings: &billing.MerchantSettings{ArrearsGraceDays: &grace}, DisplayName: &name,
 	})
 	require.NoError(t, err)
 	require.Positive(t, updated.Revision)
-	require.Equal(t, 7, *updated.Settings.ArrearsGraceDays)
+	require.Equal(t, 7, *updated.MerchantSettings.ArrearsGraceDays)
 	require.Equal(t, "Vaulted Shop", updated.DisplayName)
 
 	stale := 14
 	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-		ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &stale},
+		ExpectedRevision: &got.Revision, MerchantSettings: &billing.MerchantSettings{ArrearsGraceDays: &stale},
 	})
 	require.Equal(t, "revision_mismatch", codeOf(err), "%v", err)
 	require.ErrorIs(t, err, billing.ErrConflict)
@@ -181,7 +181,7 @@ func TestVaultMerchantSettings(t *testing.T) {
 	after, err := again.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Equal(t, updated.Revision, after.Revision, "Vault holds the edit across a restart")
-	require.Equal(t, 7, *after.Settings.ArrearsGraceDays)
+	require.Equal(t, 7, *after.MerchantSettings.ArrearsGraceDays)
 }
 
 // A merchant whose documents an operator wrote straight into Vault, at the
@@ -198,7 +198,7 @@ func TestVaultDocumentsServe(t *testing.T) {
 	got, err := w.client[remote].GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.Equal(t, w.slug, got.DisplayName)
-	require.Equal(t, threshold, *got.Settings.CollectionThreshold)
+	require.Equal(t, threshold, *got.MerchantSettings.CollectionThreshold)
 	psps, err := w.client[remote].ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
 	var keys []string

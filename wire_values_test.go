@@ -55,10 +55,10 @@ func TestUsageOrderMoneyWireIsLossless(t *testing.T) {
 }
 
 func TestMerchantConfigurationDocument(t *testing.T) {
-	valid := "expected_revision: 3\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
+	valid := "expected_revision: 3\ndisplay_name: Shop\nprofile:\n  support_url: https://help.example.test\n"
 	params, err := billing.ParseMerchantConfigurationYAML([]byte(valid))
 	require.NoError(t, err)
-	require.Equal(t, "https://help.example.test", params.Settings.Profile.SupportURL)
+	require.Equal(t, "https://help.example.test", params.Profile.SupportURL)
 	for _, document := range []string{
 		valid + "display_name: Duplicate\n",
 		valid + "unexpected: true\n",
@@ -67,7 +67,8 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 		"expected_revision: -1\n",
 		strings.Repeat(" ", billing.MaxMerchantConfigurationBytes+1),
 		`{"display_name":"a","display_name":"b"}`,
-		`{"expected_revision":1,"settings":{"profile":{"unknown":1}}}`,
+		`{"expected_revision":1,"profile":{"unknown":1}}`,
+		`{"expected_revision":1,"settings":{"profile":{}}}`,
 	} {
 		_, err := billing.ParseMerchantConfigurationYAML([]byte(document))
 		require.Error(t, err, document)
@@ -77,7 +78,7 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := int64(2), int64(9007199254740993)
-	params := billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+	params := billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, MerchantSettings: &billing.MerchantSettings{
 		CollectionThreshold: &amount,
 		BillingPolicies:     []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}
@@ -86,15 +87,15 @@ func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	require.Contains(t, string(body), `"collection_threshold":"9007199254740993"`)
 	decoded, err := billing.ParseMerchantConfigurationYAML(body)
 	require.NoError(t, err)
-	require.Equal(t, amount, *decoded.Settings.CollectionThreshold)
-	require.NotNil(t, decoded.Settings.BillingPolicies)
-	require.NotNil(t, decoded.Settings.BillingPolicyBindings)
-	require.NotNil(t, decoded.Settings.DelegatedInvokerWastedSpendLimits)
+	require.Equal(t, amount, *decoded.CollectionThreshold)
+	require.NotNil(t, decoded.BillingPolicies)
+	require.NotNil(t, decoded.BillingPolicyBindings)
+	require.NotNil(t, decoded.DelegatedInvokerWastedSpendLimits)
 
-	params.Settings = &billing.MerchantSettings{}
+	params.MerchantSettings = &billing.MerchantSettings{}
 	body, err = json.Marshal(params)
 	require.NoError(t, err)
 	decoded, err = billing.ParseMerchantConfigurationYAML(body)
 	require.NoError(t, err)
-	require.Nil(t, decoded.Settings.BillingPolicies)
+	require.Nil(t, decoded.MerchantSettings, "no settings named, none changed")
 }

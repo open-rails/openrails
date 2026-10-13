@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/integrations/vault"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -19,17 +18,14 @@ import (
 )
 
 // effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// config: its PSP's settings over its environment's network and curated
-// token defaults. nil = not armed, or a signer change awaits approval.
+// config: its PSP's network and the tokens it accepts there. nil = not armed.
 func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {
 	if r.State.RailConfigs == nil {
 		return nil, nil
 	}
 	proc, err := r.State.RailConfigs.RailConfig(r.Request.Context(), string(models.RailSolana), "")
 	if err != nil {
-		// An unapproved signer change refuses the rail: advertise no Solana
-		// acceptance rather than failing the documents that carry it.
-		if errors.Is(err, railresolve.ErrRailNotArmed) || errors.Is(err, vault.ErrSignerUnapproved) {
+		if errors.Is(err, railresolve.ErrRailNotArmed) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("resolve merchant solana account: %w", err)
@@ -37,8 +33,9 @@ func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig
 	return proc.Solana, nil
 }
 
-// acceptedSolanaTokens lists exactly the tokens the merchant accepts (no
-// registry fallback), dropping any whose mint decimals cannot be read.
+// acceptedSolanaTokens lists the tokens the merchant accepts on its network,
+// dropping any whose mint decimals cannot be read. A token rebills only while
+// the deployment has a cranker.
 func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailConfig) []billing.SolanaPaymentToken {
 	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 	symbols := make([]string, 0, len(tokenMap))
@@ -66,7 +63,7 @@ func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailC
 			Mint:              mint,
 			Decimals:          decimals,
 			Preferred:         symbol == solanatokens.PreferredStablecoin,
-			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
+			RecurringEligible: r.State.SolanaPlanService != nil && recurring.IsRecurringStablecoinSymbol(symbol),
 		})
 	}
 	return tokens

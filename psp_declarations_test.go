@@ -1,7 +1,9 @@
 package openrails
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +45,7 @@ func TestTypedPSPsCoverTheRailRegistry(t *testing.T) {
 			custodial = custodial || c.SupportsRail(d.Rail)
 		}
 
-		gotSecrets, gotSettings := map[string]bool{}, []string{}
+		gotSecrets, gotSettings, account := map[string]bool{}, []string{}, map[string]string{}
 		hasCustodian := false
 		value := reflect.New(typ).Elem()
 		want := PSPConfig{Rail: billing.Rail(d.Rail)}
@@ -54,32 +56,33 @@ func TestTypedPSPsCoverTheRailRegistry(t *testing.T) {
 			key, flag, _ := strings.Cut(tag, ",")
 			require.Contains(t, []string{"", "required"}, flag, "%s.%s", typ.Name(), field.Name)
 			sample := sampleFor(t, value.Field(i), field.Name)
-			section, name, _ := strings.Cut(key, ".")
-			switch section {
-			case "secrets":
+			section, name, nested := strings.Cut(key, ".")
+			switch {
+			case nested && section == "secrets":
 				require.NotContains(t, gotSecrets, name, "%s.%s", typ.Name(), field.Name)
 				gotSecrets[name] = flag == "required"
 				want.Secrets = put(want.Secrets, name, sample.(string))
-			case "settings":
-				require.Empty(t, flag, "settings are never required: %s.%s", typ.Name(), field.Name)
-				gotSettings = append(gotSettings, name)
-				want.Settings = put(want.Settings, name, sample)
-			case "account_id":
-				want.AccountID = sample.(string)
-			case "environment":
+			case nested:
+				t.Fatalf("%s.%s: only secrets nest, got %q", typ.Name(), field.Name, tag)
+			case slices.Contains(d.AccountFields, key):
+				account[key] = sample.(string)
+			case key == "environment":
 				want.Environment = sample.(string)
-			case "archived":
+			case key == "archived":
 				want.Archived = true
-			case "custodian":
+			case key == "custodian":
 				hasCustodian = true
 				want.Custodian = sample.(string)
-			case "signer":
-				require.Equal(t, "key", name)
-				want.Signer = &PSPSignerConfig{Mode: "vault_transit", Key: sample.(string)}
+			case slices.Contains(d.SettingKeys, key):
+				require.Empty(t, flag, "a rail's own fields are never required: %s.%s", typ.Name(), field.Name)
+				gotSettings = append(gotSettings, key)
+				want.Settings = put(want.Settings, key, sample)
 			default:
-				t.Fatalf("%s.%s: unknown psp tag %q", typ.Name(), field.Name, tag)
+				t.Fatalf("%s.%s: %s takes no %q", typ.Name(), field.Name, d.Rail, tag)
 			}
 		}
+		require.ElementsMatch(t, d.AccountFields, slices.Collect(maps.Keys(account)), "%s names its account in its rail's terms", typ.Name())
+		want.AccountID = rails.Account(d.Rail, account)
 		require.Equal(t, wantSecrets, gotSecrets, "%s secrets (name: required)", typ.Name())
 		require.ElementsMatch(t, d.SettingKeys, gotSettings, "%s settings", typ.Name())
 		require.Equal(t, custodial, hasCustodian, "%s: a Custodian field iff a custodian charges through %s", typ.Name(), d.Rail)
@@ -102,9 +105,6 @@ func sampleFor(t *testing.T, field reflect.Value, name string) any {
 	case *time.Time:
 		*v = time.Date(2026, 10, 8, 12, 0, 0, 0, time.FixedZone("x", 3600))
 		return "2026-10-08T11:00:00Z"
-	case *map[string]SolanaToken:
-		*v = map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "mint-" + name, Name: "Xyz"}}
-		return map[string]any{"SOL": map[string]any{}, "XYZ": map[string]any{"mint": "mint-" + name, "name": "Xyz"}}
 	}
 	t.Fatalf("%s: no sample for %s", name, field.Type())
 	return nil
@@ -122,30 +122,32 @@ func put[V any](m map[string]V, key string, value V) map[string]V {
 func TestTypedPSPsMatchTheirYAML(t *testing.T) {
 	m, err := ParseMerchantDeclaration([]byte(`
 slug: onlydemo
+sandbox: true
 psps:
   mobius:
     rail: nmi
     environment: sandbox
-    account_id: "000000"
-    settings: {tokenization_key: tk, webhook_overlap_expires_at: "2026-10-08T00:00:00Z"}
+    gateway_id: "000000"
+    tokenization_key: tk
+    webhook_overlap_expires_at: "2026-10-08T00:00:00Z"
     secrets: {security_key: sk, webhook_signing_secret: whs, webhook_signing_secret_previous: old}
   stripe: {rail: stripe, environment: test, account_id: acct_1, archived: true, secrets: {secret_key: sk_test_1, webhook_signing_secret: whsec_1}}
-  ccbill: {rail: ccbill, environment: sandbox, account_id: 999999-0000, secrets: {salt: s}}
+  ccbill: {rail: ccbill, environment: sandbox, client_accnum: "999999", client_subacc: "0000", secrets: {salt: s}}
   wallet:
     rail: solana
-    environment: sandbox
-    signer: {mode: vault_transit, key: transit-key}
-    settings: {rpc_provider: public, tokens: {SOL: {}, XYZ: {mint: m}}}
+    environment: devnet
+    treasury: CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w
+    secrets: {rpc_url: "https://devnet.helius-rpc.com/?api-key=k"}
 `))
 	require.NoError(t, err)
-	require.Equal(t, map[string]PSPConfig{
+	require.Equal(t, PSPs{
 		"mobius": NMIPSP{
-			Environment: EnvironmentSandbox, AccountID: "000000", TokenizationKey: "tk",
+			Environment: EnvironmentSandbox, GatewayID: "000000", TokenizationKey: "tk",
 			SecurityKey: "sk", WebhookSigningSecret: "whs",
 			WebhookSigningSecretPrevious: "old", WebhookOverlapExpiresAt: time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC),
 		}.PSPConfig(),
 		"stripe": StripePSP{Environment: EnvironmentTest, AccountID: "acct_1", Archived: true, SecretKey: "sk_test_1", WebhookSigningSecret: "whsec_1"}.PSPConfig(),
-		"ccbill": CCBillPSP{Environment: EnvironmentSandbox, AccountID: "999999-0000", Salt: "s"}.PSPConfig(),
-		"wallet": SolanaPSP{Environment: EnvironmentSandbox, TransitKey: "transit-key", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m"}}}.PSPConfig(),
+		"ccbill": CCBillPSP{Environment: EnvironmentSandbox, ClientAccnum: "999999", ClientSubacc: "0000", Salt: "s"}.PSPConfig(),
+		"wallet": SolanaPSP{Environment: EnvironmentDevnet, Treasury: "CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w", RPCURL: "https://devnet.helius-rpc.com/?api-key=k"}.PSPConfig(),
 	}, m.PSPs)
 }

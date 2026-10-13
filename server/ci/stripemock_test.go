@@ -38,7 +38,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()}
 	slug := "stripemock-" + uuid.NewString()[:8]
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: as.URL, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: as.URL, PSPs: map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 	}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})

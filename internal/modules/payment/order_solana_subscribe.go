@@ -51,7 +51,7 @@ func (s *OrderAttemptService) startOrderSolanaSubscribe(ctx context.Context, ord
 		return err
 	}
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-		return fmt.Errorf("%w: solana recurring billing is not configured", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: %v", ErrOrderAttemptValidation, recurring.ErrNoCranker)
 	}
 	if len(order.Lines) != 1 || order.Lines[0].Quantity != nil && *order.Lines[0].Quantity != 1 || price == nil || order.Lines[0].Amount != price.Amount {
 		return fmt.Errorf("%w: a Solana subscription is one seat of its plan", ErrOrderAttemptValidation)
@@ -64,6 +64,9 @@ func (s *OrderAttemptService) startOrderSolanaSubscribe(ctx context.Context, ord
 	if err != nil {
 		return err
 	}
+	if err := s.solanaPlanOwned(ctx, terms); err != nil {
+		return err
+	}
 	if token = strings.ToUpper(strings.TrimSpace(token)); token != "" && token != strings.ToUpper(terms.mintSymbol) {
 		return fmt.Errorf("%w: the plan is paid in %s", ErrOrderAttemptValidation, terms.mintSymbol)
 	}
@@ -73,6 +76,11 @@ func (s *OrderAttemptService) startOrderSolanaSubscribe(ctx context.Context, ord
 	}
 	if rail.Solana == nil {
 		return fmt.Errorf("%w: solana rail is not configured", ErrOrderAttemptValidation)
+	}
+	// The plan pays the treasury it was published with.
+	treasury := terms.treasury
+	if treasury == "" {
+		treasury = rail.AccountID
 	}
 	cfg, ok := rail.Solana.Tokens[strings.ToUpper(terms.mintSymbol)]
 	if !ok {
@@ -88,6 +96,7 @@ func (s *OrderAttemptService) startOrderSolanaSubscribe(ctx context.Context, ord
 		"token_amount": strconv.FormatUint(terms.amount, 10), "quote_expires_at": validUntil.Format(time.RFC3339),
 		"plan_id": strconv.FormatUint(terms.planID, 10), "mint_symbol": terms.mintSymbol, "amount_base_units": strconv.FormatUint(terms.amount, 10),
 		"period_hours": strconv.FormatUint(terms.period, 10), "plan_created_at": strconv.FormatInt(terms.createdAt, 10),
+		"plan_owner": terms.owner, "treasury": treasury,
 	}
 	return s.openOrderSolana(ctx, order, attemptID, psp, state, validUntil, replaces)
 }
@@ -140,6 +149,7 @@ func (s *OrderAttemptService) enrollSolanaOrder(ctx context.Context, attempt *mo
 		MerchantID: mid, SubscriberWallet: wallet, Signature: strings.TrimSpace(signature), Reference: *attempt.Reference, ValidUntil: validUntil,
 		PlanID: getUint64Field(attempt.RailState, "plan_id"), MintSymbol: getStringField(attempt.RailState, "mint_symbol"),
 		AmountBaseUnits: getUint64Field(attempt.RailState, "amount_base_units"), PeriodHours: getUint64Field(attempt.RailState, "period_hours"),
+		Owner: getStringField(attempt.RailState, "plan_owner"), Treasury: getStringField(attempt.RailState, "treasury"),
 	}
 	in.PlanCreatedAt, _ = strconv.ParseInt(getStringField(attempt.RailState, "plan_created_at"), 10, 64)
 	review := solanamodule.LateSettlement{UserID: attempt.CustomerID.String(), SessionID: attempt.ID.String(), Currency: models.DerefStr(attempt.Currency),
@@ -187,7 +197,7 @@ func (s *OrderAttemptService) enrollSolanaOrder(ctx context.Context, attempt *mo
 			Metadata: map[string]any{
 				"solana_reference": in.Reference, "solana_subscriber_wallet": sub.SubscriberWallet, "solana_subscription_pda": sub.SubscriptionPDA,
 				"solana_token_symbol": in.MintSymbol, "solana_token_mint": sub.Mint, "solana_token_amount": strconv.FormatUint(in.AmountBaseUnits, 10),
-				"solana_recipient_wallet": sub.MerchantAddress,
+				"solana_treasury": sub.Treasury,
 			},
 			Enrolled: &orders.Enrolled{RailSubscriptionID: sub.SubscriptionPDA, PeriodStart: enrolled.PeriodStart, PeriodEnd: enrolled.PeriodEnd}})
 		if err != nil {

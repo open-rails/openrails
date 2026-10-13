@@ -13,10 +13,10 @@ import (
 func TestConfigurationChangesCountSecurityTargets(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
 	id := billing.AlertWebhookID(uuid.New())
-	old := Merchant{DisplayName: "Old", Settings: billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "https://old.test/logo"}}, AlertWebhooks: []AlertWebhook{{ID: id, Name: "old", URL: "https://alerts.test/private-token", Enabled: true}}}
+	old := Merchant{DisplayName: "Old", MerchantSettings: billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "https://old.test/logo"}}, AlertWebhooks: []AlertWebhook{{ID: id, Name: "old", URL: "https://alerts.test/private-token", Enabled: true}}}
 	next := old
 	next.DisplayName = "New"
-	next.Settings.Profile = &billing.MerchantProfile{LogoURL: "https://new.test/logo"}
+	next.Profile = &billing.MerchantProfile{LogoURL: "https://new.test/logo"}
 	next.AlertWebhooks = append([]AlertWebhook(nil), old.AlertWebhooks...)
 	next.AlertWebhooks[0].Name = "New name"
 	next.AlertWebhooks[0].UpdatedAt = time.Now()

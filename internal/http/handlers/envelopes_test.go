@@ -298,7 +298,7 @@ func TestProviderTransportErrorsAreNotEchoed(t *testing.T) {
 		http.Error(w, "nope", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	client := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{Endpoint: srv.URL + "/?api-key=" + secret, Network: "mainnet"})
+	client := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{URL: srv.URL + "/?api-key=" + secret, PublicURL: srv.URL, Network: "mainnet"})
 	_, err := client.GetBalance(context.Background(), solanago.MustPublicKeyFromBase58("11111111111111111111111111111111"))
 	require.Error(t, err)
 	refusal := solanaClientError(err)

@@ -13,28 +13,20 @@ import (
 )
 
 // CrankService executes the recurring pull: one transfer_subscription per
-// subscriber per cycle. The merchant (cranker) signs and pays gas; funds move
-// from the subscriber's ATA to the merchant's.
+// subscriber per cycle. The plan's owner, a listed cranker, signs and pays gas; funds move from the
+// subscriber's token account to the treasury the plan pays.
 type CrankService struct {
 	submitter Submitter
 }
 
-type merchantAddressSubmitter interface {
-	SubmitForMerchantAddress(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
-}
-
-// Presubmit capabilities: the production signerSubmitter persists the signed
-// signature via the caller's hook before submission, so a crash mid-submit is
-// resolvable by a chain read. Optional; fakes skip the write-ahead.
+// presubmitSubmitter persists the signed signature via the caller's hook
+// before submission, so a crash mid-submit is resolvable by a chain read.
+// Optional; fakes skip the write-ahead.
 type presubmitSubmitter interface {
-	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
 }
 
-type presubmitMerchantAddressSubmitter interface {
-	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
-}
-
-// NewCrankService builds a CrankService over a per-merchant Submitter.
+// NewCrankService builds a CrankService over the cranker's Submitter.
 func NewCrankService(submitter Submitter) *CrankService {
 	return &CrankService{submitter: submitter}
 }
@@ -57,8 +49,15 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 		return "", fmt.Errorf("recurring: crank amount must be > 0")
 	}
 
-	merchant, err := parseKey("merchant_address", sub.MerchantAddress)
+	owner, err := parseKey("merchant_address", sub.MerchantAddress)
 	if err != nil {
+		return "", err
+	}
+	treasury, err := parseKey("treasury", sub.Treasury)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.submitter.Signer(ctx, owner); err != nil {
 		return "", err
 	}
 	mint, err := parseKey("mint", sub.Mint)
@@ -86,8 +85,7 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 	if err != nil {
 		return "", fmt.Errorf("recurring: derive delegator ata: %w", err)
 	}
-	// Receiver = the merchant's ATA.
-	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
+	receiverATA, _, err := subscriptions.DeriveATA(treasury, mint, solanago.TokenProgramID)
 	if err != nil {
 		return "", fmt.Errorf("recurring: derive receiver ata: %w", err)
 	}
@@ -102,7 +100,7 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 		SubscriptionAuthority: saPDA,
 		DelegatorATA:          delegatorATA,
 		ReceiverATA:           receiverATA,
-		Caller:                merchant,
+		Caller:                owner,
 		Mint:                  mint,
 		TokenProgram:          solanago.TokenProgramID,
 		EventAuthority:        eventAuth,
@@ -121,17 +119,10 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 		sigPresubmit = func(sig solanago.Signature) error { return presubmit(sig.String()) }
 	}
 	var sig solanago.Signature
-	switch submitter := s.submitter.(type) {
-	case presubmitMerchantAddressSubmitter:
-		sig, err = submitter.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchant, instructions, sigPresubmit)
-	case merchantAddressSubmitter:
-		sig, err = submitter.SubmitForMerchantAddress(ctx, tenantID, merchant, instructions)
-	default:
-		if ps, ok := s.submitter.(presubmitSubmitter); ok {
-			sig, err = ps.SubmitWithPresubmit(ctx, tenantID, instructions, sigPresubmit)
-		} else {
-			sig, err = s.submitter.Submit(ctx, tenantID, instructions)
-		}
+	if ps, ok := s.submitter.(presubmitSubmitter); ok {
+		sig, err = ps.SubmitWithPresubmit(ctx, tenantID, owner, instructions, sigPresubmit)
+	} else {
+		sig, err = s.submitter.Submit(ctx, tenantID, owner, instructions)
 	}
 	if err != nil {
 		return "", err

@@ -185,6 +185,8 @@ var pinnedMarshalers = map[string]string{
 	"internal/cardguard/card.go:Card":                                     "TestCardRedactsItself — no money: always the redaction",
 	"billing/list_page.go:ListPage":                                       "TestListPageWire — no money of its own: {data, next_cursor}, items encode as their own type",
 	"internal/contract/openapi.go:obj":                                    "TestOpenAPICoversTheCatalog — the generated OpenAPI document, never a wire value",
+	"internal/merchantdocs/docs.go:PSP":                                   "TestPSPDocumentSchema — no money: a PSP's rail fields, environment and secrets, flat",
+	"internal/merchantdocs/docs.go:Custodian":                             "TestPSPDocumentSchema — no money: a custodian's kind fields and secrets, flat",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {

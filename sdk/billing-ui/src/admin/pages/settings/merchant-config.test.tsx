@@ -55,11 +55,10 @@ const configuration = (
 ): MerchantConfigurationState => ({
   revision,
   display_name: displayName,
-  settings: {
-    profile: { from_email: "billing@acme.test" },
-    alert_email: "ops@acme.test",
-    reprice_notice_window_days: 14,
-  },
+  sandbox: false,
+  profile: { from_email: "billing@acme.test" },
+  alert_email: "ops@acme.test",
+  reprice_notice_window_days: 14,
   platform_vault: { available: false },
 })
 
@@ -71,7 +70,6 @@ const aPSP = (revision = 7): PSP => ({
   account_id: "acct_a",
   archived: false,
   open_obligations: 0,
-  settings: {},
   credentials: {
     secret_key: { configured: true, validated_at: WHEN },
     webhook_secret: { configured: true, validated_at: null },
@@ -86,7 +84,8 @@ const rails: RailDefinition[] = [
     rail: "stripe",
     display_name: "Stripe",
     credential_keys: ["secret_key", "webhook_secret"],
-    setting_keys: [],
+    account_fields: ["account_id"],
+    fields: ["publishable_key"],
     environments: ["live", "test"],
   },
 ]
@@ -249,7 +248,7 @@ it("a configuration edit names the revision it opened at; one changed since clos
     {
       expected_revision: 3,
       display_name: "Acme Corp",
-      settings: { profile: { from_email: "billing@acme.test" } },
+      profile: { from_email: "billing@acme.test" },
     },
   ])
   expect(error).toHaveBeenCalledWith(
@@ -281,10 +280,7 @@ it("the merchant profile edits where customers subscribe and manage billing", as
       current = {
         ...current,
         revision: current.revision + 1,
-        settings: {
-          ...current.settings,
-          profile: { ...current.settings.profile, ...body.settings?.profile },
-        },
+        profile: { ...current.profile, ...body.profile },
       }
       return current
     },
@@ -300,12 +296,10 @@ it("the merchant profile edits where customers subscribe and manage billing", as
     {
       expected_revision: 3,
       display_name: "Acme Retail",
-      settings: {
-        profile: {
-          from_email: "billing@acme.test",
-          subscribe_url: "https://acme.test/subscribe",
-          billing_url: "https://acme.test/account",
-        },
+      profile: {
+        from_email: "billing@acme.test",
+        subscribe_url: "https://acme.test/subscribe",
+        billing_url: "https://acme.test/account",
       },
     },
   ])

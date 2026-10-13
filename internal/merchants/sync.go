@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchantdocs"
-	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 // SyncConfig reconciles a freshly loaded configuration with the identities
@@ -73,9 +72,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), err.Error())
 				continue
 			}
-			if why, err := s.environmentRefusal(ctx, q, p.Environment); err != nil {
-				return err
-			} else if why != "" {
+			if why := s.environmentRefusal(key, p.Rail, p.Environment, set.Merchant.Value.Sandbox); why != "" {
 				reject(merchantdocs.PSPDoc(key), why)
 				continue
 			}
@@ -134,11 +131,11 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 type pspIdentity struct{ rail, class, account string }
 
 func docIdentity(p merchantdocs.PSP) pspIdentity {
-	return pspIdentity{normalizeProviderSecretType(p.Rail), config.EnvironmentClass(p.Environment), strings.TrimSpace(p.AccountID)}
+	return pspIdentity{normalizeProviderSecretType(p.Rail), config.EnvironmentClass(normalizeProviderSecretType(p.Rail), p.Environment), strings.TrimSpace(p.AccountID)}
 }
 
 func rowIdentity(row gen.BillingPsp) pspIdentity {
-	return pspIdentity{row.Rail, config.EnvironmentClass(row.Environment), row.AccountID}
+	return pspIdentity{row.Rail, config.EnvironmentClass(row.Rail, row.Environment), row.AccountID}
 }
 
 // oneLabelPerAccount keeps one label for each declared account: the label
@@ -345,32 +342,9 @@ func (s *Service) fingerprint(ctx context.Context, tx pgx.Tx, id billing.Merchan
 // declaration.
 func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) error {
 	rail := normalizeProviderSecretType(p.Rail)
-	if err := config.ValidatePSPKeys(key, config.PSPConfig{Rail: billing.Rail(rail), Settings: p.Settings, Secrets: p.Secrets}); err != nil {
+	if _, err := config.NormalizePSPDeclaration(key, config.PSPConfig{Rail: billing.Rail(rail), Environment: p.Environment, AccountID: p.AccountID,
+		Custodian: p.Custodian, Settings: p.Settings, Secrets: p.Secrets}); err != nil {
 		return err
-	}
-	if err := config.ValidatePSPEnvironment(key, rail, p.Environment); err != nil {
-		return err
-	}
-	account := strings.TrimSpace(p.AccountID)
-	if account == "" {
-		return fmt.Errorf("account_id is required")
-	}
-	if err := config.ValidateRailAccountID(models.Rail(rail), account); err != nil {
-		return err
-	}
-	if rail == string(models.RailSolana) {
-		if err := config.ValidateSolanaAccountSettings(p.Settings); err != nil {
-			return err
-		}
-		settings, err := config.ParseSolanaAccountSettings(p.Settings)
-		if err != nil {
-			return err
-		}
-		if _, err := solanatokens.ResolveDeclared(config.SolanaNetwork(p.Environment), settings.Tokens); err != nil {
-			return err
-		}
-	} else if p.Signer != nil {
-		return fmt.Errorf("a signer is only for solana")
 	}
 	if err := config.RejectRetiredCustodySettings(p.Settings); err != nil {
 		return err
@@ -386,13 +360,13 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 		if raw, ok := p.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
 			if err := config.ValidateStripePublishableKeyEnvironment(p.Environment, value); err != nil {
-				return fmt.Errorf("settings.publishable_key: %w", err)
+				return fmt.Errorf("publishable_key: %w", err)
 			}
 		}
 	}
 	if custodian != "" {
 		held, ok := set.Custodians[custodian]
-		if !ok || held.Value.Environment != config.EnvironmentClass(p.Environment) {
+		if !ok || held.Value.Environment != config.EnvironmentClass(p.Rail, p.Environment) {
 			return fmt.Errorf("custodian %q is not declared (declared: %s)", custodian, strings.Join(set.CustodianKeys(), ", "))
 		}
 		d, err := custodians.Require(held.Value.Kind)

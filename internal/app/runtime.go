@@ -70,14 +70,8 @@ type Runtime struct {
 	// background owns goroutines that reconnect optional providers; Close
 	// stops them first.
 	background backgroundTasks
-	// signerIdentity records a Vault Transit key that no longer matches its
-	// stored Solana identity.
-	signerIdentity dependencyState
 	// refusals are what the engine serves without (Refuse).
 	refusals refusals
-	// ApproveSolanaSigner, set by the embedded constructor, accepts the
-	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
-	ApproveSolanaSigner func(ctx context.Context, merchantID billing.MerchantID, key string) error
 	// posturePending counts loaded PSPs whose verdict is not yet known; -1
 	// until StartProviderPosture's first pass completes.
 	posturePending atomic.Int64
@@ -209,6 +203,8 @@ type Runtime struct {
 	// FXRates is FXProvider: rates held in memory, refreshed from the
 	// process's first cross-currency quote until Close.
 	FXRates *fx.Rates
+	// SolanaCrankers are the deployment's listed crankers; nil with none.
+	SolanaCrankers *recurring.Crankers
 	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
 	// composition root once the merchant secret store is available; nil -> the
 	// cranker worker log-and-skips.

@@ -78,10 +78,9 @@ type railPublicProfile struct {
 // A settings key added anywhere else — or any merchant secret, which does not
 // live in settings at all — is private by default and stays private.
 //
-// Two live examples of why this is a whitelist and not a denylist: solana's
-// settings carry rpc_api_key (a paid Helius key that #352 says must never
-// reach a browser) and a custody block carries the custodian's tenant id. Both
-// are in the same map as the public keys below.
+// A live example of why this is a whitelist and not a denylist: a custody
+// block carries the custodian's tenant id in the same map as the public keys
+// below.
 var publicRailProfiles = map[string]railPublicProfile{
 	string(models.RailNMI): {
 		Flow: FlowTokenize,
@@ -344,7 +343,7 @@ func (s *Service) pspSelectors(ctx context.Context, id billing.MerchantID) (map[
 	if err != nil {
 		return nil, fmt.Errorf("load PSP routing policy: %w", err)
 	}
-	routing := set.Merchant.Value.Settings.PSPRouting
+	routing := set.Merchant.Value.PSPRouting
 	if routing == nil || len(*routing) == 0 {
 		return nil, nil
 	}

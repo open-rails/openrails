@@ -299,33 +299,28 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.Mer
 }
 
 // buildSolana: Solana pulls read public chain state, so the rail needs no pull
-// credential (private_key is the operator-only signing key). A declared solana
-// account arms the fetcher; its settings carry the merchant's RPC knobs
-// (rpc_provider / rpc_api_key), defaulting to the public RPC for the PSP
-// environment's network.
+// credential. A declared Solana PSP arms the fetcher on its network: its
+// rpc_url first, the network's public endpoint as fallback.
 func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if b.DB == nil {
 		return
 	}
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderSolana, out); ok {
-		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
+		rpcURL, err := b.Merchants.OptionalPSPSecret(ctx, mid, scope, config.SolanaSecretRPCURL)
 		if err != nil {
 			b.warnScopeError(ctx, mid, ProviderSolana, err)
 			return
 		}
 		// A sandbox run's loopback RPC replaces the public one here as it does
 		// for the runtime's own Solana clients (hermetic CI never reaches devnet).
-		endpoint := config.SandboxSolanaRPCURL(b.Config)
 		rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-			Endpoint:        endpoint,
-			LoopbackFixture: endpoint != "",
-			RPCProvider:     settings.RPCProvider,
-			RPCAPIKey:       settings.RPCAPIKey,
-			Network:         config.SolanaNetwork(scope.Environment),
-			ReadOnly:        true,
+			Network:   scope.Environment,
+			URL:       rpcURL,
+			PublicURL: config.SandboxSolanaRPCURL(b.Config),
+			ReadOnly:  true,
 		})
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
-		// The PSP's account_id is the merchant wallet the discovery lanes scan.
+		// The PSP's treasury is the wallet the discovery lanes scan.
 		fetcher.MerchantWallet = scope.AccountID
 		plans := SolanaPlanSourceFromDB(b.DB)
 		fetcher.Plans = func(ctx context.Context) ([]string, error) { return plans(db.WithPSPID(ctx, scope.ID)) }

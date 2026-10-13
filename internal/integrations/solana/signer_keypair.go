@@ -3,101 +3,24 @@ package solana
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/billing"
 )
 
-// DefaultSignerCacheTTL is the in-process lifetime of a resolved merchant
-// signing key: a rotation takes effect within it, while the hot path skips
-// almost every secret-store round-trip.
-const DefaultSignerCacheTTL = 60 * time.Second
+// keypairSigner signs in-process with a key the deployment holds; Vault
+// Transit keeps it out of the process instead.
+type keypairSigner struct{ key solanago.PrivateKey }
 
-// keypairSigner loads the PSP private_key from a MerchantSecretGetter and
-// signs in-process, from a file or Vault. The plaintext key lives in memory
-// (cached up to ttl); Vault Transit keeps it out of the process entirely.
-type keypairSigner struct {
-	secrets MerchantSecretGetter
-	ttl     time.Duration
-	now     func() time.Time
+// NewKeypairSigner returns the cranker signing with key.
+func NewKeypairSigner(key solanago.PrivateKey) Signer { return keypairSigner{key: key} }
 
-	mu    sync.Mutex
-	cache map[string]cachedKey // keyed by merchantID.String()
+func (k keypairSigner) PublicKey(context.Context) (solanago.PublicKey, error) {
+	return k.key.PublicKey(), nil
 }
 
-type cachedKey struct {
-	key       solanago.PrivateKey
-	expiresAt time.Time
-}
-
-// NewKeypairSigner returns a per-merchant in-process signer backed by secrets. A
-// zero ttl uses DefaultSignerCacheTTL.
-func NewKeypairSigner(secrets MerchantSecretGetter, ttl time.Duration) Signer {
-	if ttl <= 0 {
-		ttl = DefaultSignerCacheTTL
-	}
-	return &keypairSigner{
-		secrets: secrets,
-		ttl:     ttl,
-		now:     time.Now,
-		cache:   make(map[string]cachedKey),
-	}
-}
-
-// load resolves and caches the merchant's private key. Cache hits avoid the
-// secret-store round-trip; misses fetch, parse, and cache with a ttl expiry.
-func (k *keypairSigner) load(ctx context.Context, merchantID billing.MerchantID) (solanago.PrivateKey, error) {
-	if k.secrets == nil {
-		return nil, fmt.Errorf("solana: keypair signer has no secret store")
-	}
-	if merchantID.IsZero() {
-		return nil, fmt.Errorf("solana: signing requires a merchant id")
-	}
-
-	id := merchantID.String()
-
-	k.mu.Lock()
-	if entry, ok := k.cache[id]; ok && k.now().Before(entry.expiresAt) {
-		key := entry.key
-		k.mu.Unlock()
-		return key, nil
-	}
-	k.mu.Unlock()
-
-	raw, err := k.secrets.GetSecret(ctx, merchantID, privateKeySecretName)
-	if err != nil {
-		return nil, fmt.Errorf("solana: load merchant signing key: %w", err)
-	}
-	key, err := solanago.PrivateKeyFromBase58(strings.TrimSpace(raw))
-	if err != nil {
-		return nil, fmt.Errorf("solana: parse merchant signing key: %w", err)
-	}
-
-	k.mu.Lock()
-	k.cache[id] = cachedKey{key: key, expiresAt: k.now().Add(k.ttl)}
-	k.mu.Unlock()
-
-	return key, nil
-}
-
-func (k *keypairSigner) PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error) {
-	key, err := k.load(ctx, merchantID)
-	if err != nil {
-		return solanago.PublicKey{}, err
-	}
-	return key.PublicKey(), nil
-}
-
-func (k *keypairSigner) SignMessage(ctx context.Context, merchantID billing.MerchantID, message []byte) (solanago.Signature, error) {
+func (k keypairSigner) SignMessage(_ context.Context, message []byte) (solanago.Signature, error) {
 	if len(message) == 0 {
 		return solanago.Signature{}, fmt.Errorf("solana: cannot sign empty message")
 	}
-	key, err := k.load(ctx, merchantID)
-	if err != nil {
-		return solanago.Signature{}, err
-	}
-	return key.Sign(message)
+	return k.key.Sign(message)
 }

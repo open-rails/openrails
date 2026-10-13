@@ -14,10 +14,11 @@ import (
 // third-party vault:
 //
 //	merchants.<slug>.custodians.<key>
-//	    kind:       basis_theory
-//	    account_id: <custodian-native tenant id>
-//	    settings:   { public_api_key: …, network_tokens: false }
-//	    secrets:    { api_key: … }
+//	    kind:           basis_theory
+//	    account_id:     <custodian-native tenant id>
+//	    public_api_key: …
+//	    network_tokens: false
+//	    secrets:        { api_key: … }
 //
 // and each PSP whose gateway those cards are charged through REFERENCES it:
 //

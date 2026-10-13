@@ -6,50 +6,37 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/gagliardetto/solana-go/rpc/jsonrpc"
-
-	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
-// A Solana RPC credential is a merchant secret, and providers take it in the
-// query string (Helius `?api-key=`). solana-go formats the full request URL
-// into its errors, which get logged, so a held endpoint URL never contains the
-// key: RPCEndpoint.URL is credential-free and the parameters are re-attached
-// here, on a clone of the outbound request.
+// An RPC endpoint URL is a secret: providers put the key in its path
+// (QuickNode, Alchemy) or query (Helius ?api-key=). solana-go formats the
+// request URL into its errors, which get logged, so its client sees only the
+// endpoint's origin and the full URL is restored here, on a clone of the
+// outbound request.
 
-// secretQueryTransport re-attaches credential query parameters at dial time.
-type secretQueryTransport struct {
+// secretURLTransport sends each request to the endpoint's full URL.
+type secretURLTransport struct {
 	base   http.RoundTripper
-	secret url.Values
+	target *url.URL
 }
 
-func (t *secretQueryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *secretURLTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if len(t.secret) == 0 {
+	if t.target == nil {
 		return base.RoundTrip(req)
 	}
 	clone := req.Clone(req.Context())
-	u := *req.URL
-	q := u.Query()
-	for name, vals := range t.secret {
-		for i, v := range vals {
-			if i == 0 {
-				q.Set(name, v)
-			} else {
-				q.Add(name, v)
-			}
-		}
-	}
-	u.RawQuery = q.Encode()
-	clone.URL = &u
+	target := *t.target
+	clone.URL = &target
+	clone.Host = target.Host
 	return base.RoundTrip(clone)
 }
 
@@ -73,27 +60,27 @@ func newRPCHTTPTransport() *http.Transport {
 }
 
 // newEndpointClient builds the solana-go client for one endpoint: it sees only
-// the credential-free URL; credentials ride the transport.
+// the endpoint's origin; the full URL rides the transport.
 func newEndpointClient(ep RPCEndpoint) *rpc.Client {
 	httpClient := &http.Client{
 		Timeout:   rpcHTTPTimeout,
-		Transport: &secretQueryTransport{base: newRPCHTTPTransport(), secret: ep.secret},
+		Transport: &secretURLTransport{base: newRPCHTTPTransport(), target: ep.target},
 	}
 	return rpc.NewWithCustomRPCClient(jsonrpc.NewClientWithOpts(ep.URL, &jsonrpc.RPCClientOpts{HTTPClient: httpClient}))
 }
 
-// newSecretEndpoint builds an endpoint whose credential is carried out-of-band.
-func newSecretEndpoint(name, rawURL string, priority int, secret url.Values) RPCEndpoint {
-	safeURL, stripped := redact.StripSecretQuery(rawURL)
-	if len(stripped) > 0 {
-		if secret == nil {
-			secret = url.Values{}
-		}
-		for k, v := range stripped {
-			secret[k] = v
-		}
+// newSecretEndpoint is an endpoint whose path and query are held back from
+// everything but the transport.
+func newSecretEndpoint(name, rawURL string, priority int) RPCEndpoint {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return RPCEndpoint{Name: name, Priority: priority}
 	}
-	return RPCEndpoint{Name: name, URL: safeURL, Priority: priority, secret: secret}
+	origin := u.Scheme + "://" + u.Host
+	if (u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.User == nil {
+		return RPCEndpoint{Name: name, URL: origin, Priority: priority}
+	}
+	return RPCEndpoint{Name: name, URL: origin, Priority: priority, target: u}
 }
 
 // CredentialFingerprint is a short, non-reversible digest of a credential, so
@@ -106,16 +93,11 @@ func CredentialFingerprint(v string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// PrimaryCredentialFingerprint fingerprints the credential armed on the
-// primary endpoint; empty when the endpoint carries none.
+// PrimaryCredentialFingerprint fingerprints the primary endpoint's full URL;
+// empty when it carries no credential.
 func (c *RPCFallbackClient) PrimaryCredentialFingerprint() string {
-	if len(c.endpoints) == 0 {
+	if len(c.endpoints) == 0 || c.endpoints[0].target == nil {
 		return ""
 	}
-	vals := make([]string, 0, len(c.endpoints[0].secret))
-	for _, v := range c.endpoints[0].secret {
-		vals = append(vals, v...)
-	}
-	sort.Strings(vals)
-	return CredentialFingerprint(strings.Join(vals, "\x00"))
+	return CredentialFingerprint(c.endpoints[0].target.String())
 }

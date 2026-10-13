@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/authkit/keys"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/service"
 )
@@ -26,7 +25,6 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
-	environments := map[string]string{}
 	for _, rawSlug := range sortedMerchantKeys(m.Merchants) {
 		t := m.Merchants[rawSlug]
 		slug := strings.ToLower(strings.TrimSpace(rawSlug))
@@ -40,17 +38,18 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		}
 		// The configuration API's own validator: a manifest cannot declare
 		// settings the API would refuse.
-		if err := service.ValidateMerchantSettings(t.Settings); err != nil {
+		if err := service.ValidateMerchantSettings(t.MerchantSettings); err != nil {
 			return fmt.Errorf("merchant %q settings: %w", slug, err)
 		}
 		for key, account := range t.PSPs {
-			if err := validateManifestPSP(slug, key, account); err != nil {
+			normalized, err := normalizeManifestPSP(slug, key, account)
+			if err != nil {
 				return err
 			}
-			environments[slug+"/"+key] = account.Environment
+			t.PSPs[key] = normalized
 		}
 	}
-	return config.ValidateDeploymentEnvironments(environments)
+	return nil
 }
 
 // validateManifestRemoteApplication checks the per-merchant host-app
@@ -92,8 +91,7 @@ func validateManifestRemoteApplication(merchantSlug string, app *RemoteApplicati
 	return nil
 }
 
-var validateManifestPSP = merchantbootstrap.ValidateManifestPSP
-var solanaSignerConfigured = merchantbootstrap.SolanaSignerConfigured
+var normalizeManifestPSP = merchantbootstrap.NormalizeManifestPSP
 
 func validHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))

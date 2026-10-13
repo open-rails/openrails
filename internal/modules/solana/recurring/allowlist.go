@@ -13,20 +13,11 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
-// RecurringStablecoins is the allowlist of token symbols that may back a
-// recurring Solana subscription. The subscriptions program rejects mints with
-// ConfidentialTransfer, NonTransferable, PermanentDelegate, TransferHook,
-// TransferFee, MintCloseAuthority or Pausable extensions:
-//
-//   - USDC, USD1 (mainnet only), DUSD (devnet test coin): plain SPL Token.
-//   - USDT: plain SPL Token, but no devnet mint to verify create_plan against.
-//   - PYUSD, USDG: Token-2022 with PermanentDelegate+TransferFee, rejected.
-//   - SOL and volatile tokens: plan amounts are immutable, so only a stablecoin
-//     keeps a fixed USD value across cycles.
-//
-// Mint extensions are immutable, so a rejected token never becomes eligible.
-// One-off purchases are unaffected.
-var RecurringStablecoins = []string{"USDC", "USD1", "DUSD"}
+// RecurringStablecoins are the tokens a recurring Solana subscription bills
+// in: USDC, a plain SPL Token mint the subscriptions program takes. A plan's
+// amount is immutable, so only a stablecoin keeps its USD value across cycles;
+// SOL is one-time only. Testnet has no USDC, so no recurring plan.
+var RecurringStablecoins = []string{solanatokens.USDC}
 
 // IsRecurringStablecoinSymbol reports whether symbol is on the recurring allowlist.
 func IsRecurringStablecoinSymbol(symbol string) bool {
@@ -45,11 +36,11 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 		e.Symbol, strings.Join(RecurringStablecoins, ", "))
 }
 
-// ResolveRecurringMint returns an allowlisted symbol's built-in mint for network
-// (mainnet/devnet), failing closed on an unknown, ineligible or unconfigured
-// token. Decimals come from the mint on-chain.
+// ResolveRecurringMint returns an allowlisted symbol's mint on network,
+// failing closed on an ineligible token or one the network lacks. Decimals
+// come from the mint on-chain.
 func ResolveRecurringMint(symbol, network string) (mint string, err error) {
-	return ResolveRecurringMintFromTokens(symbol, solanatokens.ForNetwork(network))
+	return ResolveRecurringMintFromTokens(symbol, solanatokens.Accepted(network))
 }
 
 // ResolveRecurringMintFromTokens is ResolveRecurringMint against the runtime

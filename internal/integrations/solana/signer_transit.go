@@ -7,7 +7,6 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/billing"
 )
 
 // TransitClient is the Vault Transit surface the remote signer needs, declared
@@ -20,70 +19,42 @@ type TransitClient interface {
 	PublicKey(ctx context.Context, name string) ([]byte, error)
 }
 
-// TransitKeyName maps a merchant to its Vault Transit key name.
-type TransitKeyName func(billing.MerchantID) string
-
-// DefaultTransitKeyName names a merchant signing key "openrails-solana-<merchantID>".
-func DefaultTransitKeyName(id billing.MerchantID) string {
-	return "openrails-solana-" + id.String()
-}
-
-// transitSigner is the "sign this" Signer: the merchant's Ed25519 key lives inside
-// Vault Transit (non-extractable) and NEVER enters this process. PublicKey is the
-// Solana address (base58 of the Ed25519 public key) and is cached since it is
-// stable for the key version; signatures always round-trip Vault.
+// transitSigner is the cranker whose Ed25519 key lives inside Vault Transit
+// (non-extractable) and never enters this process. Its public key is cached;
+// signatures always round-trip Vault.
 type transitSigner struct {
 	transit TransitClient
-	keyName TransitKeyName
+	key     string
 	ttl     time.Duration
 	now     func() time.Time
 
-	mu   sync.Mutex
-	pubs map[string]cachedPub // keyed by merchantID.String()
-}
-
-type cachedPub struct {
-	key       solanago.PublicKey
+	mu        sync.Mutex
+	pub       solanago.PublicKey
 	expiresAt time.Time
 }
 
-// NewTransitSigner returns a per-merchant Signer backed by Vault Transit. A nil
-// keyName uses DefaultTransitKeyName; a zero ttl uses DefaultSignerCacheTTL for
-// the public-key cache.
-func NewTransitSigner(transit TransitClient, keyName TransitKeyName, ttl time.Duration) Signer {
-	if keyName == nil {
-		keyName = DefaultTransitKeyName
-	}
+// NewTransitSigner returns the cranker signing with Transit key. A zero ttl
+// uses DefaultSignerCacheTTL for the public-key cache.
+func NewTransitSigner(transit TransitClient, key string, ttl time.Duration) Signer {
 	if ttl <= 0 {
 		ttl = DefaultSignerCacheTTL
 	}
-	return &transitSigner{
-		transit: transit,
-		keyName: keyName,
-		ttl:     ttl,
-		now:     time.Now,
-		pubs:    make(map[string]cachedPub),
-	}
+	return &transitSigner{transit: transit, key: key, ttl: ttl, now: time.Now}
 }
 
-func (t *transitSigner) PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error) {
+func (t *transitSigner) PublicKey(ctx context.Context) (solanago.PublicKey, error) {
 	if t.transit == nil {
 		return solanago.PublicKey{}, fmt.Errorf("solana: transit signer has no client")
 	}
-	if merchantID.IsZero() {
-		return solanago.PublicKey{}, fmt.Errorf("solana: signing requires a merchant id")
-	}
-	id := merchantID.String()
-
 	t.mu.Lock()
-	if entry, ok := t.pubs[id]; ok && t.now().Before(entry.expiresAt) {
-		key := entry.key
+	if t.now().Before(t.expiresAt) {
+		key := t.pub
 		t.mu.Unlock()
 		return key, nil
 	}
 	t.mu.Unlock()
 
-	raw, err := t.transit.PublicKey(ctx, t.keyName(merchantID))
+	raw, err := t.transit.PublicKey(ctx, t.key)
 	if err != nil {
 		return solanago.PublicKey{}, fmt.Errorf("solana: transit public key: %w", err)
 	}
@@ -93,23 +64,19 @@ func (t *transitSigner) PublicKey(ctx context.Context, merchantID billing.Mercha
 	key := solanago.PublicKeyFromBytes(raw)
 
 	t.mu.Lock()
-	t.pubs[id] = cachedPub{key: key, expiresAt: t.now().Add(t.ttl)}
+	t.pub, t.expiresAt = key, t.now().Add(t.ttl)
 	t.mu.Unlock()
-
 	return key, nil
 }
 
-func (t *transitSigner) SignMessage(ctx context.Context, merchantID billing.MerchantID, message []byte) (solanago.Signature, error) {
+func (t *transitSigner) SignMessage(ctx context.Context, message []byte) (solanago.Signature, error) {
 	if t.transit == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: transit signer has no client")
-	}
-	if merchantID.IsZero() {
-		return solanago.Signature{}, fmt.Errorf("solana: signing requires a merchant id")
 	}
 	if len(message) == 0 {
 		return solanago.Signature{}, fmt.Errorf("solana: cannot sign empty message")
 	}
-	raw, err := t.transit.Sign(ctx, t.keyName(merchantID), message)
+	raw, err := t.transit.Sign(ctx, t.key, message)
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: transit sign: %w", err)
 	}

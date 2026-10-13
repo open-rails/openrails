@@ -43,7 +43,7 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 }
 
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at, treasury FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
 `
 
 type GetSolanaSubscriptionByPDAParams struct {
@@ -71,12 +71,13 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, arg GetSolanaS
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Treasury,
 	)
 	return i, err
 }
 
 const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_id = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at, treasury FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_id = $1
 `
 
 type GetSolanaSubscriptionBySubscriptionIDParams struct {
@@ -104,21 +105,26 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, arg
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Treasury,
 	)
 	return i, err
 }
 
 const listActiveSolanaMerchantWallets = `-- name: ListActiveSolanaMerchantWallets :many
-SELECT DISTINCT merchant_id, merchant_address
+SELECT merchant_id, merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT plan_pda)::bigint AS plans
 FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
+GROUP BY merchant_id, merchant_address
 `
 
 type ListActiveSolanaMerchantWalletsRow struct {
 	MerchantID      uuid.UUID
 	MerchantAddress string
+	Subscriptions   int64
+	Plans           int64
 }
 
+// Each plan owner with active subscriptions: how many, on how many plans.
 func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantID uuid.UUID) ([]ListActiveSolanaMerchantWalletsRow, error) {
 	rows, err := q.db.Query(ctx, listActiveSolanaMerchantWallets, merchantID)
 	if err != nil {
@@ -128,7 +134,12 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 	var items []ListActiveSolanaMerchantWalletsRow
 	for rows.Next() {
 		var i ListActiveSolanaMerchantWalletsRow
-		if err := rows.Scan(&i.MerchantID, &i.MerchantAddress); err != nil {
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.MerchantAddress,
+			&i.Subscriptions,
+			&i.Plans,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -140,7 +151,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 }
 
 const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at, treasury FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
@@ -179,6 +190,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Treasury,
 		); err != nil {
 			return nil, err
 		}
@@ -191,7 +203,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 }
 
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
-SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, sub.psp_id
+SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, s.treasury, sub.psp_id
 FROM billing.solana_subscriptions s
 JOIN billing.subscriptions sub ON sub.id = s.subscription_id
 WHERE s.merchant_id = $1::uuid AND sub.merchant_id = $1::uuid AND s.status = 'active' AND s.next_pull_at <= $2::timestamptz
@@ -243,6 +255,7 @@ func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSol
 			&i.BillingSolanaSubscription.Status,
 			&i.BillingSolanaSubscription.CreatedAt,
 			&i.BillingSolanaSubscription.UpdatedAt,
+			&i.BillingSolanaSubscription.Treasury,
 			&i.PspID,
 		); err != nil {
 			return nil, err
@@ -309,13 +322,13 @@ INSERT INTO billing.solana_subscriptions (
     id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature,
-    next_pull_at, status, created_at, updated_at
+    next_pull_at, status, created_at, updated_at, treasury
 ) VALUES (
     $1,
     $14::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
     $15, $16,
-    $10, $11, $12, $13
+    $10, $11, $12, $13, $17::text
 )
 ON CONFLICT (subscription_pda) DO UPDATE SET
     subscription_id = EXCLUDED.subscription_id,
@@ -343,6 +356,7 @@ type UpsertSolanaSubscriptionParams struct {
 	MerchantID               uuid.UUID
 	LastPulledPeriodStartsAt *time.Time
 	LastSignature            *string
+	Treasury                 string
 }
 
 // billing.solana_subscriptions: on-chain recurring subscription state.
@@ -364,6 +378,7 @@ func (q *Queries) UpsertSolanaSubscription(ctx context.Context, arg UpsertSolana
 		arg.MerchantID,
 		arg.LastPulledPeriodStartsAt,
 		arg.LastSignature,
+		arg.Treasury,
 	)
 	return err
 }

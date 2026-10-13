@@ -65,15 +65,14 @@ func TestClientRequestShapes(t *testing.T) {
 	}{
 		{"settings carry named policies and tier bindings", func() error {
 			revision := int64(1)
-			_, err := client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+			_, err := client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, MerchantSettings: &billing.MerchantSettings{
 				BillingPolicies:       []billing.BillingPolicy{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
 				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "api_line", Tier: "gold"}},
 			}})
 			return err
 		}, http.MethodPatch, "/v1/merchant/configuration", "", func(t *testing.T, b map[string]any) {
-			settings := b["settings"].(map[string]any)
-			require.Equal(t, "api_line", settings["billing_policies"].([]any)[0].(map[string]any)["name"])
-			binding := settings["billing_policy_bindings"].([]any)[0].(map[string]any)
+			require.Equal(t, "api_line", b["billing_policies"].([]any)[0].(map[string]any)["name"])
+			binding := b["billing_policy_bindings"].([]any)[0].(map[string]any)
 			require.Equal(t, "api_line", binding["policy"])
 			require.Equal(t, "gold", binding["tier"])
 		}},

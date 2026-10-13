@@ -23,7 +23,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := prepareWorld(t, 30)
-			fake, _ := withSolana(t, w)
+			fake := withSolana(t, w).fake
 			w.start()
 			chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 			chain.runWorkers(w)

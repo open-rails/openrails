@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // pspCatalog is an in-memory PSP catalog: key lookup, the rail-kind list,
@@ -312,7 +313,7 @@ func TestRailSkipReason(t *testing.T) {
 	oneOff := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD"}
 	solanaLinked := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD", PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana"}}}
 	solanaPlan := recurringPrice()
-	solanaPlan.PSPLinks = map[string]map[string]string{"solana": {models.RailKeyRail: "solana", "plan_id": "7", "amount_base_units": "1000000", "period_hours": "720", "mint_symbol": "USDC"}}
+	solanaPlan.PSPLinks = map[string]map[string]string{"solana": {models.RailKeyRail: "solana", "plan_id": "7", "amount_base_units": "1000000", "period_hours": "720", "mint_symbol": "USDC", "merchant_address": "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"}}
 	recurringReady := &OrderAttemptService{solanaPrepareSubscribe: &recurring.PrepareSubscribeService{}, solanaEnroll: &recurring.EnrollService{}}
 	const S, O = models.PurchaseSubscription, models.PurchaseOneOff
 
@@ -410,6 +411,10 @@ func TestSavedMethodMustBelongToTargetPSP(t *testing.T) {
 func TestPurchaseRequiresProviderWrites(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 	for _, cfg := range []*config.Config{nil, {ProviderWriteMode: config.ProviderWriteModeReadOnly}} {
-		require.ErrorIs(t, (&OrderAttemptService{config: cfg}).requireProviderWrites(ctx), ErrOrderAttemptValidation)
+		err := (&OrderAttemptService{config: cfg}).requireProviderWrites(ctx)
+		require.ErrorIs(t, err, ErrProviderWritesDisabled)
+		require.Equal(t, billing.CodeProviderWritesDisabled, err.(*apperr.Error).Code)
 	}
+	err := (&OrderAttemptService{config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}}).requireProviderWrites(ctx)
+	require.ErrorContains(t, err, "provider_write_mode=readonly blocks all provider writes", "the refusal names why")
 }

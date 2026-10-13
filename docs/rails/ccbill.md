@@ -16,15 +16,10 @@ webhooks. A checkout can keep it as a card PSP's fallback (below).
 ### Account structure
 
 CCBill identifies a merchant by a **client account number** (`clientAccnum`,
-e.g. `999999`) plus a **subaccount** (`clientSubacc`, e.g. `0000`). OpenRails
-declares this pair once, as the dash-joined `account_id`:
-
-```
-account_id: "999999-0000"   # clientAccnum-clientSubacc — dash, never a slash
-```
-
-Config validation rejects a slash and derives the pair by splitting on the
-first dash; there is no separate accnum/subacc setting.
+e.g. `999999`) plus a **subaccount** (`clientSubacc`, e.g. `0000`). A CCBill
+PSP declares both, as `client_accnum` and `client_subacc`; quote them, or YAML
+reads `0000` as the number 0. Joined, `999999-0000` is the PSP's account: its
+webhook path and credential names use it.
 
 From CCBill (dashboard or merchant support) you need:
 
@@ -45,8 +40,8 @@ Under `merchants.<slug>.psps` (secrets via YAML overlays; secret-store prefix
 psps:
   ccbill:               # PSP key — reserved gateway, must be "ccbill"
     rail: ccbill
-    # clientAccnum-clientSubacc, dash-joined:
-    account_id: "999999-0000"
+    client_accnum: "999999"
+    client_subacc: "0000"
     secrets:
       salt: replace-with-ccbill-flexform-salt
       # Optional pair — declare both or neither:
@@ -159,7 +154,7 @@ Point CCBill's Webhooks admin at:
 - `POST /v1/webhooks/ccbill/{account_id}` (standalone; the configured account resolves its merchant), or
 - `POST <prefix>/v1/webhooks/ccbill/{account_id}` (embedded, e.g. `/billing/v1/...`)
 
-`account_id` is the configured `clientAccnum-clientSubacc` identity and must match the payload. Accountless webhook URLs are not registered.
+`{account_id}` is the PSP's `client_accnum-client_subacc` (`999999-0000`) and must match the payload. Accountless webhook URLs are not registered.
 
 The `eventType` must arrive as a query parameter and, when the body also
 carries one, the two must match. Payloads may be form-encoded or JSON.
@@ -170,11 +165,11 @@ Verification, as implemented (CCBill has no HMAC):
   (`64.38.212.0/24`, `64.38.215.0/24`, `64.38.240.0/24`, `64.38.241.0/24`)
   are built in; nothing to configure. Any OTHER source must be listed
   explicitly in `ccbill_webhook_ip_allowlist` (a CIDR list; `/0` is refused),
-  and even then is accepted only while the database proves no live PSP exists
-  anywhere in the deployment. If that cannot be proven — probe error, no DB —
-  the entry is refused.
+  and even then is accepted only for a webhook naming a sandbox merchant's
+  CCBill account. If that cannot be proven — probe error, no DB — the entry is
+  refused.
 - **Account match** — the payload's `clientAccnum`/`clientSubacc` must equal
-  the pair derived from the declared `account_id`.
+  the PSP's `client_accnum` and `client_subacc`.
 - A merchant with no armed CCBill account rejects the webhook with a 5xx
   (fail closed; CCBill redelivers).
 
@@ -186,7 +181,8 @@ non-retryable. Events are deduplicated by transaction id / payload hash.
 
 ### Sandbox testing
 
-Declare the PSP `environment: sandbox` (CCBill has `live` and `sandbox`). A
+Declare the PSP `environment: sandbox` (CCBill has `live` and `sandbox`) on a
+sandbox merchant (`sandbox: true`). A
 sandbox PSP's FlexForm URLs go to
 `https://sandbox-api.ccbill.com/wap-frontflex/flexforms/...` instead of
 `api.ccbill.com`. To post webhooks from a local harness, declare its source

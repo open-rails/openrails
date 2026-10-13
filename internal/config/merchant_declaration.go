@@ -38,18 +38,23 @@ type MerchantDeclaration struct {
 	// group (authkit/auth Bound), whose id is the merchant's.
 	Issuer      string `yaml:"-"`
 	DisplayName string `yaml:"display_name"`
+	// Sandbox makes the merchant a sandbox: its PSPs move no money (test,
+	// sandbox, devnet, testnet). Every PSP of a live merchant, the default,
+	// moves real money. A merchant's sandbox is another merchant.
+	Sandbox bool `yaml:"sandbox,omitempty"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
-	PSPs map[string]PSPConfig `yaml:"psps,omitempty"`
+	PSPs PSPs `yaml:"psps,omitempty"`
 	// Custodians is the operator-declared custodian catalog, keyed by
 	// custodian key. A custodian holds the card; a PSP charges
 	// it. Declared once here and referenced by every PSP whose gateway those
 	// cards are charged through.
-	Custodians map[string]CustodianConfig `yaml:"custodians,omitempty"`
-	// Settings are the merchant's settings: the same document the
-	// configuration API reads and applies, validated the same way. Omitted
-	// fields keep their stored values; a declared list replaces the stored one.
-	Settings billing.MerchantSettings `yaml:"settings,omitempty"`
+	Custodians Custodians `yaml:"custodians,omitempty"`
+	// MerchantSettings are the merchant's settings, beside display_name: the
+	// same fields the configuration API reads and applies, validated the same
+	// way. Omitted fields keep their stored values; a declared list replaces
+	// the stored one.
+	billing.MerchantSettings `yaml:",inline"`
 	// AlertWebhooks are where the merchant's operational alerts are posted.
 	AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 	// Secrets are the merchant's own credentials.
@@ -81,38 +86,65 @@ type MerchantSecrets struct {
 type PSPConfig struct {
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
 	Rail billing.Rail `yaml:"rail"`
-	// Environment is whether the PSP moves real money: live, test (the
-	// provider's own system, no money moves) or sandbox (the provider's
-	// separate sandbox system), as the rail has them. Required, and verified
-	// with the provider before the PSP is used.
-	Environment string `yaml:"environment"`
-	// AccountID is the rail's own id for the account (NMI Gateway ID, Stripe
-	// acct_…, CCBill clientAccnum-clientSubacc). Solana derives it from the
-	// signer.
+	// Environment is the rail's own: nmi live | test | sandbox, stripe live |
+	// test, ccbill live | sandbox, solana mainnet | devnet | testnet. Omitted
+	// is the rail's real-money one. It is verified with the provider before
+	// the PSP is used.
+	Environment string `yaml:"environment,omitempty"`
+	// AccountID is the card rails' own id for the account (NMI Gateway ID,
+	// Stripe acct_…, CCBill clientAccnum-clientSubacc). A Solana PSP has none:
+	// its account is its signer's public key.
 	AccountID string `yaml:"account_id,omitempty"`
 	Archived  bool   `yaml:"archived,omitempty"`
-	// Custodian references a declared custodian by key:
+	// Custodian (nmi) references a declared custodian by key:
 	// merchants.<slug>.custodians.<key>. "" = this PSP holds its own
 	// instruments (Stripe pm_, NMI customer vault), which is the common case
 	// and needs no configuration. A key with no matching custodian entry is a
 	// hard error, never an unarmed default.
 	Custodian string            `yaml:"custodian,omitempty"`
-	Signer    *PSPSignerConfig  `yaml:"signer,omitempty"`
 	Secrets   map[string]string `yaml:"secrets,omitempty"`
-	// Settings are per-account NON-SECRET runtime knobs, stored on the
-	// psps row (NMI: tokenization_key/tokenization_url;
-	// Solana: rpc_provider, rpc_api_key, tokens,
-	// recipient_wallet).
+	// Settings are the rail's other non-secret fields (nmi tokenization_key,
+	// stripe publishable_key, …), flat in a PSP document.
 	Settings map[string]any `yaml:"settings,omitempty"`
 }
 
-// ValidatePSPDeclaration refuses a declared PSP whose rail, keys or
-// environment the rail does not take.
-func ValidatePSPDeclaration(psp string, p PSPConfig) error {
+// NormalizePSPDeclaration refuses a declared PSP whose fields, keys or
+// environment its rail does not take, and returns it in its declared
+// environment (the rail's real-money one when omitted).
+func NormalizePSPDeclaration(psp string, p PSPConfig) (PSPConfig, error) {
 	if err := ValidatePSPKeys(psp, p); err != nil {
-		return err
+		return p, err
 	}
-	return ValidatePSPEnvironment(psp, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment)
+	if err := ValidatePSPFields(psp, string(p.Rail), map[string]bool{"custodian": strings.TrimSpace(p.Custodian) != ""}); err != nil {
+		return p, err
+	}
+	if err := ValidatePSPAccount(psp, string(p.Rail), p.AccountID); err != nil {
+		return p, err
+	}
+	environment, err := ResolvePSPEnvironment(psp, string(p.Rail), p.Environment)
+	if err != nil {
+		return p, err
+	}
+	p.Environment = environment
+	if rpcURL := strings.TrimSpace(p.Secrets[SolanaSecretRPCURL]); p.Rail == billing.Rail(models.RailSolana) && rpcURL != "" {
+		if err := ValidateSolanaRPCURL(environment, rpcURL); err != nil {
+			return p, fmt.Errorf("psps.%s.%w", psp, err)
+		}
+	}
+	return p, nil
+}
+
+// ValidatePSPFields refuses a PSP field its rail does not take: present names
+// each field the PSP sets.
+func ValidatePSPFields(psp, rail string, present map[string]bool) error {
+	rail = strings.ToLower(strings.TrimSpace(rail))
+	takes := rails.Fields(models.Rail(rail))
+	for _, field := range slices.Sorted(maps.Keys(present)) {
+		if present[field] && !slices.Contains(takes, field) {
+			return fmt.Errorf("psps.%s.%s: a %s PSP has no %s (%s takes %s)", psp, field, rail, field, rail, strings.Join(PSPDocumentFields(models.Rail(rail)), ", "))
+		}
+	}
+	return nil
 }
 
 // ValidatePSPKeys refuses a rail that does not exist and a settings or
@@ -134,39 +166,36 @@ func ValidatePSPKeys(psp string, p PSPConfig) error {
 		}
 		return fmt.Errorf("psps.%s.rail: unknown rail %q (%s)", psp, p.Rail, strings.Join(names, ", "))
 	}
-	if err := unknownPSPKeys(psp, "settings", d.Rail, slices.Collect(maps.Keys(p.Settings)), d.SettingKeys, false); err != nil {
-		return err
+	var unknown []string
+	for _, key := range slices.Sorted(maps.Keys(p.Settings)) {
+		if !slices.Contains(d.SettingKeys, key) {
+			unknown = append(unknown, strconv.Quote(key))
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("psps.%s: a %s PSP has no %s (%s takes %s)", psp, d.Rail, strings.Join(unknown, ", "), d.Rail, strings.Join(PSPDocumentFields(d.Rail), ", "))
 	}
 	secrets := make([]string, 0, len(d.CredentialKeys))
 	for _, k := range d.CredentialKeys {
 		secrets = append(secrets, k.Name)
 	}
-	return unknownPSPKeys(psp, "secrets", d.Rail, slices.Collect(maps.Keys(p.Secrets)), secrets, true)
-}
-
-func unknownPSPKeys(psp, section string, rail models.Rail, declared, allowed []string, fold bool) error {
-	var unknown []string
-	for _, key := range declared {
-		match := key
-		if fold {
-			match = strings.ToLower(strings.TrimSpace(key))
-		}
-		if !slices.Contains(allowed, match) {
+	unknown = nil
+	for _, key := range slices.Sorted(maps.Keys(p.Secrets)) {
+		if !slices.Contains(secrets, strings.ToLower(strings.TrimSpace(key))) {
 			unknown = append(unknown, strconv.Quote(key))
 		}
 	}
 	if len(unknown) == 0 {
 		return nil
 	}
-	slices.Sort(unknown)
-	field, takes := "field", "no "+section
+	field, takes := "field", "no secrets"
 	if len(unknown) > 1 {
 		field = "fields"
 	}
-	if len(allowed) > 0 {
-		takes = strings.Join(slices.Sorted(slices.Values(allowed)), ", ")
+	if len(secrets) > 0 {
+		takes = strings.Join(slices.Sorted(slices.Values(secrets)), ", ")
 	}
-	return fmt.Errorf("psps.%s.%s: unknown %s %s (%s takes %s)", psp, section, field, strings.Join(unknown, ", "), rail, takes)
+	return fmt.Errorf("psps.%s.secrets: unknown %s %s (%s takes %s)", psp, field, strings.Join(unknown, ", "), d.Rail, takes)
 }
 
 // CustodianConfig is one declared custodian: the merchant's account with a
@@ -187,13 +216,6 @@ type CustodianConfig struct {
 	// private application key), named in-process
 	// custodians/<kind>/<environment>/<account_id>/<key>.
 	Secrets map[string]string `yaml:"secrets,omitempty"`
-}
-
-// PSPSignerConfig selects how a Solana PSP signs: Mode is "local_keypair" or
-// "vault_transit", and Key names the Vault Transit key.
-type PSPSignerConfig struct {
-	Mode string `yaml:"mode,omitempty"`
-	Key  string `yaml:"key,omitempty"`
 }
 
 // merchantFile is the single-merchant document: the declaration and its slug.
@@ -247,14 +269,19 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	}
 	m := f.MerchantDeclaration
 	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
-		if err := ValidatePSPDeclaration(key, m.PSPs[key]); err != nil {
+		p, err := NormalizePSPDeclaration(key, m.PSPs[key])
+		if err != nil {
+			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+		}
+		m.PSPs[key] = p
+	}
+	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
+		p := m.PSPs[key]
+		if err := ValidatePSPMoneyClass(key, string(p.Rail), p.Environment, m.Sandbox); err != nil {
 			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 		}
 	}
 	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
-	if err := ValidateDeploymentEnvironments(DeclaredEnvironments([]MerchantDeclaration{m})); err != nil {
-		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
-	}
 	return m, nil
 }
 
@@ -265,14 +292,21 @@ func ConfigurationFields(m MerchantDeclaration) []string {
 	if strings.TrimSpace(m.DisplayName) != "" {
 		out = append(out, "display_name")
 	}
+	if m.Sandbox {
+		out = append(out, "sandbox")
+	}
 	if len(m.PSPs) > 0 {
 		out = append(out, "psps")
 	}
 	if len(m.Custodians) > 0 {
 		out = append(out, "custodians")
 	}
-	if !reflect.ValueOf(m.Settings).IsZero() {
-		out = append(out, "settings")
+	settings := reflect.ValueOf(m.MerchantSettings)
+	for i := range settings.NumField() {
+		if !settings.Field(i).IsZero() {
+			name, _, _ := strings.Cut(settings.Type().Field(i).Tag.Get("json"), ",")
+			out = append(out, name)
+		}
 	}
 	if len(m.AlertWebhooks) > 0 {
 		out = append(out, "alert_webhooks")
@@ -305,7 +339,6 @@ func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaratio
 // is not its key, refuses the merchant; an Issuer that is not an absolute
 // https URL (http on a loopback host), or that another entry declares too, is
 // bound to no merchant. Each PSP is checked as its merchant is provisioned.
-// Declared PSPs that mix live and non-live money refuse the deployment.
 func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degradation, err error) {
 	byIssuer := map[string][]string{}
 	for _, key := range slices.Sorted(maps.Keys(cfg.Merchants)) {
@@ -328,6 +361,19 @@ func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degrad
 				byIssuer[m.Issuer] = append(byIssuer[m.Issuer], slug)
 			}
 		}
+		// A PSP's omitted environment is its rail's real-money one. One that
+		// does not check is refused alone as its merchant is provisioned.
+		psps := make(map[string]PSPConfig, len(m.PSPs))
+		for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
+			p := m.PSPs[psp]
+			if normalized, err := NormalizePSPDeclaration(psp, p); err == nil {
+				p = normalized
+			}
+			psps[psp] = p
+		}
+		if m.PSPs != nil {
+			m.PSPs = psps
+		}
 		out = append(out, m)
 	}
 	for i, m := range out {
@@ -336,24 +382,7 @@ func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degrad
 			out[i].Issuer = ""
 		}
 	}
-	if err := ValidateDeploymentEnvironments(declaredValidEnvironments(out)); err != nil {
-		return nil, nil, fmt.Errorf("Config.Merchants: %w", err)
-	}
 	return out, refused, nil
-}
-
-// declaredValidEnvironments is DeclaredEnvironments without the PSPs whose
-// environment their rail does not have: those are refused on their own.
-func declaredValidEnvironments(merchants []MerchantDeclaration) map[string]string {
-	out := DeclaredEnvironments(merchants)
-	for _, m := range merchants {
-		for key, p := range m.PSPs {
-			if ValidatePSPEnvironment(key, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment) != nil {
-				delete(out, m.Slug+"/"+strings.ToLower(strings.TrimSpace(key)))
-			}
-		}
-	}
-	return out
 }
 
 // validateIssuer accepts an issuer identifier as tokens carry it (RFC 8414

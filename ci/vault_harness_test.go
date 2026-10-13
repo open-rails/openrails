@@ -38,10 +38,10 @@ func TestVaultHarness(t *testing.T) {
 	require.Equal(t, "Acme Inc", got.DisplayName, "the stale edit changed nothing")
 
 	psp := "merchants/acme/psps/mobius"
-	created, err := v.PutCAS(t, psp, map[string]any{"rail": "nmi", "account_id": "1234"}, 0)
+	created, err := v.PutCAS(t, psp, map[string]any{"rail": "nmi", "gateway_id": "1234"}, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, created)
-	_, err = v.PutCAS(t, psp, map[string]any{"rail": "nmi", "account_id": "5678"}, 0)
+	_, err = v.PutCAS(t, psp, map[string]any{"rail": "nmi", "gateway_id": "5678"}, 0)
 	require.ErrorIs(t, err, vaulttest.ErrCASMismatch, "version 0 creates only")
 
 	var mount string

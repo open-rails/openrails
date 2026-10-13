@@ -24,11 +24,18 @@ type recordingSubmitter struct {
 	failATA     bool // refuse ATA creation, as a dropped transaction would
 }
 
-func (s *recordingSubmitter) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
+func (s *recordingSubmitter) Publisher(context.Context) (solanago.PublicKey, error) {
 	return s.merchantPub, nil
 }
 
-func (s *recordingSubmitter) Submit(_ context.Context, _ billing.MerchantID, ins []solanago.Instruction) (solanago.Signature, error) {
+func (s *recordingSubmitter) Signer(_ context.Context, owner solanago.PublicKey) (solanaint.Signer, error) {
+	if !owner.Equals(s.merchantPub) {
+		return nil, ErrUnheldPlan
+	}
+	return nil, nil
+}
+
+func (s *recordingSubmitter) Submit(_ context.Context, _ billing.MerchantID, _ solanago.PublicKey, ins []solanago.Instruction) (solanago.Signature, error) {
 	if s.failATA && ins[0].ProgramID().Equals(subscriptions.AssociatedTokenProgramID) {
 		return solanago.Signature{}, errors.New("transaction dropped")
 	}
@@ -45,6 +52,7 @@ type planChain struct {
 	created      *[2]uint64 // amount, period
 	atas         map[solanago.PublicKey]bool
 	sub          *recordingSubmitter
+	treasury     solanago.PublicKey
 }
 
 func (c planChain) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
@@ -64,13 +72,14 @@ func (c planChain) GetAccountData(_ context.Context, addr solanago.PublicKey) ([
 		return nil, nil
 	}
 	if c.created != nil && len(c.sub.submits) > 0 {
-		return planBlob(c.sub.merchantPub, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), c.created[0], c.created[1], testPlanCreatedAt), nil
+		return planBlob(c.sub.merchantPub, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), c.created[0], c.created[1], testPlanCreatedAt, c.treasury), nil
 	}
 	return c.existing, nil
 }
 
-// planBlob lays out an on-chain Plan account in DecodePlanAccount's byte order.
-func planBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, createdAt int64) []byte {
+// planBlob lays out an on-chain Plan account in DecodePlanAccount's byte order,
+// paying into destination (zero: anywhere).
+func planBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, createdAt int64, destination solanago.PublicKey) []byte {
 	blob := make([]byte, 0, subscriptions.PlanAccountSize)
 	u64 := func(v uint64) { blob = binary.LittleEndian.AppendUint64(blob, v) }
 	blob = append(blob, 1) // discriminator
@@ -81,16 +90,32 @@ func planBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, create
 	u64(amount)
 	u64(periodHours)
 	u64(uint64(createdAt))
-	u64(0)                                     // end_ts
-	blob = append(blob, make([]byte, 8*32)...) // destinations + pullers
+	u64(0) // end_ts
+	blob = append(blob, destination.Bytes()...)
+	blob = append(blob, make([]byte, 7*32)...) // other destinations + pullers
 	return append(blob, make([]byte, 128)...)  // metadata uri
 }
+
+var testTreasury = solanago.MustPublicKeyFromBase58("CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w")
 
 func newPlanService(t *testing.T, c planChain) (*PlanService, *recordingSubmitter) {
 	t.Helper()
 	sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey()}
-	c.sub = sub
-	return NewPlanServiceWithReader(sub, c, NetworkTokens("devnet", testTokens())), sub
+	c.sub, c.treasury = sub, testTreasury
+	return NewPlanServiceWithReader(sub, c, NetworkTokens("devnet", testTokens()), treasuryOf(testTreasury)), sub
+}
+
+// createPlanDestinations are the destinations a create_plan instruction names.
+func createPlanDestinations(t *testing.T, ix solanago.Instruction) [4]solanago.PublicKey {
+	t.Helper()
+	data, err := ix.Data()
+	require.NoError(t, err)
+	var out [4]solanago.PublicKey
+	for i := range out {
+		off := 1 + 8 + 32 + 8 + 8 + 8 + 8 + 32*i
+		out[i] = solanago.PublicKeyFromBytes(data[off : off+32])
+	}
+	return out
 }
 
 func planInput(amount uint64, decimals int) PublishPlanInput {
@@ -120,9 +145,10 @@ func ensuredATAOwners(t *testing.T, sub *recordingSubmitter) []solanago.PublicKe
 	return owners
 }
 
-// A fresh publish submits create_plan, provisions the receiving ATA (a pull
-// into a missing ATA reverts), and returns the CHAIN's created_at, which
-// subscribe must echo exactly.
+// A fresh publish submits create_plan with the treasury as its only
+// destination, provisions the treasury's token account (a pull into a missing
+// one reverts), and returns the CHAIN's created_at, which subscribe must echo
+// exactly.
 func TestPublishPlanCreatesPlanAndReceivingATA(t *testing.T) {
 	amount := [2]uint64{10_000_000, 720}
 	svc, sub := newPlanService(t, planChain{mintDecimals: 6, created: &amount})
@@ -135,7 +161,9 @@ func TestPublishPlanCreatesPlanAndReceivingATA(t *testing.T) {
 	require.Equal(t, "USDC", h.MintSymbol)
 	require.NotEmpty(t, h.Signature)
 	require.True(t, sub.submits[0][0].ProgramID().Equals(subscriptions.ProgramID), "create_plan first")
-	require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
+	require.Equal(t, [4]solanago.PublicKey{testTreasury}, createPlanDestinations(t, sub.submits[0][0]), "the treasury is the plan's only destination")
+	require.Equal(t, sub.merchantPub.String(), h.MerchantAddress, "the cranker owns the plan")
+	require.Equal(t, []solanago.PublicKey{testTreasury}, ensuredATAOwners(t, sub))
 }
 
 // The plan amount is immutable on-chain, so the caller's decimals must equal
@@ -177,12 +205,13 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	d, err := svc.MintDecimals(context.Background(), "USDC")
 	require.NoError(t, err)
 	require.Equal(t, 9, d)
-	_, err = NewPlanServiceWithReader(&recordingSubmitter{}, nil, NetworkTokens("devnet", testTokens())).MintDecimals(context.Background(), "USDC")
+	_, err = NewPlanServiceWithReader(&recordingSubmitter{}, nil, NetworkTokens("devnet", testTokens()), treasuryOf(testTreasury)).MintDecimals(context.Background(), "USDC")
 	require.Error(t, err, "no reader armed has no fallback precision")
 }
 
-// An occupied plan PDA with matching terms is an idempotent no-op; any
-// differing immutable term is refused (publish a new plan_id instead).
+// An occupied plan PDA with matching terms paying the treasury is an
+// idempotent no-op; any differing immutable term, a destination other than
+// the treasury included, is refused (publish a new plan_id instead).
 func TestPublishPlanRepublish(t *testing.T) {
 	mint := solanago.MustPublicKeyFromBase58(testDevnetUSDCMint)
 	other := randKey(t).PublicKey()
@@ -190,19 +219,22 @@ func TestPublishPlanRepublish(t *testing.T) {
 		name          string
 		mint          solanago.PublicKey
 		amount, hours uint64
-		idempotent    bool
+		destination   solanago.PublicKey
+		want          string
 	}{
-		{"same terms", mint, 10_000_000, 720, true},
-		{"different amount", mint, 5_000_000, 720, false},
-		{"different period", mint, 10_000_000, 744, false},
-		{"different mint", other, 10_000_000, 720, false},
+		{"same terms", mint, 10_000_000, 720, testTreasury, ""},
+		{"same terms before treasuries", mint, 10_000_000, 720, solanago.PublicKey{}, ""},
+		{"different amount", mint, 5_000_000, 720, testTreasury, "IMMUTABLE"},
+		{"different period", mint, 10_000_000, 744, testTreasury, "IMMUTABLE"},
+		{"different mint", other, 10_000_000, 720, testTreasury, "IMMUTABLE"},
+		{"another treasury", mint, 10_000_000, 720, other, "not the merchant's treasury"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey()}
-			chain := planChain{mintDecimals: 6, existing: planBlob(sub.merchantPub, tc.mint, tc.amount, tc.hours, 1_600_000_000), sub: sub}
-			h, err := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens())).PublishPlan(context.Background(), planInput(10_000_000, 6))
-			if !tc.idempotent {
-				require.ErrorContains(t, err, "IMMUTABLE")
+			chain := planChain{mintDecimals: 6, existing: planBlob(sub.merchantPub, tc.mint, tc.amount, tc.hours, 1_600_000_000, tc.destination), sub: sub}
+			h, err := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens()), treasuryOf(testTreasury)).PublishPlan(context.Background(), planInput(10_000_000, 6))
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
 				require.Empty(t, sub.submits)
 				return
 			}
@@ -210,7 +242,7 @@ func TestPublishPlanRepublish(t *testing.T) {
 			require.Equal(t, int64(1_600_000_000), h.CreatedAt, "echo the existing on-chain created_at")
 			require.Empty(t, h.Signature)
 			require.Len(t, sub.submits, 1, "no second create_plan")
-			require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
+			require.Equal(t, []solanago.PublicKey{testTreasury}, ensuredATAOwners(t, sub))
 		})
 	}
 }
@@ -220,8 +252,8 @@ func TestPublishPlanRepublish(t *testing.T) {
 func TestPublishPlanRetryEnsuresReceivingATA(t *testing.T) {
 	created := [2]uint64{10_000_000, 720}
 	sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey(), failATA: true}
-	chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub}
-	svc := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens()))
+	chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub, treasury: testTreasury}
+	svc := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens()), treasuryOf(testTreasury))
 	in := planInput(10_000_000, 6)
 
 	_, err := svc.PublishPlan(context.Background(), in)
@@ -232,8 +264,8 @@ func TestPublishPlanRetryEnsuresReceivingATA(t *testing.T) {
 	h, err := svc.PublishPlan(context.Background(), in)
 	require.NoError(t, err)
 	require.Equal(t, testPlanCreatedAt, h.CreatedAt)
-	require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
-	ata, _, _ := subscriptions.DeriveATA(sub.merchantPub, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
+	require.Equal(t, []solanago.PublicKey{testTreasury}, ensuredATAOwners(t, sub))
+	ata, _, _ := subscriptions.DeriveATA(testTreasury, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
 	chain.atas[ata] = true
 
 	submitted := len(sub.submits)

@@ -2,18 +2,22 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -54,6 +58,9 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 	if err != nil {
 		return nil, err
 	}
+	if digest, err = s.treasuryDigest(ctx, digest); err != nil {
+		return nil, err
+	}
 	for attempt := 1; ; attempt++ {
 		prepared, err := s.prepareCatalogApplication(ctx, params, digest)
 		if err != nil {
@@ -72,6 +79,31 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 			return nil, apperr.New(409, "catalog_revision_conflict", "catalog kept changing during the declarative application; retry")
 		}
 	}
+}
+
+// treasuryDigest folds in the merchant's declared Solana PSPs: a plan pays the
+// treasury its PSP names, so the same document under another treasury is
+// another application, which binds its recurring prices to new plans.
+func (s *Service) treasuryDigest(ctx context.Context, digest [32]byte) ([32]byte, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return digest, err
+	}
+	accounts, err := merchants.Of(s.catalogDatabase()).PSPScopes(ctx, mid)
+	if err != nil {
+		return digest, err
+	}
+	var ids []string
+	for _, a := range accounts {
+		if a.Rail == string(models.RailSolana) && a.Declared {
+			ids = append(ids, a.ID.String())
+		}
+	}
+	if len(ids) == 0 {
+		return digest, nil
+	}
+	slices.Sort(ids)
+	return sha256.Sum256(append(digest[:], strings.Join(ids, ",")...)), nil
 }
 
 // A concurrent catalog edit invalidates prepared provider references. Retry

@@ -33,9 +33,9 @@ type solanaBalanceChecker interface {
 	GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error)
 }
 
-// SolanaGasAlertWorker warns when a merchant's cranker (merchant) wallet — the one
-// that signs + pays gas for transfer_subscription pulls — drops below the SOL
-// threshold, so it can be topped up before pulls start failing for lack of gas.
+// SolanaGasAlertWorker warns when the cranker that signs and pays gas for
+// transfer_subscription pulls drops below the SOL threshold, so it can be
+// topped up before pulls start failing for lack of gas.
 type SolanaGasAlertWorker struct {
 	river.WorkerDefaults[SolanaGasAlertArgs]
 	DB                *db.DB

@@ -29,6 +29,7 @@ var excludedTables = map[string]string{
 	"merchant_slug_aliases":     "former names are directory identity, not billing history",
 	"worker_state":              "deployment-wide worker health and fair sweep cursors",
 	"periodic_leases":           "deployment-wide fleet leases on periodic work",
+	"solana_crankers":           "the deployment's Solana cranker pins",
 	"destructive_action_switch": "deployment-wide safety switch",
 	"book_identity":             "the deployment's database identity",
 	"merchant_write_posture":    "deployment write posture: export sets the source readonly, restore the destination",
@@ -72,6 +73,7 @@ var excludedColumns = map[string]string{
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
 	"periodic_leases":               "kind merchant_set holder expires_at claimed_at",
+	"solana_crankers":               "name public_key pinned_at",
 	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
@@ -116,7 +118,8 @@ var omittedColumns = map[string]string{
 	"prices": "public_id",
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
-	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",
+	// live is generated from environment.
+	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at live",
 	"subscriptions":    "destructive_run_class lifecycle_rev row_version",
 	"customers":        "access_version",
 	"payments":         "destructive_run_class",

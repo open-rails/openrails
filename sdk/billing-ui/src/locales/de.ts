@@ -189,6 +189,8 @@ export const de: BillingUiMessageBundle = {
       "Das hat sich inzwischen geändert. Lade neu und versuche es erneut.",
     rate_limit_exceeded:
       "Zu viele Anfragen. Warte einen Moment und versuche es erneut.",
+    provider_writes_disabled:
+      "Zahlungen sind auf dieser Seite gerade abgeschaltet.",
     service_unavailable:
       "Die Abrechnung ist vorübergehend nicht verfügbar. Versuche es bald erneut.",
     internal_error:

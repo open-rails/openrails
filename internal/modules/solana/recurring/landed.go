@@ -150,16 +150,17 @@ func accountsAre(keys []solanago.PublicKey, want ...solanago.PublicKey) bool {
 	return true
 }
 
-// subscription names one on-chain subscription and the terms it binds.
+// subscription names one on-chain subscription and the terms it binds: its
+// plan's owner (the cranker) and the treasury its pulls pay into.
 type subscription struct {
-	subscriber, merchant, mint solanago.PublicKey
-	planID                     uint64
-	amount, periodHours        uint64
-	createdAt                  int64
+	subscriber, owner, treasury, mint solanago.PublicKey
+	planID                            uint64
+	amount, periodHours               uint64
+	createdAt                         int64
 }
 
 func (s subscription) addresses() (plan, sub, authority solanago.PublicKey, err error) {
-	if plan, _, err = subscriptions.DerivePlanPDA(s.merchant, s.planID); err != nil {
+	if plan, _, err = subscriptions.DerivePlanPDA(s.owner, s.planID); err != nil {
 		return
 	}
 	if sub, _, err = subscriptions.DeriveSubscriptionPDA(plan, s.subscriber); err != nil {
@@ -180,7 +181,7 @@ func (l *landedTx) subscribes(s subscription) error {
 	}
 	for _, ix := range l.instructions(subscriptions.KindSubscribe) {
 		d, err := subscriptions.DecodeSubscribeData(ix.data)
-		if err != nil || !accountsAre(ix.accounts, s.subscriber, s.merchant, plan, sub) {
+		if err != nil || !accountsAre(ix.accounts, s.subscriber, s.owner, plan, sub) {
 			continue
 		}
 		if d.PlanID == s.planID && d.Mint.Equals(s.mint) && d.Amount == s.amount && d.PeriodHours == s.periodHours && d.CreatedAt == s.createdAt {
@@ -190,10 +191,10 @@ func (l *landedTx) subscribes(s subscription) error {
 	return fmt.Errorf("%w: no subscribe of %s to plan %d at the quoted terms", ErrPaymentUnverified, s.subscriber, s.planID)
 }
 
-// pulls proves the merchant co-signed a pull of amount from the subscriber's
-// token account into the merchant's for this subscription, and that the
-// merchant's account was credited. amount 0 accepts the co-signed amount (the
-// merchant only co-signs amounts it quoted). Returns the pulled amount.
+// pulls proves the cranker co-signed a pull of amount from the subscriber's
+// token account into the treasury's for this subscription, and that the
+// treasury was credited. amount 0 accepts the co-signed amount (the cranker
+// only co-signs amounts it quoted). Returns the pulled amount.
 func (l *landedTx) pulls(s subscription, amount uint64) (uint64, error) {
 	plan, sub, authority, err := s.addresses()
 	if err != nil {
@@ -203,16 +204,16 @@ func (l *landedTx) pulls(s subscription, amount uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	to, _, err := subscriptions.DeriveATA(s.merchant, s.mint, solanago.TokenProgramID)
+	to, _, err := subscriptions.DeriveATA(s.treasury, s.mint, solanago.TokenProgramID)
 	if err != nil {
 		return 0, err
 	}
-	if !l.signedBy(s.merchant) {
-		return 0, fmt.Errorf("%w: no pull co-signed by the merchant", ErrPaymentUnverified)
+	if !l.signedBy(s.owner) {
+		return 0, fmt.Errorf("%w: no pull co-signed by the cranker", ErrPaymentUnverified)
 	}
 	for _, ix := range l.instructions(subscriptions.KindTransferSubscription) {
 		d, err := subscriptions.DecodeTransferData(ix.data)
-		if err != nil || !accountsAre(ix.accounts, sub, plan, authority, from, to, s.merchant, s.mint) {
+		if err != nil || !accountsAre(ix.accounts, sub, plan, authority, from, to, s.owner, s.mint) {
 			continue
 		}
 		if !d.Delegator.Equals(s.subscriber) || !d.Mint.Equals(s.mint) || d.Amount == 0 || (amount != 0 && d.Amount != amount) {
@@ -223,14 +224,14 @@ func (l *landedTx) pulls(s subscription, amount uint64) (uint64, error) {
 			return 0, fmt.Errorf("%w: %v", ErrPaymentUnverified, err)
 		}
 		if credited < d.Amount {
-			return 0, fmt.Errorf("%w: merchant credited %d, pull was %d", ErrPaymentUnverified, credited, d.Amount)
+			return 0, fmt.Errorf("%w: treasury credited %d, pull was %d", ErrPaymentUnverified, credited, d.Amount)
 		}
 		return d.Amount, nil
 	}
 	if amount != 0 {
-		return 0, fmt.Errorf("%w: no pull of %d from %s to the merchant", ErrPaymentUnverified, amount, s.subscriber)
+		return 0, fmt.Errorf("%w: no pull of %d from %s to the treasury", ErrPaymentUnverified, amount, s.subscriber)
 	}
-	return 0, fmt.Errorf("%w: no pull from %s to the merchant", ErrPaymentUnverified, s.subscriber)
+	return 0, fmt.Errorf("%w: no pull from %s to the treasury", ErrPaymentUnverified, s.subscriber)
 }
 
 // cancels proves the subscriber signed a cancel of the subscription account.

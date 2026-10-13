@@ -32,10 +32,10 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		c.RateLimits = config.DefaultRateLimits()
 		(*c.RateLimits)["subscribe"].RequestsPerMinute = 50
 	}
-	fake, merchantKey := withSolana(t, w)
+	sol := withSolana(t, w)
+	fake := sol.fake
 	w.start()
-	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)
-	fake.Fund(merchantKey.PublicKey(), mint, 0)
+	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)
 
 	sfx := uuid.NewString()[:8]
 	type plan struct {
@@ -55,8 +55,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	doc.WriteString("schema_version: 1\nproducts:\n")
 	for i, p := range plans {
 		id := 5001 + i
-		pda, err := fake.Plan(merchantKey.PublicKey(), uint64(id), solanafake.DevnetDUSDMint, uint64(p.amount), monthHours)
-		require.NoError(t, err)
+		pda := sol.plan(t, uint64(id), uint64(p.amount))
 		fmt.Fprintf(&doc, "  %s-%s:\n    display_name: %s\n", p.key, sfx, p.key)
 		if p.group != "" {
 			fmt.Fprintf(&doc, "    tier_group: %s\n    tier_rank: %d\n", p.group, p.rank)
@@ -82,7 +81,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 
 	b := &solanaBuyer{customer: w.newCustomer(), wallet: solanago.NewWallet().PrivateKey}
 	fake.Fund(b.wallet.PublicKey(), mint, 60_000_000)
-	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, price: price("basic"), key: "basic-" + sfx}
+	shop := &solanaShop{w: w, fake: fake, cranker: sol.cranker, treasury: sol.treasury, mint: mint, price: price("basic"), key: "basic-" + sfx}
 	c := shop.purchase(t, b, b.wallet.PublicKey())
 	done, err := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
 	require.NoError(t, err)

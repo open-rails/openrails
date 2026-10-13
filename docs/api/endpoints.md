@@ -145,8 +145,10 @@ know about the deployment, and names no merchant:
 - `capabilities`: the route groups the mount serves and its features.
 - `currencies`: every currency's `decimals` (the native scale) and
   `minor_decimals`.
-- `rails`: every rail a PSP can be declared on, with the credential and
-  setting keys it takes.
+- `rails`: every rail a PSP can be declared on: its environments (the
+  real-money one first), the account fields it names a PSP by (`gateway_id`,
+  `account_id`, `client_accnum` and `client_subacc`, `treasury`), the other
+  fields a create takes, and its credential keys.
 - `captcha`: the challenge to solve when a request answers 403
   `captcha_required` — `{provider, site_key, script_url, action,
   token_header}`: load `script_url`, solve with `site_key` and `action`, and

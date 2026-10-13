@@ -1303,13 +1303,11 @@ func (f *SolanaFetcher) mintDecimals(ctx context.Context, mint string) (int, boo
 	return d, true
 }
 
-// isUSDStablecoinMint reports whether the mint is a canonical USD-pegged
-// stablecoin (the trust anchor: KnownStablecoinByMint). Devnet mints fall out by
-// construction — they are not in the registry — so devnet amounts stay
-// unnormalized. Devnet money is fake.
+// isUSDStablecoinMint reports whether the mint is mainnet USDC. Devnet
+// amounts stay unnormalized: devnet money is fake.
 func isUSDStablecoinMint(mint string) bool {
-	sc, ok := solanatokens.KnownStablecoinByMint(mint)
-	return ok && sc.Peg == "usd"
+	mint = strings.TrimSpace(mint)
+	return mint == solanatokens.MainnetUSDCMint || mint == solanatokens.DevnetUSDCMint
 }
 
 // solanaFiatCents converts mint base units to integer cents (the fetchers'

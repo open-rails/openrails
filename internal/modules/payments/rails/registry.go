@@ -101,9 +101,10 @@ type Descriptor struct {
 	// order. Nil = the rail holds no PSP secrets.
 	CredentialKeys []CredentialKey
 
-	// SettingKeys are the non-secret psps.settings keys a PSP declaration
-	// may carry. The root package's typed declarations (openrails.NMIPSP, …)
-	// cover exactly these and CredentialKeys.
+	// SettingKeys are the rail's other non-secret PSP fields, flat beside
+	// rail and environment in a PSP document. The root package's typed
+	// declarations (openrails.NMIPSP, …) cover exactly these, Fields and
+	// CredentialKeys.
 	SettingKeys []string
 
 	// OneOffSale: purchase can sell a one-time price on this rail.
@@ -117,10 +118,19 @@ type Descriptor struct {
 	// this rail may declare card_entry: server.
 	ServerCardEntry bool
 
-	// Environments are the environments a PSP on the rail may declare: live
-	// (real money), test (the provider's own system, no money moves) and
-	// sandbox (the provider's separate sandbox system).
+	// Environments are the environments a PSP on the rail may declare. The
+	// first moves real money and is the default; the rest move none.
 	Environments []string
+
+	// AccountFields are the PSP fields naming its account, in the rail's own
+	// terms: NMI's gateway_id, Stripe's account_id, CCBill's client_accnum
+	// and client_subacc, a Solana PSP's treasury. Joined with "-" they are its
+	// account, the identity its id, webhook path and secrets are keyed by.
+	AccountFields []string
+
+	// Fields are the PSP's own fields beside rail, environment, archived,
+	// secrets and SettingKeys: its account fields first.
+	Fields []string
 }
 
 // NewSubscription classifies new-subscription enrollment on a rail.
@@ -194,6 +204,8 @@ var descriptors = []Descriptor{
 		NewSubscriptionEngine,               // saved vault card charged by OpenRails
 		true,                                // ServerCardEntry (Direct Post customer_vault=add_customer)
 		[]string{"live", "test", "sandbox"}, // test: a gateway account in test mode; sandbox: sandbox.nmi.com
+		[]string{"gateway_id"},              // the dashboard's Gateway ID
+		[]string{"gateway_id", "custodian"},
 	},
 	{
 		models.RailCCBill,
@@ -214,6 +226,8 @@ var descriptors = []Descriptor{
 		NewSubscriptionHostedForm,   // an order's FlexForm sale; CCBill bills it
 		false,                       // ServerCardEntry (CCBill's own page takes the card)
 		[]string{"live", "sandbox"}, // sandbox: sandbox-api.ccbill.com
+		[]string{"client_accnum", "client_subacc"},
+		[]string{"client_accnum", "client_subacc"},
 	},
 	{
 		models.RailStripe,
@@ -236,6 +250,8 @@ var descriptors = []Descriptor{
 		NewSubscriptionEngine,    // saved PaymentMethod charged by OpenRails
 		false,                    // ServerCardEntry (Stripe's own fields take the card)
 		[]string{"live", "test"}, // test: sk_test_/rk_test_ keys
+		[]string{"account_id"},   // acct_…
+		[]string{"account_id"},
 	},
 	{
 		models.RailSolana,
@@ -250,12 +266,16 @@ var descriptors = []Descriptor{
 		autoBilledNever,
 		cancelDestructive,
 		"", // CancelPortalURL
-		[]CredentialKey{{"private_key", false, false}}, // operator-only signer
-		[]string{"rpc_provider", "rpc_api_key", "tokens", "recipient_wallet"},
-		true,                        // OneOffSale (Solana Pay transfer)
-		NewSubscriptionOnChainPlan,  // subscriber signs the price's on-chain plan
-		false,                       // ServerCardEntry (no card)
-		[]string{"live", "sandbox"}, // live: mainnet; sandbox: devnet
+		// rpc_url: the operator's RPC endpoint, a secret because its URL carries
+		// the provider's key. The deployment's cranker signs; no PSP holds a key.
+		[]CredentialKey{{"rpc_url", false, false}},
+		nil,
+		true,                       // OneOffSale (Solana Pay transfer)
+		NewSubscriptionOnChainPlan, // subscriber signs the price's on-chain plan
+		false,                      // ServerCardEntry (no card)
+		[]string{"mainnet", "devnet", "testnet"},
+		[]string{"treasury"}, // the address every payment lands in
+		[]string{"treasury"},
 	},
 }
 
@@ -284,11 +304,66 @@ func All() []Descriptor {
 	return out
 }
 
-// Environments are the environments a PSP on rail may declare; nil for an
-// unknown rail.
+// Environments are the environments a PSP on rail may declare, its
+// real-money one first; nil for an unknown rail.
 func Environments(rail models.Rail) []string {
 	d, _ := Lookup(rail)
 	return d.Environments
+}
+
+// DefaultEnvironment is the environment a PSP on rail declares by omitting
+// one: its real-money one. "" for an unknown rail.
+func DefaultEnvironment(rail models.Rail) string {
+	if environments := Environments(rail); len(environments) > 0 {
+		return environments[0]
+	}
+	return ""
+}
+
+// LiveEnvironment reports whether environment moves real money on rail.
+func LiveEnvironment(rail models.Rail, environment string) bool {
+	return environment != "" && environment == DefaultEnvironment(rail)
+}
+
+// Fields are the PSP's own fields on rail beside rail, environment, archived,
+// secrets and its setting keys; nil for an unknown rail.
+func Fields(rail models.Rail) []string {
+	d, _ := Lookup(rail)
+	return d.Fields
+}
+
+// AccountFields name the PSP fields making up its account on rail.
+func AccountFields(rail models.Rail) []string {
+	d, _ := Lookup(rail)
+	return d.AccountFields
+}
+
+// Account joins a PSP's account fields into its account; "" when none is set.
+func Account(rail models.Rail, fields map[string]string) string {
+	names := AccountFields(rail)
+	parts := make([]string, len(names))
+	set := false
+	for i, name := range names {
+		parts[i] = strings.TrimSpace(fields[name])
+		set = set || parts[i] != ""
+	}
+	if !set {
+		return ""
+	}
+	return strings.Join(parts, "-")
+}
+
+// AccountParts splits a PSP's account into its account fields.
+func AccountParts(rail models.Rail, account string) map[string]string {
+	names := AccountFields(rail)
+	out := make(map[string]string, len(names))
+	if account == "" || len(names) == 0 {
+		return out
+	}
+	for i, part := range strings.SplitN(account, "-", len(names)) {
+		out[names[i]] = part
+	}
+	return out
 }
 
 // HasRemoteCustomer reports whether the rail exposes a card-independent remote

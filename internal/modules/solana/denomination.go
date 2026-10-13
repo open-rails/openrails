@@ -22,7 +22,7 @@ func ValidateQuoteCurrency(currency, symbol, mint string) error {
 	if units.Code != strings.ToUpper(strings.TrimSpace(symbol)) {
 		return fmt.Errorf("%s prices require payment in %s; cross-token conversion is not supported", units.Code, units.Code)
 	}
-	for _, registered := range []string{solanatokens.DefaultSupportedTokens()[units.Code].Mint, solanatokens.DefaultDevnetTokens()[units.Code].Mint} {
+	for _, registered := range []string{solanatokens.Accepted("mainnet")[units.Code].Mint, solanatokens.Accepted("devnet")[units.Code].Mint} {
 		if registered != "" && registered == strings.TrimSpace(mint) {
 			return nil
 		}

@@ -55,8 +55,8 @@ func TestRailSetShapeValidation(t *testing.T) {
 	ccbill := func(accountID string) *ResolvedPSP {
 		return &ResolvedPSP{Rail: models.RailCCBill, AccountID: accountID, CCBill: &CCBillRailConfig{Salt: "s"}}
 	}
-	solana := func(provider, key string) *ResolvedPSP {
-		return &ResolvedPSP{Rail: models.RailSolana, Solana: &SolanaRailConfig{RPCProvider: provider, RPCAPIKey: key}}
+	solana := func(treasury string) *ResolvedPSP {
+		return &ResolvedPSP{Rail: models.RailSolana, AccountID: treasury, Solana: &SolanaRailConfig{Network: EnvironmentDevnet}}
 	}
 	withAccount := func(p *ResolvedPSP, id string) *ResolvedPSP { p.AccountID = id; return p }
 	custody := func(rail *ResolvedPSP, c ResolvedCustodian) *ResolvedPSP { rail.Custody = &c; return rail }
@@ -73,18 +73,16 @@ func TestRailSetShapeValidation(t *testing.T) {
 		"nmi webhook secret":          {PSPSet{"mobius": nmi("")}, "webhook_signing_secret is required"},
 		"stripe webhook secret":       {PSPSet{"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}}}, "webhook_signing_secret is required"},
 		"nmi security key":            {PSPSet{"mobius": {Rail: models.RailNMI, NMI: &NMIRailConfig{WebhookSigningSecret: "w"}}}, "security_key is required"},
-		"two stripe without ids":      {PSPSet{"a": stripeRail("sk_test_a"), "b": stripeRail("sk_test_b")}, "must declare account_id"},
+		"two stripe without ids":      {PSPSet{"a": stripeRail("sk_test_a"), "b": stripeRail("sk_test_b")}, "must declare its account"},
 		"two stripe with ids":         {PSPSet{"a": withAccount(stripeRail("sk_test_a"), "acct_a"), "b": withAccount(stripeRail("sk_test_b"), "acct_b")}, ""},
-		"archived still needs id":     {PSPSet{"a": func() *ResolvedPSP { p := stripeRail("sk_test_a"); p.Archived = true; return p }(), "b": stripeRail("sk_test_b")}, "must declare account_id"},
-		"two solana need no id":       {PSPSet{"a": solana("helius", "k"), "b": solana("public", "")}, ""},
+		"archived still needs id":     {PSPSet{"a": func() *ResolvedPSP { p := stripeRail("sk_test_a"); p.Archived = true; return p }(), "b": stripeRail("sk_test_b")}, "must declare its account"},
+		"two solana treasuries":       {PSPSet{"a": solana("TreasuryA"), "b": solana("TreasuryB")}, ""},
+		"two solana need treasuries":  {PSPSet{"a": solana("TreasuryA"), "b": solana("")}, "must declare its account"},
 		"ccbill dash identity":        {PSPSet{"ccbill": ccbill("999999-0000")}, ""},
-		"ccbill slash identity":       {PSPSet{"ccbill": ccbill("999999/0000")}, "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000"},
-		"ccbill missing identity":     {PSPSet{"ccbill": ccbill("")}, "account_id is required"},
+		"ccbill slash identity":       {PSPSet{"ccbill": ccbill("999999/0000")}, `client_accnum must be CCBill's number, digits only (got "999999/0000")`},
+		"ccbill missing identity":     {PSPSet{"ccbill": ccbill("")}, `client_accnum must be CCBill's number, digits only (got "")`},
 		"ccbill half datalink":        {PSPSet{"ccbill": {Rail: models.RailCCBill, AccountID: "1-2", CCBill: &CCBillRailConfig{Salt: "s", DataLinkUsername: "u"}}}, "datalink_username and datalink_password"},
 		"ccbill without salt":         {PSPSet{"ccbill": {Rail: models.RailCCBill, AccountID: "1-2", CCBill: &CCBillRailConfig{}}}, "salt is required"},
-		"solana default provider":     {PSPSet{"solana": solana("", "k")}, ""},
-		"solana unknown provider":     {PSPSet{"solana": solana("quicknode", "k")}, "rpc_provider must be helius or public"},
-		"solana public with key":      {PSPSet{"solana": solana("public", "k")}, "rpc_provider public cannot use rpc_api_key"},
 		"custody on proxy rail":       {PSPSet{"mobius": custody(nmi("w"), bt)}, ""},
 		"custody psp is no custodian": {PSPSet{"stripe": custody(stripeRail("sk_test_x"), ResolvedCustodian{Custodian: models.CustodianPSP})}, ""},
 		"custody on non-proxy rail":   {PSPSet{"stripe": custody(stripeRail("sk_test_x"), bt)}, "not supported on this rail"},

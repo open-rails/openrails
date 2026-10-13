@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -68,7 +69,7 @@ func (s *Service) configurationState(ctx context.Context, mid billing.MerchantID
 		return nil, err
 	}
 	return &billing.MerchantConfigurationState{
-		Revision: set.Merchant.Revision, DisplayName: set.Merchant.Value.DisplayName, Settings: set.Merchant.Value.Settings,
+		Revision: set.Merchant.Revision, DisplayName: set.Merchant.Value.DisplayName, Sandbox: set.Merchant.Value.Sandbox, MerchantSettings: set.Merchant.Value.MerchantSettings,
 		PlatformVault: billing.PlatformVaultState{Available: s.rt.Merchants.PlatformVaultAvailable()},
 	}, nil
 }
@@ -116,13 +117,19 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 			cas = *params.ExpectedRevision
 		}
 		next := held.Value
-		if params.Settings != nil {
-			next.Settings = mergeMerchantSettings(next.Settings, *params.Settings)
+		if params.MerchantSettings != nil {
+			next.MerchantSettings = mergeMerchantSettings(next.MerchantSettings, *params.MerchantSettings)
 		}
 		if params.DisplayName != nil {
 			next.DisplayName = strings.TrimSpace(*params.DisplayName)
 		}
-		settings, err := merchantconfig.Normalize(next.DisplayName, next.Settings)
+		if params.Sandbox != nil && *params.Sandbox != next.Sandbox {
+			if err := refuseSandboxFlip(*params.Sandbox, set); err != nil {
+				return nil, err
+			}
+			next.Sandbox = *params.Sandbox
+		}
+		settings, err := merchantconfig.Normalize(next.DisplayName, next.MerchantSettings)
 		var refusal *apperr.Error
 		if errors.As(err, &refusal) {
 			return nil, err
@@ -133,7 +140,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
 		}
-		if err := s.rt.Merchants.CheckCardCustody(ctx, mid, next.Settings, set.PSPs); err != nil {
+		if err := s.rt.Merchants.CheckCardCustody(ctx, mid, next, set.PSPs); err != nil {
 			return nil, err
 		}
 		set, err = cache.PutMerchant(ctx, mid, next, cas)
@@ -152,6 +159,21 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		}
 		return s.configurationState(ctx, mid, set)
 	}
+}
+
+// refuseSandboxFlip refuses making a merchant a sandbox, or live, while a PSP
+// it serves would then disagree with it.
+func refuseSandboxFlip(sandbox bool, set merchantdocs.Set) error {
+	for _, key := range set.PSPKeys() {
+		p := set.PSPs[key].Value
+		if p.Archived {
+			continue
+		}
+		if err := config.ValidatePSPMoneyClass(key, p.Rail, p.Environment, sandbox); err != nil {
+			return apperr.Invalidf("%v; archive the PSP first", err).WithParam("sandbox")
+		}
+	}
+	return nil
 }
 
 // refuseAssignedPolicyRemoval refuses settings that no longer declare a

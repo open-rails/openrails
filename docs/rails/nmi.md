@@ -34,7 +34,7 @@ Three values, all found in (or issued for) the NMI merchant dashboard:
    Your payment page loads Collect.js with it; the raw card goes browser →
    NMI, and OpenRails only ever receives the opaque `payment_token` (SAQ-A).
    Not needed with `card_entry: server` (below).
-3. **Gateway ID** (`account_id`) — shown in the dashboard as "Gateway ID".
+3. **Gateway ID** (`gateway_id`) — shown in the dashboard as "Gateway ID".
    In NMI this **is** the merchant account id (NMI provisions every merchant as
    a "gateway account"; the v4 API documents `{gateway_id}` as "the merchant
    ID"). It is **not** the ISO/reseller's id, and it is **not** fetchable from
@@ -61,11 +61,10 @@ merchants:
     psps:
       mobius:                 # your name for this PSP (any slug)
         rail: nmi
-        environment: live      # live | test | sandbox
-        account_id: "1234567"  # dashboard "Gateway ID"
-        settings:
-          tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-          tokenization_key: replace-with-live-nmi-tokenization-key   # public
+        environment: live      # live (default) | test | sandbox
+        gateway_id: "1234567"  # dashboard Gateway ID
+        tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+        tokenization_key: replace-with-live-nmi-tokenization-key   # public
         secrets:
           security_key: replace-with-live-nmi-security-key
           webhook_signing_secret: replace-with-live-nmi-webhook-secret
@@ -73,8 +72,8 @@ merchants:
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
 never commit them. Every PSP declares its `environment`
-([PSP environments](../psp-environments.md)); a deployment is all live or all
-non-live.
+([PSP environments](../psp-environments.md)), which agrees with its merchant:
+live, or a sandbox (`sandbox: true`).
 
 ### Card entry: browser or server
 
@@ -118,9 +117,8 @@ What OpenRails does in `server` mode:
 ```yaml
       mobius:
         rail: nmi
-        account_id: "1234567"
-        settings:
-          card_entry: server
+        gateway_id: "1234567"
+        card_entry: server
 ```
 
 Boot refuses `card_entry: server` on any rail other than NMI and on a PSP
@@ -144,9 +142,9 @@ A price is offered on NMI when the PSP is armed.
 In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
 deployment:
 
-- URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key, then
+- URL: `https://<your-host>/v1/webhooks/nmi/{gateway_id}` — the rail, not the PSP key, then
   the PSP's Gateway ID; the payload's Gateway ID must agree with it. An embedded
-  host prefixes its billing mount (e.g. `/billing/v1/webhooks/nmi/{account_id}`)
+  host prefixes its billing mount (e.g. `/billing/v1/webhooks/nmi/{gateway_id}`)
 - Signing secret: exactly the value you declared as `webhook_signing_secret`
 
 OpenRails verifies every delivery: HMAC-SHA256 over `<timestamp>.<body>` from a
@@ -233,10 +231,9 @@ whether they move money; NMI's own answer must agree before the PSP arms:
       mobius:
         rail: nmi
         environment: sandbox            # a sandbox.nmi.com account
-        account_id: "1234567"           # dashboard Gateway ID
-        settings:
-          tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-          tokenization_key: public-collectjs-key
+        gateway_id: "1234567"           # dashboard Gateway ID
+        tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+        tokenization_key: public-collectjs-key
         secrets:
           security_key: ...
           webhook_signing_secret: ...

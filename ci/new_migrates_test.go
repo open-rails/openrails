@@ -80,7 +80,7 @@ func TestUnknownPSPKeysRefuseThatPSPAlone(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	bill, err := openrails.New(t.Context(), openrails.Config{
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
-		Merchants: map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{
+		Merchants: map[string]openrails.MerchantDeclaration{"host-one": {Sandbox: true, DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{
 			"p": {Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"}},
 			"q": {Rail: "stripe", AccountID: "acct_1", Secrets: map[string]string{"secret_kye": "sk_test_1"}},
 		}}},
@@ -88,7 +88,7 @@ func TestUnknownPSPKeysRefuseThatPSPAlone(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bill.Close(context.Background()) })
 	refused := probe(t, bill, "openrails_configuration")
-	require.ErrorContains(t, refused, `merchants.host-one.psps/p: psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, tokenization_key, tokenization_url, webhook_overlap_expires_at)`)
+	require.ErrorContains(t, refused, `merchants.host-one.psps/p: psps.p: a nmi PSP has no "tokenisation_key" (nmi takes rail, environment, archived, gateway_id, custodian, tokenization_key, tokenization_url, card_entry, webhook_overlap_expires_at, secrets)`)
 	require.ErrorContains(t, refused, `merchants.host-one.psps/q: psps.q.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`)
 	shop, err := bill.MerchantBySlug("host-one")
 	require.NoError(t, err)

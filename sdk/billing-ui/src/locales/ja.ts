@@ -185,6 +185,7 @@ export const ja: BillingUiMessageBundle = {
       "内容が更新されています。再読み込みしてもう一度お試しください。",
     rate_limit_exceeded:
       "リクエストが多すぎます。しばらく待ってからお試しください。",
+    provider_writes_disabled: "このサイトでは現在、支払いが停止されています。",
     service_unavailable:
       "請求機能は一時的に利用できません。しばらくしてからお試しください。",
     internal_error: "システムで問題が発生しました。もう一度お試しください。",

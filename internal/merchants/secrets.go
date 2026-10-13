@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -24,7 +25,7 @@ import (
 // against the PSP document whose identity it names, never a storage path.
 func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
-	environment = normalizePSPEnvironment(environment)
+	environment = normalizePSPEnvironment(rail, environment)
 	accountID = strings.TrimSpace(accountID)
 	key, err := NormalizePSPSecretKey(rail, key)
 	if err != nil {
@@ -34,7 +35,7 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 		return "", apperr.Invalidf("PSP secret requires rail")
 	}
 	if environment == "" {
-		return "", apperr.Invalidf("PSP secret environment must be live, test or sandbox")
+		return "", apperr.Invalidf("PSP secret environment must be one of %s's (%s)", rail, strings.Join(rails.Environments(models.Rail(rail)), ", "))
 	}
 	if accountID == "" {
 		return "", apperr.Invalidf("PSP secret requires account id")
@@ -98,7 +99,7 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 		return "", "", "", "", false, nil
 	}
 	rail = normalizeProviderSecretType(parts[1])
-	environment = normalizePSPEnvironment(parts[2])
+	environment = normalizePSPEnvironment(rail, parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
 		return "", "", "", "", true, fmt.Errorf("invalid PSP id escape: %w", err)
@@ -154,22 +155,21 @@ func normalizeProviderSecretType(rail string) string {
 	return strings.ToLower(strings.TrimSpace(rail))
 }
 
-// normalizePSPEnvironment is a PSP's declared environment, or "" when it is
-// none: live, test or sandbox, never defaulted.
-func normalizePSPEnvironment(environment string) string {
-	switch e := strings.ToLower(strings.TrimSpace(environment)); e {
-	case config.EnvironmentLive, config.EnvironmentTest, config.EnvironmentSandbox:
+// normalizePSPEnvironment is a PSP's declared environment, or "" when rail
+// has no such environment. Never defaulted.
+func normalizePSPEnvironment(rail, environment string) string {
+	e := strings.ToLower(strings.TrimSpace(environment))
+	if slices.Contains(rails.Environments(models.Rail(rail)), e) {
 		return e
-	default:
-		return ""
 	}
+	return ""
 }
 
 // normalizeCustodianEnvironment is a custodian's money class, or "" when it
 // is none: live or test.
 func normalizeCustodianEnvironment(environment string) string {
 	switch e := strings.ToLower(strings.TrimSpace(environment)); e {
-	case config.EnvironmentLive, config.EnvironmentTest:
+	case config.ClassLive, config.ClassTest:
 		return e
 	default:
 		return ""

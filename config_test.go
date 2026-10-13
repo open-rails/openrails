@@ -25,13 +25,13 @@ func TestReadMerchantFile(t *testing.T) {
 
 // A declaration built in Go, written as a merchant file, reads back unchanged.
 func TestMerchantFileRoundTrip(t *testing.T) {
-	want := MerchantDeclaration{
+	want := MerchantDeclaration{Sandbox: true,
 		Slug: "onlydemo", DisplayName: "OnlyDemo",
-		PSPs: map[string]PSPConfig{
-			"mobius": NMIPSP{Environment: EnvironmentSandbox, AccountID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
-			"wallet": SolanaPSP{Environment: EnvironmentSandbox, TransitKey: "transit", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m", Name: "Xyz"}}}.PSPConfig(),
+		PSPs: PSPs{
+			"mobius": NMIPSP{Environment: EnvironmentSandbox, GatewayID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
+			"wallet": SolanaPSP{Environment: EnvironmentDevnet, Treasury: "CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w", RPCURL: "https://devnet.helius-rpc.com/?api-key=k"}.PSPConfig(),
 		},
-		Settings: billing.MerchantSettings{BillingPeriodBoundary: "calendar_month"},
+		MerchantSettings: billing.MerchantSettings{BillingPeriodBoundary: "calendar_month"},
 	}
 	raw, err := yaml.Marshal(struct {
 		Slug                string `yaml:"slug"`

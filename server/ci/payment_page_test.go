@@ -73,12 +73,12 @@ func newPayShop(t *testing.T) *payShop {
 	var err error
 	s.handler, err = standaloneHandler(s.srv)
 	require.NoError(t, err)
-	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("pay"), DisplayName: "Pay Shop"})
+	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Sandbox: true, Slug: uniqueName("pay"), DisplayName: "Pay Shop"})
 	require.NoError(t, err)
 	s.mid = entry.MerchantID
-	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", AccountID: "e2e-" + uuid.NewString()[:8],
-		Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
-		Credentials: map[string]string{"security_key": "e2e-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
+	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "e2e-" + uuid.NewString()[:8]},
+		TokenizationKey: "e2e-tokenization",
+		Credentials:     map[string]string{"security_key": "e2e-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 	require.NoError(t, err)
 	s.psp = psp.ID
 	issuer := newIssuerKey(t, "https://backend-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")

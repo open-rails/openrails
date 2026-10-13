@@ -10,8 +10,8 @@
 //	client, err := openrails.New(ctx, openrails.Config{
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
-//		Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
-//			"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+//		Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", Sandbox: true, PSPs: map[string]openrails.PSPConfig{
+//			"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //

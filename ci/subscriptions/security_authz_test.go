@@ -142,7 +142,7 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		DB:                &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: psps, Issuer: issuer}},
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, PSPs: psps, Issuer: issuer}},
 	}
 	if w.vault != nil {
 		cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Issuer: issuer}}
@@ -152,7 +152,7 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	if w.vault != nil && slug != w.slug {
-		writeVaultDocs(t, w.vault, rt, openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps})
+		writeVaultDocs(t, w.vault, rt, openrails.MerchantDeclaration{Sandbox: true, Slug: slug, DisplayName: slug, PSPs: psps})
 	}
 	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, RouteGroups: routeGroups}
 	if slug != w.slug {

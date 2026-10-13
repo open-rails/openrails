@@ -91,6 +91,7 @@ var Tables = map[string]Table{
 	"book_identity":                     {Class: State},
 	"worker_state":                      {Class: State},
 	"periodic_leases":                   {Class: State},
+	"solana_crankers":                   {Class: State},
 	"dashboard_configs":                 {Class: State},
 	"customer_contacts":                 {Class: State},
 	"provisioning_tokens":               {Class: State},

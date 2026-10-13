@@ -67,6 +67,21 @@ func Degrade(cfg *Config) []Degradation {
 		cfg.HyperSwitch = nil
 		off("hyperswitch", fmt.Errorf("%w; HyperSwitch is off", err))
 	}
+	if crankers := SolanaCrankers(cfg); len(crankers) > 0 {
+		var kept []SolanaCrankerConfig
+		for i, c := range crankers {
+			if err := validateSolanaCranker(cfg, kept, c); err != nil {
+				next := ""
+				if i == 0 {
+					next = "; the next listed cranker publishes new plans"
+				}
+				off(fmt.Sprintf("solana.crankers[%d]", i), fmt.Errorf("%w; it pulls none of its plans%s", err, next))
+				continue
+			}
+			kept = append(kept, c)
+		}
+		cfg.Solana = &SolanaConfig{Crankers: kept}
+	}
 	if err := validatePlatformVault(cfg); err != nil {
 		cfg.PlatformVault = nil
 		off("platform_vault", fmt.Errorf("%w; settings.card_custody platform is refused", err))

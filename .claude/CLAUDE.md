@@ -119,14 +119,15 @@ through `host-four`; these are placeholders, not customer or repository names.
   or, with `vault.kv_mount`, Vault: one document per object
   (`<scope_prefix>/merchants/<merchant-id>/psps/<key>`); never Postgres. The retired
   manifest keys (`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename error.
-- Per rail, the declared `account_id` is:
-  - **NMI** — the dashboard **"Gateway ID"**, which IS the merchant account id. It is NOT
-    the reseller/ISO, and is NOT fetchable from the `security_key`.
-  - **Stripe** — `acct_…`, operator-declared like every other rail (there is no
-    `GET /v1/account` call in the tree; see docs/rails/stripe.md).
-  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined like `999999-0000`.
-  - **Solana** — DERIVED from the signer public key (a declared `account_id` is ignored
-    with a warning); the payout destination is `settings.recipient_wallet`.
+- Each rail names its account in its own terms (joined with `-` into the internal
+  account its id and webhook path use):
+  - **NMI** — `gateway_id`, the dashboard **"Gateway ID"**, which IS the merchant account
+    id. It is NOT the reseller/ISO, and is NOT fetchable from the `security_key`.
+  - **Stripe** — `account_id`, `acct_…`, operator-declared like every other rail (there
+    is no `GET /v1/account` call in the tree; see docs/rails/stripe.md).
+  - **CCBill** — `client_accnum` and `client_subacc`, CCBill's own numbers.
+  - **Solana** — `treasury`, where every payment lands. Plans are owned by the
+    deployment's `solana.crankers`, never by a PSP.
   - Elsewhere the rule is the opposite: **the less a merchant configures, the better**.
     Where an authoritative source exists, derive from it and delete the knob.
 

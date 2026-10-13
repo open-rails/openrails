@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -42,7 +41,7 @@ func TestPublicRailProfilesAreCompleteAndSecretFree(t *testing.T) {
 func TestPublicPSPConfigServesOnlyWhitelistedSettings(t *testing.T) {
 	const poison = "LEAKED-SENTINEL-VALUE"
 	poisoned := func() map[string]any {
-		s := map[string]any{"a_key_invented_next_year": poison, config.SolanaSettingRPCProvider: poison, config.SolanaSettingRPCAPIKey: poison, config.SolanaSettingRecipientWallet: poison}
+		s := map[string]any{"a_key_invented_next_year": poison, "rpc_url": poison, "treasury": poison}
 		for _, d := range rails.All() {
 			for _, k := range d.CredentialKeys {
 				s[k.Name] = poison

@@ -123,7 +123,9 @@ group in AuthKit before treating it as the idempotent repair, and a
 display name applies only to a merchant the call creates. Rate limits on
 registration are the product's. Ownerless `ProvisionMerchant` and Bootstrap
 are operator acts and stay ungated — that is how a platform merchant claims a
-reserved name. OpenRails serves no route that creates a merchant.
+reserved name. `Sandbox: true` creates a sandbox merchant (`acme-sandbox`),
+whose PSPs move no money, beside the live one. OpenRails serves no route that
+creates a merchant.
 
 `FreeAllowance` selects the standard hosted admission policy, composed from
 OpenRails' own state: verified email always; a free allowance of owned
@@ -170,21 +172,19 @@ merchants:
     remote_application:            # issuer-as-owner
       issuer: https://myapp.example
       jwks_uri: https://myapp.example/.well-known/jwks.json
-    settings:                      # the configuration API's settings document
-      profile:                     # customer-facing display
-        logo_url: https://myapp.example/logo.png
-        from_email: billing@myapp.example
-        support_url: https://myapp.example/support
-      billing_period_boundary: calendar_month   # arrears invoicing (amounts in micros)
-      collection_threshold: 50000000
-      monthly_floor: 1000000
-      arrears_grace_days: 7        # days past due before delinquent (default 14)
+    profile:                       # settings sit flat on the merchant
+      logo_url: https://myapp.example/logo.png
+      from_email: billing@myapp.example
+      support_url: https://myapp.example/support
+    billing_period_boundary: calendar_month   # arrears invoicing (amounts in micros)
+    collection_threshold: 50000000
+    monthly_floor: 1000000
+    arrears_grace_days: 7          # days past due before delinquent (default 14)
     psps:                          # operator-declared rail accounts
       mobius:
         rail: nmi
-        account_id: "100001"
-        settings:
-          tokenization_key: replace-with-nmi-tokenization-key
+        gateway_id: "100001"
+        tokenization_key: replace-with-nmi-tokenization-key
         secrets:
           security_key: replace-with-nmi-security-key
           webhook_signing_secret: replace-with-nmi-webhook-secret
@@ -199,9 +199,9 @@ Per merchant:
   merchant's group, holding its **owner** role: its RFC 9068 access tokens act
   for this one merchant and no other, within that role
   ([auth](auth.md#trusted-issuers); needs `auth.resource.id`).
-- `settings` — the merchant's settings (`billing.MerchantSettings`), the same
-  document `GET /v1/merchant/configuration` reads and a configuration
-  application changes, with the same names, units and validation
+- Settings — the merchant's settings (`billing.MerchantSettings`), flat on the
+  merchant: the fields `GET /v1/merchant/configuration` reads and a
+  configuration application changes, with the same names, units and validation
   ([merchant settings](api/merchant-settings.md)): `profile`, invoicing
   (`billing_period_boundary`, `collection_threshold`, `monthly_floor`, amounts in
   micros), the delinquency policy (`arrears_grace_days`,
@@ -211,15 +211,18 @@ Per merchant:
   (windows in seconds). Omitted fields keep their stored values; a declared list
   replaces the stored one.
 - `psps.<key>` — one entry per PSP. `key` is the manifest PSP name a catalog
-  price's `psps` and purchase use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
-  `stripe`, `solana`), `environment` (required: `live`, `test` or `sandbox`,
-  as the rail has them; see [PSP environments](psp-environments.md)),
-  `account_id`, `archived`, `custodian`, non-secret `settings`, `secrets`, and
-  (Solana) `signer`. A deployment's PSPs are all live or all non-live. The
-  money class (live, or test and sandbox together) is part of the PSP's
-  identity: re-declaring a test PSP sandbox keeps it.
+  price's `psps` and purchase use ("mobius"). Its `rail` (`nmi`, `ccbill`,
+  `stripe`, `solana`) decides its other fields, all flat but `secrets`:
+  `environment` (one of the rail's, its real-money one when omitted; see
+  [PSP environments](psp-environments.md)), the rail's account fields (below),
+  `archived`, the rail's own fields (`custodian`, `tokenization_key`, …) and
+  `secrets`. A field the rail does not take is refused. A live merchant's PSPs
+  move real money, a sandbox merchant's (`sandbox: true`) none; the money
+  class is part of the PSP's identity, so re-declaring a test PSP sandbox
+  keeps it.
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
-  `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
+  `kind` (`basis_theory`), `account_id`, `archived`, the kind's own fields
+  (`public_api_key`, `network_tokens`), `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the
   merchant's directory presents to an embedded engine's SCIM routes
   ([customer contacts](customer-contacts.md)); the standalone server's
@@ -227,20 +230,22 @@ Per merchant:
   the merchant's declared token, replaced when this changes and removed when it
   is removed; tokens minted over the API stand beside it.
 
-`account_id` is operator-declared, per rail (never derived from credentials at
-runtime — details in `docs/rails/*.md`):
+Each rail names its account in its own terms, operator-declared (never
+derived from credentials at runtime — details in `docs/rails/*.md`). Joined
+with `-`, they are the PSP's account: its webhook path and credential names
+use it.
 
-| Rail | `account_id` |
-|---|---|
-| nmi | the dashboard **Gateway ID** (NMI's merchant account id — not the ISO/reseller) — [rails/nmi.md](rails/nmi.md) |
-| stripe | `acct_…`, operator-declared — [rails/stripe.md](rails/stripe.md) shows the curl to read it off your own account |
-| ccbill | `clientAccnum-clientSubacc`, dash-joined (`900000-0000`) — [rails/ccbill.md](rails/ccbill.md) |
-| solana | derived from the signer public key; a declared value is ignored — [rails/solana.md](rails/solana.md) |
+| Rail | Account fields | Account |
+|---|---|---|
+| nmi | `gateway_id`: the dashboard **Gateway ID** (NMI's merchant account id — not the ISO/reseller) — [rails/nmi.md](rails/nmi.md) | `100001` |
+| stripe | `account_id`: `acct_…` — [rails/stripe.md](rails/stripe.md) shows the curl to read it off your own account | `acct_123` |
+| ccbill | `client_accnum`, `client_subacc` — [rails/ccbill.md](rails/ccbill.md) | `900000-0000` |
+| solana | `treasury`: the address payments land in — [rails/solana.md](rails/solana.md) | the address |
 
 A PSP may additionally reference a **custodian** — a third party that holds the
 cards it charges (`custodian: <key>`, resolved against the merchant's
 `custodians:` block; today `basis_theory` on `nmi` only). That is a modifier on
-the rail, not a rail: the `account_id` above is still the gateway's, and the
+the rail, not a rail: the account above is still the gateway's, and the
 custodian's own tenant id is declared once on the custodian entry. Several PSPs
 may reference the same custodian. See
 [payment-method-custody.md](payment-method-custody.md).
@@ -267,7 +272,7 @@ The engine itself reads no environment variable and no secret directory.
 Inside OpenRails a PSP credential is named by its account:
 
 ```text
-psps/<rail>/<environment>/<account_id>/<secret_key>
+psps/<rail>/<environment>/<account>/<secret_key>
 ```
 
 Examples: `psps/nmi/live/100001/security_key`,

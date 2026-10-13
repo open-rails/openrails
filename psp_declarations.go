@@ -4,23 +4,25 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // The typed PSP declarations: one struct per rail whose fields are the rail's
 // slots, so a misspelled secret or setting fails to compile. Each field's psp
 // tag names the declaration key it fills. PSPConfig returns the same value the
-// YAML parses to; an empty field is an omitted key. Environment is required:
-// EnvironmentLive, EnvironmentTest or EnvironmentSandbox, as the rail has them.
+// YAML parses to; an empty field is an omitted key. Environment is the rail's
+// own; omitted, it is the rail's real-money one (live, or Solana's mainnet).
 //
 // A slot tagged required is not checked here: as in YAML, a PSP declared
 // without one exists but is not armed until the credential is supplied.
 
 // NMIPSP declares a PSP on the nmi rail.
 type NMIPSP struct {
-	// AccountID is the NMI dashboard's "Gateway ID".
-	AccountID string `psp:"account_id"`
-	// Environment is live, test (a gateway account in test mode) or sandbox
-	// (a sandbox.nmi.com account).
+	// GatewayID is the NMI dashboard's Gateway ID: the PSP's account.
+	GatewayID string `psp:"gateway_id"`
+	// Environment is live (the default), test (a gateway account in test
+	// mode) or sandbox (a sandbox.nmi.com account).
 	Environment string `psp:"environment"`
 	Archived    bool   `psp:"archived"`
 	// Custodian is the key of a declared custodian holding this PSP's cards;
@@ -32,21 +34,21 @@ type NMIPSP struct {
 	// WebhookSigningSecretPrevious is the rotated-out secret. It verifies only
 	// until WebhookOverlapExpiresAt, which must be set with it.
 	WebhookSigningSecretPrevious string    `psp:"secrets.webhook_signing_secret_previous"`
-	WebhookOverlapExpiresAt      time.Time `psp:"settings.webhook_overlap_expires_at"`
+	WebhookOverlapExpiresAt      time.Time `psp:"webhook_overlap_expires_at"`
 
 	// TokenizationKey is the public Collect.js key the browser's card fields use.
-	TokenizationKey string `psp:"settings.tokenization_key"`
+	TokenizationKey string `psp:"tokenization_key"`
 	// TokenizationURL overrides the Collect.js script URL.
-	TokenizationURL string `psp:"settings.tokenization_url"`
+	TokenizationURL string `psp:"tokenization_url"`
 	// CardEntry is browser (the default) or server, where the payment page
 	// posts the card to OpenRails, which vaults it.
-	CardEntry string `psp:"settings.card_entry"`
+	CardEntry string `psp:"card_entry"`
 }
 
 // PSPConfig returns the declaration.
 func (p NMIPSP) PSPConfig() PSPConfig {
 	return PSPConfig{
-		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian,
+		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
 		Secrets: secretSlots(map[string]string{
 			"security_key":                    p.SecurityKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -65,7 +67,8 @@ func (p NMIPSP) PSPConfig() PSPConfig {
 type StripePSP struct {
 	// AccountID is the Stripe account, acct_….
 	AccountID string `psp:"account_id"`
-	// Environment is live or test, as the secret key's prefix says.
+	// Environment is live (the default) or test, as the secret key's prefix
+	// says.
 	Environment string `psp:"environment"`
 	Archived    bool   `psp:"archived"`
 
@@ -76,11 +79,11 @@ type StripePSP struct {
 	// WebhookSigningSecretPrevious is the rotated-out secret. It verifies only
 	// until WebhookOverlapExpiresAt, which must be set with it.
 	WebhookSigningSecretPrevious string    `psp:"secrets.webhook_signing_secret_previous"`
-	WebhookOverlapExpiresAt      time.Time `psp:"settings.webhook_overlap_expires_at"`
+	WebhookOverlapExpiresAt      time.Time `psp:"webhook_overlap_expires_at"`
 
 	// PublishableKey (pk_…) enables embedded Elements; without it purchase
 	// redirects to Stripe Checkout.
-	PublishableKey string `psp:"settings.publishable_key"`
+	PublishableKey string `psp:"publishable_key"`
 }
 
 // PSPConfig returns the declaration.
@@ -102,9 +105,11 @@ func (p StripePSP) PSPConfig() PSPConfig {
 
 // CCBillPSP declares a PSP on the ccbill rail.
 type CCBillPSP struct {
-	// AccountID is clientAccnum-clientSubacc, dash-joined like 999999-0000.
-	AccountID string `psp:"account_id"`
-	// Environment is live or sandbox (CCBill's sandbox).
+	// ClientAccnum and ClientSubacc are the CCBill account and subaccount
+	// numbers, like 945280 and 0000: the PSP's account.
+	ClientAccnum string `psp:"client_accnum"`
+	ClientSubacc string `psp:"client_subacc"`
+	// Environment is live (the default) or sandbox (CCBill's sandbox).
 	Environment string `psp:"environment"`
 	Archived    bool   `psp:"archived"`
 
@@ -117,7 +122,8 @@ type CCBillPSP struct {
 // PSPConfig returns the declaration.
 func (p CCBillPSP) PSPConfig() PSPConfig {
 	return PSPConfig{
-		Rail: billing.RailCCBill, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
+		Rail: billing.RailCCBill, Environment: p.Environment, Archived: p.Archived,
+		AccountID: rails.Account(models.RailCCBill, map[string]string{"client_accnum": p.ClientAccnum, "client_subacc": p.ClientSubacc}),
 		Secrets: secretSlots(map[string]string{
 			"salt":              p.Salt,
 			"datalink_username": p.DatalinkUsername,
@@ -126,70 +132,29 @@ func (p CCBillPSP) PSPConfig() PSPConfig {
 	}
 }
 
-// SolanaPSP declares the Solana wallet PSP. Its account id is the signer's
-// public key, so it declares none.
+// SolanaPSP declares a Solana PSP: the merchant's treasury on the network its
+// environment names. It holds no key: the deployment's cranker
+// (Config.Solana.Crankers) publishes plans and pulls renewals into the
+// treasury.
 type SolanaPSP struct {
-	// Environment is live (mainnet) or sandbox (devnet).
+	// Environment is mainnet (the default), devnet or testnet.
 	Environment string `psp:"environment"`
 	Archived    bool   `psp:"archived"`
-
-	// PrivateKey is the base58 key of a local keypair signer.
-	PrivateKey string `psp:"secrets.private_key"`
-	// TransitKey names a Vault Transit Ed25519 key that signs instead of
-	// PrivateKey.
-	TransitKey string `psp:"signer.key"`
-
-	// RPCProvider is helius or public.
-	RPCProvider string `psp:"settings.rpc_provider"`
-	// RPCAPIKey is the Helius API key.
-	RPCAPIKey string `psp:"settings.rpc_api_key"`
-	// Tokens are the accepted SPL tokens by symbol.
-	Tokens map[string]SolanaToken `psp:"settings.tokens"`
-	// RecipientWallet is the payout address.
-	RecipientWallet string `psp:"settings.recipient_wallet"`
-}
-
-// SolanaToken is one accepted SPL token. A built-in symbol (SOL, USDC, …)
-// takes the network's mint and declares none.
-type SolanaToken struct {
-	Mint string
-	Name string
+	// Treasury is the Solana address every payment to the merchant lands in:
+	// the PSP's identity.
+	Treasury string `psp:"treasury"`
+	// RPCURL is the PSP's own Solana JSON-RPC endpoint, tried before the
+	// network's public one. A secret: its URL usually carries the provider's
+	// key.
+	RPCURL string `psp:"secrets.rpc_url"`
 }
 
 // PSPConfig returns the declaration.
 func (p SolanaPSP) PSPConfig() PSPConfig {
-	out := PSPConfig{
-		Rail: billing.RailSolana, Environment: p.Environment, Archived: p.Archived,
-		Secrets: secretSlots(map[string]string{"private_key": p.PrivateKey}),
-		Settings: settingSlots(map[string]any{
-			"rpc_provider":     p.RPCProvider,
-			"rpc_api_key":      p.RPCAPIKey,
-			"tokens":           solanaTokens(p.Tokens),
-			"recipient_wallet": p.RecipientWallet,
-		}),
+	return PSPConfig{
+		Rail: billing.RailSolana, Environment: p.Environment, AccountID: p.Treasury, Archived: p.Archived,
+		Secrets: secretSlots(map[string]string{"rpc_url": p.RPCURL}),
 	}
-	if p.TransitKey != "" {
-		out.Signer = &PSPSignerConfig{Mode: "vault_transit", Key: p.TransitKey}
-	}
-	return out
-}
-
-func solanaTokens(tokens map[string]SolanaToken) map[string]any {
-	if len(tokens) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(tokens))
-	for symbol, token := range tokens {
-		fields := map[string]any{}
-		if token.Mint != "" {
-			fields["mint"] = token.Mint
-		}
-		if token.Name != "" {
-			fields["name"] = token.Name
-		}
-		out[symbol] = fields
-	}
-	return out
 }
 
 func instant(t time.Time) string {

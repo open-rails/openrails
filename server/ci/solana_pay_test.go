@@ -51,16 +51,14 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 	for _, s := range shops {
 		manifest += fmt.Sprintf(`  %s:
     display_name: %s
-    settings:
-      profile: {logo_url: "%s"}
+    sandbox: true
+    profile: {logo_url: "%s"}
     psps:
       solana:
         rail: solana
-        environment: sandbox
-        signer: {mode: local_keypair}
-        secrets: {private_key: %s}
-        settings: {rpc_provider: public, tokens: {DUSD: {}}}
-`, s.slug, s.name, s.logo, solanago.NewWallet().PrivateKey.String())
+        environment: devnet
+        treasury: %s
+`, s.slug, s.name, s.logo, solanago.NewWallet().PublicKey().String())
 	}
 	path := filepath.Join(t.TempDir(), "merchants.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
@@ -105,7 +103,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 		var order billing.Order
 		require.NoError(t, json.Unmarshal(created.Body.Bytes(), &order))
 		paid := me(http.MethodPost, "/orders/"+order.ID.String()+"/pay", map[string]any{
-			"payment": map[string]any{"token_symbol": "DUSD", "psp_id": cfg.Payment.PSPs[0].PSPID}, "expected_total": "5000000"})
+			"payment": map[string]any{"token_symbol": "USDC", "psp_id": cfg.Payment.PSPs[0].PSPID}, "expected_total": "5000000"})
 		require.Equal(t, http.StatusOK, paid.Code, paid.Body.String())
 		require.NoError(t, json.Unmarshal(paid.Body.Bytes(), &order))
 		require.NotNil(t, order.Payment.NextAction, paid.Body.String())

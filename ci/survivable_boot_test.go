@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/internal/vaulttest"
 )
 
@@ -78,39 +80,38 @@ func notServedFindings(t *testing.T, f *fixture, merchant billing.MerchantID) ma
 	return out
 }
 
-// The doujins boot of #1265: a Solana PSP signing with Vault Transit on a
-// deployment with no Vault. The engine boots and serves; the card PSP sells;
-// only the Solana PSP is refused, and Ready, the configuration probe and the
-// console's review queue say why.
-func TestSolanaTransitSignerWithoutVaultRefusesOnlyThatPSP(t *testing.T) {
+// The doujins boot of #1265 with the cranker it now lists: a Vault Transit
+// cranker on a deployment with no Vault. The engine boots and serves; the
+// Solana PSP, a treasury needing no key, sells; only the cranker is refused,
+// so nothing is pulled, and Ready and the configuration probe say why.
+func TestTransitCrankerWithoutVaultRefusesOnlyTheCranker(t *testing.T) {
 	f := newFixture(t)
 	slug := "transit-" + uuid.NewString()[:8]
+	chain := solanafake.New()
+	t.Cleanup(chain.Close)
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
+	cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "vault_transit", Key: transitKey}}}
+	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL()}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
 		"stripe": stripeTest(),
-		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox, TransitKey: transitKey}.PSPConfig(),
+		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: solanago.NewWallet().PublicKey().String()}.PSPConfig(),
 	}}}
 	bill := survivingEngine(t, f, cfg)
 	shop := declared(t, bill, cfg)
 
-	const why = "solana signer mode vault_transit requires a Vault connection"
+	const why = "vault_transit needs vault; it pulls none of its plans"
 	err := probe(t, bill, "openrails_configuration")
-	require.ErrorContains(t, err, "merchants."+slug+".psps/solana: "+why)
+	require.ErrorContains(t, err, "solana.crankers[0]: "+why)
 	dep := readiness(t, bill, "configuration")
 	require.True(t, dep.Optional)
 	require.False(t, dep.Available)
 	require.ErrorContains(t, dep.Err, why)
-	require.Equal(t, map[string]string{"psps/solana": why}, notServedFindings(t, f, shop.MerchantID()))
+	require.Empty(t, notServedFindings(t, f, shop.MerchantID()), "no merchant document is refused")
 
-	_, offered := routedPSP(t, bill, "solana")
-	require.False(t, offered, "the refused PSP is never offered")
-	_, offered = routedPSP(t, bill, "stripe")
+	require.Eventually(t, func() bool { _, ok := routedPSP(t, bill, "solana"); return ok }, 20*time.Second, 50*time.Millisecond, "the treasury sells")
+	_, offered := routedPSP(t, bill, "stripe")
 	require.True(t, offered)
 	stripeCheckout(t, bill, shop)
-	psps, err := shop.ListPSPs(t.Context(), billing.PSPListParams{})
-	require.NoError(t, err)
-	require.Len(t, psps.Items, 1)
-	require.Equal(t, "stripe", psps.Items[0].Key)
 }
 
 // A PSP whose secret is missing is served as declared but never armed: the
@@ -120,9 +121,9 @@ func TestPSPWithoutItsSecretIsNotArmedAndTheRestSells(t *testing.T) {
 	f := newFixture(t)
 	slug := "secretless-" + uuid.NewString()[:8]
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
 		"stripe": stripeTest(),
-		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-secretless", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-secretless", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 	}}}
 	bill := survivingEngine(t, f, cfg)
 	shop := declared(t, bill, cfg)
@@ -145,7 +146,7 @@ func TestOptionalSettingsThatCannotBeServedAreTurnedOff(t *testing.T) {
 	f := newFixture(t)
 	slug := "optional-" + uuid.NewString()[:8]
 	base := f.config()
-	base.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}}}
+	base.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}}}
 
 	unreachable := base
 	unreachable.Redis = &openrails.RedisConfig{Addr: "127.0.0.1:1"}
@@ -196,9 +197,9 @@ func TestOneMerchantsBadDeclarationLeavesTheOthersServing(t *testing.T) {
 	platform.AccountID = "acct_e2e_custody"
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		good:         {DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
-		typo:         {DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
-		custody:      {DisplayName: "Custody", Settings: billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
+		good:         {Sandbox: true, DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
+		typo:         {Sandbox: true, DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
+		custody:      {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
 		"Not A Slug": {DisplayName: "Unprovisionable"},
 	}
 	bill := survivingEngine(t, f, cfg)

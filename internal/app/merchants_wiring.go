@@ -82,7 +82,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	r.startConfigRealerts()
 	r.DB.SetMerchantConfig(svc)
 	r.ArmMerchantsService(svc)
-	r.ArmSolanaRecurringServices(svc.Secrets(), conn.SolanaTransit)
+	r.ArmSolanaRecurringServices(conn.SolanaTransit)
 	return nil
 }
 
@@ -214,7 +214,7 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		return set
 	}
 	doc := set.Merchant.Value
-	settings, err := merchantconfig.Normalize(doc.DisplayName, doc.Settings)
+	settings, err := merchantconfig.Normalize(doc.DisplayName, doc.MerchantSettings)
 	if err != nil {
 		return reject("settings: " + err.Error()), nil
 	}

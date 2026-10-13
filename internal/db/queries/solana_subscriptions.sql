@@ -5,13 +5,13 @@ INSERT INTO billing.solana_subscriptions (
     id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature,
-    next_pull_at, status, created_at, updated_at
+    next_pull_at, status, created_at, updated_at, treasury
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
     sqlc.narg(last_pulled_period_starts_at), sqlc.narg(last_signature),
-    $10, $11, $12, $13
+    $10, $11, $12, $13, sqlc.arg(treasury)::text
 )
 ON CONFLICT (subscription_pda) DO UPDATE SET
     subscription_id = EXCLUDED.subscription_id,
@@ -57,9 +57,11 @@ UPDATE billing.solana_subscriptions SET
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListActiveSolanaMerchantWallets :many
-SELECT DISTINCT merchant_id, merchant_address
+-- Each plan owner with active subscriptions: how many, on how many plans.
+SELECT merchant_id, merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT plan_pda)::bigint AS plans
 FROM billing.solana_subscriptions
-WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
+GROUP BY merchant_id, merchant_address;
 
 -- name: ListActiveSolanaSubscriptionsWithSignature :many
 SELECT * FROM billing.solana_subscriptions

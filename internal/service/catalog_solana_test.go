@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,6 +29,7 @@ const (
 // as plan accounts and serves SPL mint accounts with the given decimals.
 type fakeChain struct {
 	owner    solanago.PublicKey
+	treasury solanago.PublicKey
 	mints    map[string]uint8 // mint -> decimals
 	accounts map[solanago.PublicKey][]byte
 	submits  int
@@ -36,14 +38,26 @@ type fakeChain struct {
 }
 
 func newFakeChain(mints map[string]uint8) *fakeChain {
-	return &fakeChain{owner: solanago.NewWallet().PublicKey(), mints: mints, accounts: map[solanago.PublicKey][]byte{}}
+	return &fakeChain{owner: solanago.NewWallet().PublicKey(), treasury: solanago.NewWallet().PublicKey(), mints: mints, accounts: map[solanago.PublicKey][]byte{}}
 }
 
-func (c *fakeChain) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
+func (c *fakeChain) Publisher(context.Context) (solanago.PublicKey, error) {
 	return c.owner, nil
 }
 
-func (c *fakeChain) Submit(_ context.Context, _ billing.MerchantID, instructions []solanago.Instruction) (solanago.Signature, error) {
+func (c *fakeChain) Signer(_ context.Context, owner solanago.PublicKey) (solanaint.Signer, error) {
+	if !owner.Equals(c.owner) {
+		return nil, fmt.Errorf("%w (owner %s)", recurring.ErrUnheldPlan, owner)
+	}
+	return nil, nil
+}
+
+// Treasury is the merchant's treasury.
+func (c *fakeChain) Treasury(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
+	return c.treasury, nil
+}
+
+func (c *fakeChain) Submit(_ context.Context, _ billing.MerchantID, _ solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
 	c.submits++
 	if c.readOnly {
 		return solanago.Signature{}, fmt.Errorf("provider writes forbidden")
@@ -87,9 +101,9 @@ func solanaFixture(chain *fakeChain, network string, tokens map[string]string, r
 	for symbol, mint := range tokens {
 		cfg[symbol] = config.TokenConfig{Mint: mint}
 	}
-	plan := recurring.NewPlanServiceWithReader(chain, nil, recurring.NetworkTokens(network, cfg))
+	plan := recurring.NewPlanServiceWithReader(chain, nil, recurring.NetworkTokens(network, cfg), chain.Treasury)
 	if reader {
-		plan = recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens(network, cfg))
+		plan = recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens(network, cfg), chain.Treasury)
 	}
 	return &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 }
@@ -132,15 +146,15 @@ func TestSolanaPlanPublishUsesOnChainMintDecimals(t *testing.T) {
 }
 
 func TestSolanaAdapterBranches(t *testing.T) {
-	const dusdMint = "7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T"
 	out, err := solanaFixture(newFakeChain(map[string]uint8{usdcMint: 6}), "mainnet", map[string]string{"USDC": usdcMint}, true).AutoCreate(solanaCtx(), recurringTerms(29_000_000))
 	require.NoError(t, err)
-	require.Equal(t, "USDC", out[solanaKeyMintSymbol], "live recurring defaults to USDC")
+	require.Equal(t, "USDC", out[solanaKeyMintSymbol], "mainnet recurring bills in USDC")
 
-	sandbox := solanaFixture(newFakeChain(map[string]uint8{dusdMint: 6}), "devnet", map[string]string{"DUSD": dusdMint}, true)
-	out, err = sandbox.AutoCreate(solanaCtx(), recurringTerms(29_000_000))
+	devnet := solanaFixture(newFakeChain(map[string]uint8{solanatokens.DevnetUSDCMint: 6}), "devnet", map[string]string{"USDC": solanatokens.DevnetUSDCMint}, true)
+	out, err = devnet.AutoCreate(solanaCtx(), recurringTerms(29_000_000))
 	require.NoError(t, err)
-	require.Equal(t, "DUSD", out[solanaKeyMintSymbol], "sandbox recurring defaults to DUSD")
+	require.Equal(t, "USDC", out[solanaKeyMintSymbol], "devnet recurring bills in devnet USDC")
+	require.Equal(t, solanatokens.DevnetUSDCMint, out[solanaKeyMint])
 
 	out, err = (&solanaAdapter{}).AutoCreate(context.Background(), autoCreateContext{Currency: "eur", UnitAmount: 29_000_000, BillingIntervalHours: intPtr(720)})
 	require.NoError(t, err)
@@ -171,14 +185,13 @@ func TestSolanaAdapterBranches(t *testing.T) {
 	require.False(t, missing)
 	require.Nil(t, drift)
 
-	plan := recurring.NewPlanServiceWithReader(newFakeChain(nil), nil, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}, "USD1": {Mint: "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD"}}))
-	token, err := resolveSolanaTokenFromMint(t.Context(), plan, "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD")
+	unconfigured := newFakeChain(nil)
+	plan := recurring.NewPlanServiceWithReader(unconfigured, nil, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}}), unconfigured.Treasury)
+	token, err := resolveSolanaTokenFromMint(t.Context(), plan, usdcMint)
 	require.NoError(t, err)
-	require.Equal(t, "USD1", token)
+	require.Equal(t, "USDC", token)
 	_, err = resolveSolanaTokenFromMint(t.Context(), plan, solanago.NewWallet().PublicKey().String())
 	require.Error(t, err, "unconfigured mint")
-	_, err = resolveSolanaTokenFromMint(t.Context(), plan, "usd1usd1usd1usd1usd1usd1usd1usd1usd1usd1usd")
-	require.Error(t, err, "base58 is case-sensitive")
 }
 
 // A catalog apply whose plan landed but whose receiving ATA did not is healed
@@ -188,7 +201,7 @@ func TestSolanaCatalogReapplyEnsuresReceivingATA(t *testing.T) {
 	chain.failATA = true
 	adapter := solanaFixture(chain, "mainnet", map[string]string{"USDC": usdcMint}, true)
 	ctx := solanaCtx()
-	ata, _, err := subscriptions.DeriveATA(chain.owner, solanago.MustPublicKeyFromBase58(usdcMint), solanago.TokenProgramID)
+	ata, _, err := subscriptions.DeriveATA(chain.treasury, solanago.MustPublicKeyFromBase58(usdcMint), solanago.TokenProgramID)
 	require.NoError(t, err)
 
 	_, err = adapter.AutoCreate(ctx, recurringTerms(10_000_000))
@@ -215,7 +228,7 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 		chain := newFakeChain(map[string]uint8{usdcMint: 6})
 		chain.readOnly = true
 		mint := solanago.MustPublicKeyFromBase58(usdcMint)
-		id := solanaPlanID(recurringTerms(23_000_000).PriceID, usdcMint)
+		id := solanaPlanID(recurringTerms(23_000_000).PriceID, usdcMint, chain.treasury)
 		address, bump, err := subscriptions.DerivePlanPDA(chain.owner, id)
 		require.NoError(t, err)
 		raw := make([]byte, subscriptions.PlanAccountSize)
@@ -227,15 +240,16 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 		binary.LittleEndian.PutUint64(raw[75:83], 23_000_000)
 		binary.LittleEndian.PutUint64(raw[83:91], 720)
 		binary.LittleEndian.PutUint64(raw[91:99], 1_700_000_000)
+		copy(raw[107:139], chain.treasury[:])
 		chain.accounts[address] = raw
-		return chain, recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}})), address
+		return chain, recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}}), chain.Treasury), address
 	}
 
 	chain, plan, address := setup()
 	_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, req, map[string]string{solanaKeyPlanPDA: address.String()})
 	require.NoError(t, err)
 
-	planID := solanaPlanID(recurringTerms(req.UnitAmount).PriceID, usdcMint)
+	planID := solanaPlanID(recurringTerms(req.UnitAmount).PriceID, usdcMint, chain.treasury)
 	for _, link := range []map[string]string{
 		{solanaKeyPlanID: strconv.FormatUint(planID, 10)},
 		{solanaKeyPlanID: strconv.FormatUint(planID, 10), solanaKeyMint: usdcMint, solanaKeyMerchant: chain.owner.String()},
@@ -267,10 +281,11 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 	require.ErrorContains(t, err, "plan_pda or plan_id is required")
 
 	for name, corrupt := range map[string]func([]byte){
-		"foreign owner": func(raw []byte) { foreign := solanago.NewWallet().PublicKey(); copy(raw[1:33], foreign[:]) },
-		"amount":        func(raw []byte) { binary.LittleEndian.PutUint64(raw[75:83], 19_000_000) },
-		"period":        func(raw []byte) { binary.LittleEndian.PutUint64(raw[83:91], 744) },
-		"sunset":        func(raw []byte) { raw[34] = subscriptions.PlanStatusSunset },
+		"foreign owner":    func(raw []byte) { foreign := solanago.NewWallet().PublicKey(); copy(raw[1:33], foreign[:]) },
+		"another treasury": func(raw []byte) { other := solanago.NewWallet().PublicKey(); copy(raw[107:139], other[:]) },
+		"amount":           func(raw []byte) { binary.LittleEndian.PutUint64(raw[75:83], 19_000_000) },
+		"period":           func(raw []byte) { binary.LittleEndian.PutUint64(raw[83:91], 744) },
+		"sunset":           func(raw []byte) { raw[34] = subscriptions.PlanStatusSunset },
 	} {
 		chain, plan, address := setup()
 		corrupt(chain.accounts[address])
@@ -281,25 +296,30 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 	require.Zero(t, chain.submits)
 }
 
-// unsignedChain is a deployment with no Solana signer to own plans.
+// unsignedChain is a deployment with no cranker to own plans.
 type unsignedChain struct{ *fakeChain }
 
-func (unsignedChain) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
-	return solanago.PublicKey{}, fmt.Errorf("no Solana signer is configured")
+func (unsignedChain) Publisher(context.Context) (solanago.PublicKey, error) {
+	return solanago.PublicKey{}, recurring.ErrNoCranker
 }
 
-// Without a signer to own the plan, catalog application refuses the recurring
-// price by name, before any submission.
-func TestCatalogSolanaPlanNeedsASigner(t *testing.T) {
+// Without the deployment's cranker to own the plan, catalog application
+// refuses the recurring price by name, before any submission; so does a
+// runtime that armed no plan service.
+func TestCatalogSolanaPlanNeedsTheCranker(t *testing.T) {
 	chain := newFakeChain(map[string]uint8{usdcMint: 6})
 	tokens := recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}})
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		SolanaPlanService: recurring.NewPlanServiceWithReader(unsignedChain{chain}, chain, tokens)}}
+		SolanaPlanService: recurring.NewPlanServiceWithReader(unsignedChain{chain}, chain, tokens, chain.Treasury)}}
 	terms := recurringTerms(23_000_000)
 	check := catalogReferenceCheck{key: "monthly", productKey: "premium", priceID: terms.PriceID,
 		request: billing.CreatePriceParams{Currency: "USD", UnitAmount: terms.UnitAmount, BillingIntervalHours: terms.BillingIntervalHours}}
 	_, err := svc.findOrPublishCatalogSolanaPlan(solanaCtx(), check, nil)
-	require.ErrorContains(t, err, `price "monthly" of product "premium": a recurring Solana price needs the Solana signer`)
-	require.ErrorContains(t, err, "no Solana signer is configured")
+	require.ErrorContains(t, err, `price "monthly" of product "premium": a recurring Solana price needs a listed solana.crankers`)
+	require.ErrorContains(t, err, "solana rebilling is off")
 	require.Zero(t, chain.submits)
+
+	svc.rt.SolanaPlanService = nil
+	_, err = svc.findOrPublishCatalogSolanaPlan(solanaCtx(), check, nil)
+	require.ErrorContains(t, err, `price "monthly" of product "premium": solana rebilling is off: this deployment lists no solana.crankers`)
 }

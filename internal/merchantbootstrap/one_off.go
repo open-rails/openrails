@@ -19,7 +19,8 @@ import (
 )
 
 // Merchants is a one-off process's merchant configuration: the merchants
-// service over it, the Transit signer and the cleanup.
+// service over it, Vault Transit (the cranker's, when it signs there) and the
+// cleanup.
 type Merchants struct {
 	Service       *merchants.Service
 	SolanaTransit solana.TransitClient
@@ -90,7 +91,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, m
 			return nil, err
 		}
 		if declaration != nil {
-			req := ProvisionMerchantParams{Config: cfg, Database: database, Merchants: svc, SolanaTransit: opened.SolanaTransit}
+			req := ProvisionMerchantParams{Config: cfg, Database: database, Merchants: svc}
 			refused, err := PutDeclaration(ctx, req, merchantID, *declaration)
 			if err == nil && len(refused) > 0 {
 				err = rejected(refused)

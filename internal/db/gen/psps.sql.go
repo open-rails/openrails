@@ -12,34 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const approvePSPPendingSigner = `-- name: ApprovePSPPendingSigner :execrows
-UPDATE billing.psps
-SET pending_signer_public_key = NULL,
-    superseded_at = COALESCE(superseded_at, now()),
-    credential_fingerprint = NULL,
-    updated_at = now()
-WHERE merchant_id = $1::uuid
-  AND id = $2::uuid
-  AND pending_signer_public_key = $3::text
-`
-
-type ApprovePSPPendingSignerParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	PublicKey  string
-}
-
-// #1101: the operator approval is the only writer that clears a pending
-// signer. The stored identity is superseded and drains; the approved one is
-// registered next.
-func (q *Queries) ApprovePSPPendingSigner(ctx context.Context, arg ApprovePSPPendingSignerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, approvePSPPendingSigner, arg.MerchantID, arg.ID, arg.PublicKey)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const clearPSPCredentialDuplicate = `-- name: ClearPSPCredentialDuplicate :exec
 UPDATE billing.psps SET credential_duplicate_at = NULL
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND credential_duplicate_at IS NOT NULL
@@ -122,10 +94,10 @@ const declarePSPIdentity = `-- name: DeclarePSPIdentity :one
 INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES ($1::uuid, $2::uuid, $3::text,
         $4::text, $5::text, $6::text)
-ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET id=billing.psps.id
+ON CONFLICT (rail, live, account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
-RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live
 `
 
 type DeclarePSPIdentityParams struct {
@@ -158,18 +130,18 @@ func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentity
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }
 
 const getPSP = `-- name: GetPSP :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE psps.merchant_id = $2::uuid AND id = $1
 `
 
@@ -190,37 +162,37 @@ func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (BillingPsp, err
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }
 
 const getPSPByIdentity = `-- name: GetPSPByIdentity :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
-  AND (environment = 'live') = ($3::text = 'live')
+  AND live = $3::bool
   AND account_id = $4::text
 LIMIT 1
 `
 
 type GetPSPByIdentityParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-	AccountID   string
+	MerchantID uuid.UUID
+	Rail       string
+	Live       bool
+	AccountID  string
 }
 
 func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, getPSPByIdentity,
 		arg.MerchantID,
 		arg.Rail,
-		arg.Environment,
+		arg.Live,
 		arg.AccountID,
 	)
 	var i BillingPsp
@@ -233,12 +205,12 @@ func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityPara
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }
@@ -262,7 +234,7 @@ func (q *Queries) GetPSPEnvironmentForRail(ctx context.Context, arg GetPSPEnviro
 }
 
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
 FOR SHARE
 `
@@ -284,12 +256,12 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }
@@ -315,7 +287,7 @@ func (q *Queries) GetPSPIDByRailAccount(ctx context.Context, arg GetPSPIDByRailA
 }
 
 const listPSPsByIDs = `-- name: ListPSPsByIDs :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -343,12 +315,12 @@ func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([
 			&i.AccountID,
 			&i.CredentialsValidatedAt,
 			&i.WebhookEndpointID,
-			&i.PendingSignerPublicKey,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CredentialFingerprint,
 			&i.CredentialDuplicateAt,
 			&i.SupersededAt,
+			&i.Live,
 		); err != nil {
 			return nil, err
 		}
@@ -361,7 +333,7 @@ func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([
 }
 
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE merchant_id = $1::uuid
 ORDER BY created_at, id
 `
@@ -386,12 +358,12 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, merchantID uuid.UUID)
 			&i.AccountID,
 			&i.CredentialsValidatedAt,
 			&i.WebhookEndpointID,
-			&i.PendingSignerPublicKey,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CredentialFingerprint,
 			&i.CredentialDuplicateAt,
 			&i.SupersededAt,
+			&i.Live,
 		); err != nil {
 			return nil, err
 		}
@@ -480,27 +452,6 @@ func (q *Queries) MerchantHasPSPs(ctx context.Context, merchantID uuid.UUID) (bo
 	return exists, err
 }
 
-const pSPExistsOnRail = `-- name: PSPExistsOnRail :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.psps
-    WHERE rail = lower($1::text) AND environment = $2::text
-)
-`
-
-type PSPExistsOnRailParams struct {
-	Rail        string
-	Environment string
-}
-
-// CROSS-MERCHANT: whether any merchant holds a PSP identity on rail in
-// environment, archived ones included.
-func (q *Queries) PSPExistsOnRail(ctx context.Context, arg PSPExistsOnRailParams) (bool, error) {
-	row := q.db.QueryRow(ctx, pSPExistsOnRail, arg.Rail, arg.Environment)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const pSPHeldBilling = `-- name: PSPHeldBilling :one
 SELECT
     (SELECT count(*) FROM billing.payment_methods m
@@ -534,54 +485,18 @@ func (q *Queries) PSPHeldBilling(ctx context.Context, arg PSPHeldBillingParams) 
 	return i, err
 }
 
-const pSPOutsideEnvironments = `-- name: PSPOutsideEnvironments :one
-SELECT p.id, m.slug, p.key, p.rail, p.environment, p.account_id
-FROM billing.psps p
-JOIN billing.merchants m ON m.id = p.merchant_id
-WHERE p.superseded_at IS NULL
-  AND m.deleted_at IS NULL
-  AND NOT (p.environment = ANY($1::text[]))
-ORDER BY p.created_at, p.id
-LIMIT 1
-`
-
-type PSPOutsideEnvironmentsRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Key         string
-	Rail        string
-	Environment string
-	AccountID   string
-}
-
-// CROSS-MERCHANT: the oldest current PSP identity in none of environments,
-// for the rule that a deployment's PSPs are all live or all non-live.
-func (q *Queries) PSPOutsideEnvironments(ctx context.Context, environments []string) (PSPOutsideEnvironmentsRow, error) {
-	row := q.db.QueryRow(ctx, pSPOutsideEnvironments, environments)
-	var i PSPOutsideEnvironmentsRow
-	err := row.Scan(
-		&i.ID,
-		&i.Slug,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-	)
-	return i, err
-}
-
 const registerPSP = `-- name: RegisterPSP :one
 
 INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)
 VALUES ($1::uuid, $2::uuid, $3::text,
         lower($4::text), $5::text, $6::text)
-ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET
+ON CONFLICT (rail, live, account_id) DO UPDATE SET
     key = EXCLUDED.key,
     environment = EXCLUDED.environment,
     superseded_at = NULL,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live
 `
 
 type RegisterPSPParams struct {
@@ -597,10 +512,10 @@ type RegisterPSPParams struct {
 // (settings, credentials, archived) is its document in a file or Vault; a row
 // holds the identity history points at and what OpenRails discovers.
 // Records a PSP document's identity under its natural-key id, current under
-// the document's key, with its declared environment: test and sandbox are one
-// money class, so a declaration moving between them corrects the row in
-// place. An identity another merchant owns answers no row; a key another
-// current PSP of the merchant holds violates psps_key_key.
+// the document's key, with its declared environment: every non-live
+// environment is one money class, so a declaration moving between them
+// corrects the row in place. An identity another merchant owns answers no row;
+// a key another current PSP of the merchant holds violates psps_key_key.
 func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, registerPSP,
 		arg.ID,
@@ -620,12 +535,12 @@ func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (Billi
 		&i.AccountID,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.PendingSignerPublicKey,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
 		&i.SupersededAt,
+		&i.Live,
 	)
 	return i, err
 }
@@ -634,14 +549,14 @@ const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :o
 SELECT id, merchant_id, rail, environment, account_id
 FROM billing.psps
 WHERE rail = lower($1::text)
-  AND (environment = 'live') = ($2::text = 'live')
+  AND live = $2::bool
   AND account_id = $3::text
 `
 
 type ResolvePSPOwnerByRailIdentityParams struct {
-	Rail        string
-	Environment string
-	AccountID   string
+	Rail      string
+	Live      bool
+	AccountID string
 }
 
 type ResolvePSPOwnerByRailIdentityRow struct {
@@ -654,9 +569,9 @@ type ResolvePSPOwnerByRailIdentityRow struct {
 
 // CROSS-MERCHANT: PSP ownership by the global (rail, money class, account_id)
 // natural key, for webhook routing and the uniqueness preflight, both of which
-// run before any merchant context exists. test and sandbox are one class.
+// run before any merchant context exists.
 func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg ResolvePSPOwnerByRailIdentityParams) (ResolvePSPOwnerByRailIdentityRow, error) {
-	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
+	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Live, arg.AccountID)
 	var i ResolvePSPOwnerByRailIdentityRow
 	err := row.Scan(
 		&i.ID,
@@ -704,29 +619,6 @@ func (q *Queries) SetPSPCredentialsValidated(ctx context.Context, arg SetPSPCred
 	return err
 }
 
-const setPSPPendingSigner = `-- name: SetPSPPendingSigner :execrows
-UPDATE billing.psps
-SET pending_signer_public_key = $1::text,
-    updated_at = now()
-WHERE merchant_id = $2::uuid
-  AND id = $3::uuid
-`
-
-type SetPSPPendingSignerParams struct {
-	PublicKey  string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// #1101: record the unapproved public key a changed Transit signer reports.
-func (q *Queries) SetPSPPendingSigner(ctx context.Context, arg SetPSPPendingSignerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setPSPPendingSigner, arg.PublicKey, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const setPSPWebhookEndpoint = `-- name: SetPSPWebhookEndpoint :exec
 UPDATE billing.psps SET webhook_endpoint_id = $1::text, updated_at = now()
 WHERE merchant_id = $2::uuid AND id = $3::uuid
@@ -746,7 +638,7 @@ func (q *Queries) SetPSPWebhookEndpoint(ctx context.Context, arg SetPSPWebhookEn
 
 const supersedePSP = `-- name: SupersedePSP :exec
 UPDATE billing.psps
-SET superseded_at = COALESCE(superseded_at, now()), credential_fingerprint = NULL, pending_signer_public_key = NULL, updated_at = now()
+SET superseded_at = COALESCE(superseded_at, now()), credential_fingerprint = NULL, updated_at = now()
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 

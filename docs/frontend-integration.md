@@ -193,7 +193,7 @@ customer's own credential, so its browser reads that one.
   tokenizes against — same rail, different script and different public key. Read `flow` and
   `config` and you never have to care; read `rail` alone and you will get this wrong.
 - Every value here is public by nature. Secrets (an NMI `security_key`, a Stripe
-  `sk_`, a CCBill DataLink password, a Solana signer) are structurally unreachable
+  `sk_`, a CCBill DataLink password, a Solana RPC URL) are structurally unreachable
   from this endpoint: it serves a fixed whitelist of per-rail public fields, so a new
   setting is private unless someone deliberately publishes it.
 

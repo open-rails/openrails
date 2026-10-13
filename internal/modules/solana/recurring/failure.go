@@ -51,6 +51,12 @@ func IsOperationalFailure(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return true
 	}
+	// A pull no listed cranker can sign is the deployment's problem, never
+	// the subscriber's.
+	var changed *CrankerKeyChangedError
+	if errors.Is(err, ErrUnheldPlan) || errors.Is(err, ErrNoCranker) || errors.As(err, &changed) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	for _, sig := range operationalSignatures {
 		if strings.Contains(msg, sig) {

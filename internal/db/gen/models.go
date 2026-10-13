@@ -1449,23 +1449,24 @@ type BillingPsp struct {
 	// The merchant's name for the PSP (e.g. mobius): the key of its document. One current PSP holds a key.
 	Key  string
 	Rail string
-	// The PSP's declared environment: live (real money), test (the provider's own system, no money moves) or sandbox (the provider's separate sandbox system). Its money class (live, or test and sandbox together) is part of its identity; a deployment's current PSPs are all live or all non-live.
+	// The PSP's declared environment, its rail's own: nmi live, test or sandbox; stripe live or test; ccbill live or sandbox; solana mainnet, devnet or testnet.
 	Environment string
 	// Operator-declared account identity on the rail (Stripe acct_, NMI gateway id, CCBill account-subaccount, Solana signer address).
 	AccountID string
 	// When the provider last accepted the stored credentials; NULL when never checked.
 	CredentialsValidatedAt *time.Time
 	// The provider webhook endpoint OpenRails manages for this PSP.
-	WebhookEndpointID      *string
-	PendingSignerPublicKey *string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	WebhookEndpointID *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	// HMAC-SHA256, under a key held in Vault, of the credential naming the gateway account (NMI security_key, Stripe secret_key). Cleared when the PSP archives.
 	CredentialFingerprint *string
 	// When this PSP was found to declare a gateway account another live PSP on its rail already declares. Its credentials are not read, so it stays disarmed, until it is archived or given its own.
 	CredentialDuplicateAt *time.Time
 	// When OpenRails found the PSP's key naming another account. A superseded PSP takes no new work and drains, as an archived one does.
 	SupersededAt *time.Time
+	// The PSP's money class: whether its environment moves real money (live, mainnet). A PSP's identity is (rail, live, account_id); a sandbox merchant's PSPs are non-live, a live merchant's live.
+	Live bool
 }
 
 // A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.
@@ -1612,6 +1613,15 @@ type BillingScheduledChange struct {
 	Reason  *string
 }
 
+// Global by design: the deployment's Solana crankers, each pinned to the public key it first had. A cranker whose key now differs is refused, so a Vault Transit rotation never silently becomes another cranker. A row is never rewritten.
+type BillingSolanaCranker struct {
+	// The listed cranker without its secret: vault_transit:<key> or local_keypair:<public key>.
+	Name string
+	// The public key the cranker had on its first use.
+	PublicKey string
+	PinnedAt  time.Time
+}
+
 // Every signature observed on a Solana Pay reference, recorded once. credited = the order attempt was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
 type BillingSolanaPayReceipt struct {
 	MerchantID     uuid.UUID
@@ -1654,13 +1664,14 @@ type BillingSolanaPayReference struct {
 
 // On-chain mirror of one Solana subscription: its program accounts, mint and next pull.
 type BillingSolanaSubscription struct {
-	ID                       uuid.UUID
-	MerchantID               uuid.UUID
-	SubscriptionID           uuid.UUID
-	SubscriberWallet         string
-	AuthorityPda             string
-	SubscriptionPda          string
-	PlanPda                  string
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	SubscriptionID   uuid.UUID
+	SubscriberWallet string
+	AuthorityPda     string
+	SubscriptionPda  string
+	PlanPda          string
+	// The plan's owner: the deployment cranker that publishes it and pulls each renewal.
 	MerchantAddress          string
 	Mint                     string
 	PlanCreatedAtFingerprint int64
@@ -1670,6 +1681,8 @@ type BillingSolanaSubscription struct {
 	Status                   string
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+	// The merchant's treasury: the plan's destination, where every pull lands.
+	Treasury string
 }
 
 // Core subscription records tracking user billing relationships

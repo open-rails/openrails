@@ -6,8 +6,12 @@ reads them with the configuration's revision, and
 `PATCH /v1/merchant/configuration` (`Client.UpdateMerchantConfiguration`)
 changes them against that revision where Vault holds the configuration
 ([merchant configuration](../merchant-configuration.md)). A merchant whose
-configuration is a file declares the same document under `settings:` in its
+configuration is a file declares the same fields, flat on the merchant, in its
 YAML.
+
+The configuration also says whether the merchant is a sandbox (`sandbox`),
+whose PSPs move no money; a change is refused while a PSP the merchant serves
+would disagree with it ([PSP environments](../psp-environments.md)).
 
 The settings hold the profile, usage billing and arrears policy, PSP routing, the
 dunning policy, named billing policies, default/tier bindings and delegated

@@ -4,7 +4,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	solanago "github.com/gagliardetto/solana-go"
 
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -105,49 +108,100 @@ func TestCardEntry(t *testing.T) {
 	}
 }
 
-func TestSolanaAccountSettings(t *testing.T) {
-	const usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-	s, err := ParseSolanaAccountSettings(map[string]any{
-		"rpc_provider":     " Helius ",
-		"rpc_api_key":      "key-123",
-		"tokens":           map[string]any{"usdc": map[string]any{"mint": usdc, "name": "USD Coin"}, "sol": map[any]any{}},
-		"recipient_wallet": "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu",
-	})
-	require.NoError(t, err)
-	require.Equal(t, "helius", s.RPCProvider)
-	require.Equal(t, map[string]TokenConfig{"USDC": {Mint: usdc, Name: "USD Coin"}, "SOL": {}}, s.Tokens,
-		"a mint-less built-in symbol is valid here; the network-aware resolver rules on it")
+// A Solana PSP is its treasury, a Solana address; its rpc_url is https (http
+// only on a loopback host of a non-live PSP) and no message repeats it. The
+// cranker is one deployment key.
+func TestSolanaPSPAndCranker(t *testing.T) {
+	treasury := solanago.NewWallet().PublicKey().String()
+	require.NoError(t, ValidateSolanaTreasury(treasury))
+	require.ErrorContains(t, ValidateSolanaTreasury(""), "treasury is required")
+	require.ErrorContains(t, ValidateSolanaTreasury("not-an-address"), "is not a Solana address")
+	require.ErrorContains(t, ValidatePSPAccount("wallet", "solana", ""), "psps.wallet.treasury is required")
 
-	for want, settings := range map[string]map[string]any{
-		// Decimals belong to the on-chain mint; a declared copy could misprice by 10^n.
-		"read from the SPL mint on-chain":       {"tokens": map[string]any{"usdc": map[string]any{"mint": usdc, "decimals": 6.0}}},
-		"unknown field":                         {"tokens": map[string]any{"USDC": map[string]any{"decimls": 6}}},
-		"empty symbol":                          {"tokens": map[string]any{" ": map[string]any{}}},
-		"must be a map":                         {"tokens": []any{"USDC"}},
-		"rpc_provider must be helius or public": {"rpc_provider": "quicknode"},
-		"public cannot use rpc_api_key":         {"rpc_provider": "public", "rpc_api_key": "k"},
-		"must be a string":                      {"rpc_api_key": 42},
-	} {
-		_, err := ParseSolanaAccountSettings(settings)
-		require.ErrorContains(t, err, want)
-		require.ErrorContains(t, ValidateSolanaAccountSettings(settings), want)
+	require.NoError(t, ValidateSolanaRPCURL(EnvironmentMainnet, "https://mainnet.helius-rpc.com/?api-key=k"))
+	require.NoError(t, ValidateSolanaRPCURL(EnvironmentDevnet, "http://127.0.0.1:8899"))
+	for environment, url := range map[string]string{EnvironmentMainnet: "http://127.0.0.1:8899/secret-path", EnvironmentDevnet: "http://rpc.example/secret-path"} {
+		err := ValidateSolanaRPCURL(environment, url)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "secret-path")
 	}
 
-	typo := map[string]any{"rpc_provder": "helius"}
-	s, err = ParseSolanaAccountSettings(typo)
-	require.NoError(t, err, "stored rows stay forward compatible")
-	require.True(t, s.IsZero())
-	require.ErrorContains(t, ValidateSolanaAccountSettings(typo), "unknown key(s) rpc_provder")
-	require.NoError(t, ValidateSolanaAccountSettings(map[string]any{"recipient_wallet": "w"}))
+	key := solanago.NewWallet().PrivateKey.String()
+	local := SolanaCrankerConfig{Mode: CrankerLocalKeypair, PrivateKey: key}
+	transit := SolanaCrankerConfig{Mode: CrankerVaultTransit, Key: "openrails-cranker"}
+	// A cranker that cannot sign is turned off alone: it pulls nothing, and
+	// the others serve.
+	for name, row := range map[string]struct {
+		crankers []SolanaCrankerConfig
+		vault    *VaultConfig
+		kept     []SolanaCrankerConfig
+		refused  map[string]string
+	}{
+		"none":                {nil, nil, nil, nil},
+		"local keypair":       {[]SolanaCrankerConfig{local}, nil, []SolanaCrankerConfig{local}, nil},
+		"transit then local":  {[]SolanaCrankerConfig{transit, local}, &VaultConfig{}, []SolanaCrankerConfig{transit, local}, nil},
+		"bad keypair":         {[]SolanaCrankerConfig{transit, {Mode: CrankerLocalKeypair, PrivateKey: "x"}}, &VaultConfig{}, []SolanaCrankerConfig{transit}, map[string]string{"solana.crankers[1]": "private_key is not a base58 Solana keypair; it pulls none of its plans"}},
+		"transit needs vault": {[]SolanaCrankerConfig{transit, local}, nil, []SolanaCrankerConfig{local}, map[string]string{"solana.crankers[0]": "vault_transit needs vault; it pulls none of its plans; the next listed cranker publishes new plans"}},
+		"unknown mode":        {[]SolanaCrankerConfig{{Mode: "hsm"}}, nil, nil, map[string]string{"solana.crankers[0]": "mode must be"}},
+		"listed twice":        {[]SolanaCrankerConfig{local, transit, local}, &VaultConfig{}, []SolanaCrankerConfig{local, transit}, map[string]string{"solana.crankers[2]": "local_keypair:" + solanago.MustPrivateKeyFromBase58(key).PublicKey().String() + " is listed twice"}},
+	} {
+		cfg := &Config{Vault: row.vault}
+		if row.crankers != nil {
+			cfg.Solana = &SolanaConfig{Crankers: row.crankers}
+		}
+		refused := map[string]string{}
+		for _, d := range Degrade(cfg) {
+			if strings.HasPrefix(d.Field, "solana.") {
+				refused[d.Field] = d.Err.Error()
+				require.NotContains(t, d.Err.Error(), key, name)
+			}
+		}
+		require.Equal(t, row.kept, SolanaCrankers(cfg), name)
+		require.Len(t, refused, len(row.refused), name)
+		for field, want := range row.refused {
+			require.Contains(t, refused[field], want, name)
+		}
+	}
+}
 
-	base := &SolanaRailConfig{RPCProvider: "helius", RPCAPIKey: "boot-key", Tokens: map[string]TokenConfig{"SOL": {Mint: "So1"}}, Network: "devnet"}
-	out := SolanaAccountSettings{RPCAPIKey: "store-key", Tokens: map[string]TokenConfig{"USDC": {}}}.ApplyTo(base)
-	require.Equal(t, &SolanaRailConfig{RPCProvider: "helius", RPCAPIKey: "store-key", Tokens: map[string]TokenConfig{"SOL": {Mint: "So1"}}, Network: "devnet"}, out,
-		"declared knobs win; tokens are resolved later by the network-aware layer")
-	out.Tokens["X"] = TokenConfig{}
-	require.Equal(t, "boot-key", base.RPCAPIKey)
-	require.NotContains(t, base.Tokens, "X", "ApplyTo must never alias the boot plane")
-	require.Equal(t, &SolanaRailConfig{RPCAPIKey: "store-key"}, SolanaAccountSettings{RPCAPIKey: "store-key"}.ApplyTo(nil))
+// A PSP document is flat, and its rail decides its fields: each refuses what
+// the rail lacks, naming what it takes.
+func TestPSPDocumentSchema(t *testing.T) {
+	d, err := DecodePSPDocument(map[string]any{"rail": "solana", "environment": "devnet", "treasury": "T", "secrets": map[string]any{"rpc_url": "https://rpc.example/k"}})
+	require.NoError(t, err)
+	require.Equal(t, PSPDocument{Rail: "solana", Environment: "devnet", AccountID: "T", Secrets: map[string]string{"rpc_url": "https://rpc.example/k"}}, d)
+	require.Equal(t, map[string]any{"rail": "solana", "environment": "devnet", "treasury": "T", "secrets": map[string]string{"rpc_url": "https://rpc.example/k"}}, d.Fields())
+
+	d, err = DecodePSPDocument(map[string]any{"rail": "nmi", "gateway_id": "1", "tokenization_key": "tk", "custodian": "bt"})
+	require.NoError(t, err)
+	require.Equal(t, PSPDocument{Rail: "nmi", AccountID: "1", Custodian: "bt", Settings: map[string]any{"tokenization_key": "tk"}}, d)
+
+	// CCBill names its account by its two numbers, joined into the account
+	// its id and webhook path have always used.
+	d, err = DecodePSPDocument(map[string]any{"rail": "ccbill", "client_accnum": "945280", "client_subacc": "0000"})
+	require.NoError(t, err)
+	require.Equal(t, "945280-0000", d.AccountID)
+	require.Equal(t, map[string]any{"rail": "ccbill", "client_accnum": "945280", "client_subacc": "0000"}, d.Fields())
+
+	for doc, want := range map[*map[string]any]string{
+		{"rail": "solana", "account_id": "x"}:                         `a solana PSP has no "account_id" (solana takes rail, environment, archived, treasury, secrets)`,
+		{"rail": "solana", "tokens": map[string]any{}}:                `a solana PSP has no "tokens"`,
+		{"rail": "solana", "rpc_provider": "helius"}:                  `a solana PSP has no "rpc_provider"`,
+		{"rail": "solana", "signer": map[string]any{}}:                `a solana PSP has no "signer"`,
+		{"rail": "stripe", "treasury": "T"}:                           `a stripe PSP has no "treasury"`,
+		{"rail": "nmi", "account_id": "1"}:                            `a nmi PSP has no "account_id" (nmi takes rail, environment, archived, gateway_id, custodian,`,
+		{"rail": "ccbill", "account_id": "945280-0000"}:               `a ccbill PSP has no "account_id" (ccbill takes rail, environment, archived, client_accnum, client_subacc, secrets)`,
+		{"rail": "nmi", "gateway_id": 1233466}:                        `gateway_id must be a string: quote it (gateway_id: "1233466")`,
+		{"rail": "stripe", "custodian": "bt"}:                         `a stripe PSP has no "custodian"`,
+		{"rail": "nmi", "settings": map[string]any{}}:                 `a nmi PSP has no "settings"`,
+		{"rail": "ccbill", "tokenization_key": "x"}:                   `a ccbill PSP has no "tokenization_key"`,
+		{"rail": "paypal"}:                                            `unknown rail "paypal"`,
+		{"environment": "live"}:                                       "rail is required",
+		{"rail": "nmi", "secrets": map[string]any{"security_key": 1}}: "secrets.security_key must be a string",
+	} {
+		_, err := DecodePSPDocument(*doc)
+		require.ErrorContains(t, err, want)
+	}
 }
 
 func TestSecretFiles(t *testing.T) {

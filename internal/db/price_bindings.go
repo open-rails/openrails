@@ -81,6 +81,11 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 			price.PSPLinks = map[string]map[string]string{}
 		}
 		key := row.PspKey
+		// A superseded PSP's label names another account: its binding is keyed by id.
+		if row.Superseded {
+			price.PSPLinks[row.PspID.String()] = cfg
+			continue
+		}
 		if ambiguousKeys[price.ID] == nil {
 			ambiguousKeys[price.ID] = map[string]bool{}
 		}

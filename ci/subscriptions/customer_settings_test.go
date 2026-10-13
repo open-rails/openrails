@@ -241,7 +241,7 @@ func declareBillingPolicy(t *testing.T, w *world, name string) {
 	require.NoError(t, err)
 	_, err = client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
 		ExpectedRevision: &got.Revision,
-		Settings:         &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{{Name: name, Kind: "outstanding_cap", OutstandingCapAmount: 100_000_000}}},
+		MerchantSettings: &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{{Name: name, Kind: "outstanding_cap", OutstandingCapAmount: 100_000_000}}},
 	})
 	require.NoError(t, err)
 }

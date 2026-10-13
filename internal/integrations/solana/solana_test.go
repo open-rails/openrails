@@ -13,8 +13,6 @@ import (
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/billing"
 )
 
 // Memos are public and immutable; recovery tooling parses these bytes.
@@ -171,20 +169,6 @@ func TestMintDecimalsFailClosed(t *testing.T) {
 	require.Error(t, err)
 }
 
-type countingSecrets struct {
-	mu    sync.Mutex
-	value string
-	err   error
-	reads int
-}
-
-func (s *countingSecrets) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reads++
-	return s.value, s.err
-}
-
 type fakeTransit struct {
 	mu              sync.Mutex
 	key             solanago.PrivateKey
@@ -221,88 +205,69 @@ func (f *fakeTransit) PublicKey(_ context.Context, name string) ([]byte, error) 
 	return pk[:f.pubLen], nil
 }
 
-// Both signers sign verifiably for the merchant key and fail closed on a zero
-// merchant, an empty message, or a broken key store.
+// Both crankers sign verifiably and fail closed on an empty message or a
+// broken key store.
 func TestSignersFailClosed(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	mid := billing.MerchantID(uuid.New())
 	ctx := context.Background()
 	signers := map[string]func(broken bool) Signer{
-		"keypair": func(broken bool) Signer {
-			s := &countingSecrets{value: key.String()}
-			if broken {
-				s.err = errors.New("vault unreachable")
-			}
-			return NewKeypairSigner(s, time.Minute)
-		},
+		"keypair": func(bool) Signer { return NewKeypairSigner(key) },
 		"transit": func(broken bool) Signer {
 			f := &fakeTransit{key: key, pubLen: 32, sigLen: 64}
 			if broken {
 				f.err = errors.New("transit unreachable")
 			}
-			return NewTransitSigner(f, nil, time.Minute)
+			return NewTransitSigner(f, "openrails-cranker", time.Minute)
 		},
 	}
 	for name, mk := range signers {
 		t.Run(name, func(t *testing.T) {
 			s := mk(false)
-			pub, err := s.PublicKey(ctx, mid)
+			pub, err := s.PublicKey(ctx)
 			require.NoError(t, err)
 			require.Equal(t, key.PublicKey(), pub)
 			msg := []byte("transfer_subscription message")
-			sig, err := s.SignMessage(ctx, mid, msg)
+			sig, err := s.SignMessage(ctx, msg)
 			require.NoError(t, err)
 			require.True(t, sig.Verify(pub, msg))
 
-			_, err = s.SignMessage(ctx, billing.MerchantID{}, msg)
-			require.Error(t, err, "zero merchant")
-			_, err = s.SignMessage(ctx, mid, nil)
+			_, err = s.SignMessage(ctx, nil)
 			require.Error(t, err, "empty message")
-			_, err = mk(true).SignMessage(ctx, mid, msg)
-			require.Error(t, err, "store failure")
+			if name == "transit" {
+				_, err = mk(true).SignMessage(ctx, msg)
+				require.Error(t, err, "store failure")
+			}
 		})
 	}
 
 	t.Run("transit rejects malformed key material", func(t *testing.T) {
-		_, err := NewTransitSigner(&fakeTransit{key: key, pubLen: 31, sigLen: 64}, nil, time.Minute).PublicKey(ctx, mid)
+		_, err := NewTransitSigner(&fakeTransit{key: key, pubLen: 31, sigLen: 64}, "k", time.Minute).PublicKey(ctx)
 		require.Error(t, err)
-		_, err = NewTransitSigner(&fakeTransit{key: key, pubLen: 32, sigLen: 63}, nil, time.Minute).SignMessage(ctx, mid, []byte("m"))
+		_, err = NewTransitSigner(&fakeTransit{key: key, pubLen: 32, sigLen: 63}, "k", time.Minute).SignMessage(ctx, []byte("m"))
 		require.Error(t, err)
 	})
 }
 
-// Keys are cached per TTL window; transit caches only the public key — every
-// signature round-trips Vault, under the configured key name.
+// Transit caches only the public key: every signature round-trips Vault,
+// under the cranker's key name.
 func TestSignerCaching(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	mid := billing.MerchantID(uuid.New())
 	ctx := context.Background()
 
-	secrets := &countingSecrets{value: key.String()}
-	ks := NewKeypairSigner(secrets, time.Minute).(*keypairSigner)
-	now := time.Unix(1_700_000_000, 0)
-	ks.now = func() time.Time { return now }
-	for _, step := range []time.Duration{0, 30 * time.Second, time.Minute} {
-		now = now.Add(step)
-		_, err := ks.PublicKey(ctx, mid)
-		require.NoError(t, err)
-	}
-	require.Equal(t, 2, secrets.reads, "one read per TTL window")
-
 	ft := &fakeTransit{key: key, pubLen: 32, sigLen: 64}
-	ts := NewTransitSigner(ft, func(id billing.MerchantID) string { return "custom-" + id.String() }, time.Minute)
+	ts := NewTransitSigner(ft, "openrails-cranker", time.Minute)
 	for range 3 {
-		_, err := ts.PublicKey(ctx, mid)
+		_, err := ts.PublicKey(ctx)
 		require.NoError(t, err)
-		_, err = ts.SignMessage(ctx, mid, []byte("m"))
+		_, err = ts.SignMessage(ctx, []byte("m"))
 		require.NoError(t, err)
 	}
 	require.Equal(t, 1, ft.pubReads)
 	require.Equal(t, 3, ft.signs)
 	for _, n := range ft.names {
-		require.Equal(t, "custom-"+mid.String(), n)
+		require.Equal(t, "openrails-cranker", n)
 	}
 }
 
@@ -320,15 +285,14 @@ func TestBuildPartiallySignedTx(t *testing.T) {
 	wallet, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
 	dest := solanago.NewWallet().PublicKey()
-	cosigner := NewKeypairSigner(staticSecret(cranker.String()), 0)
-	mid := billing.MerchantID(uuid.New())
+	cosigner := NewKeypairSigner(cranker)
 	ctx := context.Background()
 
 	ixs := []solanago.Instruction{
 		system.NewTransferInstruction(1, wallet.PublicKey(), dest).Build(),
 		system.NewTransferInstruction(1, cranker.PublicKey(), dest).Build(),
 	}
-	b64, err := BuildPartiallySignedTx(ctx, mid, cosigner, fixedBlockhash{}, wallet.PublicKey(), ixs)
+	b64, err := BuildPartiallySignedTx(ctx, cosigner, fixedBlockhash{}, wallet.PublicKey(), ixs)
 	require.NoError(t, err)
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	require.NoError(t, err)
@@ -348,7 +312,7 @@ func TestBuildPartiallySignedTx(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.VerifySignatures())
 
-	_, err = BuildPartiallySignedTx(ctx, mid, cosigner, fixedBlockhash{}, wallet.PublicKey(), ixs[:1])
+	_, err = BuildPartiallySignedTx(ctx, cosigner, fixedBlockhash{}, wallet.PublicKey(), ixs[:1])
 	require.ErrorContains(t, err, "not a required signer")
 }
 

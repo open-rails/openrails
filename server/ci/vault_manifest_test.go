@@ -38,7 +38,7 @@ merchants:
       nmi:
         rail: nmi
         environment: sandbox
-        account_id: test
+        gateway_id: test
         secrets: {security_key: test}
 `, shop))
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, declaring, nil, ""))

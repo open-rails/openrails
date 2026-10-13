@@ -44,11 +44,11 @@ func TestPaymentPageEmbedded(t *testing.T) {
 			"https://g.e2e.test", "https://h.e2e.test", "https://i.e2e.test", "https://j.e2e.test", "https://k.e2e.test"},
 	} {
 		_, err := shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-			Settings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: origins}}})
+			MerchantSettings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: origins}}})
 		require.Error(t, err, "%v is refused", origins)
 	}
 	_, err := shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
+		MerchantSettings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test", "http://localhost:3000"}}}})
 	require.NoError(t, err)
 
 	embedded, secret := create(true)
@@ -76,7 +76,7 @@ func TestPaymentPageEmbedded(t *testing.T) {
 
 	// Origins withdrawn: the page is framed by none, at once.
 	_, err = shop.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		Settings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{}}}})
+		MerchantSettings: &billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{}}}})
 	require.NoError(t, err)
 	h = page(embedded)
 	require.True(t, strings.HasSuffix(h.Get("Content-Security-Policy"), "; frame-ancestors 'none'"))

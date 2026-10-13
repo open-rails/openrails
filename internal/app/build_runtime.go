@@ -94,7 +94,7 @@ type devnetParityPriceProvider struct {
 }
 
 func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) (float64, error) {
-	if p.network == nil || p.network(ctx) != "devnet" {
+	if p.network == nil || p.network(ctx) == config.EnvironmentMainnet {
 		return p.inner.PriceUSD(ctx, symbol)
 	}
 	if p.inner != nil {
@@ -102,7 +102,7 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 			return price, nil
 		} else if err != nil {
 			log.WithError(err).WithField("token", symbol).
-				Debug("devnet: pyth price unavailable; using $1.00 parity (fake money)")
+				Debug("solana devnet/testnet: pyth price unavailable; using $1.00 parity (fake money)")
 		}
 	}
 	return 1.0, nil

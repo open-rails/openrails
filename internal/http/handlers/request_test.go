@@ -27,6 +27,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -270,8 +271,13 @@ func TestSolanaConfigIsBrowserSafe(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []any{"devnet", "solana:devnet", solanatokens.PreferredStablecoin}, []any{got.Network, got.Chain, got.PreferredToken})
 	require.Len(t, got.Tokens, 1)
-	require.Equal(t, []any{"USDC", mint, 6, true, true},
-		[]any{got.Tokens[0].Symbol, got.Tokens[0].Mint, got.Tokens[0].Decimals, got.Tokens[0].Preferred, got.Tokens[0].RecurringEligible})
+	require.Equal(t, []any{"USDC", mint, 6, true, false},
+		[]any{got.Tokens[0].Symbol, got.Tokens[0].Mint, got.Tokens[0].Decimals, got.Tokens[0].Preferred, got.Tokens[0].RecurringEligible},
+		"without a cranker nothing rebills")
+	rt.SolanaPlanService = &recurring.PlanService{}
+	got, err = solanaPaymentConfig(r)
+	require.NoError(t, err)
+	require.True(t, got.Tokens[0].RecurringEligible, "USDC rebills once a cranker publishes plans")
 	raw, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.NotContains(t, strings.ToLower(string(raw)), "rpc")

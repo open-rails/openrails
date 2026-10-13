@@ -180,6 +180,8 @@ export const en = {
     resource_not_found: "This item no longer exists.",
     resource_conflict: "This changed in the meantime. Refresh and try again.",
     rate_limit_exceeded: "Too many requests. Wait a moment and try again.",
+    provider_writes_disabled:
+      "Payments are switched off on this site right now.",
     service_unavailable: "Billing is temporarily unavailable. Try again soon.",
     internal_error: "Something went wrong on our side. Please try again.",
     card_declined: "The card was declined.",

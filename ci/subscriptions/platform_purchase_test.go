@@ -32,7 +32,7 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 					Settings: map[string]any{"public_api_key": "merchant-public-test"},
 				}}
 				w.declare = func(psps map[string]openrails.PSPConfig) {
-					psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", Custodian: "bt"}.PSPConfig()
+					psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-nmi", SecurityKey: "e2e-nmi-key", Custodian: "bt"}.PSPConfig()
 				}
 			}
 			w.start()
@@ -231,7 +231,7 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 				routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi", "nmi-again"}}}
 				w.settings = billing.MerchantSettings{PSPRouting: &routing}
 				w.declare = func(psps map[string]openrails.PSPConfig) {
-					psps["nmi-again"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-again", SecurityKey: "e2e-nmi-again-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
+					psps["nmi-again"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-nmi-again", SecurityKey: "e2e-nmi-again-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
 				}
 			}
 			w.start()

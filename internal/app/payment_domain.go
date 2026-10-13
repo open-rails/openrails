@@ -78,7 +78,7 @@ func embedDomains(set merchantdocs.Set) []string {
 		return nil
 	}
 	var out []string
-	for _, origin := range merchantconfig.EmbedOrigins(set.Merchant.Value.Settings) {
+	for _, origin := range merchantconfig.EmbedOrigins(set.Merchant.Value.MerchantSettings) {
 		if u, err := url.Parse(origin); err == nil && u.Scheme == "https" {
 			out = append(out, strings.ToLower(u.Hostname()))
 		}

@@ -65,3 +65,24 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	require.Len(t, rebills, 1, "one refused pull, one attempt")
 	require.Equal(t, []string{"rebill", "issuer_soft", "insufficient_funds"}, []string{rebills[0].Kind, rebills[0].Category, str(rebills[0].Reason)})
 }
+
+// The deployment's cranker pulls each renewal into the merchant's treasury,
+// the plan's only destination; nothing lands with the cranker.
+func TestSolanaRenewalLandsInTheTreasury(t *testing.T) {
+	s := openSolanaShop(t)
+	w := s.w
+	b := s.buyer(t, false)
+	c := s.purchase(t, b, b.wallet.PublicKey())
+	done, err := b.confirm(c, s.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
+	require.NoError(t, err)
+	require.NotNil(t, done.SubscriptionID)
+	require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
+
+	w.advance(monthHours*time.Hour + time.Hour)
+	res, err := w.jobs.Insert(t.Context(), solanaCrankPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	w.waitJob(res.Job.ID)
+	w.wake()
+	w.until(func() bool { return s.fake.Balance(s.treasury, s.mint) == 2*solanaPlanAmount }, "the renewal lands in the treasury")
+	require.Zero(t, s.fake.Balance(s.cranker.PublicKey(), s.mint), "the cranker holds nothing")
+}

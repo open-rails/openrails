@@ -418,7 +418,7 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 			"solana_subscription_pda":  row.SubscriptionPDA,
 			"solana_token_mint":        row.Mint,
 			"solana_token_amount":      plan.amountBaseUnits,
-			"solana_recipient_wallet":  row.MerchantAddress,
+			"solana_treasury":          row.Treasury,
 		},
 	}); err != nil {
 		return fmt.Errorf("solana crank: renew membership: %w", err)

@@ -50,15 +50,17 @@ func TestStripePortalIsAStripeMerchantsRoute(t *testing.T) {
 merchants:
   %s:
     display_name: Stripe Shop
+    sandbox: true
     psps:
       stripe:
         rail: stripe
         environment: test
         account_id: acct_portal
         secrets: {secret_key: sk_test_portal, webhook_signing_secret: whsec_portal}
-        settings: {publishable_key: pk_test_portal}
+        publishable_key: pk_test_portal
   %s:
     display_name: Plain Shop
+    sandbox: true
 `, shop, plain)), 0o600))
 	graph, plane := operator.Of(cp)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, manifest, nil, ""))

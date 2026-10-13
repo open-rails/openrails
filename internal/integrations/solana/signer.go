@@ -3,35 +3,26 @@ package solana
 import (
 	"context"
 	"fmt"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/billing"
 )
 
-const privateKeySecretName = "private_key"
+// DefaultSignerCacheTTL is how long a cranker's public key is cached.
+const DefaultSignerCacheTTL = 60 * time.Second
 
-// MerchantSecretGetter is the per-merchant secret read the signer needs,
-// declared here so signing is independent of where configuration lives. An adapter
-// over merchants.MerchantSecretReader satisfies it at the composition root.
-type MerchantSecretGetter interface {
-	// GetSecret returns the plaintext secret value for (merchant, name), or an
-	// error. Implementations MUST fail closed (never return "" + nil for a
-	// missing secret) so a missing key can be distinguished from an empty one.
-	GetSecret(ctx context.Context, merchantID billing.MerchantID, name string) (string, error)
-}
-
-// Signer produces Solana signatures for a merchant key without exposing the
-// private key. It is resolved per merchant; there is no process-global signer.
-// keypairSigner loads the PSP private_key secret and signs in-process;
-// transitSigner signs through Vault Transit, so the key never leaves Vault.
-// The interface is message-level so a remote signer can satisfy it.
+// Signer is the deployment's cranker: the one key that publishes every
+// merchant's recurring plans, pulls their renewals and pays the fees. It
+// signs without exposing the private key: keypairSigner in-process,
+// transitSigner through Vault Transit. The interface is message-level so a
+// remote signer can satisfy it.
 type Signer interface {
-	// PublicKey returns the merchant address — the fee payer and sole
-	// required signer on every plan/pull transaction this package builds.
-	PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error)
+	// PublicKey is the cranker's address: the owner of every plan it
+	// publishes, the caller of every pull and the fee payer.
+	PublicKey(ctx context.Context) (solanago.PublicKey, error)
 	// SignMessage signs the raw serialized Solana message bytes
 	// (Transaction.Message.MarshalBinary()) and returns the 64-byte signature.
-	SignMessage(ctx context.Context, merchantID billing.MerchantID, message []byte) (solanago.Signature, error)
+	SignMessage(ctx context.Context, message []byte) (solanago.Signature, error)
 }
 
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
@@ -44,21 +35,19 @@ type blockhashProvider interface {
 	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error)
 }
 
-// BuildSignSubmit assembles a single-signer transaction (the merchant is fee
-// payer and sole required signer), signs its message via the per-merchant
-// Signer, and submits it: the shared path for create_plan, update_plan and
-// transfer_subscription.
+// BuildSignSubmit assembles a single-signer transaction (the cranker is fee
+// payer and sole required signer), signs it and submits it: the shared path
+// for create_plan, update_plan and transfer_subscription.
 //
 // With one required signer, Signatures[0] is the fee payer's; a co-signer flow
 // must order signatures to match the message's required-signer list.
 func BuildSignSubmit(
 	ctx context.Context,
-	merchantID billing.MerchantID,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
 ) (solanago.Signature, error) {
-	return BuildSignSubmitPresubmit(ctx, merchantID, signer, rpc, instructions, nil)
+	return BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, nil)
 }
 
 // BuildSignSubmitPresubmit is BuildSignSubmit with a hook run after signing and
@@ -67,7 +56,6 @@ func BuildSignSubmit(
 // aborts the submit (nothing was sent).
 func BuildSignSubmitPresubmit(
 	ctx context.Context,
-	merchantID billing.MerchantID,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
@@ -83,12 +71,12 @@ func BuildSignSubmitPresubmit(
 		return solanago.Signature{}, fmt.Errorf("solana: at least one instruction is required")
 	}
 
-	payer, err := signer.PublicKey(ctx, merchantID)
+	payer, err := signer.PublicKey(ctx)
 	if err != nil {
-		return solanago.Signature{}, fmt.Errorf("solana: resolve merchant signer public key: %w", err)
+		return solanago.Signature{}, fmt.Errorf("solana: resolve cranker public key: %w", err)
 	}
 	return BuildSignSubmitWithPayerPresubmit(ctx, rpc, payer, instructions, func(message []byte) (solanago.Signature, error) {
-		return signer.SignMessage(ctx, merchantID, message)
+		return signer.SignMessage(ctx, message)
 	}, presubmit)
 }
 

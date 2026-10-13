@@ -9,9 +9,14 @@ import (
 // revision the caller read; a configuration changed since is refused with
 // revision_mismatch. Credentials and PSPs use the PSP methods.
 type UpdateMerchantConfigurationParams struct {
-	ExpectedRevision *int64            `json:"expected_revision"`
-	Settings         *MerchantSettings `json:"settings,omitempty"`
-	DisplayName      *string           `json:"display_name,omitempty"`
+	ExpectedRevision *int64  `json:"expected_revision"`
+	DisplayName      *string `json:"display_name,omitempty"`
+	// Sandbox makes the merchant a sandbox, or live; refused while a PSP it
+	// serves would disagree.
+	Sandbox *bool `json:"sandbox,omitempty"`
+	// MerchantSettings are the settings to merge, beside display_name; nil
+	// keeps them all.
+	*MerchantSettings
 }
 
 // MarshalJSON preserves explicit empty policy lists across both Client
@@ -20,29 +25,21 @@ type UpdateMerchantConfigurationParams struct {
 func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 	type plain UpdateMerchantConfigurationParams
 	body, err := json.Marshal(plain(p))
-	if err != nil || p.Settings == nil {
+	if err != nil || p.MerchantSettings == nil {
 		return body, err
 	}
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(body, &document); err != nil {
 		return nil, err
 	}
-	var settings map[string]json.RawMessage
-	if err := json.Unmarshal(document["settings"], &settings); err != nil {
-		return nil, err
-	}
 	for name, present := range map[string]bool{
-		"billing_policies":                      p.Settings.BillingPolicies != nil,
-		"billing_policy_bindings":               p.Settings.BillingPolicyBindings != nil,
-		"delegated_invoker_wasted_spend_limits": p.Settings.DelegatedInvokerWastedSpendLimits != nil,
+		"billing_policies":                      p.BillingPolicies != nil,
+		"billing_policy_bindings":               p.BillingPolicyBindings != nil,
+		"delegated_invoker_wasted_spend_limits": p.DelegatedInvokerWastedSpendLimits != nil,
 	} {
-		if _, exists := settings[name]; present && !exists {
-			settings[name] = json.RawMessage("[]")
+		if _, exists := document[name]; present && !exists {
+			document[name] = json.RawMessage("[]")
 		}
-	}
-	document["settings"], err = json.Marshal(settings)
-	if err != nil {
-		return nil, err
 	}
 	return json.Marshal(document)
 }
@@ -50,10 +47,12 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 // MerchantConfigurationState is the merchant's configuration, never its
 // credentials. Revision advances with every change; an update may name it.
 type MerchantConfigurationState struct {
-	Revision    int64            `json:"revision"`
-	DisplayName string           `json:"display_name"`
-	Settings    MerchantSettings `json:"settings"`
-	// PlatformVault is whether settings.card_custody platform can be chosen.
+	Revision    int64  `json:"revision"`
+	DisplayName string `json:"display_name"`
+	// Sandbox is whether the merchant is a sandbox: its PSPs move no money.
+	Sandbox bool `json:"sandbox"`
+	MerchantSettings
+	// PlatformVault is whether card_custody platform can be chosen.
 	PlatformVault PlatformVaultState `json:"platform_vault"`
 }
 

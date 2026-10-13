@@ -34,6 +34,7 @@ func solanaSubscriptionFromGen(s gen.BillingSolanaSubscription) *models.SolanaSu
 		SubscriptionPDA:          s.SubscriptionPda,
 		PlanPDA:                  s.PlanPda,
 		MerchantAddress:          s.MerchantAddress,
+		Treasury:                 s.Treasury,
 		Mint:                     s.Mint,
 		PlanCreatedAtFingerprint: s.PlanCreatedAtFingerprint,
 		LastPulledPeriodStartsAt: s.LastPulledPeriodStartsAt,
@@ -79,6 +80,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 		SubscriptionPda:          s.SubscriptionPDA,
 		PlanPda:                  s.PlanPDA,
 		MerchantAddress:          s.MerchantAddress,
+		Treasury:                 s.Treasury,
 		Mint:                     s.Mint,
 		PlanCreatedAtFingerprint: s.PlanCreatedAtFingerprint,
 		LastPulledPeriodStartsAt: s.LastPulledPeriodStartsAt,
@@ -218,14 +220,17 @@ func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID
 	})
 }
 
-// MerchantWallet is a distinct (merchant, cranker wallet) pair with active subs.
+// MerchantWallet is a merchant's plan owner (a cranker) with active
+// subscriptions: how many, on how many plans.
 type MerchantWallet struct {
 	MerchantID      uuid.UUID
 	MerchantAddress string
+	Subscriptions   int64
+	Plans           int64
 }
 
-// ListActiveMerchantWallets returns the distinct cranker (merchant) wallets with
-// at least one active subscription: the SOL floats the gas-alert worker watches.
+// ListActiveMerchantWallets returns each merchant's plan owners with active
+// subscriptions: the SOL floats the gas-alert worker watches.
 func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) ([]MerchantWallet, error) {
 	if _, ok := merchant.FromContext(ctx); ok {
 		return r.listActiveMerchantWalletsScoped(ctx)
@@ -262,7 +267,7 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 	}
 	out := make([]MerchantWallet, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantWallet{MerchantID: row.MerchantID, MerchantAddress: row.MerchantAddress})
+		out = append(out, MerchantWallet{MerchantID: row.MerchantID, MerchantAddress: row.MerchantAddress, Subscriptions: row.Subscriptions, Plans: row.Plans})
 	}
 	return out, nil
 }

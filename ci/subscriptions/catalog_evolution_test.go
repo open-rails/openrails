@@ -429,7 +429,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
 		t.Helper()
 		bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, ProviderWriteMode: openrails.ProviderWritesFull,
-			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}},
+			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps}},
 		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = bill.Close(context.Background()) })

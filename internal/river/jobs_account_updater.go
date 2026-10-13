@@ -191,14 +191,9 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	}
 	cursor := cursorRow.CursorMerchantID
 	batch := w.merchantBatch()
-	environment, err := w.environment(ctx)
-	if err != nil {
-		return result, fmt.Errorf("account updater: %w", err)
-	}
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListAccountUpdaterWorkMerchants(ctx, gen.ListAccountUpdaterWorkMerchantsParams{
 			Custodian:        models.CustodianBasisTheory,
-			Environment:      environment,
 			Now:              now,
 			MinLookaheadDays: 1,
 			MaxLookaheadDays: int32(custodians.MaxAccountUpdaterLookaheadDays),
@@ -276,19 +271,6 @@ func (w AccountUpdaterBatchWorker) instrumentBatch() int {
 		return w.InstrumentBatch
 	}
 	return accountUpdaterInstrumentBatch
-}
-
-// environment is the money class of this deployment's custodians: live
-// when any PSP is.
-func (w AccountUpdaterBatchWorker) environment(ctx context.Context) (string, error) {
-	presence, err := merchants.Of(w.DB).ProbeLivePSPs(ctx)
-	switch {
-	case err != nil:
-		return "", err
-	case presence == merchants.LiveRailPresent:
-		return config.EnvironmentLive, nil
-	}
-	return config.EnvironmentTest, nil
 }
 
 // ingestMerchant polls this merchant's open batches and folds whatever the

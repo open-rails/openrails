@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -33,9 +34,10 @@ import (
 // A recurring price is an on-chain Plan published with the merchant's key.
 //
 //   - AutoCreate: one-off prices need no plan; recurring prices publish (or
-//     attach to) a USDC plan in live mode, DUSD in test mode.
-//   - Attach: token selects a non-default token for a published plan; plan_pda
-//     attaches an existing plan and resolves its token on-chain.
+//     attach to) a USDC plan owned by the deployment's cranker, paying into
+//     the merchant's treasury.
+//   - Attach: plan_pda attaches an existing plan and resolves its token
+//     on-chain.
 //   - Verify: reads the Plan account and diffs its immutable terms against the
 //     stored snapshot. No RPC -> sync_disabled.
 //   - Update: no-op. Plan terms are immutable on-chain, so a term change is a
@@ -45,9 +47,7 @@ type solanaAdapter struct{ svc *Service }
 
 // Solana rail-config keys (mirror recurring.PlanHandle.ToRailConfig).
 const (
-	solanaDefaultRecurringToken = "USDC"
-	solanaUSD1RecurringToken    = "USD1"
-	solanaDUSDRecurringToken    = "DUSD"
+	solanaDefaultRecurringToken = solanatokens.USDC
 	solanaKeyPlanPDA            = "plan_pda"
 	solanaKeyPlanID             = "plan_id"
 	solanaKeyMint               = "mint"
@@ -57,6 +57,7 @@ const (
 	solanaKeyPeriodHours        = "period_hours"
 	solanaKeyCreatedAt          = "created_at"
 	solanaKeyMerchant           = "merchant_address"
+	solanaKeyTreasury           = "treasury"
 )
 
 func (a *solanaAdapter) Name() string { return "solana" }
@@ -65,7 +66,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) billing.Pending
 	return billing.PendingAction{
 		PSP:    "solana",
 		Action: "configure_solana_recurring",
-		Hint:   "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psps.solana.token to select another supported stablecoin)",
+		Hint:   "List a cranker in the deployment's solana.crankers, then re-apply to publish the on-chain USDC plan for price " + priceID.String(),
 	}
 }
 
@@ -78,11 +79,11 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 	return a.svc.rt.SolanaPlanService, true
 }
 
-// solanaPlanID addresses an immutable local price and the chosen token mint.
-// Existing bindings retain their stored plan PDA even when their ID predates
-// this scheme; only new publications use the current local identity.
-func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
-	sum := sha256.Sum256([]byte(priceID.String() + ":" + strings.TrimSpace(mint)))
+// solanaPlanID addresses an immutable local price, the chosen token mint and
+// the treasury the plan pays: a new treasury takes a new plan. Existing
+// bindings retain their stored plan PDA; only new publications use it.
+func solanaPlanID(priceID uuid.UUID, mint string, treasury solanago.PublicKey) uint64 {
+	sum := sha256.Sum256([]byte(priceID.String() + ":" + strings.TrimSpace(mint) + ":" + treasury.String()))
 	return binary.BigEndian.Uint64(sum[:8])
 }
 
@@ -98,12 +99,8 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	return a.createRecurringPlan(ctx, in, a.defaultRecurringToken(ctx))
 }
 
-// defaultRecurringToken is the stablecoin a plan publishes in: DUSD for a
-// merchant whose Solana PSP is on devnet, USDC otherwise.
-func (a *solanaAdapter) defaultRecurringToken(ctx context.Context) string {
-	if plan, ok := a.planService(); ok && plan.Network(ctx) == "devnet" {
-		return solanaDUSDRecurringToken
-	}
+// defaultRecurringToken is the stablecoin a plan publishes in: USDC.
+func (a *solanaAdapter) defaultRecurringToken(context.Context) string {
 	return solanaDefaultRecurringToken
 }
 
@@ -156,7 +153,11 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	if in.PriceID == uuid.Nil {
 		return nil, fmt.Errorf("solana auto-create requires a local price ID")
 	}
-	planID := solanaPlanID(in.PriceID, mint)
+	treasury, err := plan.Treasury(ctx, tid)
+	if err != nil {
+		return nil, err
+	}
+	planID := solanaPlanID(in.PriceID, mint, treasury)
 	periodHours := uint64(*in.BillingIntervalHours)
 
 	if in.RemoteWritesDisabled {
@@ -193,7 +194,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false
 	}
-	merchant, err := plan.MerchantAddress(ctx, tid)
+	merchant, err := plan.Publisher(ctx)
 	if err != nil {
 		return nil, false
 	}
@@ -206,7 +207,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 		return nil, false
 	}
 	acct, err := subscriptions.DecodePlanAccount(data)
-	if err != nil {
+	if err != nil || plan.PaysInto(ctx, tid, pda, acct.Destinations) != nil {
 		return nil, false
 	}
 	handle := &recurring.PlanHandle{
@@ -218,6 +219,7 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 		PeriodHours:     acct.PeriodHours,
 		CreatedAt:       acct.CreatedAt,
 		MerchantAddress: merchant.String(),
+		Treasury:        acct.Destinations[0].String(),
 	}
 	return handle.ToRailConfig(), true
 }
@@ -236,7 +238,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyToken]))
 	if symbol != "" && !isSolanaRecurringToken(symbol) {
-		return nil, fmt.Errorf("psps.solana.token must be USDC, USD1, or DUSD, got %q", symbol)
+		return nil, fmt.Errorf("psps.solana.token must be USDC, got %q", symbol)
 	}
 	if pda != "" && symbol != "" {
 		return nil, fmt.Errorf("psps.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain")
@@ -266,7 +268,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	out := map[string]string{solanaKeyPlanPDA: pda}
 	for _, k := range []string{
 		solanaKeyPlanID, solanaKeyMint,
-		solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant,
+		solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant, solanaKeyTreasury,
 	} {
 		if v := strings.TrimSpace(link[k]); v != "" {
 			out[k] = v
@@ -325,9 +327,12 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 				}
 			}
 		}
+		if err := plan.Owns(ctx, acct.Owner); err != nil {
+			return nil, fmt.Errorf("solana plan %q is owned by %s: %w", pda, acct.Owner, err)
+		}
 		if tid, ok := merchant.FromContext(ctx); ok {
-			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !acct.Owner.Equals(merchant) {
-				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this merchant's merchant (%s)", pda, acct.Owner, merchant)
+			if err := plan.PaysInto(ctx, tid, pubkey, acct.Destinations); err != nil {
+				return nil, err
 			}
 		}
 	} else if symbol == "" {
@@ -341,6 +346,9 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	out[solanaKeyPeriodHours] = strconv.FormatUint(acct.PeriodHours, 10)
 	out[solanaKeyCreatedAt] = strconv.FormatInt(acct.CreatedAt, 10)
 	out[solanaKeyMerchant] = acct.Owner.String()
+	if !acct.Destinations[0].IsZero() {
+		out[solanaKeyTreasury] = acct.Destinations[0].String()
+	}
 	out[solanaKeyMintSymbol] = symbol
 	return out, nil
 }
@@ -391,16 +399,12 @@ func (s *Service) findOrPublishCatalogSolanaPlan(ctx context.Context, check cata
 		return nil, apperr.Invalidf("%s: an archived price publishes no Solana plan; reference an existing plan_pda or apply the price active", price)
 	}
 	if s.rt == nil || s.rt.SolanaPlanService == nil {
-		return nil, fmt.Errorf("%s: Solana recurring is not configured, so its plan cannot be published", price)
+		return nil, apperr.Conflictf("%s: %v; a recurring price is not sold on Solana", price, recurring.ErrNoCranker)
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// The plan's owner is the Solana signer: the plan's address derives from
-	// it, and it signs the publication.
-	if _, err := s.rt.SolanaPlanService.MerchantAddress(ctx, mid); err != nil {
-		return nil, fmt.Errorf("%s: a recurring Solana price needs the Solana signer that owns its plan, and none is available: %w", price, err)
+	// A new plan's owner is the deployment's first cranker: the plan's address
+	// derives from it, and it signs the publication.
+	if _, err := s.rt.SolanaPlanService.Publisher(ctx); err != nil {
+		return nil, apperr.Conflictf("%s: a recurring Solana price needs a listed solana.crankers to own its plan: %v", price, err)
 	}
 	req := check.request
 	ids, err := (&solanaAdapter{svc: s}).Attach(ctx, link, autoCreateContext{
@@ -414,7 +418,9 @@ func (s *Service) findOrPublishCatalogSolanaPlan(ctx context.Context, check cata
 	if err != nil {
 		return nil, fmt.Errorf("%s: Solana plan: %w", price, err)
 	}
-	out := map[string]string{solanaKeyPlanID: ids[solanaKeyPlanID], solanaKeyToken: ids[solanaKeyToken]}
+	// The plan's owner is fixed on-chain: the reference keeps it, so a
+	// cranker listed first later never re-derives another plan.
+	out := map[string]string{solanaKeyPlanID: ids[solanaKeyPlanID], solanaKeyToken: ids[solanaKeyToken], solanaKeyMerchant: ids[solanaKeyMerchant]}
 	for _, key := range []string{models.RailKeyRail, models.RailKeyProvider} {
 		if v := link[key]; v != "" {
 			out[key] = v
@@ -424,11 +430,7 @@ func (s *Service) findOrPublishCatalogSolanaPlan(ctx context.Context, check cata
 }
 
 func resolveSolanaTokenFromMint(ctx context.Context, plan *recurring.PlanService, mint string) (string, error) {
-	for _, symbol := range [...]string{
-		solanaDefaultRecurringToken,
-		solanaUSD1RecurringToken,
-		solanaDUSDRecurringToken,
-	} {
+	for _, symbol := range [...]string{solanaDefaultRecurringToken} {
 		configuredMint, err := plan.ResolveMint(ctx, symbol)
 		if err == nil && strings.TrimSpace(configuredMint) == strings.TrimSpace(mint) {
 			return symbol, nil
@@ -438,9 +440,7 @@ func resolveSolanaTokenFromMint(ctx context.Context, plan *recurring.PlanService
 }
 
 func isSolanaRecurringToken(symbol string) bool {
-	return symbol == solanaDefaultRecurringToken ||
-		symbol == solanaUSD1RecurringToken ||
-		symbol == solanaDUSDRecurringToken
+	return symbol == solanaDefaultRecurringToken
 }
 
 // Verify reads the on-chain Plan account and diffs its immutable terms (amount,

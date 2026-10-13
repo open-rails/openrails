@@ -3,6 +3,7 @@ package merchants
 import (
 	"testing"
 
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,7 +15,7 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 		{" Stripe ", " LIVE ", "acct_1", "SECRET_KEY", "psps/stripe/live/acct_1/secret_key"},
 		{"nmi", "test", " 999999-0000 ", "security_key", "psps/nmi/test/999999-0000/security_key"},
 		{"nmi", "sandbox", " 999999-0000 ", "security_key", "psps/nmi/sandbox/999999-0000/security_key"},
-		{"solana", "sandbox", "AKnL4", "private_key", "psps/solana/sandbox/AKnL4/private_key"},
+		{"solana", "devnet", "AKnL4", "rpc_url", "psps/solana/devnet/AKnL4/rpc_url"},
 		// Account ids are path-escaped so they can never add a path segment.
 		{"stripe", "live", "../evil/x", "secret_key", "psps/stripe/live/..%2Fevil%2Fx/secret_key"},
 	} {
@@ -33,7 +34,9 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 		{"stripe", "", "a", "secret_key"}, // environment is never defaulted
 		{"stripe", "staging", "a", "secret_key"},
 		{"stripe", "production", "a", "secret_key"}, // no aliases
-		{"solana", "devnet", "a", "private_key"},
+		{"solana", "sandbox", "a", "rpc_url"},       // another rail's environment
+		{"nmi", "devnet", "a", "security_key"},
+		{"solana", "mainnet", "a", "private_key"}, // the cranker is the deployment's
 		{"stripe", "live", " ", "secret_key"},
 		{"stripe", "live", "a", "publishable_key"},
 		{"nmi", "live", "mobius", "tokenization_key"}, // public setting, not a secret
@@ -57,13 +60,13 @@ func TestSecretNameRejectsTraversal(t *testing.T) {
 const stripeKeyName = "psps/stripe/live/acct_884_test/secret_key"
 
 func TestSecretWritability(t *testing.T) {
-	solana, err := PSPSecretName("solana", "live", "authority", "private_key")
+	solana, err := PSPSecretName("solana", "mainnet", "treasury", "rpc_url")
 	require.NoError(t, err)
 	for name, writable := range map[string]bool{
 		stripeKeyName:                                  true,
 		"psps/nmi/test/gw/security_key":                true,
 		"psps/stripe/live/acct/webhook_signing_secret": true,
-		solana:                          false, // platform-owned signer
+		solana:                          false, // the operator's RPC endpoint
 		"psps/stripe/live/acct/unknown": false,
 		"custodians/basis_theory/test/t1/api_key": true,
 		"custodians/nope/test/t1/api_key":         false,
@@ -87,6 +90,11 @@ func TestPSPIDDerivesFromCanonicalNaturalKey(t *testing.T) {
 		require.NotEqual(t, base, PspID(other[0], other[1], other[2]), "%q", other)
 	}
 	require.Equal(t, PspID("nmi", "test", "999999-0000"), PspID("nmi", "sandbox", "999999-0000"), "test and sandbox are one money class: a re-declared PSP keeps its id")
+	// Solana's networks keep the ids its PSPs held as live and test.
+	require.Equal(t, uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "solana", "live", "T"), PspID("solana", "mainnet", "T"))
+	for _, network := range []string{"devnet", "testnet"} {
+		require.Equal(t, uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "solana", "test", "T"), PspID("solana", network, "T"), network)
+	}
 	id, rail, env, account := PSPNaturalKey("NMI", "Live", " 999999-0000 ")
 	require.Equal(t, []any{base, "nmi", "live", "999999-0000"}, []any{id, rail, env, account})
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -235,29 +236,53 @@ func TestProviderSandboxGatewaysAreLiteralLoopbackOnly(t *testing.T) {
 	require.Empty(t, FakeProviders(validConfig()))
 }
 
-// Each rail takes only the environments it has, and every PSP declares one.
+// Each rail takes only its own environments, its real-money one when a PSP
+// omits it, and a PSP agrees with its merchant: live or a sandbox.
 func TestPSPEnvironments(t *testing.T) {
+	all := []string{EnvironmentLive, EnvironmentTest, EnvironmentSandbox, EnvironmentMainnet, EnvironmentDevnet, EnvironmentTestnet}
 	for rail, environments := range map[string][]string{
 		"nmi":    {EnvironmentLive, EnvironmentTest, EnvironmentSandbox},
 		"stripe": {EnvironmentLive, EnvironmentTest},
 		"ccbill": {EnvironmentLive, EnvironmentSandbox},
-		"solana": {EnvironmentLive, EnvironmentSandbox},
+		"solana": {EnvironmentMainnet, EnvironmentDevnet, EnvironmentTestnet},
 	} {
-		for _, environment := range []string{EnvironmentLive, EnvironmentTest, EnvironmentSandbox} {
-			err := ValidatePSPEnvironment("p", rail, environment)
+		for _, environment := range all {
+			got, err := ResolvePSPEnvironment("p", rail, environment)
 			if slices.Contains(environments, environment) {
 				require.NoError(t, err, "%s %s", rail, environment)
+				require.Equal(t, environment, got)
+				require.Equal(t, environment == environments[0], LiveEnvironment(rail, environment), "%s %s", rail, environment)
 			} else {
-				require.ErrorContains(t, err, "psps.p.environment: "+rail+` has no "`+environment+`" environment`)
+				require.EqualError(t, err, "psps.p.environment: "+rail+` has no "`+environment+`" environment (`+strings.Join(environments, ", ")+")")
 			}
 		}
-		require.ErrorContains(t, ValidatePSPEnvironment("p", rail, ""), "psps.p.environment is required")
-		require.Error(t, ValidatePSPEnvironment("p", rail, "production"), "no aliases")
+		got, err := ResolvePSPEnvironment("p", rail, "")
+		require.NoError(t, err)
+		require.Equal(t, environments[0], got, "%s defaults to its real-money environment", rail)
+		require.Equal(t, ClassLive, EnvironmentClass(rail, environments[0]))
+		require.Equal(t, ClassTest, EnvironmentClass(rail, environments[len(environments)-1]))
 	}
-	require.Equal(t, "devnet", SolanaNetwork(EnvironmentSandbox))
-	require.Equal(t, "mainnet", SolanaNetwork(EnvironmentLive))
-	require.Equal(t, EnvironmentTest, EnvironmentClass(EnvironmentSandbox))
-	require.Equal(t, EnvironmentLive, EnvironmentClass(EnvironmentLive))
+	// A merchant's PSPs agree with it: real money for a live merchant, none for
+	// a sandbox.
+	for _, row := range []struct {
+		rail, environment string
+		sandbox           bool
+		want              string
+	}{
+		{"nmi", EnvironmentTest, true, ""},
+		{"solana", EnvironmentDevnet, true, ""},
+		{"solana", EnvironmentMainnet, false, ""},
+		{"stripe", EnvironmentLive, false, ""},
+		{"solana", EnvironmentMainnet, true, "psps.p.environment: mainnet moves real money, and the merchant is a sandbox (sandbox: true); its PSPs take devnet or testnet"},
+		{"nmi", EnvironmentSandbox, false, "psps.p.environment: sandbox moves no money, and the merchant is live; a sandbox is its own merchant, declared sandbox: true"},
+	} {
+		err := ValidatePSPMoneyClass("p", row.rail, row.environment, row.sandbox)
+		if row.want == "" {
+			require.NoError(t, err, "%+v", row)
+		} else {
+			require.EqualError(t, err, row.want)
+		}
+	}
 }
 
 // The custody deployment is host-owned: secure transport only (any other is

@@ -71,23 +71,20 @@ type accountDataReader interface {
 // to start a recurring subscription. All instruction encoding stays here; the
 // frontend only signs, sends and confirms.
 type PrepareSubscribeService struct {
-	submitter Submitter // resolves the merchant's merchant (plan owner / cranker) address
-	// signer is the cranker key: it pre-signs the transfer slot of the atomic
-	// [subscribe + transfer_subscription] bundle while the wallet completes the
-	// fee-payer slot. It MUST be the merchant (cranker) key.
-	signer solanaint.Signer
-	rpc    prepareRPC
-	tokens Tokens
+	// submitter holds the crankers: the plan owner's pre-signs the transfer
+	// slot of the atomic [subscribe + transfer_subscription] bundle while the
+	// wallet completes the fee-payer slot.
+	submitter Submitter
+	rpc       prepareRPC
+	tokens    Tokens
 	// authorityReadBackoff shortens the retry only in package tests; zero keeps
 	// the production default.
 	authorityReadBackoff time.Duration
 }
 
-// NewPrepareSubscribeService builds a PrepareSubscribeService. signer pre-signs
-// the bundle's transfer slot and MUST be the key the Submitter resolves as the
-// merchant address.
-func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, tokens Tokens) *PrepareSubscribeService {
-	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, tokens: tokens}
+// NewPrepareSubscribeService builds a PrepareSubscribeService.
+func NewPrepareSubscribeService(submitter Submitter, rpc prepareRPC, tokens Tokens) *PrepareSubscribeService {
+	return &PrepareSubscribeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 
 // PrepareSubscribeInput describes the plan + subscriber to enroll. Plan terms are
@@ -101,6 +98,10 @@ type PrepareSubscribeInput struct {
 	AmountBaseUnits  uint64
 	PeriodHours      uint64
 	PlanCreatedAt    int64
+	// Owner is the plan's owner: the listed cranker that co-signs the first
+	// pull. Treasury is the plan's destination, where that pull lands.
+	Owner    string
+	Treasury string
 
 	// Reference is the purchase's Solana Pay REFERENCE (read-only, non-signer
 	// account meta). The merchant co-signs the bundle carrying it, which binds
@@ -127,6 +128,17 @@ type PrepareSubscribeResult struct {
 	Mint            string
 }
 
+// Holds refuses a plan owner no listed cranker holds: its plan cannot be
+// pulled, so it is not sold.
+func (s *PrepareSubscribeService) Holds(ctx context.Context, owner string) error {
+	key, err := parseKey("plan owner", owner)
+	if err != nil {
+		return err
+	}
+	_, err = s.submitter.Signer(ctx, key)
+	return err
+}
+
 // Prepare derives the PDAs, checks for the subscriber's SubscriptionAuthority on
 // this mint, and returns the one transaction to sign: the atomic [subscribe +
 // transfer] bundle, with initialize_subscription_authority prepended for a
@@ -151,14 +163,33 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if err != nil {
 		return nil, fmt.Errorf("recurring: invalid subscriber wallet: %w", err)
 	}
-	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
+	merchant, err := parseKey("plan owner", in.Owner)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
+		return nil, err
+	}
+	signer, err := s.submitter.Signer(ctx, merchant)
+	if err != nil {
+		return nil, err
+	}
+	treasury, err := parseKey("treasury", in.Treasury)
+	if err != nil {
+		return nil, err
 	}
 
 	planPDA, planBump, err := subscriptions.DerivePlanPDA(merchant, in.PlanID)
 	if err != nil {
 		return nil, err
+	}
+	if data, err := s.rpc.GetAccountData(ctx, planPDA); err != nil {
+		return nil, fmt.Errorf("recurring: read plan %s: %w", planPDA, err)
+	} else if len(data) > 0 {
+		plan, err := subscriptions.DecodePlanAccount(data)
+		if err != nil {
+			return nil, fmt.Errorf("recurring: decode plan %s: %w", planPDA, err)
+		}
+		if err := planPaysInto(planPDA, plan.Destinations, treasury); err != nil {
+			return nil, err
+		}
 	}
 	subPDA, _, err := subscriptions.DeriveSubscriptionPDA(planPDA, subscriber)
 	if err != nil {
@@ -237,7 +268,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// the upgrade bundle. The cranker pre-signs the transfer's caller slot; the
 	// wallet completes the fee-payer slot. The wallet could send subscribe alone,
 	// so ConfirmEnrollment requires this pull in the landed tx.
-	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
+	receiverATA, _, err := subscriptions.DeriveATA(treasury, mint, solanago.TokenProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
 	}
@@ -256,9 +287,6 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	})
 	ixs = append(ixs, subscribeIx, transferIx)
 
-	if s.signer == nil {
-		return nil, fmt.Errorf("recurring: atomic subscribe requires a cranker signer")
-	}
 	// Carry the purchase's reference (its own instruction — see
 	// referenceTagInstruction): it binds the bundle to the purchase and lets the
 	// poller detect it.
@@ -266,7 +294,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if err != nil {
 		return nil, err
 	}
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber, ixs)
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, signer, s.rpc, subscriber, ixs)
 	if err != nil {
 		return nil, err
 	}

@@ -84,7 +84,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 				err := hosttools.PullProvider(t.Context(), hosttools.PullProviderOptions{
 					Config:  &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}},
 					PGXPool: w.pool, MerchantID: w.client[embedded].MerchantID(),
-					MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},
+					MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps}}},
 					NMITransport:     w.nmi, Providers: []string{"nmi"}, Insert: true,
 					Since: w.clock.Now().Add(-90 * day).UTC().Format(time.RFC3339), Until: w.clock.Now().Add(time.Second).UTC().Format(time.RFC3339), Out: &out,
 				})

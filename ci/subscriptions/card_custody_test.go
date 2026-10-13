@@ -43,7 +43,7 @@ func (w *world) platformIdentities() []struct{ id, kind, environment, account st
 }
 
 func setCustody(custody billing.CardCustody) billing.UpdateMerchantConfigurationParams {
-	return billing.UpdateMerchantConfigurationParams{Settings: &billing.MerchantSettings{CardCustody: custody}}
+	return billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardCustody: custody}}
 }
 
 // A merchant chooses platform custody only where the deployment's platform
@@ -58,7 +58,7 @@ func TestPlatformCardCustody(t *testing.T) {
 
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
-	require.Empty(t, got.Settings.CardCustody, "absent is merchant custody")
+	require.Empty(t, got.MerchantSettings.CardCustody, "absent is merchant custody")
 	require.True(t, got.PlatformVault.Available)
 
 	_, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyHosted))
@@ -72,7 +72,7 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.NoError(t, err)
 	got, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyPlatform))
 	require.NoError(t, err)
-	require.Equal(t, billing.CardCustodyPlatform, got.Settings.CardCustody)
+	require.Equal(t, billing.CardCustodyPlatform, got.MerchantSettings.CardCustody)
 	identities := w.platformIdentities()
 	require.Len(t, identities, 1)
 	identity := identities[0]
@@ -81,7 +81,7 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.Equal(t, platformTenant+"/"+mid.String(), identity.account)
 
 	grace := 3
-	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{Settings: &billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform, ArrearsGraceDays: &grace}})
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform, ArrearsGraceDays: &grace}})
 	require.NoError(t, err)
 	w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe") }
 	w.restart()
@@ -89,18 +89,18 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.Equal(t, identities, w.platformIdentities(), "choosing again and reloading record no second identity")
 
 	// A PSP that could not charge platform cards is refused before any write.
-	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", AccountID: "acct_e2etwo",
-		Settings: map[string]any{"publishable_key": "pk_test_two"}, Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}})
+	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2etwo"},
+		PublishableKey: "pk_test_two", Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}})
 	require.Equal(t, "platform_vault_unreachable", codeOf(err))
 	// Nor is a PSP document written into Vault directly whose own server
 	// would take the card.
-	w.editDoc("psps/nmi", func(doc map[string]any) { doc["settings"].(map[string]any)["card_entry"] = "server" })
+	w.editDoc("psps/nmi", func(doc map[string]any) { doc["card_entry"] = "server" })
 	rt := engine.Graph(w.rt).Runtime
 	served, err := rt.MerchantConfig.Get(ctx, rt.DeclaredMerchants()[0])
 	require.NoError(t, err)
 	require.Contains(t, served.Rejected["psps/nmi"], "platform vault")
 	require.NotContains(t, served.PSPs["nmi"].Value.Settings, "card_entry")
-	require.Equal(t, billing.CardCustodyPlatform, served.Merchant.Value.Settings.CardCustody)
+	require.Equal(t, billing.CardCustodyPlatform, served.Merchant.Value.MerchantSettings.CardCustody)
 
 	// A platform card is held by the merchant's identity; without it the
 	// custody checks refuse the row.
@@ -150,14 +150,14 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 	require.Equal(t, "platform_vault_unavailable", codeOf(err))
 	got, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyMerchant))
 	require.NoError(t, err)
-	require.Equal(t, billing.CardCustodyMerchant, got.Settings.CardCustody)
+	require.Equal(t, billing.CardCustodyMerchant, got.MerchantSettings.CardCustody)
 
-	w.editDoc("merchant", func(doc map[string]any) { doc["settings"].(map[string]any)["card_custody"] = "platform" })
+	w.editDoc("merchant", func(doc map[string]any) { doc["card_custody"] = "platform" })
 	rt := engine.Graph(w.rt).Runtime
 	served, err := rt.MerchantConfig.Get(ctx, rt.DeclaredMerchants()[0])
 	require.NoError(t, err)
 	require.Contains(t, served.Rejected["merchant"], "platform vault")
-	require.Equal(t, billing.CardCustodyMerchant, served.Merchant.Value.Settings.CardCustody, "the previous document keeps serving")
+	require.Equal(t, billing.CardCustodyMerchant, served.Merchant.Value.MerchantSettings.CardCustody, "the previous document keeps serving")
 	require.Empty(t, w.platformIdentities())
 
 	// Boot serves without what it refuses, and names it.
@@ -175,7 +175,7 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 		return nil
 	}
 	declared := func(custody billing.CardCustody) map[string]openrails.MerchantDeclaration {
-		return map[string]openrails.MerchantDeclaration{"custody-" + uuid.NewString()[:8]: {DisplayName: "Custody", Settings: billing.MerchantSettings{CardCustody: custody}}}
+		return map[string]openrails.MerchantDeclaration{"custody-" + uuid.NewString()[:8]: {DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardCustody: custody}}}
 	}
 	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyPlatform)}), "no platform vault")
 	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyHosted)}), "reserved")

@@ -14,6 +14,7 @@ func TestToolsReadTheServerManifest(t *testing.T) {
 merchants:
   onlydemo:
     display_name: OnlyDemo
+    sandbox: true
     remote_application:
       issuer: https://app.example
       jwks_uri: https://app.example/.well-known/jwks.json
@@ -21,9 +22,8 @@ merchants:
       mobius:
         rail: nmi
         environment: sandbox
-        account_id: "000000"
-        settings:
-          tokenization_key: public-key
+        gateway_id: "000000"
+        tokenization_key: public-key
         secrets:
           security_key: private-key
 `)

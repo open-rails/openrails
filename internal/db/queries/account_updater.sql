@@ -12,7 +12,6 @@
 SELECT DISTINCT c.merchant_id
 FROM billing.custodians c
 WHERE c.kind = lower(sqlc.arg(custodian)::text)
-  AND c.environment = sqlc.arg(environment)::text
   AND (sqlc.narg(after)::uuid IS NULL OR c.merchant_id > sqlc.narg(after)::uuid)
   -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
   AND NOT EXISTS (

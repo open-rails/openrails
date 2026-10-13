@@ -136,22 +136,24 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 merchants:
   %s:
     display_name: Network Shop
+    sandbox: true
     psps:
       nmi:
         rail: nmi
         environment: sandbox
-        account_id: test
+        gateway_id: test
         secrets: {security_key: test, webhook_signing_secret: test}
-        settings: {tokenization_key: test}
+        tokenization_key: test
   %s:
     display_name: Network Mart
+    sandbox: true
     psps:
       nmi:
         rail: nmi
         environment: sandbox
-        account_id: mart
+        gateway_id: mart
         secrets: {security_key: mart, webhook_signing_secret: mart}
-        settings: {tokenization_key: mart}
+        tokenization_key: mart
 `, shop, mart)), 0o600))
 	graph, plane := operator.Of(srv)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, plane, manifest, nil, ""))

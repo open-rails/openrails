@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -72,6 +73,8 @@ type Config struct {
 	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
 	// mounts: a KV mount makes Vault hold merchant configuration.
 	Vault *VaultConfig `yaml:"vault" json:"vault"`
+	// Solana is the deployment's Solana configuration: its crankers.
+	Solana *SolanaConfig `yaml:"solana" json:"solana"`
 
 	// LLM is the model behind the console's catalog questions.
 	// Without an API key those features are off.
@@ -102,7 +105,8 @@ type Config struct {
 
 	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
 	// webhook origins. CCBill signs nothing, so the source address is the
-	// authentication: the list is honored only while no live PSP exists.
+	// authentication: the list is honored only for a sandbox merchant's
+	// account.
 	// Empty accepts CCBill's own ranges alone.
 	CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 
@@ -503,14 +507,14 @@ type ResolvedPSP struct {
 	// `psps.<key>` map name, e.g. "mobius"). Resolution OUTPUT only — set by
 	// railresolve sources, never declared inside the entry itself.
 	Key string
-	// Environment is the PSP's declared environment: live, test or sandbox.
+	// Environment is the PSP's environment, one of its rail's.
 	Environment string
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail
 	// AccountID is this account's rail-native identity (#641/#655): NMI
 	// gateway-id, Stripe acct_…, CCBill clientAccnum-clientSubacc (dash-joined,
-	// e.g. 999999-0000, #697), or Solana wallet (#592: operator-declared).
+	// e.g. 999999-0000, #697), or a Solana PSP's treasury.
 	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string
 	// Archived keeps an account addressable for existing obligations and inbound
@@ -559,20 +563,6 @@ type StripeRailConfig struct {
 	// WebhookSigningSecretThin is the signing secret of a Stripe "thin" Event
 	// Destination; when set, webhooks verify against either secret.
 	WebhookSigningSecretThin string
-}
-
-// SolanaRailConfig — programmatic-only boot plane. Standalone declares the same
-// knobs per merchant in the manifest rail-account `settings` block (#711, see
-// SolanaAccountSettings); store settings win over this boot plane (#699).
-type SolanaRailConfig struct {
-	// RPCProvider selects the preferred Solana RPC provider. Empty defaults to
-	// "helius"; without rpc_api_key the client uses public RPC fallback.
-	RPCProvider string
-	// RPCAPIKey is the API key for the selected RPC provider (currently helius).
-	RPCAPIKey string
-	Tokens    map[string]TokenConfig
-	// Network is the PSP environment's: devnet under sandbox, mainnet live.
-	Network string
 }
 
 // ResolvedCustodian (#795 / or#879 / or#880) is the RESOLVED runtime shape of a
@@ -642,14 +632,37 @@ func (p *ResolvedPSP) EffectiveAccountID() string {
 	return strings.TrimSpace(p.AccountID)
 }
 
-// ValidateRailAccountID rejects rail-specific malformed account_id values.
-// CCBill composite identity is dash-joined (#697): clientAccnum-clientSubacc,
-// matching CCBill's own convention — a slash would also re-embed the
-// merchant-secret path delimiter inside the id. Format-only; empty ids are
-// handled by the callers' requiredness rules.
+// ValidateRailAccountID refuses a malformed account: a CCBill part that is
+// not CCBill's number, a treasury that is not a Solana address. An empty one
+// is the callers'.
 func ValidateRailAccountID(rail models.Rail, accountID string) error {
-	if rail == models.RailCCBill && strings.Contains(accountID, "/") {
-		return fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000 (got %q)", accountID)
+	switch rail {
+	case models.RailCCBill:
+		parts := rails.AccountParts(rail, accountID)
+		for _, name := range rails.AccountFields(rail) {
+			if part := parts[name]; part == "" || strings.Trim(part, "0123456789") != "" {
+				return fmt.Errorf("%s must be CCBill's number, digits only (got %q)", name, part)
+			}
+		}
+	case models.RailSolana:
+		return ValidateSolanaTreasury(accountID)
+	}
+	return nil
+}
+
+// ValidatePSPAccount refuses a PSP missing an account field of its rail, or
+// with a malformed account.
+func ValidatePSPAccount(psp, rail, account string) error {
+	r := models.Rail(strings.ToLower(strings.TrimSpace(rail)))
+	account = strings.TrimSpace(account)
+	parts := rails.AccountParts(r, account)
+	for _, name := range rails.AccountFields(r) {
+		if strings.TrimSpace(parts[name]) == "" {
+			return fmt.Errorf("psps.%s.%s is required", psp, name)
+		}
+	}
+	if err := ValidateRailAccountID(r, account); err != nil {
+		return fmt.Errorf("psps.%s: %w", psp, err)
 	}
 	return nil
 }
@@ -746,22 +759,20 @@ func (p *ResolvedPSP) ToNMIProviderSettings() *NMIProviderSettings {
 	return s
 }
 
-// SplitCCBillAccountID splits the dash-joined CCBill composite identity
-// (clientAccnum-clientSubacc, #697) at the FIRST dash — both parts are
-// numeric in CCBill's own convention, so the first dash is the separator.
+// SplitCCBillAccountID splits a CCBill account into its client_accnum and
+// client_subacc.
 func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
-	acc, sub, ok := strings.Cut(strings.TrimSpace(accountID), "-")
-	acc, sub = strings.TrimSpace(acc), strings.TrimSpace(sub)
-	if !ok || acc == "" || sub == "" {
-		return "", "", fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000 (got %q)", accountID)
+	accountID = strings.TrimSpace(accountID)
+	if err := ValidateRailAccountID(models.RailCCBill, accountID); err != nil {
+		return "", "", err
 	}
-	return acc, sub, nil
+	parts := rails.AccountParts(models.RailCCBill, accountID)
+	return parts["client_accnum"], parts["client_subacc"], nil
 }
 
 // ToCCBillConfig converts the rail config to the CCBill client config. Only
-// valid for CCBill-type rails. The clientAccnum/clientSubacc pair is derived
-// from the declared AccountID (#711 — identity is declared once); a malformed
-// AccountID leaves the pair empty and is rejected by validateCCBillRail.
+// valid for CCBill-type rails. A malformed account leaves the pair empty and
+// is rejected by validateCCBillRail.
 func (p *ResolvedPSP) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{Sandbox: p.Environment == EnvironmentSandbox}
 	if acc, sub, err := SplitCCBillAccountID(p.EffectiveAccountID()); err == nil {
@@ -784,8 +795,8 @@ type NMIProviderSettings struct {
 	WebhookSecret string
 }
 
-// CCBillConfig is the derived CCBill CLIENT config (programmatic-only): the
-// account pair split out of the dash-joined account_id plus credentials.
+// CCBillConfig is the derived CCBill client config: the PSP's
+// client_accnum and client_subacc plus credentials.
 type CCBillConfig struct {
 	Salt         string
 	ClientSubAcc string
@@ -1081,10 +1092,10 @@ func ValidateStripeSecretKeyEnvironment(environment, secretKey string) error {
 	if (!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_") {
 		return fmt.Errorf("invalid Stripe secret key format: expected sk_live_, rk_live_, sk_test_, or rk_test_ with a nonempty value")
 	}
-	if isLiveKey && !LiveEnvironment(environment) {
+	if isLiveKey && !LiveEnvironment("stripe", environment) {
 		return fmt.Errorf("a live key (sk_live_/rk_live_) moves real money; the PSP declares environment %q", environment)
 	}
-	if isTestKey && LiveEnvironment(environment) {
+	if isTestKey && LiveEnvironment("stripe", environment) {
 		return fmt.Errorf("a test key (sk_test_/rk_test_) moves no money; the PSP declares environment live")
 	}
 	return nil
@@ -1098,7 +1109,7 @@ func ValidateStripePublishableKeyEnvironment(environment, key string) error {
 	if (!live && !test) || len(key) <= len("pk_test_") {
 		return fmt.Errorf("invalid Stripe publishable key format: expected pk_live_ or pk_test_ with a nonempty value")
 	}
-	if live != LiveEnvironment(environment) {
+	if live != LiveEnvironment("stripe", environment) {
 		return fmt.Errorf("publishable key %s… disagrees with the PSP's environment %q", key[:len("pk_test_")], environment)
 	}
 	return nil
@@ -1106,8 +1117,8 @@ func ValidateStripePublishableKeyEnvironment(environment, key string) error {
 
 // validateRails validates all rails in the new Rails map
 func validateRails(cfg *Config, rails PSPSet) error {
-	// Count accounts per rail: with more than one, each must declare account_id
-	// (the made-up map name can't be the provider identity, #641).
+	// Count accounts per rail: with more than one, each must declare its
+	// account (the made-up map name can't be the provider identity, #641).
 	countByRail := map[models.Rail]int{}
 	for name, proc := range rails {
 		if proc != nil {
@@ -1124,11 +1135,10 @@ func validateRails(cfg *Config, rails PSPSet) error {
 
 		effectiveType := proc.EffectiveRail(name)
 		// #641: with multiple accounts on a rail, the made-up map name can't serve
-		// as the provider identity — each must declare its real account_id. Solana is
-		// exempt: its identity is derived from the signer, so account_id is ignored
-		// there and never a required disambiguator.
-		if effectiveType != models.RailSolana && countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
-			return fmt.Errorf("rail '%s' shares rail %q with another account, so it must declare account_id (the rail-native id; no name fallback)", name, effectiveType)
+		// as the provider identity — each must declare its real account (a
+		// Solana PSP's treasury).
+		if countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
+			return fmt.Errorf("rail '%s' shares rail %q with another account, so it must declare its account (no name fallback)", name, effectiveType)
 		}
 		switch effectiveType {
 		case models.RailNMI:
@@ -1144,9 +1154,6 @@ func validateRails(cfg *Config, rails PSPSet) error {
 				return err
 			}
 		case models.RailSolana:
-			if err := validateSolanaRail(name, proc); err != nil {
-				return err
-			}
 		default:
 			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
 		}
@@ -1177,14 +1184,8 @@ func validateNMIRail(name string, proc *ResolvedPSP) error {
 
 // validateCCBillRail validates a CCBill-type rail
 func validateCCBillRail(name string, proc *ResolvedPSP) error {
-	// #697/#711: identity checks run even in dev — the clientAccnum/clientSubacc
-	// pair is DERIVED from the dash-joined account_id, so a missing or malformed
-	// account_id is a config bug, not a missing credential.
-	if err := ValidateRailAccountID(models.RailCCBill, proc.EffectiveAccountID()); err != nil {
-		return fmt.Errorf("rail '%s' (ccbill): %w", name, err)
-	}
 	if _, _, err := SplitCCBillAccountID(proc.EffectiveAccountID()); err != nil {
-		return fmt.Errorf("rail '%s' (ccbill): account_id is required (the pair is derived from it): %w", name, err)
+		return fmt.Errorf("rail '%s' (ccbill): %w", name, err)
 	}
 	ccbill := proc.CCBill
 	if ccbill == nil {
@@ -1215,28 +1216,6 @@ func validateStripeRail(name string, proc *ResolvedPSP) error {
 
 	if strings.TrimSpace(stripe.WebhookSigningSecret) == "" {
 		return fmt.Errorf("rail '%s' (stripe): webhook_signing_secret is required", name)
-	}
-
-	return nil
-}
-
-// validateSolanaRail validates only config-loading concerns. Solana token
-// pricing/default policy belongs to internal/modules/solana/tokens and is
-// applied at runtime by configureSolanaRail.
-func validateSolanaRail(name string, proc *ResolvedPSP) error {
-	solana := proc.Solana
-	if solana == nil {
-		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
-	}
-	rpcProvider := strings.ToLower(strings.TrimSpace(solana.RPCProvider))
-	switch rpcProvider {
-	case "", "helius", "public":
-	default:
-		return fmt.Errorf("rail '%s' (solana): rpc_provider must be helius or public", name)
-	}
-	rpcAPIKey := strings.TrimSpace(solana.RPCAPIKey)
-	if rpcProvider == "public" && rpcAPIKey != "" {
-		return fmt.Errorf("rail '%s' (solana): rpc_provider public cannot use rpc_api_key", name)
 	}
 
 	return nil

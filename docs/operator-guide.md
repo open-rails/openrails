@@ -63,9 +63,9 @@ modes"](operations.md#operating-modes-the-safety-levers).
   continue in every mode.
 - **PSP `environment`** — declared on every PSP in the merchant manifest
   (`live | test | sandbox`) and verified with the provider before the PSP is
-  used ([PSP environments](psp-environments.md)). A deployment is all live or
-  all non-live, so no real money can move in a non-live deployment regardless
-  of write mode.
+  used ([PSP environments](psp-environments.md)). A merchant is live or a
+  sandbox (`sandbox: true`) and its PSPs agree with it, so no real money moves
+  for a sandbox merchant regardless of write mode.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|

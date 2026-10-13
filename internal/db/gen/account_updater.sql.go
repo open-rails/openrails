@@ -189,8 +189,7 @@ const listAccountUpdaterWorkMerchants = `-- name: ListAccountUpdaterWorkMerchant
 SELECT DISTINCT c.merchant_id
 FROM billing.custodians c
 WHERE c.kind = lower($1::text)
-  AND c.environment = $2::text
-  AND ($3::uuid IS NULL OR c.merchant_id > $3::uuid)
+  AND ($2::uuid IS NULL OR c.merchant_id > $2::uuid)
   -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
   AND NOT EXISTS (
         SELECT 1 FROM billing.account_updater_batches b
@@ -202,7 +201,7 @@ WHERE c.kind = lower($1::text)
            AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
            AND pm.rail_method_ref IS NOT NULL
            AND (pm.account_updater_checked_at IS NULL
-                OR pm.account_updater_checked_at < $4::timestamptz - make_interval(days => $5::int))
+                OR pm.account_updater_checked_at < $3::timestamptz - make_interval(days => $4::int))
            AND EXISTS (
                  SELECT 1 FROM billing.subscriptions s
                   WHERE s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
@@ -210,14 +209,13 @@ WHERE c.kind = lower($1::text)
                     AND s.deleted_at IS NULL
                     AND s.status IN ('active', 'past_due')
                     AND s.current_period_ends_at IS NOT NULL
-                    AND s.current_period_ends_at <= $4::timestamptz + make_interval(days => $6::int)))
+                    AND s.current_period_ends_at <= $3::timestamptz + make_interval(days => $5::int)))
 ORDER BY c.merchant_id
-LIMIT $7::int
+LIMIT $6::int
 `
 
 type ListAccountUpdaterWorkMerchantsParams struct {
 	Custodian        string
-	Environment      string
 	After            *uuid.UUID
 	Now              time.Time
 	MinLookaheadDays int32
@@ -237,7 +235,6 @@ type ListAccountUpdaterWorkMerchantsParams struct {
 func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListAccountUpdaterWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listAccountUpdaterWorkMerchants,
 		arg.Custodian,
-		arg.Environment,
 		arg.After,
 		arg.Now,
 		arg.MinLookaheadDays,

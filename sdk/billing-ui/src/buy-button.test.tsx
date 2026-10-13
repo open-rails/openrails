@@ -122,6 +122,44 @@ describe("BuyButton", () => {
     expect(screen.queryByRole("dialog")).toBeNull()
   })
 
+  it("says payments are off when provider writes are, and gives the operator why", async () => {
+    const reason =
+      "provider writes are off, so the merchant takes no payment: provider_write_mode=readonly blocks all provider writes: set provider_write_mode to full (or limited)"
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    for (const host of ["shop.example", "localhost"]) {
+      vi.stubGlobal("location", new URL(`https://${host}/checkout`))
+      const server = fakeBilling()
+      server.fail["POST /me/orders"] = apiError(
+        503,
+        "provider_writes_disabled",
+        reason
+      )
+      const { tree, rerender, unmount } = mount(server)
+      rerender(
+        tree(
+          <BuyButton
+            price={rent()}
+            label="Rent"
+            onPaid={vi.fn()}
+            onSignInRequired={vi.fn()}
+          />
+        )
+      )
+      fireEvent.click(await enabled("Rent"))
+      const alert = await screen.findByRole("alert")
+      expect(alert.textContent).toContain(
+        "Payments are switched off on this site right now."
+      )
+      expect(alert.textContent).not.toContain("temporarily unavailable")
+      if (host === "localhost") expect(alert.textContent).toContain(reason)
+      else expect(alert.textContent).not.toContain(reason)
+      unmount()
+    }
+    expect(warn).toHaveBeenCalledWith(`OpenRails: ${reason}`)
+    vi.unstubAllGlobals()
+    warn.mockRestore()
+  })
+
   it("creates the customer's order and calls onPaid once it is complete", async () => {
     modals.length = 0
     const server = fakeBilling()

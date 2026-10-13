@@ -497,8 +497,8 @@ func auExpiry(month, year string) string {
 
 // BasisTheoryWebhookKeyURL selects BT's CDN webhook public key for the
 // custodian's money class.
-func BasisTheoryWebhookKeyURL(environment string) string {
-	if !config.LiveEnvironment(environment) {
+func BasisTheoryWebhookKeyURL(class string) string {
+	if class != config.ClassLive {
 		return basistheory.TestWebhookKeyURL
 	}
 	return basistheory.ProdWebhookKeyURL

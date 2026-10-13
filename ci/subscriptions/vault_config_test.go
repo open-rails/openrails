@@ -34,12 +34,12 @@ func TestVaultEditReachesEveryReplica(t *testing.T) {
 
 	grace := 9
 	updated, err := w.client[embedded].UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-		ExpectedRevision: &seen.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
+		ExpectedRevision: &seen.Revision, MerchantSettings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
 	})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		got, err := sibling.client.GetMerchantConfiguration(ctx)
-		return err == nil && got.Revision == updated.Revision && got.Settings.ArrearsGraceDays != nil && *got.Settings.ArrearsGraceDays == 9
+		return err == nil && got.Revision == updated.Revision && got.MerchantSettings.ArrearsGraceDays != nil && *got.MerchantSettings.ArrearsGraceDays == 9
 	}, 5*time.Second, 50*time.Millisecond, "the other replica reloads on the announcement, well inside the recheck")
 }
 

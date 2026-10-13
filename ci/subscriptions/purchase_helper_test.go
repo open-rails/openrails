@@ -173,7 +173,7 @@ func (s sale) payment(o order) map[string]any {
 		return map[string]any{"token": o.token, "psp_id": s.w.psp[o.rail], "billing_details": map[string]any{
 			"name": "Page Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
 	case o.rail == "solana":
-		return map[string]any{"token_symbol": "DUSD"}
+		return map[string]any{"token_symbol": "USDC"}
 	}
 	out := map[string]any{"return_url": cmp.Or(o.returnURL, "https://e2e.test/return")}
 	if psp, ok := s.w.psp[o.rail]; ok {

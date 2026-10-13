@@ -63,7 +63,7 @@ func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPB
 }
 
 const listPricePSPBindings = `-- name: ListPricePSPBindings :many
-SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key
+SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
 WHERE b.merchant_id = $1::uuid AND (cardinality($2::uuid[]) = 0 OR b.price_id = ANY($2::uuid[]))
@@ -89,6 +89,7 @@ type ListPricePSPBindingsRow struct {
 	Configuration            []byte
 	Rail                     string
 	PspKey                   string
+	Superseded               bool
 }
 
 func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBindingsParams) ([]ListPricePSPBindingsRow, error) {
@@ -112,6 +113,7 @@ func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBind
 			&i.Configuration,
 			&i.Rail,
 			&i.PspKey,
+			&i.Superseded,
 		); err != nil {
 			return nil, err
 		}
@@ -142,7 +144,7 @@ func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceFo
 }
 
 const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
        OR ($3::uuid IS NULL AND key = $4::text AND superseded_at IS NULL))
@@ -180,12 +182,12 @@ func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBi
 			&i.AccountID,
 			&i.CredentialsValidatedAt,
 			&i.WebhookEndpointID,
-			&i.PendingSignerPublicKey,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CredentialFingerprint,
 			&i.CredentialDuplicateAt,
 			&i.SupersededAt,
+			&i.Live,
 		); err != nil {
 			return nil, err
 		}

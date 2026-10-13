@@ -145,11 +145,11 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	const otherSecret, otherAccount = "whsec_e2e_webhook_other", "acct_e2e_webhook_other"
 	otherSlug := "webhook-other-" + uuid.NewString()[:8]
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
+		slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
 			AccountID: account,
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
 		}}},
-		otherSlug: {DisplayName: otherSlug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
+		otherSlug: {Sandbox: true, DisplayName: otherSlug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
 			AccountID: otherAccount,
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e_other", "webhook_signing_secret": otherSecret},
 		}}},

@@ -18,7 +18,7 @@ import (
 // label names next, from a file or from Vault. A label moved to an unused
 // account registers that account as a new PSP; a label naming an account the
 // merchant cannot hold (another merchant's, one another label of the
-// merchant already declares, or real money beside a non-live deployment) is
+// merchant already declares, or real money on a sandbox merchant) is
 // refused, and the account it named keeps serving and renewing.
 func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 	for _, source := range []string{"file", "vault"} {
@@ -49,6 +49,7 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 						_, _, err := rt.Merchants.RegisterForRestore(ctx, other, "other-"+uuid.NewString()[:8])
 						require.NoError(t, err)
 						foreign, err := rt.Merchants.SyncConfig(ctx, other, merchantdocs.Set{}, merchantdocs.Set{
+							Merchant: merchantdocs.Doc[merchantdocs.Merchant]{Value: merchantdocs.Merchant{Sandbox: true}}, HasMerchant: true,
 							PSPs: map[string]merchantdocs.Doc[merchantdocs.PSP]{"other": doc},
 						})
 						require.NoError(t, err)
@@ -80,7 +81,7 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 				require.Equal(t, original, methodPSP)
 				var live int
 				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.psps WHERE environment = 'live'`)).Scan(&live))
-				require.Zero(t, live, "no real-money PSP joins a deployment of test seams")
+				require.Zero(t, live, "no real-money PSP joins a sandbox merchant")
 
 				var superseded bool
 				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT superseded_at IS NOT NULL FROM billing.psps WHERE id = $1`), original).Scan(&superseded))
@@ -133,10 +134,10 @@ func TestPSPAccountsKeepTheirBilling(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, original.ID, rotated.ID)
-	require.Equal(t, original.AccountID, rotated.AccountID)
+	require.Equal(t, original.GatewayID, rotated.GatewayID)
 
 	added, err := client.CreatePSP(ctx, billing.CreatePSPParams{
-		Key: "second", Rail: "nmi", Environment: "sandbox", AccountID: "second-account",
+		Key: "second", Rail: "nmi", Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "second-account"},
 		Credentials: map[string]string{"security_key": "second-account-key", "webhook_signing_secret": "second-webhook"},
 	})
 	require.NoError(t, err)

@@ -10,18 +10,20 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // Declared is the configuration a file declares for merchant id. Each PSP is
 // in its declared environment; custodians take their PSPs' money class.
-// accounts gives the account id of each PSP whose file declaration derives it
-// (a Solana signer's public key); loaded is when the file was read.
-func Declared(id billing.MerchantID, m config.MerchantDeclaration, accounts map[string]string, loaded time.Time) Set {
+// loaded is when the file was read.
+func Declared(id billing.MerchantID, m config.MerchantDeclaration, loaded time.Time) Set {
 	set := Set{}.Clone()
 	merchant := Merchant{
-		DisplayName: strings.TrimSpace(m.DisplayName),
-		Settings:    m.Settings,
-		Secrets:     MerchantSecrets{SCIMToken: strings.TrimSpace(m.Secrets.SCIMToken)},
+		DisplayName:      strings.TrimSpace(m.DisplayName),
+		Sandbox:          m.Sandbox,
+		MerchantSettings: m.MerchantSettings,
+		Secrets:          MerchantSecrets{SCIMToken: strings.TrimSpace(m.Secrets.SCIMToken)},
 	}
 	for i, w := range m.AlertWebhooks {
 		format := billing.AlertWebhookFormat(strings.ToLower(strings.TrimSpace(w.Format)))
@@ -39,16 +41,11 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, accounts map[
 	for key, p := range m.PSPs {
 		key = strings.ToLower(strings.TrimSpace(key))
 		account := strings.TrimSpace(p.AccountID)
-		if derived, ok := accounts[key]; ok {
-			account = derived
-		}
+		rail := strings.ToLower(strings.TrimSpace(string(p.Rail)))
 		doc := PSP{
-			Rail: strings.ToLower(strings.TrimSpace(string(p.Rail))), Environment: strings.TrimSpace(p.Environment), AccountID: account,
+			Rail: rail, Environment: DefaultEnvironment(rail, p.Environment), AccountID: account,
 			Archived: p.Archived, Custodian: strings.ToLower(strings.TrimSpace(p.Custodian)),
 			Settings: maps.Clone(p.Settings), Secrets: normalizedSecrets(p.Secrets),
-		}
-		if p.Signer != nil {
-			doc.Signer = &Signer{Mode: strings.ToLower(strings.TrimSpace(p.Signer.Mode)), Key: strings.TrimSpace(p.Signer.Key)}
 		}
 		set.PSPs[key] = Doc[PSP]{Value: doc, UpdatedAt: loaded}
 	}
@@ -63,15 +60,22 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, accounts map[
 	return set
 }
 
-// DeclaredCustodianEnvironment is the money class of m's custodians: live
-// when its PSPs are, test otherwise.
+// DeclaredCustodianEnvironment is the money class of m's custodians: test
+// for a sandbox merchant, live otherwise.
 func DeclaredCustodianEnvironment(m config.MerchantDeclaration) string {
-	for _, p := range m.PSPs {
-		if config.LiveEnvironment(strings.TrimSpace(p.Environment)) {
-			return config.EnvironmentLive
-		}
+	if m.Sandbox {
+		return config.ClassTest
 	}
-	return config.EnvironmentTest
+	return config.ClassLive
+}
+
+// DefaultEnvironment is a PSP document's environment: the rail's real-money
+// one when the document names none.
+func DefaultEnvironment(rail, environment string) string {
+	if environment = strings.TrimSpace(environment); environment != "" {
+		return environment
+	}
+	return rails.DefaultEnvironment(models.Rail(strings.ToLower(strings.TrimSpace(rail))))
 }
 
 func normalizedSecrets(in map[string]string) map[string]string {

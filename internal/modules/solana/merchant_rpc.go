@@ -17,13 +17,13 @@ import (
 
 // MerchantRPCBuilder resolves one merchant's Solana RPC client at use time for
 // the process-wide services (poller, crank, intent verify). Nothing is cached,
-// so a rotated setting takes effect on the next pass. MerchantsFn is
+// so a rotated rpc_url takes effect on the next pass. MerchantsFn is
 // late-bound; a nil fn or service arms nothing.
 type MerchantRPCBuilder struct {
 	Config      *config.Config
 	MerchantsFn func() *merchants.Service
-	// Endpoint overrides store-armed clients' RPC endpoint — a test seam for
-	// fake RPC servers. Zero value = real endpoints.
+	// Endpoint replaces the network's public endpoint: a sandbox run's
+	// loopback node (provider_sandbox.solana_rpc_url).
 	Endpoint string
 }
 
@@ -34,59 +34,72 @@ func (b *MerchantRPCBuilder) merchants() *merchants.Service {
 	return b.MerchantsFn()
 }
 
-// Resolve arms the merchant's RPC client from its declared solana account's
-// settings, picking the pull scope (active, else newest archived for drain).
-// nil client with nil error = no declared account (caller skips/warns).
+// Resolve arms the merchant's RPC client from its Solana PSP (active, else
+// newest archived for drain): its rpc_url first, its network's public
+// endpoint as fallback. nil client with nil error = no Solana PSP.
 func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID) (*solanarpc.RPCClient, error) {
 	if b == nil {
 		return nil, nil
 	}
 	svc := b.merchants()
 	if svc == nil {
-		return nil, nil // nothing arms without the merchants service
+		return nil, nil
 	}
 	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana")
 	if err != nil {
 		return nil, fmt.Errorf("solana: resolve merchant %s rail account: %w", mid.String(), err)
 	}
 	if !ok {
-		return nil, nil // no declared solana account → not armed
+		return nil, nil
 	}
-	settings, err := config.ParseSolanaAccountSettings(scope.Settings)
+	rpcURL, err := svc.OptionalPSPSecret(ctx, mid, scope, config.SolanaSecretRPCURL)
 	if err != nil {
-		// Malformed settings fail loud; there is no fallback client.
-		return nil, fmt.Errorf("solana: merchant %s account %s settings: %w", mid.String(), scope.AccountID, err)
+		return nil, fmt.Errorf("solana: merchant %s rpc_url: %w", mid.String(), err)
 	}
 	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-		Endpoint:        b.Endpoint,
-		LoopbackFixture: b.Endpoint != "",
-		RPCProvider:     settings.RPCProvider,
-		RPCAPIKey:       settings.RPCAPIKey,
-		Network:         config.SolanaNetwork(scope.Environment),
-		ReadOnly:        b.Config != nil && config.IsProviderReadOnly(b.Config),
+		Network:   scope.Environment,
+		URL:       rpcURL,
+		PublicURL: b.Endpoint,
+		ReadOnly:  b.Config != nil && config.IsProviderReadOnly(b.Config),
 	}), nil
 }
 
-// Network is the network the ctx merchant's Solana PSP pays on: devnet for a
-// sandbox PSP, mainnet otherwise and when it has none.
+// Network is the network the ctx merchant's Solana PSP pays on, its
+// environment; mainnet when it has none.
 func (b *MerchantRPCBuilder) Network(ctx context.Context) string {
 	svc := b.merchants()
 	mid, err := merchant.Require(ctx)
 	if svc == nil || err != nil {
-		return config.SolanaNetwork(config.EnvironmentLive)
+		return config.EnvironmentMainnet
 	}
 	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana")
 	if err != nil || !ok {
-		return config.SolanaNetwork(config.EnvironmentLive)
+		return config.EnvironmentMainnet
 	}
-	return config.SolanaNetwork(scope.Environment)
+	return scope.Environment
 }
 
-// RecurringTokens is the ctx merchant's network and its built-in mint table:
-// the recurring services' lookup, never what the merchant accepts.
+// RecurringTokens is the ctx merchant's network and the tokens accepted on
+// it: the recurring services' mint lookup.
 func (b *MerchantRPCBuilder) RecurringTokens(ctx context.Context) (string, map[string]config.TokenConfig) {
 	network := b.Network(ctx)
-	return network, solanatokens.ForNetwork(network)
+	return network, solanatokens.Accepted(network)
+}
+
+// Treasury is the merchant's Solana treasury: its active Solana PSP's account.
+func (b *MerchantRPCBuilder) Treasury(ctx context.Context, mid billing.MerchantID) (solanago.PublicKey, error) {
+	svc := b.merchants()
+	if svc == nil {
+		return solanago.PublicKey{}, fmt.Errorf("solana: no merchant configuration")
+	}
+	scope, ok, err := svc.ActivePSPScope(ctx, mid, "solana")
+	if err != nil {
+		return solanago.PublicKey{}, err
+	}
+	if !ok {
+		return solanago.PublicKey{}, fmt.Errorf("solana: merchant %s has no active Solana PSP, so no treasury", mid)
+	}
+	return solanago.PublicKeyFromBase58(scope.AccountID)
 }
 
 // ChainReader adapts the builder to the intent verify leg's chain reads: the

@@ -76,7 +76,7 @@ func configurationChanges(key []byte, name string, before, after any) ([]configu
 		}
 		return value
 	}
-	if err := compare("merchant/settings", settings(old.Settings), settings(next.Settings)); err != nil {
+	if err := compare("merchant/settings", settings(old.MerchantSettings), settings(next.MerchantSettings)); err != nil {
 		return nil, err
 	}
 	if err := compare("merchant/credentials", old.Secrets, next.Secrets); err != nil {

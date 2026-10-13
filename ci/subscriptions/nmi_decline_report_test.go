@@ -25,7 +25,7 @@ func (w *world) declineReport(since time.Time, format string) string {
 		Config:           &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}},
 		PGXPool:          w.pool,
 		MerchantID:       w.client[embedded].MerchantID(),
-		MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},
+		MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps}}},
 		NMITransport:     http.RoundTripper(w.nmi),
 		Since:            since.UTC().Format(time.RFC3339),
 		Until:            w.clock.Now().UTC().Format(time.RFC3339),

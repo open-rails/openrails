@@ -789,6 +789,9 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 // writes are fenced.
 func (s *Service) orderCustomerAllowed(ctx context.Context, _ billing.CustomerID) error {
 	if err := s.rt.OrderAttemptService.TakesOrders(ctx); err != nil {
+		if errors.Is(err, payment.ErrProviderWritesDisabled) {
+			return err
+		}
 		return errOrdersFenced
 	}
 	return nil

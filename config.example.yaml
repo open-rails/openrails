@@ -101,7 +101,7 @@ naming:
 # vault:
 #   kv_mount: ""      # KV v2 mount holding merchant configuration
 #   scope_prefix: ""  # path under the mount; default openrails
-#   transit_mount: "" # Transit mount for Solana signers; default transit
+#   transit_mount: "" # Transit mount for Solana crankers; default transit
 #   address: ""       # defaults to the Vault client default / VAULT_ADDR
 #   auth_method: ""   # token | approle | kubernetes
 #   token: ""
@@ -109,6 +109,15 @@ naming:
 #   secret_id: ""
 #   k8s_role: ""
 #   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
+
+# Solana rebilling's crankers, in order: the first publishes new plans, and
+# each pulls the plans it owns. None turns Solana rebilling off; one-time
+# Solana payments still work. SOLANA_CRANKERS takes them as a JSON list, from
+# the environment or a mounted secret file. docs/rails/solana.md.
+# solana:
+#   crankers:
+#     - {mode: vault_transit, key: openrails-solana-cranker}
+#     - {mode: local_keypair, private_key: ""}
 
 # The built-in email sender, for billing and control-plane mail: any SMTP
 # server (SendGrid: host smtp.sendgrid.net, username apikey, password the API
@@ -155,7 +164,7 @@ rate_limits:
 
 # EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
 # CCBill signs nothing, so this list is authentication: entries are honored only
-# while no live PSP exists anywhere in the deployment. `/0` is refused. Empty
+# for a webhook naming a sandbox merchant's CCBill account. `/0` is refused. Empty
 # (default) accepts CCBill's ranges alone.
 # ccbill_webhook_ip_allowlist:
 #   - 127.0.0.1/32

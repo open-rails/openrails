@@ -31,10 +31,11 @@ func solanaRails() railresolve.FixedSet {
 }
 
 func TestSolanaPlanTerms(t *testing.T) {
-	plan := map[string]string{"plan_id": "7", "mint_symbol": " USDC ", "amount_base_units": "10000000", "period_hours": "720", "created_at": "1700000000"}
+	plan := map[string]string{"plan_id": "7", "mint_symbol": " USDC ", "amount_base_units": "10000000", "period_hours": "720", "created_at": "1700000000",
+		"merchant_address": recipientWallet, "treasury": recipientWallet}
 	terms, err := parseSolanaPlanTerms(plan)
 	require.NoError(t, err)
-	require.Equal(t, solanaPlanTerms{planID: 7, mintSymbol: "USDC", amount: 10_000_000, period: 720, createdAt: 1_700_000_000}, terms)
+	require.Equal(t, solanaPlanTerms{planID: 7, mintSymbol: "USDC", amount: 10_000_000, period: 720, createdAt: 1_700_000_000, owner: recipientWallet, treasury: recipientWallet}, terms)
 
 	price := &models.Price{}
 	price.SetRailConfig(models.RailSolana, plan)
@@ -42,7 +43,7 @@ func TestSolanaPlanTerms(t *testing.T) {
 	require.False(t, priceHasSolanaRecurring(nil))
 	require.False(t, priceHasSolanaRecurring(&models.Price{}))
 
-	for _, bad := range [][2]string{{"plan_id", "x"}, {"amount_base_units", "0"}, {"amount_base_units", ""}, {"period_hours", "0"}, {"period_hours", "-1"}} {
+	for _, bad := range [][2]string{{"plan_id", "x"}, {"amount_base_units", "0"}, {"amount_base_units", ""}, {"period_hours", "0"}, {"period_hours", "-1"}, {"merchant_address", ""}} {
 		cfg := map[string]string{}
 		for k, v := range plan {
 			cfg[k] = v

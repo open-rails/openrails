@@ -72,7 +72,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			gateway.Close()
 		}
 	}()
-	signer := solanago.NewWallet().PrivateKey
+	cranker, treasury := solanago.NewWallet().PrivateKey, solanago.NewWallet().PublicKey()
 	authCfg, staffRoles := authConfig(baseURL)
 	auth, err := authkit.New(ctx, authCfg, authkit.Deps{Postgres: pool})
 	if err != nil {
@@ -89,16 +89,13 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		PublicBillingBaseURL: baseURL + "/billing",
 		ReturnOrigins:        []string{baseURL},
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
+		Solana:               &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: cranker.String()}}},
 		// AuthKit's issuer is baseURL: its users are this merchant's customers.
-		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: map[string]openrails.PSPConfig{
+		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Sandbox: true, Issuer: baseURL, DisplayName: "billing-ui e2e", MerchantSettings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: openrails.PSPs{
 			// An armed Solana PSP on devnet: purchase offers it.
-			SolanaPSPKey: openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox,
-				PrivateKey:  signer.String(),
-				RPCProvider: "public",
-				Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
-			}.PSPConfig(),
+			SolanaPSPKey: openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: treasury.String()}.PSPConfig(),
 			CardPSPKey: openrails.NMIPSP{Environment: openrails.EnvironmentSandbox,
-				AccountID:            "billing-ui-e2e-cards",
+				GatewayID:            "billing-ui-e2e-cards",
 				SecurityKey:          "e2e-security-key",
 				WebhookSigningSecret: "e2e-webhook-secret",
 				TokenizationKey:      CardTokenizationKey,
@@ -125,7 +122,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, err
 	}
-	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, Environment: openrails.EnvironmentSandbox, AccountID: PSPAccountID}); err != nil {
+	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, Environment: openrails.EnvironmentSandbox, PSPAccount: billing.PSPAccount{GatewayID: PSPAccountID}}); err != nil {
 		return nil, err
 	}
 	if workers {
@@ -133,7 +130,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			return nil, err
 		}
 	}
-	catalog, err := seedCatalog(ctx, client, chain, signer.PublicKey())
+	catalog, err := seedCatalog(ctx, client, chain, cranker.PublicKey(), treasury)
 	if err != nil {
 		return nil, fmt.Errorf("seed catalog: %w", err)
 	}

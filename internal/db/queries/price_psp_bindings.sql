@@ -1,5 +1,5 @@
 -- name: ListPricePSPBindings :many
-SELECT b.*, p.rail, p.key AS psp_key
+SELECT b.*, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND (cardinality(sqlc.arg(price_ids)::uuid[]) = 0 OR b.price_id = ANY(sqlc.arg(price_ids)::uuid[]))

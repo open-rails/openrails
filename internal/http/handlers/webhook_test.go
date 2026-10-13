@@ -320,9 +320,9 @@ func TestWebhookAccountResolutionFailsClosed(t *testing.T) {
 
 func stubCCBillProbe(t *testing.T, probe webhookauth.LiveRailProbe) {
 	t.Helper()
-	orig := livePSPProbe
-	livePSPProbe = func(*httprequest.Request) webhookauth.LiveRailProbe { return probe }
-	t.Cleanup(func() { livePSPProbe = orig })
+	orig := ccbillAccountProbe
+	ccbillAccountProbe = func(*httprequest.Request) webhookauth.LiveRailProbe { return probe }
+	t.Cleanup(func() { ccbillAccountProbe = orig })
 }
 
 func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.LiveRailProbe {
@@ -330,8 +330,8 @@ func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.Liv
 }
 
 // CCBill has no HMAC, so its source address is its only authentication. A
-// declared dev source is honoured only when a probe proves no live PSP exists
-// in the deployment, and only if declared.
+// declared dev source is honoured only when a probe proves the account the
+// webhook names moves no money (a sandbox merchant's), and only if declared.
 func TestCCBillSourceAllowlist(t *testing.T) {
 	declared := []string{"203.0.113.0/24"}
 	const ccbillIP, devIP, strangerIP = "64.38.212.5", "203.0.113.5", "198.51.100.7"

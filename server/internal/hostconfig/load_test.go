@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
+
 	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +129,7 @@ func TestEnvKeyRouting(t *testing.T) {
 		"AUTH_ISSUER":                      "auth.issuer",
 		"NAMING_FORMER_NAMES_DURATION":     "naming.former_names.duration",
 		"PROVIDER_SANDBOX_NMI_GATEWAY_URL": "provider_sandbox.nmi_gateway_url",
+		"SOLANA_CRANKERS":                  "solana.crankers",
 		"EMAIL_SMTP_PASSWORD":              "email_smtp.password",
 		"SENDGRID_API_KEY":                 "",
 		"CATALOG_SOURCE":                   "",
@@ -163,6 +166,24 @@ func TestLoadSourcePrecedence(t *testing.T) {
 	require.Equal(t, "from-env", password())
 	require.Equal(t, "from-flag", password(WithOverride("db.password", "from-flag")))
 	require.Equal(t, "from-env", os.Getenv("DB_PASSWORD"), "flags never write the process env")
+}
+
+// The deployment's Solana crankers read like any section: from config.yaml,
+// or as a JSON list from the environment or a mounted secret file, which keeps
+// a local keypair out of the file.
+func TestSolanaCrankers(t *testing.T) {
+	secrets := bootEnv(t)
+	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), "db:\n  password: x\nvault:\n  address: http://127.0.0.1:8200\n  token: t\nsolana:\n  crankers:\n    - {mode: vault_transit, key: openrails-solana-doujins}\n")
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	transit := billing.SolanaCrankerConfig{Mode: "vault_transit", Key: "openrails-solana-doujins"}
+	require.Equal(t, []billing.SolanaCrankerConfig{transit}, cfg.Solana.Crankers)
+
+	key := solanago.NewWallet().PrivateKey.String()
+	writeFile(t, filepath.Join(secrets, "SOLANA_CRANKERS"), `[{"mode":"vault_transit","key":"openrails-solana-doujins"},{"mode":"local_keypair","private_key":"`+key+`"}]`)
+	cfg, err = Load(path)
+	require.NoError(t, err)
+	require.Equal(t, []billing.SolanaCrankerConfig{transit, {Mode: "local_keypair", PrivateKey: key}}, cfg.Solana.Crankers)
 }
 
 // rate_limits_disabled turns the defaults off, from the file or the environment.

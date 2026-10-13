@@ -326,5 +326,5 @@ func (c *Cache) MerchantSettings(ctx context.Context, id billing.MerchantID) (st
 	if err != nil {
 		return "", billing.MerchantSettings{}, err
 	}
-	return set.Merchant.Value.DisplayName, set.Merchant.Value.Settings, nil
+	return set.Merchant.Value.DisplayName, set.Merchant.Value.MerchantSettings, nil
 }

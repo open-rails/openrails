@@ -21,12 +21,14 @@ import (
 
 func TestRailDefinitions(t *testing.T) {
 	// or#879/or#880: custody is not a rail and its key is not an NMI credential;
-	// solana's signer is operator-only, so no merchant-visible slots.
+	// solana's rpc_url is operator-only, so no merchant-visible slots. Each
+	// rail names its account in its own terms; its real-money environment
+	// leads its environments.
 	require.Equal(t, []billing.RailDefinition{
-		{Rail: "nmi", DisplayName: "Credit Card", Environments: []string{"live", "test", "sandbox"}, CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}, SettingKeys: []string{"tokenization_key"}},
-		{Rail: "ccbill", DisplayName: "Credit Card", Environments: []string{"live", "sandbox"}, CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}, SettingKeys: []string{}},
-		{Rail: "stripe", DisplayName: "Stripe", Environments: []string{"live", "test"}, CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}, SettingKeys: []string{"publishable_key"}},
-		{Rail: "solana", DisplayName: "Solana", Environments: []string{"live", "sandbox"}, CredentialKeys: []string{}, SettingKeys: []string{}},
+		{Rail: "nmi", DisplayName: "Credit Card", AccountFields: []string{"gateway_id"}, Fields: []string{"tokenization_key"}, Environments: []string{"live", "test", "sandbox"}, CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}},
+		{Rail: "ccbill", DisplayName: "Credit Card", AccountFields: []string{"client_accnum", "client_subacc"}, Fields: []string{}, Environments: []string{"live", "sandbox"}, CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
+		{Rail: "stripe", DisplayName: "Stripe", AccountFields: []string{"account_id"}, Fields: []string{"publishable_key"}, Environments: []string{"live", "test"}, CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}},
+		{Rail: "solana", DisplayName: "Solana", AccountFields: []string{"treasury"}, Fields: []string{}, Environments: []string{"mainnet", "devnet", "testnet"}, CredentialKeys: []string{}},
 	}, RailDefinitions())
 }
 
@@ -43,7 +45,10 @@ func TestPSPView(t *testing.T) {
 	stripe := scope("stripe", "secret_key", "webhook_signing_secret")
 	stripe.Settings, stripe.Revision = map[string]any{"publishable_key": "pk_live_123"}, 4
 	got := pspView(stripe, 2)
-	require.Equal(t, map[string]any{"publishable_key": "pk_live_123"}, got.Settings)
+	require.Equal(t, billing.PSPFields{PSPAccount: billing.PSPAccount{AccountID: "acct_123"}, PublishableKey: "pk_live_123"}, got.PSPFields)
+	ccbill := scope("ccbill")
+	ccbill.AccountID = "945280-0000"
+	require.Equal(t, billing.PSPAccount{ClientAccnum: "945280", ClientSubacc: "0000"}, pspView(ccbill, 0).PSPAccount, "CCBill's account reads as its two numbers")
 	require.Equal(t, billing.PSPCredential{Configured: true, ValidatedAt: &now}, got.Credentials["secret_key"])
 	require.True(t, got.Credentials["webhook_signing_secret"].Configured)
 	require.Nil(t, got.Credentials["webhook_signing_secret"].ValidatedAt, "format-only secrets carry no live validation")

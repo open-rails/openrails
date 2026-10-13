@@ -66,11 +66,8 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 	for _, row := range pspRows {
 		scope := PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID, Key: row.Key,
-			Archived: true, DuplicateAccount: row.CredentialDuplicateAt != nil,
+			Archived: true, Superseded: row.SupersededAt != nil, DuplicateAccount: row.CredentialDuplicateAt != nil,
 			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ValidatedAt: row.CredentialsValidatedAt,
-		}
-		if row.PendingSignerPublicKey != nil {
-			scope.SignerChange = *row.PendingSignerPublicKey
 		}
 		if row.WebhookEndpointID != nil {
 			scope.WebhookEndpointID = *row.WebhookEndpointID
@@ -79,7 +76,7 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 			p := doc.Value
 			scope.Declared = true
 			scope.Environment = p.Environment
-			scope.Settings, scope.Archived, scope.Signer, scope.secrets = p.Settings, p.Archived, p.Signer, normalizedKeys(p.Secrets)
+			scope.Settings, scope.Archived, scope.secrets = p.Settings, p.Archived, normalizedKeys(p.Secrets)
 			scope.Revision = doc.Revision
 			if !doc.UpdatedAt.IsZero() {
 				scope.UpdatedAt = doc.UpdatedAt
@@ -98,9 +95,9 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 }
 
 // pspDocNames reports whether a document names the row's identity: its rail,
-// money class and account. test and sandbox are one class.
+// money class and account. Every non-live environment is one class.
 func pspDocNames(p merchantdocs.PSP, row gen.BillingPsp) bool {
-	return strings.EqualFold(p.Rail, row.Rail) && config.EnvironmentClass(p.Environment) == config.EnvironmentClass(row.Environment) && strings.TrimSpace(p.AccountID) == row.AccountID
+	return strings.EqualFold(p.Rail, row.Rail) && config.LiveEnvironment(p.Rail, p.Environment) == row.Live && strings.TrimSpace(p.AccountID) == row.AccountID
 }
 
 func custodianDocNames(c merchantdocs.Custodian, row gen.BillingCustodian) bool {

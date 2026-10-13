@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,10 +48,13 @@ const (
 	mountPrefix = "/billing"
 	stripeAcct  = "acct_e2e"
 	nmiAcct     = "e2e-nmi"
-	ccbillAcct  = "999999-0000"
-	whsecStripe = "whsec_e2e"
-	whsecNMI    = "nmi_webhook_e2e"
-	monthHours  = 720
+	// ccbillAcct is the PSP's account, the one its webhook path names.
+	ccbillAcct   = ccbillAccnum + "-" + ccbillSubacc
+	ccbillAccnum = "999999"
+	ccbillSubacc = "0000"
+	whsecStripe  = "whsec_e2e"
+	whsecNMI     = "nmi_webhook_e2e"
+	monthHours   = 720
 )
 
 // Topology selects how merchant operations reach the engine: the embedded
@@ -350,7 +354,16 @@ func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, de
 	rt := engine.Graph(bill).Runtime
 	id := rt.DeclaredMerchants()[0]
 	root := "openrails/merchants/" + id.UUID().String() + "/"
-	merchant := map[string]any{"display_name": declared.DisplayName, "settings": declared.Settings}
+	// Every document is flat: its own fields beside display_name, rail or
+	// kind, and only credentials nest, under secrets.
+	merchant := map[string]any{}
+	raw, err := json.Marshal(declared.MerchantSettings)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &merchant))
+	merchant["display_name"] = declared.DisplayName
+	if declared.Sandbox {
+		merchant["sandbox"] = true
+	}
 	var hooks []map[string]any
 	for _, hook := range declared.AlertWebhooks {
 		hooks = append(hooks, map[string]any{"id": uuid.NewString(), "name": hook.Name, "url": hook.URL, "format": "generic", "enabled": true})
@@ -360,12 +373,13 @@ func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, de
 	}
 	v.Put(t, root+"merchant", merchant)
 	for key, psp := range declared.PSPs {
-		v.Put(t, root+"psps/"+key, map[string]any{"rail": psp.Rail, "environment": psp.Environment, "account_id": psp.AccountID,
-			"custodian": psp.Custodian, "settings": psp.Settings, "secrets": psp.Secrets})
+		v.Put(t, root+"psps/"+key, config.PSPDocument{Rail: string(psp.Rail), Environment: psp.Environment, AccountID: psp.AccountID,
+			Custodian: psp.Custodian, Archived: psp.Archived, Settings: psp.Settings, Secrets: psp.Secrets}.Fields())
 	}
 	for key, custodian := range declared.Custodians {
-		v.Put(t, root+"custodians/"+key, map[string]any{"kind": custodian.Kind, "environment": "test", "account_id": custodian.AccountID,
-			"settings": custodian.Settings, "secrets": custodian.Secrets})
+		doc := map[string]any{"kind": custodian.Kind, "environment": "test", "account_id": custodian.AccountID, "secrets": custodian.Secrets}
+		maps.Copy(doc, custodian.Settings)
+		v.Put(t, root+"custodians/"+key, doc)
 	}
 	loaded, err := rt.MerchantConfig.Reload(t.Context(), id)
 	require.NoError(t, err)
@@ -476,8 +490,8 @@ func (w *world) start() {
 	}
 	psps := map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe, PublishableKey: "pk_test_e2e"}.PSPConfig(),
-		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
-		"ccbill": openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig(),
+		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+		"ccbill": openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, ClientAccnum: ccbillAccnum, ClientSubacc: ccbillSubacc, Salt: "e2e-ccbill-salt"}.PSPConfig(),
 	}
 	if w.declare != nil {
 		w.declare(psps)
@@ -493,7 +507,7 @@ func (w *world) start() {
 	}
 	// The harness host's own issuer binds its merchant, as a single-merchant
 	// host declares it.
-	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, Settings: w.settings,
+	declared := openrails.MerchantDeclaration{Sandbox: true, DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, MerchantSettings: w.settings,
 		Issuer: issuer}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: declared}
 	if w.vault != nil {
@@ -596,7 +610,7 @@ func (w *world) applySettings(ctx context.Context, settings billing.MerchantSett
 	if err != nil {
 		return err
 	}
-	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{ExpectedRevision: &current.Revision, Settings: &settings})
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{ExpectedRevision: &current.Revision, MerchantSettings: &settings})
 	return err
 }
 

@@ -12,28 +12,21 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
-	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/hosttools"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/internal/vaultfake"
 )
 
 const transitKey = "e2e-solana"
+
+// resilienceTreasury is the merchant's Solana treasury.
+var resilienceTreasury = solanago.NewWallet().PublicKey()
 
 // heldNMI answers NMI's sandbox posture probe only after release: a provider
 // that is slow or down while the runtime starts.
@@ -71,7 +64,7 @@ type resilientBoot struct {
 	slug   string
 	// redisDown hands the runtime an unreachable Redis.
 	redisDown bool
-	// chain is the Solana node the rail reads; nil is an unreachable one.
+	// chain is the devnet node the rail reads; nil starts one.
 	chain *solanafake.Node
 }
 
@@ -85,20 +78,21 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.En
 	}
 	psps := map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_e2e", WebhookSigningSecret: "whsec_e2e"}.PSPConfig(),
-		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox, TransitKey: transitKey}.PSPConfig(),
+		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: resilienceTreasury.String()}.PSPConfig(),
 	}
 	if b.nmi != nil {
-		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
+		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
 	}
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.Vault = &openrails.VaultConfig{Address: b.vault.URL(), Token: b.vault.Token}
-	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
-	if b.chain != nil {
-		cfg.ProviderSandbox.SolanaRPCURL = b.chain.URL()
-		psps["solana"] = openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox, TransitKey: transitKey, RPCProvider: "public", Tokens: map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}}}.PSPConfig()
+	cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "vault_transit", Key: transitKey}}}
+	if b.chain == nil {
+		b.chain = solanafake.New()
+		t.Cleanup(b.chain.Close)
 	}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {DisplayName: b.slug, PSPs: psps}}
+	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: b.chain.URL()}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {Sandbox: true, DisplayName: b.slug, PSPs: psps}}
 	cfg = ownIssuer(cfg)
 	start := time.Now()
 	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
@@ -137,16 +131,17 @@ func sign(t *testing.T, rt *openrails.Engine) ([]byte, error) {
 	return engine.Graph(rt).Runtime.Vault.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
-// solanaSession sells a new one-time price, or a recurring one on the
-// merchant's plan published on chain, while the Solana rail is armed.
-func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client, chain *solanafake.Node, signer solanago.PublicKey) *purchase {
+// solanaSession sells a new one-time price, or a recurring one on a plan
+// owner published on chain paying the treasury, while the Solana rail is
+// armed.
+func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client, chain *solanafake.Node, owner solanago.PublicKey) *purchase {
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
 	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", PSPs: map[string]map[string]string{"solana": {}}}
 	if chain != nil {
 		hours := 720
-		plan, err := chain.Plan(signer, 1, solanafake.DevnetDUSDMint, 1_000_000, uint64(hours))
+		plan, err := chain.Plan(owner, 1, solanafake.DevnetUSDCMint, 1_000_000, uint64(hours), resilienceTreasury)
 		require.NoError(t, err)
 		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
 		params.PSPs = map[string]map[string]string{"solana": {"plan_pda": plan.String(), "plan_id": "1"}}
@@ -162,7 +157,7 @@ func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client,
 // returns the HTTP status of the refusal (0 on success).
 func solanaPayStatus(t *testing.T, rt *openrails.Engine, session *purchase) int {
 	t.Helper()
-	_, err := session.on(rt).pay("pay-"+uuid.NewString(), map[string]any{"token_symbol": "DUSD"})
+	_, err := session.on(rt).pay("pay-"+uuid.NewString(), map[string]any{"token_symbol": "USDC"})
 	var status *billing.StatusError
 	if err == nil {
 		return 0
@@ -191,9 +186,9 @@ func stripeCheckout(t *testing.T, rt *openrails.Engine, client *openrails.Client
 }
 
 // First boot with Vault, Redis and the NMI posture probe all unavailable: the
-// runtime builds and is ready, the card rails are offered, only the Solana
-// rail is missing and its signer answers unavailable; each recovers in the
-// background.
+// runtime builds and is ready, the card rails and the Solana PSP (its treasury
+// needs no Vault) are offered, and only the deployment's Transit cranker
+// waits; each recovers in the background.
 func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
@@ -225,23 +220,16 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	require.ErrorIs(t, probe(t, rt, "openrails_vault"), vault.ErrUnavailable)
 	require.Error(t, probe(t, rt, "openrails_psp_posture"), "the NMI verdict is still unknown")
 
-	for _, rail := range []string{"stripe", "nmi"} {
+	for _, rail := range []string{"stripe", "nmi", "solana"} {
 		_, offered := routedPSP(t, rt, rail)
 		require.True(t, offered, rail)
 	}
-	_, armed := routedPSP(t, rt, "solana")
-	require.False(t, armed, "a first boot without Vault leaves only the Solana rail disarmed")
 	_, err := sign(t, rt)
-	require.ErrorIs(t, err, vault.ErrUnavailable)
-	require.ErrorContains(t, probe(t, rt, "openrails_configuration"), ".psps/solana: deferred until its signer answers")
-	mid := engine.Graph(rt).Runtime.DeclaredMerchants()[0]
-	require.Contains(t, notServedFindings(t, f, mid), "psps/solana", "the console's review queue names the deferred PSP")
+	require.ErrorIs(t, err, vault.ErrUnavailable, "the Transit cranker waits for Vault")
+	require.NoError(t, probe(t, rt, "openrails_configuration"), "nothing is refused: a Solana PSP needs no Vault")
 
 	fake.SetUp(true)
-	require.Eventually(t, func() bool { _, ok := routedPSP(t, rt, "solana"); return ok }, 30*time.Second, 50*time.Millisecond, "the Solana rail arms once Vault answers")
-	require.NoError(t, probe(t, rt, "openrails_configuration"))
-	require.Empty(t, notServedFindings(t, f, mid), "its finding resolves once it serves")
-	require.NoError(t, probe(t, rt, "openrails_vault"))
+	require.Eventually(t, func() bool { return probe(t, rt, "openrails_vault") == nil }, 30*time.Second, 50*time.Millisecond)
 	signature, err := sign(t, rt)
 	require.NoError(t, err)
 	require.Len(t, signature, 64)
@@ -252,10 +240,10 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	require.NoError(t, rt.Ready(t.Context()))
 }
 
-// A restart while Vault is down reuses the Solana identity stored on the
-// first boot and sells through Stripe; signing waits for Vault and resumes
+// A restart while Vault is down keeps the Solana PSP, whose treasury is its
+// identity, and sells through Stripe; the cranker signs once Vault returns,
 // with the same key.
-func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
+func TestSolanaTreasuryServesWhileVaultIsDown(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
 	fake := vaultfake.New("e2e-root")
@@ -272,7 +260,7 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	second, client := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
 	waitReady(t, second)
 	again, ok := routedPSP(t, second, "solana")
-	require.True(t, ok, "the stored identity keeps the rail provisioned")
+	require.True(t, ok, "the treasury needs no Vault")
 	require.Equal(t, stored.PSPID, again.PSPID)
 	_, err := sign(t, second)
 	require.ErrorIs(t, err, vault.ErrUnavailable)
@@ -285,12 +273,12 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	require.Equal(t, want, solanago.PublicKeyFromBytes(pub).String())
 }
 
-// A Vault Transit key replaced behind OpenRails' back (or a wrong Vault
-// address, namespace or mount) fails closed: the ERROR log names both public
-// keys, the signer identity probe fails, and the Solana rail answers
-// unavailable until an operator approves the new identity. Approval is
-// durable across restarts.
-func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
+// A Transit cranker is pinned to the key it first had: rotated behind
+// OpenRails' back, it is refused instead of silently becoming another cranker.
+// Money never moves elsewhere: the Solana PSP is its treasury and keeps its
+// id, one-time payments still pay it, and a recurring price on the cranker's
+// plan is refused by name while the probe warns.
+func TestRotatedTransitCrankerIsRefused(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
 	fake := vaultfake.New("e2e-root")
@@ -301,106 +289,25 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	boot := func() (*openrails.Engine, *openrails.Client) {
 		return f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug, chain: chain})
 	}
-	solanaRows := func(account string) (active, archived int) {
-		rows, err := f.pool.Query(t.Context(), "SELECT superseded_at IS NOT NULL FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", account)
-		require.NoError(t, err)
-		defer rows.Close()
-		for rows.Next() {
-			var a bool
-			require.NoError(t, rows.Scan(&a))
-			if a {
-				archived++
-			} else {
-				active++
-			}
-		}
-		return active, archived
-	}
-	railConfig := func(rt *openrails.Engine, mid billing.MerchantID) error {
-		_, err := engine.Graph(rt).Runtime.RailConfigs.RailConfig(merchant.WithID(t.Context(), mid), "solana", "")
-		return err
-	}
-	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := routedPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
-	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
-	signerKey := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey))
-	once, monthly := solanaSession(t, first, client, nil, signerKey), solanaSession(t, first, client, chain, signerKey)
-	mid, _, err := hosttools.ResolveMerchant(t.Context(), engine.Graph(first), slug)
-	require.NoError(t, err)
+	stored, _ := routedPSP(t, first, "solana")
+	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey))
+	monthly := solanaSession(t, first, client, chain, old)
+	require.Eventually(t, func() bool { return probe(t, first, "openrails_solana_crankers") == nil }, 30*time.Second, 50*time.Millisecond, "the cranker pins its key")
 	require.NoError(t, first.Close(context.Background()))
 
 	fake.Rotate(transitKey)
-	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
-	logs := logtest.NewGlobal()
-	t.Cleanup(logs.Reset)
 	second, client := boot()
-	require.Eventually(t, func() bool { return probe(t, second, "openrails_solana_signer_identity") != nil }, 30*time.Second, 50*time.Millisecond)
-	require.ErrorContains(t, probe(t, second, "openrails_solana_signer_identity"), rotated)
 	waitReady(t, second)
-	var logged bool
-	for _, e := range logs.AllEntries() {
-		if e.Level == logrus.ErrorLevel && e.Data["stored_public_key"] == old && e.Data["transit_public_key"] == rotated && e.Data["key"] == transitKey {
-			logged = true
-		}
-	}
-	require.True(t, logged, "the key change is logged at ERROR with both public keys")
-	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
-	// A session minted before the change no longer sells on Solana: the
-	// unapproved rail drops out of routing before anything is signed.
-	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, once), "a one-time Solana purchase is refused")
-	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, monthly), "a recurring Solana subscribe is refused")
-	signer := func(rt *openrails.Engine) solanaint.Signer {
-		r := engine.Graph(rt).Runtime
-		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.Vault.SolanaTransit, r.DB, 0)
-	}
-	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
-	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
-	psp, ok := routedPSP(t, second, "solana")
+	again, ok := routedPSP(t, second, "solana")
 	require.True(t, ok)
-	require.Equal(t, billing.PSPTemporarilyUnavailable, psp.Status, "purchase lists the unapproved rail as temporarily unavailable")
-	active, _ := solanaRows(rotated)
-	require.Zero(t, active, "an unapproved identity never receives money")
+	require.Equal(t, stored.PSPID, again.PSPID, "the PSP is its treasury, not its cranker")
 
-	// Reloading the configuration cannot clear a pending change: only the
-	// approval does.
-	_, err = engine.Graph(second).Runtime.MerchantConfig.Reload(t.Context(), mid)
-	require.NoError(t, err)
-	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "a pending change survives a reload")
-
-	// A database failure while checking the stored identity fails closed:
-	// nothing is provisioned or approved and the rail stays refused.
-	broken, err := pgxpool.New(t.Context(), f.dsn(t))
-	require.NoError(t, err)
-	broken.Close()
-	brokenDB, err := db.NewWithPGXPool(broken, f.schema)
-	require.NoError(t, err)
-	graph := engine.Graph(second).Runtime
-	check := &signeridentity.Transit{TransitClient: graph.Vault.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
-		Slug: slug}
-	_, err = check.PublicKey(t.Context(), transitKey)
-	require.ErrorIs(t, err, vault.ErrUnavailable, "an unreadable stored identity never accepts Vault's key")
-	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.Vault.SolanaTransit, mid, transitKey)
-	require.Error(t, err)
-	active, _ = solanaRows(rotated)
-	require.Zero(t, active)
-	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved)
-
-	require.NoError(t, hosttools.ApproveSolanaSigner(t.Context(), engine.Graph(second), mid, transitKey))
-	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
-	require.NoError(t, railConfig(second, mid))
-	pub, err := signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
-	require.NoError(t, err)
-	require.Equal(t, rotated, pub.String())
-	active, _ = solanaRows(rotated)
-	require.Equal(t, 1, active, "the approved identity is provisioned")
-	oldActive, oldArchived := solanaRows(old)
-	require.Equal(t, [2]int{0, 1}, [2]int{oldActive, oldArchived}, "the previous identity drains")
-	require.NoError(t, second.Close(context.Background()))
-
-	third, client := boot()
-	require.Eventually(t, func() bool { _, ok := routedPSP(t, third, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
-	require.NoError(t, probe(t, third, "openrails_solana_signer_identity"), "approval survives a restart")
-	require.NoError(t, railConfig(third, mid))
+	require.Equal(t, http.StatusBadRequest, solanaPayStatus(t, second, monthly), "the rotated cranker signs nothing")
+	require.ErrorContains(t, probe(t, second, "openrails_solana_crankers"), "the key it was pinned to")
+	require.ErrorContains(t, probe(t, second, "openrails_configuration"), "solana.crankers.vault_transit:"+transitKey+": solana cranker", "the rotated cranker is not served")
+	once := solanaSession(t, second, client, nil, solanago.PublicKey{})
+	require.Zero(t, solanaPayStatus(t, second, once), "a one-time Solana payment still sells")
 }

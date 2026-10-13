@@ -15,7 +15,8 @@ import (
 
 // cardFieldAdmitted applies the request-level rules for the typed `card` field,
 // writing the refusal when one fails: never beside a payment_token, never over
-// plain HTTP unless no live PSP exists, and no card number in any other field.
+// plain HTTP unless the merchant is a sandbox, and no card number in any other
+// field.
 // Whether the PSP takes cards on the server is decided where the PSP is
 // resolved.
 func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) bool {
@@ -36,7 +37,8 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 	return true
 }
 
-// noLivePSP reports whether the deployment proves it holds no live PSP.
+// noLivePSP reports whether the request's merchant is a sandbox, whose PSPs
+// move no money.
 func noLivePSP(r *httprequest.Request) bool {
 	if r.State == nil {
 		return false

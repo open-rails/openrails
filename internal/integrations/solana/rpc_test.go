@@ -15,11 +15,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
@@ -119,7 +117,7 @@ func TestWatchTransactionEndsOnlyOnChainTerminalOrCaller(t *testing.T) {
 			}
 			return rpcFault{Code: -32601, Message: "unexpected " + method}
 		})
-		c := NewRPCClientWithConfig(RPCClientConfig{Endpoint: url, Network: "devnet"})
+		c := NewRPCClientWithConfig(RPCClientConfig{PublicURL: url, Network: "devnet"})
 		out, err := c.WatchTransaction(ctx, solanago.Signature{1}, rpc.CommitmentConfirmed, terminal)
 		return stub, out, err
 	}
@@ -146,25 +144,20 @@ func TestWatchTransactionEndsOnlyOnChainTerminalOrCaller(t *testing.T) {
 	})
 }
 
-type staticSecret string
-
-func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
-	return string(s), nil
-}
-
 // The signature is persisted before any byte is sent, a presubmit failure
 // sends nothing, and a landed-but-reverted pull surfaces its Custom code.
 func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	signer := NewKeypairSigner(staticSecret(key.String()), 0)
-	mid := billing.MerchantID(uuid.New())
+	signer := NewKeypairSigner(key)
 	ix := system.NewTransferInstruction(1, key.PublicKey(), solanago.NewWallet().PublicKey()).Build()
 
 	run := func(t *testing.T, onChainErr any, presubmitErr error) (*rpcStub, *solanago.Transaction, []solanago.Signature, solanago.Signature, error) {
 		var submitted *solanago.Transaction
 		stub, url := newRPCStub(t, func(method string, _ int, params []json.RawMessage) any {
 			switch method {
+			case "getGenesisHash":
+				return devnetGenesisHash
 			case "getLatestBlockhash":
 				return map[string]any{"context": map[string]any{"slot": 1}, "value": map[string]any{
 					"blockhash": solanago.Hash{9}.String(), "lastValidBlockHeight": 5000,
@@ -189,9 +182,9 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 			}
 			return rpcFault{Code: -32601, Message: "unexpected " + method}
 		})
-		c := NewRPCClientWithConfig(RPCClientConfig{Endpoint: url, Network: "devnet", LoopbackFixture: true})
+		c := NewRPCClientWithConfig(RPCClientConfig{PublicURL: url, Network: "devnet"})
 		var persisted []solanago.Signature
-		sig, err := BuildSignSubmitPresubmit(context.Background(), mid, signer, c, []solanago.Instruction{ix}, func(s solanago.Signature) error {
+		sig, err := BuildSignSubmitPresubmit(context.Background(), signer, c, []solanago.Instruction{ix}, func(s solanago.Signature) error {
 			require.Zero(t, stub.count("sendTransaction"), "persisted before submit")
 			persisted = append(persisted, s)
 			return presubmitErr
@@ -204,7 +197,7 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []solanago.Signature{sig}, persisted)
 		require.NotNil(t, submitted)
-		require.True(t, submitted.Message.AccountKeys[0].Equals(key.PublicKey()), "merchant is fee payer")
+		require.True(t, submitted.Message.AccountKeys[0].Equals(key.PublicKey()), "the cranker is fee payer")
 		require.Equal(t, solanago.Hash{9}, submitted.Message.RecentBlockhash)
 		require.NoError(t, submitted.VerifySignatures())
 	})
@@ -222,8 +215,8 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 	})
 }
 
-// Readonly and provider posture: submission is refused locally unless the
-// chain is proven to be a sandbox (or the process is live on mainnet).
+// Readonly and provider posture: submission is refused locally until every
+// endpoint in the chain is proven on the PSP's network, mainnet included.
 func TestSubmissionGatedByReadOnlyAndChainPosture(t *testing.T) {
 	genesisStub := func(t *testing.T, genesis string) (*rpcStub, string) {
 		return newRPCStub(t, func(method string, _ int, _ []json.RawMessage) any {
@@ -244,75 +237,89 @@ func TestSubmissionGatedByReadOnlyAndChainPosture(t *testing.T) {
 
 	t.Run("readonly blocks both submit paths before any request", func(t *testing.T) {
 		stub, url := genesisStub(t, devnetGenesisHash)
-		c := NewRPCFallbackClient(RPCFallbackConfig{ReadOnly: true, Network: "devnet", CustomEndpoint: url})
+		c := NewRPCFallbackClient(RPCFallbackConfig{ReadOnly: true, Network: "devnet", PublicURL: url})
 		require.ErrorIs(t, send(c), ErrProviderReadOnly)
 		require.ErrorIs(t, sendSkip(c), ErrProviderReadOnly)
 		require.Zero(t, stub.total())
 	})
 
-	t.Run("devnet genesis verified once then submits", func(t *testing.T) {
-		stub, url := genesisStub(t, devnetGenesisHash)
-		c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", CustomEndpoint: url})
-		require.NotErrorIs(t, send(c), providerposture.ErrDisarmed)
-		require.NotErrorIs(t, sendSkip(c), providerposture.ErrDisarmed)
-		require.Equal(t, 1, stub.count("getGenesisHash"))
-		require.Equal(t, 2, stub.count("sendTransaction"))
-	})
-
-	for _, genesis := range []string{mainnetGenesisHash, "11111111111111111111111111111111"} {
-		t.Run("sandbox config on genesis "+genesis[:6]+" is disarmed", func(t *testing.T) {
+	for network, genesis := range map[string]string{"devnet": devnetGenesisHash, "testnet": testnetGenesisHash, "mainnet": mainnetGenesisHash} {
+		t.Run(network+" genesis verified once then submits", func(t *testing.T) {
 			stub, url := genesisStub(t, genesis)
-			c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", CustomEndpoint: url})
-			require.ErrorIs(t, sendSkip(c), providerposture.ErrDisarmed)
+			c := NewRPCFallbackClient(RPCFallbackConfig{Network: network, PublicURL: url})
+			require.NotErrorIs(t, send(c), providerposture.ErrDisarmed)
+			require.NotErrorIs(t, sendSkip(c), providerposture.ErrDisarmed)
+			require.Equal(t, 1, stub.count("getGenesisHash"))
+			require.Equal(t, 2, stub.count("sendTransaction"))
+		})
+	}
+
+	for name, row := range map[string]struct{ network, genesis, want string }{
+		"mainnet endpoint on a devnet PSP": {"devnet", mainnetGenesisHash, "is on mainnet; the PSP declares devnet"},
+		"devnet endpoint on a mainnet PSP": {"mainnet", devnetGenesisHash, "is on devnet; the PSP declares mainnet"},
+		"testnet endpoint on a devnet PSP": {"devnet", testnetGenesisHash, "is on testnet; the PSP declares devnet"},
+		"unknown cluster on a devnet PSP":  {"devnet", "11111111111111111111111111111111", "unrecognized genesis hash"},
+		"unknown cluster on a mainnet PSP": {"mainnet", "11111111111111111111111111111111", "unrecognized genesis hash"},
+	} {
+		t.Run(name+" is disarmed", func(t *testing.T) {
+			stub, url := genesisStub(t, row.genesis)
+			c := NewRPCFallbackClient(RPCFallbackConfig{Network: row.network, PublicURL: url})
+			err := sendSkip(c)
+			require.ErrorIs(t, err, providerposture.ErrDisarmed)
+			require.ErrorContains(t, err, row.want)
 			require.Zero(t, stub.count("sendTransaction"))
 		})
 	}
 
-	t.Run("mainnet and loopback fixture skip genesis", func(t *testing.T) {
-		stub, url := genesisStub(t, mainnetGenesisHash)
-		require.NotErrorIs(t, send(NewRPCFallbackClient(RPCFallbackConfig{Network: "mainnet", CustomEndpoint: url})), providerposture.ErrDisarmed)
-		require.NotErrorIs(t, send(NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", CustomEndpoint: url, LoopbackFixture: true})), providerposture.ErrDisarmed)
-		require.Zero(t, stub.count("getGenesisHash"))
-		require.Equal(t, 2, stub.count("sendTransaction"))
-	})
-
-	t.Run("loopback fixture on a non-loopback host is disarmed", func(t *testing.T) {
-		c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", CustomEndpoint: "http://rpc.example.com", LoopbackFixture: true})
-		require.ErrorIs(t, send(c), providerposture.ErrDisarmed)
+	t.Run("every endpoint is checked: an rpc_url on another network disarms", func(t *testing.T) {
+		primary, primaryURL := genesisStub(t, mainnetGenesisHash)
+		public, publicURL := genesisStub(t, devnetGenesisHash)
+		c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", URL: primaryURL + "/secret-token", PublicURL: publicURL})
+		err := send(c)
+		require.ErrorIs(t, err, providerposture.ErrDisarmed)
+		require.ErrorContains(t, err, "solana endpoint rpc_url is on mainnet; the PSP declares devnet")
+		require.NotContains(t, err.Error(), "secret-token")
+		require.Zero(t, primary.count("sendTransaction")+public.count("sendTransaction"))
 	})
 }
 
-// The RPC credential reaches the provider and nothing else: not the held
-// endpoint URL, a log line, or an error string.
+// The rpc_url reaches its provider and nothing else: a key in its query or
+// its path is not in the held endpoint, a log line, or an error string.
 func TestRPCCredentialReachesOnlyTheProvider(t *testing.T) {
 	const secret = "merchant-rpc-secret-key"
-	var mu sync.Mutex
-	var gotKeys []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		gotKeys = append(gotKeys, r.URL.Query().Get("api-key"))
-		mu.Unlock()
-		http.Error(w, "upstream is unhappy", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
+	for name, rpcURL := range map[string]string{"query": "/?api-key=" + secret, "path": "/v2/" + secret} {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var got []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				got = append(got, r.URL.String())
+				mu.Unlock()
+				http.Error(w, "upstream is unhappy "+r.URL.String(), http.StatusInternalServerError)
+			}))
+			defer srv.Close()
+			_, public := newRPCStub(t, func(method string, _ int, _ []json.RawMessage) any {
+				return rpcFault{Code: -32000, Message: "public rejects " + method}
+			})
 
-	var logs bytes.Buffer
-	prevOut, prevLevel := log.StandardLogger().Out, log.GetLevel()
-	log.SetOutput(&logs)
-	log.SetLevel(log.DebugLevel)
-	defer func() { log.SetOutput(prevOut); log.SetLevel(prevLevel) }()
+			var logs bytes.Buffer
+			prevOut, prevLevel := log.StandardLogger().Out, log.GetLevel()
+			log.SetOutput(&logs)
+			log.SetLevel(log.DebugLevel)
+			defer func() { log.SetOutput(prevOut); log.SetLevel(prevLevel) }()
 
-	c := NewRPCFallbackClient(RPCFallbackConfig{CustomEndpoint: srv.URL + "/?api-key=" + secret, Network: "mainnet"})
-	_, err := c.GetBalance(context.Background(), solanago.SystemProgramID)
-	require.ErrorIs(t, err, ErrAllRPCEndpointsFailed)
+			c := NewRPCFallbackClient(RPCFallbackConfig{URL: srv.URL + rpcURL, PublicURL: public, Network: "mainnet"})
+			_, err := c.GetBalance(context.Background(), solanago.SystemProgramID)
+			require.ErrorIs(t, err, ErrAllRPCEndpointsFailed)
 
-	mu.Lock()
-	require.NotEmpty(t, gotKeys)
-	require.Equal(t, secret, gotKeys[0])
-	mu.Unlock()
-	for name, s := range map[string]string{"endpoint": c.GetEndpoint(), "error": err.Error(), "logs": logs.String()} {
-		require.NotContains(t, s, secret, name)
-		require.NotContains(t, s, "api-key=", name)
+			mu.Lock()
+			require.NotEmpty(t, got)
+			require.Contains(t, got[0], secret, "the provider receives its key")
+			mu.Unlock()
+			for name, s := range map[string]string{"endpoint": c.GetEndpoint(), "error": err.Error(), "logs": logs.String(), "posture": c.PostureKey().Endpoint} {
+				require.NotContains(t, s, secret, name)
+			}
+		})
 	}
 
 	sentinel := errors.New("boom ?api-key=leak")
@@ -322,23 +329,39 @@ func TestRPCCredentialReachesOnlyTheProvider(t *testing.T) {
 	require.NotContains(t, wrapped.Error(), "leak")
 }
 
-func TestRPCProviderEndpointSelection(t *testing.T) {
-	for _, eps := range [][]RPCEndpoint{DefaultMainnetEndpoints("helius-secret"), DefaultDevnetEndpoints("helius-secret")} {
-		for _, ep := range eps {
-			require.NotContains(t, ep.URL, "helius-secret")
-			require.NotContains(t, ep.URL, "api-key=")
-		}
-		require.Equal(t, "helius-secret", eps[0].secret.Get("api-key"))
-	}
-
-	helius := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", RPCProvider: "helius", RPCAPIKey: "rpc-key"})
-	require.GreaterOrEqual(t, len(helius.endpoints), 2, "helius plus public fallback")
-	require.Equal(t, "https://devnet.helius-rpc.com/", helius.endpoints[0].URL)
-	require.Equal(t, "rpc-key", helius.endpoints[0].secret.Get("api-key"))
+// rpc_url is the primary endpoint and the network's public one its fallback;
+// without one, the public endpoint alone.
+func TestRPCEndpointChain(t *testing.T) {
+	helius := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", URL: "https://devnet.helius-rpc.com/?api-key=rpc-key"})
+	require.Len(t, helius.endpoints, 2)
+	require.Equal(t, "https://devnet.helius-rpc.com", helius.endpoints[0].URL)
+	require.Equal(t, "https://devnet.helius-rpc.com/?api-key=rpc-key", helius.endpoints[0].target.String())
+	require.Equal(t, "https://api.devnet.solana.com", helius.endpoints[1].URL)
 	require.NotEmpty(t, helius.PrimaryCredentialFingerprint())
 
-	public := NewRPCFallbackClient(RPCFallbackConfig{Network: "mainnet", RPCProvider: "public", RPCAPIKey: "ignored"})
-	require.Len(t, public.endpoints, 1)
-	require.Equal(t, "https://api.mainnet-beta.solana.com", public.endpoints[0].URL)
-	require.Empty(t, public.PrimaryCredentialFingerprint())
+	for network, public := range map[string]string{"mainnet": "https://api.mainnet-beta.solana.com", "devnet": "https://api.devnet.solana.com", "testnet": "https://api.testnet.solana.com"} {
+		c := NewRPCFallbackClient(RPCFallbackConfig{Network: network})
+		require.Len(t, c.endpoints, 1)
+		require.Equal(t, public, c.endpoints[0].URL)
+		require.Empty(t, c.PrimaryCredentialFingerprint())
+	}
+
+	// A failing rpc_url falls back to the public endpoint.
+	var primaryCalls int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls++
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer primary.Close()
+	_, public := newRPCStub(t, func(method string, _ int, _ []json.RawMessage) any {
+		if method == "getBalance" {
+			return map[string]any{"context": map[string]any{"slot": 1}, "value": 42}
+		}
+		return rpcFault{Code: -32601, Message: method}
+	})
+	c := NewRPCFallbackClient(RPCFallbackConfig{Network: "devnet", URL: primary.URL + "/k", PublicURL: public})
+	balance, err := c.GetBalance(context.Background(), solanago.SystemProgramID)
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), balance)
+	require.Equal(t, 1, primaryCalls)
 }

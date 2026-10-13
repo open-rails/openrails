@@ -83,6 +83,7 @@ var ownedTables = []string{
 	"reconciliation_state",
 	"running_charges",
 	"scheduled_changes",
+	"solana_crankers",
 	"solana_pay_receipts",
 	"solana_pay_references",
 	"solana_subscriptions",

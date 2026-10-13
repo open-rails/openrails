@@ -25,9 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
@@ -229,12 +227,6 @@ type ReconcileOptions struct {
 	// Merchants is the merchants service over the configuration the manifest
 	// fills (a file) or reads (Vault); nil opens one for this call.
 	Merchants *merchants.Service
-	// SolanaTransit reads a vault_transit Solana signer's public key.
-	SolanaTransit solana.TransitClient
-	// WrapTransit wraps SolanaTransit per merchant (signer-change detection).
-	WrapTransit func(slug string, transit solana.TransitClient) solana.TransitClient
-	// DeferPSP skips a PSP whose account cannot be derived now.
-	DeferPSP func(rail string, err error) bool
 	// Refuse, set by a serving process, takes what cannot be served: a
 	// merchant that cannot be provisioned is reported to it and the others
 	// proceed, and a document the merchant does not serve is refused alone.
@@ -246,16 +238,14 @@ type ReconcileOptions struct {
 type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
-	MerchantID    billing.MerchantID
-	Config        *config.Config
-	ControlPlane  *controlplane.ControlPlane
-	Database      *db.DB
-	Merchants     *merchants.Service
-	SolanaTransit solana.TransitClient
-	DeferPSP      func(rail string, err error) bool
-	Slug          string
-	Merchant      MerchantConfig
-	Insert        bool
+	MerchantID   billing.MerchantID
+	Config       *config.Config
+	ControlPlane *controlplane.ControlPlane
+	Database     *db.DB
+	Merchants    *merchants.Service
+	Slug         string
+	Merchant     MerchantConfig
+	Insert       bool
 	// Tolerate refuses a document the merchant cannot serve alone, instead
 	// of failing.
 	Tolerate bool
@@ -302,31 +292,22 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}
-	directory, transit := opts.Merchants, opts.SolanaTransit
+	directory := opts.Merchants
 	if directory == nil {
 		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
 		if err != nil {
 			return fmt.Errorf("merchant bootstrap: %w", err)
 		}
 		defer opened.Close()
-		directory, transit = opened.Service, opened.SolanaTransit
+		directory = opened.Service
 		if _, ok := directory.Config().Source().(*merchantdocs.FileSource); ok {
 			log.Info("merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
 		}
 	}
 	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
-		signer := transit
-		switch {
-		case signer == nil:
-		case opts.WrapTransit != nil:
-			signer = opts.WrapTransit(slug, signer)
-		default:
-			// One-off tools fail closed on a changed Transit key too.
-			signer = &signeridentity.Transit{TransitClient: signer, DB: database, Directory: directory, Slug: slug}
-		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
 			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,
-			SolanaTransit: signer, DeferPSP: opts.DeferPSP, Slug: slug, Merchant: merchantsDeclared[slug], Insert: opts.Insert,
+			Slug: slug, Merchant: merchantsDeclared[slug], Insert: opts.Insert,
 			Tolerate: opts.Refuse != nil,
 		})
 		if err != nil && opts.Refuse != nil {
@@ -373,7 +354,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 	}
 	tn, refused, err := merchantbootstrap.ProvisionMerchant(ctx, merchantbootstrap.ProvisionMerchantParams{
 		MerchantID: id, Config: req.Config, Database: req.Database, Merchants: req.Merchants,
-		Slug: slug, Merchant: mt.MerchantDeclaration, SolanaTransit: req.SolanaTransit, DeferPSP: req.DeferPSP,
+		Slug: slug, Merchant: mt.MerchantDeclaration,
 	})
 	if err != nil {
 		return nil, err
@@ -509,4 +490,3 @@ var rejectMisplacedMerchantConfigKeys = merchantbootstrap.RejectMisplacedMerchan
 
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig
-type PSPSignerConfig = config.PSPSignerConfig

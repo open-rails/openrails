@@ -155,7 +155,7 @@ is a file or Vault, cached per instance. Per-instance caches:
 | Cache | An edit elsewhere shows after |
 |---|---|
 | Merchant configuration | an edit through OpenRails: at once (`NOTIFY`); one made in Vault directly: within 30 seconds of the merchant's next use; a file: the instance's next start |
-| Solana keypair signer | 60 seconds |
+| A Solana Transit cranker's public key | 60 seconds |
 | FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
 | PSP posture verdicts | at once, when the PSP's configuration changes |
@@ -1262,9 +1262,9 @@ stored ownership; `provider_write_mode` remains a separate gate.
 A merchant's write posture and the book's identity can lower the mode for one
 merchant or the whole book (see above); the lower mode applies.
 
-What each provider write mode permits (PSP environments apply orthogonally: in
-a non-live deployment the same matrix holds against test and sandbox rails, so
-no real money can move in any mode):
+What each provider write mode permits (PSP environments apply orthogonally: for
+a sandbox merchant the same matrix holds against test and sandbox rails, so no
+real money can move in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -1291,22 +1291,23 @@ work, including under `full`; see [provider recovery](provider-recovery.md).
 
 ### PSP environments — real money or not
 
-Every PSP declares `environment: live | test | sandbox`, and the provider's own
+Every PSP's `environment` is one of its rail's (omitted: its real-money one),
+and the provider's own
 answer must agree before the PSP is used
 ([PSP environments](psp-environments.md)): a Stripe key's prefix matches it;
 each NMI account answers the read-only `test_mode_status` query (a live PSP
 must not be in test mode, a test PSP must be) or, on sandbox.nmi.com, one auth
 on the canonical non-issued test PAN (only a simulator approves it); a sandbox
 CCBill PSP uses the sandbox API host and its mutations are refused; a Solana
-PSP pays on mainnet (live) or devnet (sandbox). Each NMI arm requires a fresh
+PSP's every RPC endpoint reports its network (mainnet, devnet or testnet). Each NMI arm requires a fresh
 check (manifest reconciliation and the provider API alike); unavailable,
 indeterminate or disagreeing answers refuse the arm, and an update that omits
 credentials re-checks the stored key.
 
-A deployment is all live or all non-live: a PSP of the other class, declared or
-already in the database, is refused at boot and when created, and fake
-providers (`provider_sandbox`, `Deps` test seams) are refused beside a live
-PSP.
+A merchant is live or a sandbox (`sandbox: true`): a PSP of the other class is
+refused alone, never failing boot, and one deployment serves live and sandbox
+merchants side by side. Fake providers (`provider_sandbox`, `Deps` test seams)
+are refused beside a live PSP.
 
 ### Cutover: booting against production credentials
 

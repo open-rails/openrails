@@ -318,8 +318,6 @@ func exportQuery(p contract.Profile) string {
 	for i, c := range p.Columns {
 		expr := "t." + pgx.Identifier{c.Name}.Sanitize()
 		switch p.Name + "." + c.Name {
-		case "psps.settings":
-			expr = "t.settings - 'rpc_api_key'"
 		case "mandates.storing_attempt_id":
 			// Payment attempts are analytics the archive leaves behind; the
 			// mandate keeps its references.

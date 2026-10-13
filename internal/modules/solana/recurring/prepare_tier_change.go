@@ -34,14 +34,14 @@ type tierChangeRPC interface {
 // The SubscriptionAuthority already exists (same-mint subscription), so there is
 // no init step.
 type PrepareTierChangeService struct {
-	signer solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
-	rpc    tierChangeRPC
-	tokens Tokens
+	submitter Submitter // the new plan owner's cranker co-signs upgrades
+	rpc       tierChangeRPC
+	tokens    Tokens
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
-	return &PrepareTierChangeService{signer: signer, rpc: rpc, tokens: tokens}
+func NewPrepareTierChangeService(submitter Submitter, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
+	return &PrepareTierChangeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 
 // PrepareTierChangeInput describes the old subscription + the new plan. New-plan
@@ -55,6 +55,10 @@ type PrepareTierChangeInput struct {
 	// Old subscription on-chain identifiers (from the solana_subscriptions row).
 	OldPlanPDA         string
 	OldSubscriptionPDA string
+	// New plan: its owner, the listed cranker that co-signs an upgrade's
+	// pull, and its treasury, where its pulls land.
+	NewPlanOwner string
+	Treasury     string
 
 	// New plan terms.
 	NewPlanID          uint64
@@ -128,9 +132,13 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if err != nil {
 		return nil, err
 	}
-	merchant, err := s.signer.PublicKey(ctx, in.MerchantID)
+	merchant, err := parseKey("new plan owner", in.NewPlanOwner)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
+		return nil, err
+	}
+	treasury, err := parseKey("treasury", in.Treasury)
+	if err != nil {
+		return nil, err
 	}
 
 	newPlanPDA, newPlanBump, err := subscriptions.DerivePlanPDA(merchant, in.NewPlanID)
@@ -214,7 +222,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive delegator ata: %w", err)
 	}
-	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
+	receiverATA, _, err := subscriptions.DeriveATA(treasury, mint, solanago.TokenProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
 	}
@@ -239,7 +247,11 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if err != nil {
 		return nil, err
 	}
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber, ixs)
+	signer, err := s.submitter.Signer(ctx, merchant)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, signer, s.rpc, subscriber, ixs)
 	if err != nil {
 		return nil, err
 	}
