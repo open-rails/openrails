@@ -29,6 +29,15 @@ var sources sync.Map // merchant id -> *Source
 // registration stands.
 func Register(merchantID uuid.UUID, src *Source) { sources.LoadOrStore(merchantID, src) }
 
+// Forget makes merchantID's book read its row again, for a test that rewrites it.
+func Forget(merchantID uuid.UUID) {
+	if s := For(merchantID); s != nil {
+		s.mu.Lock()
+		s.tag = nil
+		s.mu.Unlock()
+	}
+}
+
 // Registered reports whether merchantID has a book.
 func Registered(merchantID uuid.UUID) bool { _, ok := sources.Load(merchantID); return ok }
 

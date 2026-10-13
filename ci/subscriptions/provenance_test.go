@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -39,6 +40,7 @@ func (w *world) tagFrom(at time.Time) {
 	w.t.Helper()
 	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE billing.book_identity SET tagging_started_at = $1`), at)
 	require.NoError(w.t, err)
+	booktag.Forget(w.client[embedded].MerchantID().UUID())
 }
 
 // setLive makes the rail's PSP count as one that moves real money.
