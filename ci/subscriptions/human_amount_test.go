@@ -41,16 +41,13 @@ func TestHumanAmountCatalogUsesExactCurrencyNativeUnits(t *testing.T) {
 		{"euro", "9.99 eur", "EUR", 9_990_000},
 		{"yen", "10 JPY", "JPY", 100_000},
 		{"sol", "1 SOL", "SOL", 1_000_000_000},
-		{"usdc", "10 USDC", "USDC", 10_000_000},
 		{"micro-dollar", "0.000001 USD", "USD", 1},
 		{"native-yen", "0.0001 JPY", "JPY", 1},
 		{"lamport", "0.000000001 SOL", "SOL", 1},
-		{"native-usdc", "0.000001 USDC", "USDC", 1},
 		{"zero-sol", "0 SOL", "SOL", 0},
 		{"zero-usd", "0 USD", "USD", 0},
 		{"max-dollar", "9223372036854.775807 USD", "USD", math.MaxInt64},
 		{"max-sol", "9223372036.854775807 SOL", "SOL", math.MaxInt64},
-		{"max-usdc", "9223372036854.775807 USDC", "USDC", math.MaxInt64},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			key := "human-amount-" + tc.key

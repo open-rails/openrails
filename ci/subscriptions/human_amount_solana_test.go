@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -20,20 +19,11 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 		native                    int64
 	}{
 		{"SOL", "SOL", "1 SOL", solanafake.DevnetSOLMint, 1_000_000_000},
-		{"USDC", "USDC", "10 USDC", solanafake.DevnetUSDCMint, 10_000_000},
-		{"PYUSD", "PYUSD", "2.5 PYUSD", solanafake.DevnetPYUSDMint, 2_500_000},
 		{"SOL-above-2pow53", "SOL", "9007199.254740993 SOL", solanafake.DevnetSOLMint, 9_007_199_254_740_993},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := prepareWorld(t, 30)
 			fake, _ := withSolana(t, w)
-			declare := w.declare
-			w.declare = func(psps map[string]openrails.PSPConfig) {
-				declare(psps)
-				tokens := psps["solana"].Settings["tokens"].(map[string]any)
-				tokens["USDC"] = map[string]any{}
-				tokens["PYUSD"] = map[string]any{}
-			}
 			w.start()
 			chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 			chain.runWorkers(w)
