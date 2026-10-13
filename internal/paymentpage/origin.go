@@ -32,7 +32,7 @@ func Origin(raw string, forbidden ...string) (string, error) {
 			return "", fmt.Errorf("invalid application origin: %w", err)
 		}
 		if otherOrigin == origin {
-			return "", fmt.Errorf("the payment origin must be its own, separate from billing and sign-in")
+			return "", fmt.Errorf("the payment origin must be its own origin, separate from billing and sign-in")
 		}
 	}
 	return origin, nil
