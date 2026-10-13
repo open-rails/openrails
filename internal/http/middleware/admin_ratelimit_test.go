@@ -30,8 +30,8 @@ func testAdminLimiter(now *time.Time) (*AdminOperationLimiter, *[]AdminRateLimit
 	return l, &events
 }
 
-// Per-human-admin budgets: destructive actions share minute/hour/day windows;
-// the first breach locks the admin out of every protected operation for an hour.
+// Per-human-admin budgets: the first breach locks the admin out of every
+// protected operation for an hour.
 func TestAdminOperationLimits(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -43,9 +43,6 @@ func TestAdminOperationLimits(t *testing.T) {
 		window    string
 		breachCnt int64
 	}{
-		{"destructive minute", AdminOperationDestructive, 5, 0, time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC), "minute", 6},
-		{"destructive hour", AdminOperationDestructive, 10, 2 * time.Minute, time.Date(2026, 8, 1, 12, 1, 0, 0, time.UTC), "hour", 11},
-		{"destructive day", AdminOperationDestructive, 50, 12 * time.Minute, time.Date(2026, 8, 1, 0, 1, 0, 0, time.UTC), "day", 51},
 		{"extend", AdminOperationExtend, 3, 0, time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC), "minute", 4},
 		{"off channel", AdminOperationOffChannel, 10, 0, time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC), "minute", 11},
 		{"grant", AdminOperationGrant, 10, 0, time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC), "minute", 11},
@@ -73,8 +70,8 @@ func TestAdminOperationLimits(t *testing.T) {
 
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	l, _ := testAdminLimiter(&now)
-	require.EqualValues(t, 1, l.evaluate(ctx, "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF", AdminOperationDestructive, 1).counts["minute"])
-	require.EqualValues(t, 2, l.evaluate(ctx, " abcdefab-cdef-4abc-8def-abcdefabcdef ", AdminOperationDestructive, 1).counts["minute"], "user ids are canonicalized")
+	require.EqualValues(t, 1, l.evaluate(ctx, "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF", AdminOperationGrant, 1).counts["minute"])
+	require.EqualValues(t, 2, l.evaluate(ctx, " abcdefab-cdef-4abc-8def-abcdefabcdef ", AdminOperationGrant, 1).counts["minute"], "user ids are canonicalized")
 	require.True(t, l.evaluate(ctx, adminUser, AdminOperation("unknown"), 1).allowed)
 }
 
@@ -84,20 +81,20 @@ func TestAdminRateLimitMW(t *testing.T) {
 	handled := 0
 	serveAs := func(subject string, kind billingauth.SubjectKind) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		wire := httptest.NewRequest(http.MethodPost, "/v1/admin/subscriptions/sub_1/cancel", nil)
+		wire := httptest.NewRequest(http.MethodPost, "/v1/admin/credit-grants", nil)
 		if subject != "" {
 			staff := billingauth.Staff{Identity: billingauth.Identity{Issuer: "test", Subject: subject, SubjectKind: kind, Invoker: billingauth.Invoker{Issuer: "test", ID: subject}}, Merchant: billing.MerchantID(uuid.New())}
 			wire = wire.WithContext(billingauth.BindStaff(wire.Context(), staff))
 		}
 		r := request.NewHTTP(w, wire, nil)
-		l.AdminRateLimitMW(AdminOperationDestructive)(func(*request.Request) { handled++ })(r)
+		l.AdminRateLimitMW(AdminOperationGrant)(func(*request.Request) { handled++ })(r)
 		return w
 	}
 	serve := func(user string) *httptest.ResponseRecorder { return serveAs(user, billingauth.SubjectUser) }
 
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 11; i++ {
 		w := serve(adminUser)
-		if i <= 5 {
+		if i <= 10 {
 			require.Equal(t, http.StatusOK, w.Code)
 			continue
 		}
@@ -105,15 +102,15 @@ func TestAdminRateLimitMW(t *testing.T) {
 		require.Equal(t, "3600", w.Header().Get("Retry-After"))
 		require.Contains(t, w.Body.String(), `"code":"rate_limit_exceeded"`)
 	}
-	require.Equal(t, 5, handled)
+	require.Equal(t, 10, handled)
 	kinds := map[string]int{}
 	for _, e := range *events {
 		kinds[e.Kind]++
 		if e.Kind == "threshold" {
-			require.Equal(t, map[string]int64{"minute": 4}, e.Counts, "the 80% alert fires once, on the crossing")
+			require.Equal(t, map[string]int64{"minute": 8}, e.Counts, "the 80% alert fires once, on the crossing")
 		}
 	}
-	require.Equal(t, map[string]int{"allowed": 5, "threshold": 1, "lockout": 1}, kinds)
+	require.Equal(t, map[string]int{"allowed": 10, "threshold": 1, "lockout": 1}, kinds)
 
 	require.Equal(t, http.StatusTooManyRequests, serve(adminUser).Code)
 	require.Equal(t, "blocked", (*events)[len(*events)-1].Kind)
@@ -133,9 +130,9 @@ func TestAdminRateLimitMW(t *testing.T) {
 		require.Equal(t, http.StatusOK, serveAs("svc_1", billingauth.SubjectApplication).Code)
 	}
 	require.Equal(t, 20, handled)
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 11; i++ {
 		want := http.StatusOK
-		if i == 6 {
+		if i == 11 {
 			want = http.StatusTooManyRequests
 		}
 		require.Equal(t, want, serve("issuer-user-7").Code)

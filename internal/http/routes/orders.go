@@ -3,7 +3,6 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
-	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
 // ordersRoutes are purchases (#1168). The customer previews, buys in one
@@ -56,8 +55,8 @@ var ordersRoutes = []Route{
 		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/waive-balance", Group: Admin, Auth: AuthMerchant, Name: "WaiveOrderBalance", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/orders/{id}/waive-balance", Group: Admin, Auth: AuthMerchant, Name: "WaiveOrderBalance", Level: LevelUpdate,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.WaiveOrderBalance)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.MarkOrderUncollectible)},
 }

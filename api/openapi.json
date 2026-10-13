@@ -1159,7 +1159,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "order_action_not_allowed",
           "resource_not_found",
@@ -1219,7 +1218,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "order_action_not_allowed",
           "resource_not_found",
@@ -2074,7 +2072,6 @@
           "root": "root:catalog:manage"
         },
         "x-openrails-catalog-update": true,
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "product_in_use",
           "product_not_found"
@@ -2832,7 +2829,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
           "customer_action_required",
@@ -4593,7 +4589,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found"
@@ -5231,7 +5226,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "credit_grant_held",
           "credit_grant_not_found",
@@ -6990,7 +6984,6 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
-        "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "idempotency_key_required",
           "idempotency_key_reused",

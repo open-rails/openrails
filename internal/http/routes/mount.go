@@ -228,9 +228,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, e.staffGates(route)...)
 		// The staff gate stays outermost; the actor-keyed operation limiter
 		// runs before any merchant DB connection is pinned.
-		// Destructive effects have one durable command admission owner across
-		// HTTP and the in-process Client. Keep unrelated request-abuse limits.
-		if e.AdminLimiter != nil && route.Limit != "" && route.Limit != middleware.AdminOperationDestructive {
+		if e.AdminLimiter != nil && route.Limit != "" {
 			mw = append(mw, e.AdminLimiter.AdminRateLimitMW(route.Limit))
 		}
 		mw = append(mw, conn...)

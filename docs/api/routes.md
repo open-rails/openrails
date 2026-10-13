@@ -81,11 +81,11 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 |---|---|---|---|---|---|---|
 | GET | `/v1/admin/orders` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | limit `destructive` |
-| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | limit `destructive` |
+| POST | `/v1/admin/orders/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` |  |
+| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` |  |
 | GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
-| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` | limit `destructive` |
+| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/change` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `merchant:customer:read`<br>`root:customer:read` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
@@ -93,20 +93,20 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/entitlements` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/admin/product-access` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
 | POST | `/v1/admin/product-access` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant`; `Idempotency-Key` |
-| POST | `/v1/admin/product-access/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeProductAccessParams` | 204 — | limit `destructive` |
+| POST | `/v1/admin/product-access/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeProductAccessParams` | 204 — |  |
 | GET | `/v1/admin/customers` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Customer>` |  |
 | GET | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Customer` |  |
 | PATCH | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `UpdateCustomerParams` | 200 `Customer` | limit `grant` |
 | POST | `/v1/admin/credit-grants` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | limit `grant` |
 | GET | `/v1/admin/credit-grants` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `CreditGrant` |  |
-| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | limit `destructive` |
+| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
 | POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
-| POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | limit `destructive`; `Idempotency-Key` |
+| POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | `Idempotency-Key` |
 | GET | `/v1/admin/payment-attempts` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentAttempt>` |  |
 | GET | `/v1/admin/payment-attempts/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `PaymentAttempt` |  |
 | GET | `/v1/admin/renewals` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Renewal>` |  |
@@ -128,7 +128,7 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Product` |  |
 | PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | catalog update |
-| DELETE | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 204 — | catalog update; limit `destructive` |
+| DELETE | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 204 — | catalog update |
 | POST | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | catalog update |
 | GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Price>` |  |
 | GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |

@@ -29,7 +29,6 @@ const (
 	MarkUncollectible   Kind = "mark_uncollectible"
 	CatalogChange       Kind = "catalog_change"
 	ConfigurationChange Kind = "configuration_change"
-	AccountDeletion     Kind = "account_deletion"
 )
 
 // Actor is verified command attribution. Credential is audit only; rotation
@@ -115,7 +114,7 @@ func (c Command) validate() error {
 		return errors.New("destructive command requires a SHA256 digest")
 	}
 	switch c.Kind {
-	case Refund, CancelSubscription, DeletePaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange, AccountDeletion:
+	case Refund, CancelSubscription, DeletePaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange:
 	default:
 		return fmt.Errorf("unknown destructive command kind %q", c.Kind)
 	}

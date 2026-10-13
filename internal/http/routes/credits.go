@@ -22,7 +22,7 @@ var creditsRoutes = []Route{
 		Errors: withCustomer("invalid_cursor"), Handler: h(handlers.ListCreditGrants)},
 	{Method: GET, Path: "/v1/admin/credit-grants/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetCreditGrant", Level: LevelRead,
 		Responses: []Reply{{200, billing.CreditGrant{}}}, Errors: codes("credit_grant_not_found", "invalid_param"), Handler: h(handlers.GetCreditGrant)},
-	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate,
 		Request: billing.RevokeCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: codes("credit_grant_held", "credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.RevokeCreditGrant)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/balance/transactions", Group: Admin, Auth: AuthMerchant, Name: "ListBalanceTransactions", Level: LevelRead,

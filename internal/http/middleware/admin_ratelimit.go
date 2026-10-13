@@ -24,17 +24,14 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
-// AdminOperation identifies one security-sensitive merchant-console action.
-// Operations with the same policy still use separate counters unless they are
-// deliberately assigned the same identifier (the destructive actions below
-// share one aggregate blast-radius budget).
+// AdminOperation identifies one abuse-prone merchant-console action; each has
+// its own counters. Destructive effects are admitted by internal/destructive.
 type AdminOperation string
 
 const (
-	AdminOperationDestructive AdminOperation = "destructive"
-	AdminOperationExtend      AdminOperation = "extend"
-	AdminOperationOffChannel  AdminOperation = "off_channel"
-	AdminOperationGrant       AdminOperation = "grant"
+	AdminOperationExtend     AdminOperation = "extend"
+	AdminOperationOffChannel AdminOperation = "off_channel"
+	AdminOperationGrant      AdminOperation = "grant"
 )
 
 const adminLockoutDuration = time.Hour
@@ -46,11 +43,6 @@ type adminRateLimitWindow struct {
 }
 
 var adminRateLimitPolicies = map[AdminOperation][]adminRateLimitWindow{
-	AdminOperationDestructive: {
-		{name: "minute", duration: time.Minute, limit: 5},
-		{name: "hour", duration: time.Hour, limit: 10},
-		{name: "day", duration: 24 * time.Hour, limit: 50},
-	},
 	AdminOperationExtend: {
 		{name: "minute", duration: time.Minute, limit: 3},
 	},
