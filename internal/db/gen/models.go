@@ -1138,6 +1138,17 @@ type BillingPaymentMethodVersion struct {
 	CreatedAt   time.Time
 }
 
+// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind, taken over once expired.
+type BillingPeriodicLease struct {
+	// The periodic job's id: its job kind, or the name its schedule gave.
+	Kind string
+	// The holding fleet's River schema; a fleet renews its own lease.
+	Holder string
+	// When another fleet may take the kind over: a fraction of the period after the claim.
+	ExpiresAt time.Time
+	ClaimedAt time.Time
+}
+
 // Immutable financial price versions; retire with archived, never delete. Retention: permanent, never pruned.
 type BillingPrice struct {
 	ID        uuid.UUID

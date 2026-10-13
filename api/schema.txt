@@ -95,6 +95,7 @@ migration 0091_destructive_kind_account_deletion.up.sql sha256:fd108701f47bbc834
 migration 0093_price_psps.up.sql sha256:372948218fe67c2478a5397afbb7ed7bb83cbc25e305611d57efa4ba24eeab89
 migration 0095_foreign_findings.up.sql sha256:94005a83ed9701f583e0eee453b6224f960dab285295b4f0b4c4ce950a022c82
 migration 0096_psp_declared_environment.up.sql sha256:eec7846c97147b96d106f1600cb1b506f32956bdf0e1cc43c3e0489fcaf53692
+migration 0097_periodic_leases.up.sql sha256:72118e89934a0d7ed6761c0dd60cf425e96a1fc9e4eb81a387396702f67e7c5f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1714,6 +1715,16 @@ table billing.payments
   index CREATE INDEX payments_refunded_payment_id_idx ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL)
   index CREATE INDEX payments_subscription_id_idx ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event()
+
+table billing.periodic_leases
+  column kind text NOT NULL
+  column holder text NOT NULL
+  column expires_at timestamp with time zone NOT NULL
+  column claimed_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint periodic_leases_holder_check CHECK ((holder <> ''::text))
+  constraint periodic_leases_kind_check CHECK ((kind <> ''::text))
+  constraint periodic_leases_pkey PRIMARY KEY (kind)
+  index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind)
 
 table billing.price_key_movements
   column id uuid NOT NULL DEFAULT uuidv7()

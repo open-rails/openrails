@@ -538,7 +538,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every minute and on start: return OpenRails jobs whose process died.
-	jobs = append(jobs, r.healthPeriodic(
+	jobs = append(jobs, r.fleetPeriodic(
 		time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.JobRescueArgs{}, &river.InsertOpts{
@@ -703,7 +703,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	))
 
 	// Every 5 minutes: flush admission-denial counters from Redis to PG.
-	jobs = append(jobs, r.healthPeriodic(
+	jobs = append(jobs, r.fleetPeriodic(
 		5*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.AdmissionDenialFlushArgs{}, &river.InsertOpts{

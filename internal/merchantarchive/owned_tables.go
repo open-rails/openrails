@@ -96,4 +96,5 @@ var ownedTables = []string{
 	"webhook_health",
 	"webhook_health_daily",
 	"worker_state",
+	"periodic_leases",
 }

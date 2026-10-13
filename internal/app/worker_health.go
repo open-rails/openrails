@@ -9,6 +9,9 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -100,8 +103,19 @@ func (r *Runtime) riverTableAccess() (*pgxpool.Pool, string) {
 // healthPeriodic wraps river.NewPeriodicJob with a fixed interval, recording
 // kind -> interval (shortest wins) for the staleness alert rule. A periodic's
 // River ID is its job kind unless opts names one, so a River client can turn
-// a single periodic off (PeriodicJobs().RemoveByID).
+// a single periodic off (PeriodicJobs().RemoveByID). The pass is queued only
+// by the fleet holding the kind's lease (see claimPeriodic).
 func (r *Runtime) healthPeriodic(interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+	return r.periodic(true, interval, ctor, opts)
+}
+
+// fleetPeriodic is a periodic over this fleet's own state (its River jobs, its
+// Redis): every fleet runs it.
+func (r *Runtime) fleetPeriodic(interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+	return r.periodic(false, interval, ctor, opts)
+}
+
+func (r *Runtime) periodic(leased bool, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
 	own := river.PeriodicJobOpts{}
 	if opts != nil {
 		own = *opts
@@ -113,7 +127,43 @@ func (r *Runtime) healthPeriodic(interval time.Duration, ctor river.PeriodicJobC
 		}
 	}
 	r.periodicIDs = append(r.periodicIDs, own.ID)
+	if leased {
+		inner, id := ctor, own.ID
+		ctor = func() (river.JobArgs, *river.InsertOpts) {
+			if !r.claimPeriodic(id, interval) {
+				return nil, nil
+			}
+			return inner()
+		}
+	}
 	return river.NewPeriodicJob(periodBoundaries(interval), ctor, &own)
+}
+
+// claimPeriodic takes the periodic's lease for most of its period. Several
+// hosts embedding one merchant on one database each schedule the same passes;
+// the first to claim queues it and the others skip, so provider reads and
+// operator alerts happen once. The lease expires, so a stopped fleet's passes
+// are taken over by the next tick. A lease that cannot be read runs the pass:
+// duplicate passes are safe, missed ones are not.
+func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
+	if r.DB == nil {
+		return true
+	}
+	holder := r.riverSchemaOrDefault()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	n, err := r.DB.GenDirectory().ClaimPeriodicLease(ctx, gen.ClaimPeriodicLeaseParams{
+		Kind: id, Holder: holder, TtlSeconds: (interval * 4 / 5).Seconds(),
+	})
+	if err != nil {
+		log.WithError(err).WithField("periodic", id).Warn("periodic lease unreadable; running the pass")
+		return true
+	}
+	if n == 0 {
+		log.WithFields(log.Fields{"periodic": id, "fleet": holder}).Debug("periodic pass leased to another fleet; skipped")
+		return false
+	}
+	return true
 }
 
 // PeriodicJobIDs are the River IDs of the periodic jobs this runtime gave its
