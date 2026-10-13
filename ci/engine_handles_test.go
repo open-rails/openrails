@@ -12,6 +12,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchantdocs"
+	"github.com/open-rails/openrails/internal/vaulttest"
 )
 
 // One engine serves every live merchant of its directory through a handle
@@ -19,6 +21,7 @@ import (
 // pool. A handle costs nothing to make; a merchant that is not live fails at
 // the call.
 func TestEngineMerchantHandles(t *testing.T) {
+	v := vaulttest.New(t)
 	f := newFixture(t)
 	ctx := t.Context()
 	slug := "handles-" + uuid.NewString()[:8]
@@ -27,20 +30,24 @@ func TestEngineMerchantHandles(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug}}
+	cfg.Vault = v.Config()
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {}}
 	bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, bill.Close(context.Background())) })
 
 	// A second merchant in the same directory, provisioned by an engine that
-	// is gone before any handle is used.
+	// is gone before any handle is used. Both engines read its configuration
+	// from the same Vault mount.
 	other := f.config()
-	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B", Sandbox: true}}
+	other.Vault = v.Config()
+	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {}}
 	provisioner, err := openrails.New(ctx, other, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	theirs, err := provisioner.MerchantBySlug(slug + "-b")
 	require.NoError(t, err)
 	second := theirs.MerchantID()
+	v.Put(t, "openrails/merchants/"+second.UUID().String()+"/merchant", merchantdocs.Merchant{DisplayName: "B", Sandbox: true})
 	require.NoError(t, provisioner.Close(ctx))
 
 	shop, err := bill.MerchantBySlug(" " + slug + " ")
