@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,10 +16,22 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
+// priceWrite is one price version to store: its terms, the id they take, and
+// its bindings (a provider price's provider object, or one of ours' Solana
+// plan).
+type priceWrite struct {
+	req           billing.CreatePriceParams
+	product       *models.Product
+	id            uuid.UUID
+	links         map[string]map[string]string
+	providerOwned bool
+}
+
 // writeCatalogPrice atomically moves the key, writes the immutable financial
-// row, and records its movement. Provider resolution completed before entry.
+// row, and records its movement. Provider reads completed before entry.
 // Nested calls reuse the existing transaction through a savepoint.
-func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePriceParams, product *models.Product, priceID uuid.UUID, rails map[string]map[string]string) (*models.Price, error) {
+func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.Price, error) {
+	req, product, priceID := w.req, w.product, w.id
 	var price *models.Price
 	err := s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		prices := catalog.NewPriceService(s.catalogDatabase().NewWithPgxTx(tx))
@@ -75,10 +88,19 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		trueNoOp := revived == 0 && reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
 
 		if reactivating {
+			if existing.ProviderOwned != w.providerOwned {
+				return ErrCatalogConflict
+			}
 			if existing.Archived != req.Archived {
 				if err := prices.SetArchived(ctx, priceID, req.Archived); err != nil {
 					return fmt.Errorf("reactivate price %s: %w", priceID, err)
 				}
+			}
+			if !w.providerOwned && !slices.Equal(existing.SellVia, req.SellVia) {
+				if err := prices.SetSellVia(ctx, priceID, req.SellVia); err != nil {
+					return err
+				}
+				existing.SellVia = req.SellVia
 			}
 
 			existing.Archived = req.Archived
@@ -97,7 +119,9 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 				BillingIntervalHours: req.BillingIntervalHours,
 				TrialUnitAmount:      req.TrialUnitAmount,
 				TrialDurationHours:   req.TrialDurationHours,
-				PSPLinks:             rails,
+				PSPLinks:             w.links,
+				ProviderOwned:        w.providerOwned,
+				SellVia:              req.SellVia,
 				Key:                  key,
 				CreatedAt:            now,
 				UpdatedAt:            now,

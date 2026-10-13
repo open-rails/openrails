@@ -273,20 +273,9 @@ type BalanceNoticeAmount struct {
 	Amount   int64  `json:"amount,string"`
 }
 
-// CardCustody is where a merchant's new cards are stored.
-type CardCustody string
-
-const (
-	// CardCustodyMerchant: the merchant's own vault, its PSP's or the
-	// custodian a PSP names. Absent means merchant.
-	CardCustodyMerchant CardCustody = "merchant"
-	// CardCustodyPlatform: the deployment's platform vault, in the merchant's
-	// partition; its own PSP accounts still charge them.
-	CardCustodyPlatform CardCustody = "platform"
-	// CardCustodyHosted is reserved for a private vault the platform hosts
-	// for the merchant; refused.
-	CardCustodyHosted CardCustody = "hosted"
-)
+// CardVaultPlatform is the card_vault holding new cards in the deployment's
+// platform vault, in the merchant's partition.
+const CardVaultPlatform = "platform"
 
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
@@ -316,9 +305,16 @@ type MerchantSettings struct {
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".
-	// CardCustody is where new cards are stored; absent is merchant. It
+	// CardVault is where new cards are saved: a card PSP's key, whose own
+	// vault (or the custodian it names) holds them, or CardVaultPlatform.
+	// Absent: each card is saved where the PSP that takes it keeps cards. It
 	// changes new cards only.
-	CardCustody                       CardCustody            `json:"card_custody,omitempty"`
+	CardVault string `json:"card_vault,omitempty"`
+	// ChargePSPs are the card PSPs, in order, that new card charges go to:
+	// each must charge cards from CardVault. Absent: every armed card PSP
+	// that can, the CardVault PSP alone when it is a PSP. OpenRails-run
+	// renewals stay on the PSP their subscription was sold through.
+	ChargePSPs                        []string               `json:"charge_psps,omitempty"`
 	BillingPolicies                   []BillingPolicy        `json:"billing_policies,omitempty"`
 	BillingPolicyBindings             []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
 	DelegatedInvokerWastedSpendLimits []BudgetWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`

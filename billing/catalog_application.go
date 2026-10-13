@@ -17,8 +17,9 @@ type ApplyCatalogParams struct {
 // Replayed is true when the same document was already applied.
 // EntitlementChanges lists how the edit changed existing products' keys;
 // Changes lists every object the document changed and Conflicts every object
-// it skipped. They are returned once and are empty on a replay. A document
-// with conflicts is not recorded as applied: applying it again retries them.
+// it skipped. Warnings lists what it could not do. They are returned once and
+// are empty on a replay. A document with conflicts or warnings is not
+// recorded as applied: applying it again retries them.
 type CatalogApplicationReceipt struct {
 	ApplicationID      string              `json:"application_id"`
 	BaseRevision       int64               `json:"base_revision"`
@@ -29,6 +30,19 @@ type CatalogApplicationReceipt struct {
 	EntitlementChanges []EntitlementChange `json:"entitlement_changes"`
 	Changes            []CatalogChange     `json:"changes"`
 	Conflicts          []CatalogConflict   `json:"conflicts"`
+	Warnings           []CatalogWarning    `json:"warnings"`
+}
+
+// CatalogWarning is something a document could not do for one price: Refused
+// when the price was left out (none of its methods can sell it, or its
+// provider did not answer for a new provider price), otherwise the price
+// applied without it (a Solana plan not published, a provider's terms not
+// read and the cached ones kept).
+type CatalogWarning struct {
+	Key        string `json:"key"`
+	ProductKey string `json:"product_key"`
+	Refused    bool   `json:"refused"`
+	Message    string `json:"message"`
 }
 
 // CatalogObjectKind is a catalog object a document declares: a product, one

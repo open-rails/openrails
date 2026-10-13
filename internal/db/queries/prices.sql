@@ -3,7 +3,7 @@
 -- name: CreatePrice :one
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, created_at, updated_at
+    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, sell_via, created_at, updated_at
 ) SELECT
     sqlc.arg(id),
     sqlc.arg(merchant_id)::uuid,
@@ -14,6 +14,8 @@ INSERT INTO billing.prices (
     sqlc.narg(customer_amount)::jsonb,
     sqlc.narg(quantity)::jsonb,
     sqlc.arg(key)::text,
+    sqlc.arg(provider_owned)::boolean,
+    sqlc.narg(sell_via)::text[],
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 FROM billing.products catalog_product
@@ -120,6 +122,11 @@ WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sql
 UPDATE billing.prices AS price SET
     archived=sqlc.arg(archived)::boolean, updated_at=now()
 WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid;
+
+-- name: UpdatePriceSellVia :execrows
+UPDATE billing.prices AS price SET
+    sell_via=sqlc.narg(sell_via)::text[], updated_at=now()
+WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid AND NOT price.provider_owned;
 
 -- name: GetCurrentPriceByKey :one
 SELECT * FROM billing.prices

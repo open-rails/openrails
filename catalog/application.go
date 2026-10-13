@@ -168,12 +168,16 @@ type ApplyProduct struct {
 	// order the product.
 	RequiredEntitlements Field[[]string]        `json:"required_entitlements,omitzero"`
 	CreditGrant          Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
-	Prices               map[string]ApplyPrice  `json:"prices,omitempty"`
-	RateCards            Field[[]RateCard]      `json:"rate_cards,omitzero"`
+	// Prices are OpenRails' own: it vaults the card and runs the billing.
+	Prices map[string]ApplyPrice `json:"prices,omitempty"`
+	// ProviderPrices are prices a provider owns and runs. A key names one
+	// price of the product, ours or a provider's.
+	ProviderPrices map[string]ApplyProviderPrice `json:"provider_prices,omitempty"`
+	RateCards      Field[[]RateCard]             `json:"rate_cards,omitzero"`
 }
 
-// ApplyPrice declares the price its map key names. Its money terms are its
-// identity: a declaration with other terms under the same key is a new
+// ApplyPrice declares the price its map key names: OpenRails vaults the card
+// and bills it, on no provider's catalog. Its money terms are its identity: a declaration with other terms under the same key is a new
 // version of the price, and the previous one is archived. ID pins the
 // declaration to one existing price. Currency is fiat or SOL, never a
 // stablecoin.
@@ -188,10 +192,10 @@ type ApplyPrice struct {
 	TrialDurationHours   Field[int]            `json:"trial_duration_hours,omitzero"`
 	CustomerAmount       Field[CustomerAmount] `json:"customer_amount,omitzero"`
 	Quantity             Field[Quantity]       `json:"quantity,omitzero"`
-	// PSPs are the PSPs the price is sold on, keyed by PSP key; each value is
-	// that PSP's settings for the price ({} for none), e.g.
-	// mobius: {plan_id: premium}.
-	PSPs Field[map[string]map[string]string] `json:"psps,omitzero"`
+	// SellVia restricts the methods the price sells through: card (the
+	// merchant's card vault and charge PSPs) and solana. Null or omitted on a
+	// new price: every method the merchant has. It is not a term.
+	SellVia Field[[]string] `json:"sell_via,omitzero"`
 }
 
 // Validate checks the bounded syntax only; row-dependent validation happens
@@ -233,7 +237,18 @@ func (a Application) Validate() error {
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
 			return fmt.Errorf("product %q: text exceeds catalog limit", key)
 		}
-		count += len(p.Prices) + len(p.RateCards.Value)
+		count += len(p.Prices) + len(p.ProviderPrices) + len(p.RateCards.Value)
+		for _, priceKey := range slices.Sorted(maps.Keys(p.ProviderPrices)) {
+			if err := validApplicationKey(priceKey, "provider price"); err != nil {
+				return fmt.Errorf("product %q: %w", key, err)
+			}
+			if _, ours := p.Prices[priceKey]; ours {
+				return fmt.Errorf("product %q: price key %q is both a price and a provider price", key, priceKey)
+			}
+			if err := p.ProviderPrices[priceKey].Validate(); err != nil {
+				return fmt.Errorf("provider price %q: %w", priceKey, err)
+			}
+		}
 		for _, priceKey := range slices.Sorted(maps.Keys(p.Prices)) {
 			price := p.Prices[priceKey]
 			if err := validApplicationKey(priceKey, "price"); err != nil {
@@ -242,7 +257,7 @@ func (a Application) Validate() error {
 			if err := validateApplicationFields(price); err != nil {
 				return fmt.Errorf("price %q: %w", priceKey, err)
 			}
-			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null || price.PSPs.Null {
+			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null {
 				return fmt.Errorf("price %q: nonnullable field is null", priceKey)
 			}
 			if price.Currency.Set {
@@ -250,16 +265,11 @@ func (a Application) Validate() error {
 					return fmt.Errorf("price %q: %w", priceKey, err)
 				}
 			}
-			for _, psp := range slices.Sorted(maps.Keys(price.PSPs.Value)) {
-				if strings.TrimSpace(psp) == "" {
-					return fmt.Errorf("price %q: psps key must name a PSP", priceKey)
-				}
-				if price.PSPs.Value[psp] == nil {
-					return fmt.Errorf("price %q: psps.%s must be the PSP's settings for the price; use {} for none", priceKey, psp)
-				}
-			}
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
 				return fmt.Errorf("price %q: money cannot be negative", priceKey)
+			}
+			if err := ValidateSellVia(price.SellVia.Value); err != nil {
+				return fmt.Errorf("price %q: %w", priceKey, err)
 			}
 			if price.Quantity.Set && !price.Quantity.Null {
 				if err := price.Quantity.Value.Validate(); err != nil {
@@ -338,4 +348,25 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 		return [32]byte{}, err
 	}
 	return sha256.Sum256(raw), nil
+}
+
+// SellVia methods.
+const (
+	SellViaCard   = "card"
+	SellViaSolana = "solana"
+)
+
+// ValidateSellVia refuses an unknown or repeated method; nil is every method.
+func ValidateSellVia(methods []string) error {
+	if methods != nil && len(methods) == 0 {
+		return fmt.Errorf("sell_via names at least one method; null sells through every method")
+	}
+	seen := map[string]bool{}
+	for _, m := range methods {
+		if m != SellViaCard && m != SellViaSolana || seen[m] {
+			return fmt.Errorf("sell_via lists methods once each: %s, %s", SellViaCard, SellViaSolana)
+		}
+		seen[m] = true
+	}
+	return nil
 }

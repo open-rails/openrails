@@ -1178,6 +1178,10 @@ type BillingPrice struct {
 	DeletedAt *time.Time
 	// Public immutable ID product-key:price-key:v1. Percent-encoded keys; financial versions start at one. UUID id remains a private foreign key.
 	PublicID string
+	// A provider owns and runs the price: its one price_psp_bindings row names the PSP and the provider object, whose terms this row caches. False: ours, bound only to the Solana plans OpenRails published for it.
+	ProviderOwned bool
+	// The methods one of our prices sells through: card (the merchant's card vault and charge PSPs) and solana. NULL: every method the merchant has. Settable like archived; it is not a term.
+	SellVia []string
 }
 
 // One row per price key of a product: its revision advances on every change to any of its versions or their PSP links. Written only by the prices and price_psp_bindings triggers, which rebuild it on restore.
@@ -1221,7 +1225,7 @@ type BillingPriceMigration struct {
 	DestructiveActionID *uuid.UUID
 }
 
-// A price's provider objects on one PSP. Each rail uses its own reference column.
+// A price's objects at its PSPs: the one provider object a provider price mirrors, or the Solana plans OpenRails published for one of ours. Each rail uses its own reference column.
 type BillingPricePspBinding struct {
 	MerchantID               uuid.UUID
 	PriceID                  uuid.UUID

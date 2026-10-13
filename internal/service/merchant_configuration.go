@@ -140,7 +140,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
 		}
-		if err := s.rt.Merchants.CheckCardCustody(ctx, mid, next, set.PSPs); err != nil {
+		if err := s.rt.Merchants.CheckCardVault(ctx, mid, next, set.PSPs); err != nil {
 			return nil, err
 		}
 		set, err = cache.PutMerchant(ctx, mid, next, cas)

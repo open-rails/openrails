@@ -516,7 +516,7 @@ func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration)
 	if cfg != nil {
 		vault = cfg.PlatformVault
 	}
-	return merchants.CardCustodyRefusal(vault, mt.MerchantSettings, declared.PSPs)
+	return merchants.CardVaultRefusal(vault, mt.MerchantSettings, declared.PSPs)
 }
 
 // validatePSPDeclaration checks one declared PSP and returns it in its

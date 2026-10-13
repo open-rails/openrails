@@ -66,9 +66,10 @@ func ParseApplicationJSON(raw []byte) (*Application, error) {
 
 // keyedCollections are the records a catalog declares in maps keyed by key.
 var keyedCollections = map[reflect.Type]string{
-	reflect.TypeFor[ApplyProduct](): "product",
-	reflect.TypeFor[ApplyPrice]():   "price",
-	reflect.TypeFor[ApplyMeter]():   "meter",
+	reflect.TypeFor[ApplyProduct]():       "product",
+	reflect.TypeFor[ApplyPrice]():         "price",
+	reflect.TypeFor[ApplyProviderPrice](): "provider price",
+	reflect.TypeFor[ApplyMeter]():         "meter",
 }
 
 // encoding/json accepts case-insensitive aliases for struct fields. Catalog
@@ -92,7 +93,7 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 			return err
 		}
 		fields := map[string]reflect.Type{}
-		if shape == reflect.TypeFor[ApplyPrice]() {
+		if shape == reflect.TypeFor[ApplyPrice]() || shape == reflect.TypeFor[ApplyProviderPrice]() {
 			for _, name := range []string{"amount", "access_duration", "billing_interval", "trial_duration"} {
 				fields[name] = reflect.TypeFor[Field[string]]()
 			}

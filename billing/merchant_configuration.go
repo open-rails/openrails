@@ -52,7 +52,7 @@ type MerchantConfigurationState struct {
 	// Sandbox is whether the merchant is a sandbox: its PSPs move no money.
 	Sandbox bool `json:"sandbox"`
 	MerchantSettings
-	// PlatformVault is whether card_custody platform can be chosen.
+	// PlatformVault is whether card_vault platform can be chosen.
 	PlatformVault PlatformVaultState `json:"platform_vault"`
 }
 

@@ -96,7 +96,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		}
 		cfg.DunningPolicy = in.DunningPolicy
 	}
-	if err := validateCardCustody(in.CardCustody); err != nil {
+	if err := validateCardVault(in); err != nil {
 		return Settings{}, err
 	}
 	if in.PaymentPage != nil {

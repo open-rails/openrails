@@ -1,6 +1,7 @@
 package models
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -88,8 +89,17 @@ type Price struct {
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
-	// PSPLinks is the catalog projection of normalized price_psp_bindings.
-	// Keys are current PSP labels; each value carries the immutable psp_id.
+	// ProviderOwned: a provider owns and runs the price; its one PSPLinks
+	// entry is the provider object whose terms the row caches. Ours otherwise.
+	ProviderOwned bool `json:"provider_owned"`
+	// SellVia are the methods one of ours sells through (SellViaCard,
+	// SellViaSolana); nil is every method the merchant has.
+	SellVia []string `json:"sell_via,omitempty"`
+
+	// PSPLinks is the catalog projection of normalized price_psp_bindings: a
+	// provider price's provider object, or the Solana plans published for one
+	// of ours. Keys are current PSP labels; each value carries the immutable
+	// psp_id.
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -102,8 +112,44 @@ type Price struct {
 }
 
 // IsPurchasable reports whether the price can be bought by a new customer
-// (shown in the public catalog).
-func (p *Price) IsPurchasable() bool { return !p.Archived }
+// (shown in the public catalog): ours, or a provider's that still sells new
+// (CCBill). A legacy NMI or Stripe provider price only bills what it has.
+func (p *Price) IsPurchasable() bool {
+	if p.Archived {
+		return false
+	}
+	if !p.ProviderOwned {
+		return true
+	}
+	_, link, ok := p.ProviderLink()
+	return ok && link[RailKeyRail] == string(RailCCBill)
+}
+
+// Methods one of our prices sells through.
+const (
+	SellViaCard   = "card"
+	SellViaSolana = "solana"
+)
+
+// SellsVia reports whether the price sells through method: a provider price
+// through its own provider only, one of ours through its sell_via.
+func (p *Price) SellsVia(method string) bool {
+	if p == nil || p.ProviderOwned {
+		return false
+	}
+	return len(p.SellVia) == 0 || slices.Contains(p.SellVia, method)
+}
+
+// ProviderLink is a provider price's provider object: its PSP key and link.
+func (p *Price) ProviderLink() (string, map[string]string, bool) {
+	if p == nil || !p.ProviderOwned || len(p.PSPLinks) != 1 {
+		return "", nil, false
+	}
+	for key, link := range p.PSPLinks {
+		return key, link, true
+	}
+	return "", nil, false
+}
 
 // IsRecurring reports whether the price has a recurring billing cadence.
 func (p *Price) IsRecurring() bool {
@@ -328,25 +374,36 @@ func (p *Product) View() billing.Product {
 	return v
 }
 
-// View is the price as the API shows it, linked to every PSP in its links.
-// Sync status is unknown until a verifying read fills it.
+// View is the price as the API shows it. A provider price's sync status is
+// unknown until a verifying read fills it.
 func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.KeyRevision, Version: p.Revision + 1,
 		ID: p.PublicID, Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
 		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount, Quantity: p.Quantity,
-		PSPs: make(map[string]billing.PSPLinkState, len(p.PSPLinks)), PendingManualActions: []billing.PendingAction{},
-		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		SellVia: slices.Clone(p.SellVia), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
-	for name, ids := range p.PSPLinks {
-		if len(ids) == 0 {
-			continue
+	if p.ProviderOwned {
+		// An earlier version whose provider object moved to a newer one keeps
+		// no binding.
+		provider := &billing.PriceProvider{IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
+		if key, link, ok := p.ProviderLink(); ok {
+			provider.PSP, provider.Rail = key, link[RailKeyRail]
+			if id, err := uuid.Parse(link[RailKeyPSPID]); err == nil {
+				provider.PSPID = billing.PSPID(id)
+			}
+			for _, field := range []string{RailKeyPlanID, RailKeyStripePriceID, RailKeyStripeProductID, RailKeyCCBillFlexID, RailKeyCCBillRecurringBillingOption} {
+				if v := strings.TrimSpace(link[field]); v != "" {
+					provider.IDs[field] = v
+				}
+			}
 		}
-		state := billing.PSPLinkState{Status: billing.PSPLinkLinked, IDs: make(map[string]string, len(ids)), LookupKey: strings.TrimSpace(ids["lookup_key"]), SyncStatus: billing.SyncStatusUnknown}
-		for k, v := range ids {
-			state.IDs[k] = v
+		out.Provider = provider
+	}
+	if !p.ProviderOwned {
+		if pda := strings.TrimSpace(p.PSPLinkForRail(RailSolana)["plan_pda"]); pda != "" {
+			out.SolanaPlan = &pda
 		}
-		out.PSPs[name] = state
 	}
 	return out
 }
