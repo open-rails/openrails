@@ -248,6 +248,11 @@ on one merchant from either, and no call names its merchant.
 
 ### Customers
 
+`Client.UpdateCustomer` and `PATCH /v1/admin/customers/{customer_id}` return
+`CustomerSettingsResult` (`id` and `settings`), rather than `Customer`.
+Callers needing contact details, balances or the linked network account should
+read the full customer separately with `Client.GetCustomer`.
+
 | Before | After |
 |---|---|
 | `client.EnsureCustomers`, `billing.EnsureCustomerParams` (`Email`, `Username`, `Blocked`), `POST /customers/ensure` | Nothing to declare: a customer is your user's id, created by its first use; `client.UpdateCustomer` creates one OpenRails has not seen. Emails and names come from `Deps.UserInfo` or SCIM ([customer contacts](customer-contacts.md)) |

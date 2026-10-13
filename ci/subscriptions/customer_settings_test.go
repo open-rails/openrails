@@ -3,18 +3,94 @@
 package subscriptions_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/openrailstest"
 )
 
+type settingsDirectory struct {
+	openrailstest.UserInfo
+	unavailable atomic.Bool
+}
+
+func (d *settingsDirectory) Get(ctx context.Context, ids []string) (map[string]userinfo.User, error) {
+	if d.unavailable.Load() {
+		return nil, errors.New("directory unavailable")
+	}
+	return d.UserInfo.Get(ctx, ids)
+}
+
+func TestCustomerSettingsSaveWithoutDirectory(t *testing.T) {
+	t.Parallel()
+	directory := &settingsDirectory{}
+	w := prepareWorld(t, 12)
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.start()
+	c := w.newCustomer()
+	for i, tp := range []topology{embedded, remote} {
+		client := w.client[tp]
+		directory.unavailable.Store(true)
+		limits := []billing.CreditLimit{{Currency: "USD", Amount: int64(i+1) * 10_000_000}}
+		updated, err := client.UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: limits})
+		require.NoError(t, err)
+		require.Equal(t, c.cid(), updated.ID)
+		require.Equal(t, limits, updated.Settings.CreditLimits)
+		_, err = client.GetCustomer(t.Context(), c.cid())
+		require.Error(t, err, "the full customer read still needs the directory")
+		directory.unavailable.Store(false)
+		stored, err := client.GetCustomer(t.Context(), c.cid())
+		require.NoError(t, err)
+		require.Equal(t, updated.Settings, stored.Settings)
+	}
+
+	directory.unavailable.Store(true)
+	status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/"+c.id, map[string]any{})
+	require.Equal(t, http.StatusOK, status, "%v", body)
+	require.Len(t, body, 2, "the response contains only id and settings")
+	require.Equal(t, c.id, body["id"])
+	require.Contains(t, body, "settings")
+}
+
+func TestCustomerSettingsReadbackFailureRollsBack(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	client := w.client[remote]
+	initial := billing.UpdateCustomerParams{
+		CreditLimits:   []billing.CreditLimit{{Currency: "USD", Amount: 10_000_000}},
+		InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectChargeAutomatically}),
+	}
+	saved, err := client.UpdateCustomer(t.Context(), c.cid(), initial)
+	require.NoError(t, err)
+	// A stored profile that cannot be decoded makes the settings read fail
+	// after the credit limit write. That failure must roll the write back.
+	profile := pgx.Identifier{w.schema, "customer_invoice_profiles"}.Sanitize()
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+profile+` SET billing_contacts = '[{"email": 1}]' WHERE customer_id = $1`, c.cid().UUID())
+	require.NoError(t, err)
+	updated, err := client.UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 20_000_000}}})
+	require.Error(t, err)
+	require.Nil(t, updated)
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+profile+` SET billing_contacts = '[]' WHERE customer_id = $1`, c.cid().UUID())
+	require.NoError(t, err)
+	stored, err := client.GetCustomer(t.Context(), c.cid())
+	require.NoError(t, err)
+	require.Equal(t, saved.Settings, stored.Settings, "a failed readback must leave the previous settings intact")
+}
+
 // A customer's settings are one document: a write changes only the fields it
-// names and answers the customer, and clearing a field returns it to its
+// names and answers with the saved settings, and clearing a field returns it to its
 // default.
 func TestCustomerSettingsDocument(t *testing.T) {
 	t.Parallel()
@@ -49,7 +125,8 @@ func TestCustomerSettingsDocument(t *testing.T) {
 
 		read, err := client.GetCustomer(t.Context(), a.cid())
 		require.NoError(t, err)
-		require.Equal(t, updated, read, "the write answers what the read does")
+		require.Equal(t, updated.ID, read.ID)
+		require.Equal(t, updated.Settings, read.Settings, "the write answers the saved settings")
 
 		// Clearing every field returns the document to its defaults.
 		cleared, err := client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD"}}, TrustLevels: []billing.TrustLevel{{Currency: "USD"}}, BillingPolicy: catalog.Null[string](), InvoiceProfile: catalog.Null[billing.InvoiceProfile]()})

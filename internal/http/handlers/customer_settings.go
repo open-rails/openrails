@@ -5,7 +5,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-// UpdateCustomer changes one customer's settings and answers the customer.
+// UpdateCustomer changes one customer's settings and returns the saved settings.
 func UpdateCustomer(r *httprequest.Request) {
 	customer, ok := customerParam(r)
 	if !ok {

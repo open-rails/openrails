@@ -302,7 +302,7 @@ func TestCustomerLineOverridesMerchantDefault(t *testing.T) {
 	w.watch()
 	require.Empty(t, w.events(billing.HostEventBalanceLow, customer), "4 USD is above the merchant's 2.5")
 
-	update := func(lines ...billing.LowBalanceLine) *billing.Customer {
+	update := func(lines ...billing.LowBalanceLine) *billing.CustomerSettingsResult {
 		t.Helper()
 		out, err := w.client.UpdateCustomer(w.ctx, customer, billing.UpdateCustomerParams{LowBalanceLines: lines})
 		require.NoError(t, err)

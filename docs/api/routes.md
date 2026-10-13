@@ -96,7 +96,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/product-access/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeProductAccessParams` | 204 — |  |
 | GET | `/v1/admin/customers` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Customer>` |  |
 | GET | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Customer` |  |
-| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `UpdateCustomerParams` | 200 `Customer` | limit `grant` |
+| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `UpdateCustomerParams` | 200 `CustomerSettingsResult` | limit `grant` |
 | POST | `/v1/admin/credit-grants` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | limit `grant` |
 | GET | `/v1/admin/credit-grants` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `CreditGrant` |  |

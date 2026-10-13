@@ -36,7 +36,10 @@ automatically.
   them as the customer's `settings`; `Client.ListCustomers` does for each
   customer it lists.
 - `Client.UpdateCustomer` (`PATCH /v1/admin/customers/{customer_id}`)
-  changes one customer's settings and answers the customer. It changes only
+  changes one customer's settings and returns `CustomerSettingsResult` with
+  `id` and the complete saved `settings`. The settings are read within the
+  write transaction and returned after commit; confirming the save does not
+  require contact, balance or network lookups. It changes only
   the fields it names: `credit_limits` and `trust_levels` merge by currency
   (amount `"0"` or level `""` clears one), and `null` clears `billing_policy`
   or `invoice_profile`.
