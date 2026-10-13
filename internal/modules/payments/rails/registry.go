@@ -14,13 +14,12 @@ type CancelMode string
 
 const (
 	// CancelModeReversible: cancellation can be undone in place before the paid
-	// period ends (Stripe's cancel_at_period_end; NMI while a deferred delete is
-	// still pending).
+	// period ends (Stripe's cancel_at_period_end; Solana, whose renewals only
+	// OpenRails pulls; NMI while a deferred delete is still pending).
 	CancelModeReversible CancelMode = "reversible"
 
 	// CancelModeDestructive: cancellation tears down the rail-side subscription
-	// immediately and cannot be undone (NMI delete_subscription once executed,
-	// Solana).
+	// immediately and cannot be undone (NMI delete_subscription once executed).
 	CancelModeDestructive CancelMode = "destructive"
 
 	// CancelModeExternalPortal: the user cancels or resumes in the rail's own
@@ -264,7 +263,7 @@ var descriptors = []Descriptor{
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
-		cancelDestructive,
+		cancelReversible, // OpenRails stops pulling; nothing changes on-chain
 		"", // CancelPortalURL
 		// rpc_url: the operator's RPC endpoint, a secret because its URL carries
 		// the provider's key. The deployment's cranker signs; no PSP holds a key.

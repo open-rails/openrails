@@ -114,9 +114,13 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
 	}
-	// Engine resume only undoes an ordinary user cancellation. Terminal
-	// failures, merchant revocation and chargebacks require a new decision.
-	if sub.CollectionPolicy == models.CollectionPolicyEngine && (sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser || (sub.PaymentMethodID == nil && !FollowsDefault(sub))) {
+	// A renewal OpenRails collects (engine, Solana pulls) resumes only from an
+	// ordinary user cancellation. Terminal failures, merchant revocation and
+	// chargebacks require a new decision.
+	if (sub.CollectionPolicy == models.CollectionPolicyEngine || sub.Rail == models.RailSolana) && (sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser) {
+		return false
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.PaymentMethodID == nil && !FollowsDefault(sub) {
 		return false
 	}
 	if CancelModeFor(sub, now) != CancelModeReversible {

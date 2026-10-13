@@ -935,6 +935,9 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 		}
 		return []Finding{f}
 
+	case !localLive && remoteLive(r.Status) && traitsFor(provider).billsOnlyWhenPulled:
+		return nil
+
 	case !localLive && remoteLive(r.Status):
 		// PS-3 (inverse direction): local says dead, rail still bills.
 		// Never auto-resurrect a locally-terminated subscription; this is

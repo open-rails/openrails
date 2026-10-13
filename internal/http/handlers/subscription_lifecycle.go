@@ -18,9 +18,11 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
 // A customer's cancel carries their reason: 4 to 500 characters.
@@ -30,18 +32,20 @@ const (
 )
 
 // CustomerCancelSubscriptionParams is the customer's cancel, at period end.
-// Signature completes a solana_sign_transactions next action: the signature
-// of the cancel transaction the customer's wallet sent.
+// RevokeOnChain (Solana) also asks for the on-chain cancel the customer's
+// wallet signs, answered as a solana_sign_transactions next action; Signature
+// completes it with the signature of the transaction the wallet sent.
 type CustomerCancelSubscriptionParams struct {
-	Reason    string `json:"reason"`
-	Signature string `json:"signature"`
+	Reason        string `json:"reason"`
+	RevokeOnChain bool   `json:"revoke_on_chain"`
+	Signature     string `json:"signature"`
 }
 
 // CancelSubscription cancels one of the customer's subscriptions at period
-// end and answers the subscription. A rail that needs the customer's own step
-// (Solana: the wallet signs the on-chain cancel) answers the unchanged
-// subscription with next_action; the customer repeats the request with the
-// signature.
+// end and answers the subscription. A Solana cancel needs no wallet: the
+// renewal is OpenRails' own pull. With revoke_on_chain the answer carries
+// next_action, the wallet's optional on-chain cancel, which the customer
+// completes by repeating the request with its signature.
 func CancelSubscription(r *httprequest.Request) {
 	var req CustomerCancelSubscriptionParams
 	if !r.BindJSON(&req) {
@@ -61,24 +65,17 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 	ctx := db.WithPSPID(r.Request.Context(), sub.PspID)
-
-	if sub.Rail == models.RailSolana {
-		signature := strings.TrimSpace(req.Signature)
+	signature := strings.TrimSpace(req.Signature)
+	if sub.Rail != models.RailSolana && (signature != "" || req.RevokeOnChain) {
+		param := "signature"
 		if signature == "" {
-			if r.State.SolanaPrepareCancelService == nil {
-				r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
-				return
-			}
-			prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
-			if err != nil {
-				r.APIError(solanaClientError(err))
-				return
-			}
-			writeMySubscription(r, userID, sub.ID, &billing.NextAction{
-				Type: "solana_sign_transactions", Transactions: []string{prepared.Transaction},
-			})
-			return
+			param = "revoke_on_chain"
 		}
+		r.APIError(api.Coded(billing.CodeInvalidParam, "this subscription's rail has no on-chain cancel").WithParam(param))
+		return
+	}
+
+	if signature != "" {
 		if r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil {
 			r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 			return
@@ -89,11 +86,27 @@ func CancelSubscription(r *httprequest.Request) {
 			return
 		}
 		convergeAfter(ctx, r, sub, "subscription_cancel")
-	} else {
-		if req.Signature != "" {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "signature completes a wallet step; this subscription's rail has none").WithParam("signature"))
+		writeMySubscription(r, userID, sub.ID, nil)
+		return
+	}
+
+	// The on-chain cancel is prepared before anything changes, so a failed
+	// prepare leaves the subscription as it was.
+	var next *billing.NextAction
+	if req.RevokeOnChain {
+		if r.State.SolanaPrepareCancelService == nil {
+			r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 			return
 		}
+		prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
+		if err != nil {
+			r.APIError(solanaClientError(err))
+			return
+		}
+		next = &billing.NextAction{Type: "solana_sign_transactions", Transactions: []string{prepared.Transaction}}
+	}
+	// A revoke asked after the cancel needs no second cancel.
+	if !req.RevokeOnChain || sub.Status != models.StatusCanceled {
 		svc, ok := billingService(r)
 		if !ok {
 			return
@@ -103,7 +116,7 @@ func CancelSubscription(r *httprequest.Request) {
 			return
 		}
 	}
-	writeMySubscription(r, userID, sub.ID, nil)
+	writeMySubscription(r, userID, sub.ID, next)
 }
 
 // ResumeSubscription undoes the customer's own scheduled cancel on a
@@ -189,6 +202,12 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
 	case rails.IsNMI(sub.Rail):
 		err = resumeNMI(ctx, r, sub)
+	case sub.Rail == models.RailSolana:
+		if refusal := solanaResumeRefusal(ctx, r, sub); refusal != nil {
+			r.APIError(refusal)
+			return false
+		}
+		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
 	default:
 		r.ErrorCode(billing.CodeInvalidParam, "resume unsupported for rail")
 		return false
@@ -198,6 +217,33 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 		return false
 	}
 	return true
+}
+
+// solanaResumeRefusal refuses resuming a subscription its subscriber also
+// canceled in their wallet: the program would refuse the next pull.
+func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *models.Subscription) *api.APIError {
+	if r.State.SolanaRPCResolver == nil {
+		return api.Coded(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
+	}
+	row, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(ctx, sub.ID)
+	if err != nil {
+		if db.IsNotFound(err) {
+			return api.Coded(billing.CodeInvalidParam, "resume unsupported: the subscription has no on-chain record")
+		}
+		return api.Coded(billing.CodeInternalError, "failed to load the on-chain subscription")
+	}
+	canceled, err := recurring.CanceledOnChain(ctx, r.State.SolanaRPCResolver.ChainReader(), row)
+	if err != nil {
+		if refusal := solanaUnavailable(err); refusal != nil {
+			return refusal
+		}
+		log.WithContext(ctx).WithField("detail", redact.Secrets(err.Error())).Warn("solana: resume could not read the on-chain subscription")
+		return api.Coded(codeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
+	}
+	if canceled {
+		return api.Coded(billing.CodeInvalidParam, "the subscription was canceled in the customer's wallet, so it ends with its paid period; subscribe again to continue")
+	}
+	return nil
 }
 
 // resumeNMI undoes an NMI cancel inside its undo window. The NMI schedule was

@@ -33,13 +33,6 @@ var (
 	// ErrCancelUnsupportedOnRail refuses a server-side cancel on a rail that has
 	// no cancel operation.
 	ErrCancelUnsupportedOnRail = apperr.New(http.StatusBadRequest, "cancel_unsupported_on_rail", "cancel operation not supported for this rail")
-
-	// ErrCustomerActionRequired refuses a cancel only the customer can make:
-	// a Solana cancel is an on-chain transaction the customer's wallet signs
-	// (POST /v1/me/subscriptions/{id}/cancel answers it as next_action).
-	// OpenRails never marks a chain-truth subscription canceled on its own.
-	ErrCustomerActionRequired = apperr.New(http.StatusForbidden, billing.CodeCustomerActionRequired,
-		"only the customer can cancel this subscription: its wallet signs the cancel")
 )
 
 // UserSubscriptionService handles user-facing subscription operations
@@ -275,7 +268,8 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return ErrSubscriptionNotActive
 	}
 
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+	// OpenRails collects these renewals itself: the local cancel stops them.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Rail == models.RailSolana {
 		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), s.ProductService, s.PriceService, s.EntitlementService, s.NotificationService, s.PaymentService, s.Clock())
 		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback, RefuseOwnedRenewal: true, Requested: true})
 	}
@@ -341,8 +335,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 				return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
 			}
 		}
-	case subscription.Rail == models.RailSolana:
-		return ErrCustomerActionRequired
 	default:
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}

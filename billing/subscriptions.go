@@ -102,10 +102,10 @@ type Subscription struct {
 	// Access summarizes the premium access this subscription grants; the self
 	// routes fill it.
 	Access *SubscriptionAccess `json:"access,omitempty"`
-	// NextAction is set only on the answer to an action whose rail needs the
-	// customer's own step before it takes effect (a Solana cancel is signed by
-	// the customer's wallet). The subscription is then unchanged; complete the
-	// step and repeat the request with its result.
+	// NextAction is set only on the answer to an action that asks for the
+	// customer's own step (a Solana cancel's optional on-chain cancel, signed
+	// by the customer's wallet). Complete the step and repeat the request with
+	// its result.
 	NextAction *NextAction `json:"next_action"`
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`

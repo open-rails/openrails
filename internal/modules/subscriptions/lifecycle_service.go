@@ -1203,6 +1203,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("resume membership: update subscription: %w", err)
 		}
+		if subscription.Rail == models.RailSolana {
+			if err := resumeSolanaSubscription(ctx, txdb, subscription.ID); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
+		}
 		entSvc := s.newLifecycleEntitlementService(txdb)
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
 			if err := pushRenewalGrace(ctx, txdb, entSvc, subscription, *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
@@ -1766,6 +1771,26 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 		"subscription_id":        subscriptionID,
 		"solana_subscription_id": row.ID,
 	}).Info("cascaded cancellation to solana_subscriptions row; cranker stopped")
+	return nil
+}
+
+// resumeSolanaSubscription re-arms the mirror a cancel stopped, so the
+// cranker pulls the next period. A missing or expired row stays as it is.
+func resumeSolanaSubscription(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
+	solanaRepo := solanasubs.NewSolanaSubscriptionRepo(d)
+	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil {
+		if db.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
+	}
+	if row.Status != models.SolanaSubscriptionCanceled {
+		return nil
+	}
+	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionActive); err != nil {
+		return fmt.Errorf("set solana_subscriptions status active: %w", err)
+	}
 	return nil
 }
 

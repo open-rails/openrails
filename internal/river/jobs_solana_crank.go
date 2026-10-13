@@ -308,12 +308,10 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				evidence: map[string]any{"decline_code": string(cf.Code)},
 			}, nil
 		case recurring.Terminal:
-			// The subscriber revoked the SPL token delegate on-chain: cancel
-			// and stop, never dun. A user's cancel_subscription stops only
-			// future-period pulls, so it raises no crank error here; OpenRails
-			// mirrors it at confirm. Solana cancels are immediate, never
-			// scheduled.
-			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
+			// The subscriber canceled in their wallet (cancel_subscription, or
+			// the token delegate revoked): the paid period has ended, so cancel
+			// and stop, never dun.
+			llog.Warn("Solana cranker: terminal pull failure (canceled on-chain); cancelling subscription (no dunning)")
 			if err := w.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
 			}

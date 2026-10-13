@@ -583,6 +583,14 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 		require.Contains(t, f.RemoteEvidence["materialize_blocked"], "#714")
 	})
 
+	t.Run("a subscription canceled here bills nothing while live on chain", func(t *testing.T) {
+		pda := newKey().String()
+		local := &LocalState{Subscriptions: []LocalSubscription{{ID: uuid.New(), CustomerID: uuid.New(), Status: "canceled", Rail: "solana", RailSubscriptionID: pda}}}
+		snap := &RemoteSnapshot{Provider: ProviderSolana, Capabilities: Capabilities{Subscriptions: true},
+			Subscriptions: []RemoteSubscription{{RailSubscriptionID: pda, Status: SubscriptionStatusActive}}}
+		require.Empty(t, diffProvider(ProviderSolana, snap, local, nil, now, diffOptions{}))
+	})
+
 	t.Run("a ref skipped this tick is never read as disappeared", func(t *testing.T) {
 		require.False(t, traitsFor(ProviderSolana).absenceMeansCanceled)
 		local := &LocalState{Subscriptions: []LocalSubscription{{ID: uuid.New(), CustomerID: uuid.New(), Status: "active", Rail: "solana", RailSubscriptionID: newKey().String()}}}

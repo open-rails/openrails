@@ -47,7 +47,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 			[]string{"salt", "datalink_username", "datalink_password"}, CancelModeDestructive},
 		{models.RailStripe, true, true, false, true, false, true, false, false, false,
 			[]string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}, CancelModeReversible},
-		{models.RailSolana, false, false, true, true, false, false, false, false, false, nil, CancelModeDestructive},
+		{models.RailSolana, false, false, true, true, false, false, false, false, false, nil, CancelModeReversible},
 	} {
 		d, _ := Lookup(c.rail)
 		require.Equal(t, c.remoteCustomer, HasRemoteCustomer(c.rail), c.rail)
@@ -115,7 +115,7 @@ func TestCancelModeFor(t *testing.T) {
 		{"nmi delete executed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, CurrentPeriodEndsAt: &future}, CancelModeDestructive},
 		{"nmi period lapsed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &past}, CancelModeDestructive},
 		{"nmi period ends now", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &now}, CancelModeDestructive},
-		{"engine owns its schedule", &models.Subscription{Rail: models.RailSolana, CollectionPolicy: models.CollectionPolicyEngine}, CancelModeReversible},
+		{"engine owns its schedule", &models.Subscription{Rail: models.RailCCBill, CollectionPolicy: models.CollectionPolicyEngine}, CancelModeReversible},
 		{"unknown rail", &models.Subscription{Rail: "bogus"}, CancelModeDestructive},
 		{"nil", nil, CancelModeDestructive},
 	} {

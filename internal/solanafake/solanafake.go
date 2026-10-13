@@ -1,9 +1,9 @@
 // Package solanafake is a loopback Solana JSON-RPC node for sandbox tests
 // (provider_sandbox.solana_rpc_url). It serves declared mints, token accounts,
-// plans and subscription authorities, and lands signed transactions, plan
-// creation among them, as the chain would: signatures must verify, token moves
-// apply all-or-nothing, v0 transactions need opting in, and each commitment
-// sees only what reached it.
+// plans, subscription authorities and subscriptions, and lands signed
+// transactions, plan creation, subscribe, cancel and resume among them, as the
+// chain would: signatures must verify, token moves apply all-or-nothing, v0
+// transactions need opting in, and each commitment sees only what reached it.
 package solanafake
 
 import (
@@ -36,7 +36,23 @@ const (
 type tokenAccount struct {
 	owner, mint solanago.PublicKey
 	amount      uint64
+	// revoked: the owner revoked the account's delegate, so no pull moves it.
+	revoked bool
 }
+
+// programError is an instruction's on-chain Custom code.
+type programError struct {
+	code int
+	msg  string
+}
+
+func (e *programError) Error() string { return e.msg }
+
+// Custom codes the fake answers with; any other refusal is Custom 1.
+const (
+	codeTokenOwnerMismatch    = 4
+	codeSubscriptionCancelled = 508
+)
 
 type Node struct {
 	server   *httptest.Server
@@ -316,9 +332,13 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 		return solanago.Signature{}, errors.New("solanafake: refused: already processed")
 	}
 	pre := n.tokenBalances(tx)
-	saved := map[string]uint64{}
+	saved := map[string]tokenAccount{}
 	for addr, acct := range n.tokens {
-		saved[addr] = acct.amount
+		saved[addr] = *acct
+	}
+	savedData := map[string][]byte{}
+	for addr, acct := range n.accounts {
+		savedData[addr] = append([]byte(nil), acct.data...)
 	}
 	var failure any
 	var created, createdTokens []string
@@ -331,15 +351,27 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 			createdTokens = append(createdTokens, token)
 		}
 		if err != nil {
-			failure = map[string]any{"InstructionError": []any{i, map[string]any{"Custom": 1}}}
+			code := 1
+			var custom *programError
+			if errors.As(err, &custom) {
+				code = custom.code
+			}
+			failure = map[string]any{"InstructionError": []any{i, map[string]any{"Custom": code}}}
 			for _, addr := range createdTokens {
 				delete(n.tokens, addr)
 			}
-			for addr, amount := range saved {
-				n.tokens[addr].amount = amount
+			for addr, acct := range saved {
+				*n.tokens[addr] = acct
+			}
+			for addr, data := range savedData {
+				restored := n.accounts[addr]
+				restored.data = data
+				n.accounts[addr] = restored
 			}
 			for _, addr := range created {
-				delete(n.accounts, addr)
+				if _, existed := savedData[addr]; !existed {
+					delete(n.accounts, addr)
+				}
 			}
 			break
 		}
@@ -377,11 +409,27 @@ func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction
 		return "", "", n.move(accounts[0].PublicKey, accounts[1].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
 	case program.Equals(solanago.TokenProgramID) && len(data) >= 9 && data[0] == 12 && len(accounts) >= 3: // TransferChecked
 		return "", "", n.move(accounts[0].PublicKey, accounts[2].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
+	case program.Equals(solanago.TokenProgramID) && len(data) == 1 && data[0] == 5 && len(accounts) >= 2: // Revoke
+		if acct := n.tokens[accounts[0].PublicKey.String()]; acct != nil && accounts[1].IsSigner && acct.owner.Equals(accounts[1].PublicKey) {
+			acct.revoked = true
+			return "", "", nil
+		}
+		return "", "", errors.New("revoke refused: not the account's owner")
 	case program.Equals(subscriptions.ProgramID) && len(data) >= 9 && data[0] == 10 && len(accounts) >= 6: // transfer_subscription
 		if err := n.mayPull(accounts[1].PublicKey, accounts[5].PublicKey, accounts[4].PublicKey); err != nil {
 			return "", "", err
 		}
+		if acct := n.tokens[accounts[3].PublicKey.String()]; acct != nil && acct.revoked {
+			return "", "", &programError{codeTokenOwnerMismatch, "transfer_subscription refused: delegate revoked"}
+		}
+		if err := n.pullSubscription(accounts[0].PublicKey, blockTime); err != nil {
+			return "", "", err
+		}
 		return "", "", n.move(accounts[3].PublicKey, accounts[4].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
+	case program.Equals(subscriptions.ProgramID) && len(data) == subscribeDataSize && data[0] == 11 && len(accounts) >= 4: // subscribe
+		return n.subscribe(accounts, data), "", nil
+	case program.Equals(subscriptions.ProgramID) && len(data) == 1 && (data[0] == 12 || data[0] == 13) && len(accounts) >= 3: // cancel_subscription, resume_subscription
+		return "", "", n.cancelOrResume(accounts, data[0] == 12)
 	case program.Equals(subscriptions.ProgramID) && len(data) == 1 && data[0] == 0 && len(accounts) >= 2: // initialize_subscription_authority
 		authority := make([]byte, 106)
 		binary.LittleEndian.PutUint64(authority[98:], n.height)
@@ -430,6 +478,66 @@ func (n *Node) mayPull(planAddress, caller, receiver solanago.PublicKey) error {
 	if named {
 		return errors.New("transfer_subscription refused: UnauthorizedDestination")
 	}
+	return nil
+}
+
+// subscribeDataSize is subscribe's data: discriminator, plan id, plan bump,
+// mint, amount, period hours, created_at and the authority's init id.
+const subscribeDataSize = 1 + 8 + 1 + 32 + 8 + 8 + 8 + 8
+
+// subscribe stores the subscriber's subscription to the plan with the terms it
+// names, open (not canceled) and not yet pulled. n.mu held.
+func (n *Node) subscribe(accounts []*solanago.AccountMeta, data []byte) string {
+	sub := make([]byte, subscriptions.SubscriptionAccountSize)
+	sub[0], sub[1] = subscriptions.SubscriptionAccountDiscriminator, 1
+	off := 3
+	off += copy(sub[off:], accounts[0].PublicKey[:])
+	off += copy(sub[off:], accounts[2].PublicKey[:])
+	off += copy(sub[off:], accounts[0].PublicKey[:])
+	off += copy(sub[off:], data[66:74])
+	copy(sub[off:], data[42:66])
+	address := accounts[3].PublicKey.String()
+	n.accounts[address] = account{owner: subscriptions.ProgramID, data: sub}
+	return address
+}
+
+// Subscription account offsets past the header and terms.
+const (
+	subPeriodHoursOffset = 3 + 3*32 + 8 + 8
+	subPeriodStartOffset = subPeriodHoursOffset + 8 + 8 + 8
+	subExpiresAtOffset   = subPeriodStartOffset + 8
+)
+
+// pullSubscription refuses a pull of a canceled subscription, as the program
+// does past expires_at_ts, and opens the pulled period. A subscription this
+// node does not hold is not checked. n.mu held.
+func (n *Node) pullSubscription(address solanago.PublicKey, blockTime time.Time) error {
+	stored, ok := n.accounts[address.String()]
+	if !ok {
+		return nil
+	}
+	if binary.LittleEndian.Uint64(stored.data[subExpiresAtOffset:]) != 0 {
+		return &programError{codeSubscriptionCancelled, "transfer_subscription refused: subscription canceled"}
+	}
+	binary.LittleEndian.PutUint64(stored.data[subPeriodStartOffset:], uint64(blockTime.Unix())) // #nosec G115 -- the fake's clock is after 1970
+	return nil
+}
+
+// cancelOrResume sets, or clears, the subscription's expires_at_ts: the end
+// of the period it is in. Only its subscriber may. n.mu held.
+func (n *Node) cancelOrResume(accounts []*solanago.AccountMeta, cancel bool) error {
+	stored, ok := n.accounts[accounts[2].PublicKey.String()]
+	if !ok {
+		return nil
+	}
+	if !accounts[0].IsSigner || !solanago.PublicKeyFromBytes(stored.data[3:35]).Equals(accounts[0].PublicKey) {
+		return errors.New("cancel refused: not the subscriber")
+	}
+	var expires uint64
+	if cancel {
+		expires = binary.LittleEndian.Uint64(stored.data[subPeriodStartOffset:]) + 3600*binary.LittleEndian.Uint64(stored.data[subPeriodHoursOffset:])
+	}
+	binary.LittleEndian.PutUint64(stored.data[subExpiresAtOffset:], expires)
 	return nil
 }
 
