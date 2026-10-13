@@ -209,8 +209,9 @@ var jsonRules = map[string]jsonRule{
 	// The completed collection operation retains its frozen instrument and
 	// accepted terms for replay; none of these fields contains card data.
 	"provider_intents.order_collection.payload": object(map[string]jsonRule{
-		"initiator": textValue,
-		"order_id":  uuidValue, "invoice_id": uuidValue, "customer_id": uuidValue, "payment_id": uuidValue, "payment_method_id": uuidValue,
+		"order_captcha_subjects": array(textValue),
+		"initiator":              textValue,
+		"order_id":               uuidValue, "invoice_id": uuidValue, "customer_id": uuidValue, "payment_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON}),
@@ -225,7 +226,8 @@ var jsonRules = map[string]jsonRule{
 		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
 	})),
 	"provider_intents.subscription_collection.payload": object(map[string]jsonRule{
-		"initiator": textValue, "requested_payment_method_id": uuidValue,
+		"order_captcha_subjects": array(textValue),
+		"initiator":              textValue, "requested_payment_method_id": uuidValue,
 		"renewal": acceptedRenewalJSON, "previous_period_end": textValue, "accepted_at": textValue,
 		"payment_method_id": uuidValue, "instrument": frozenInstrumentJSON,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
@@ -267,8 +269,9 @@ var jsonRules = map[string]jsonRule{
 	// Successful purchase intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
 	"provider_intents.nmi_sale.payload": object(map[string]jsonRule{
-		"order_attempt_id":    uuidValue,
-		"request_fingerprint": sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
+		"order_captcha_subjects": array(textValue),
+		"order_attempt_id":       uuidValue,
+		"request_fingerprint":    sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
 		"credit_grant":      creditGrantJSON,
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
