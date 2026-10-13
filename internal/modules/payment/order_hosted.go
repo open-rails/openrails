@@ -32,8 +32,9 @@ import (
 // order to requires_payment_method. Closing the order expires the session.
 // One-time lines only: a recurring line needs a saved card.
 
-// OrderHosted pays on the hosted page of the Stripe PSP named (zero: the only
-// one that takes the order), returning to ReturnURL.
+// OrderHosted pays on the hosted page of the PSP named (zero: the only one
+// that takes the order): Stripe Checkout, returning to ReturnURL, or a CCBill
+// FlexForm.
 type OrderHosted struct {
 	PSPID     uuid.UUID
 	ReturnURL string
@@ -54,7 +55,7 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	prior, err := s.db.Gen(ctx).GetOrderAttempt(ctx, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: attemptID})
 	switch {
 	case err == nil:
-		if railStateText(prior.RailState, "flow") != hostedFlow || prior.OrderID == nil || *prior.OrderID != order.ID {
+		if flow := railStateText(prior.RailState, "flow"); flow != hostedFlow && flow != ccbillFlow || prior.OrderID == nil || *prior.OrderID != order.ID {
 			return OrderCharge{}, fmt.Errorf("%w: %w", ErrOrderAttemptConflict, billing.ErrIdempotencyKeyReused)
 		}
 		return OrderCharge{}, nil
@@ -78,13 +79,16 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	if !ok {
 		return OrderCharge{}, errors.New("hosted order payment is unavailable")
 	}
-	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, order, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}
 	option, err := HostedOption(options, in.Hosted.PSPID)
 	if err != nil {
 		return OrderCharge{}, err
+	}
+	if models.Rail(option.Rail) == models.RailCCBill {
+		return OrderCharge{}, s.payOrderCCBill(ctx, in, *option, attemptID, returnURL)
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(order.Currency, order.Total)
 	if err != nil {
@@ -104,6 +108,9 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 			return err
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
+		if err := s.releaseLapsedCCBill(ctx, s.db.NewWithPgxTx(tx), &current, now); err != nil {
+			return err
+		}
 		switch {
 		case current.Status == string(billing.OrderProcessing) || current.PaymentStatus == string(billing.OrderPaymentRequiresAction):
 			return orders.ErrInProgress
@@ -168,19 +175,7 @@ func (s *OrderAttemptService) CheckReturnURL(raw string) error {
 // HostedOption is the hosted-page PSP that takes the order: the one named, or
 // the only one.
 func HostedOption(options []OrderOption, psp uuid.UUID) (*OrderOption, error) {
-	var found []*OrderOption
-	for i := range options {
-		if options[i].Hosted && (psp == uuid.Nil || options[i].PSPID == psp) {
-			found = append(found, &options[i])
-		}
-	}
-	switch len(found) {
-	case 0:
-		return nil, orders.ErrOptionMissing
-	case 1:
-		return found[0], nil
-	}
-	return nil, ErrOrderPSPRequired
+	return pick(options, psp, func(o OrderOption) bool { return o.Hosted })
 }
 
 // hostedAttempt reports an order attempt paid on a hosted page.

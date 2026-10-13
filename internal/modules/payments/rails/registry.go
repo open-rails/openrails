@@ -122,14 +122,16 @@ type Descriptor struct {
 type NewSubscription string
 
 const (
-	// NewSubscriptionNone: the rail never enrolls new subscriptions (CCBill's
-	// retained cohort only).
+	// NewSubscriptionNone: the rail never enrolls new subscriptions.
 	NewSubscriptionNone NewSubscription = ""
 	// NewSubscriptionEngine: OpenRails collects on a saved method it charges.
 	NewSubscriptionEngine NewSubscription = "engine"
 	// NewSubscriptionOnChainPlan: the subscriber signs into the price's
 	// published on-chain plan, which OpenRails then pulls.
 	NewSubscriptionOnChainPlan NewSubscription = "on_chain_plan"
+	// NewSubscriptionHostedForm: the subscriber signs up on the provider's
+	// own payment form (a CCBill FlexForm), and the provider bills it.
+	NewSubscriptionHostedForm NewSubscription = "hosted_form"
 )
 
 func autoBilledNever(*models.Subscription) bool  { return false }
@@ -182,7 +184,7 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous verifies only until
 		// webhook_overlap_expires_at.
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "card_entry", "webhook_overlap_expires_at"},
+		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "card_entry", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
 		true,                  // OneOffSale (direct gateway sale)
 		NewSubscriptionEngine, // saved vault card charged by OpenRails
 		true,                  // ServerCardEntry (Direct Post customer_vault=add_customer)
@@ -201,10 +203,10 @@ var descriptors = []Descriptor{
 		cancelDestructive, // DataLink SMS cancel: no resume API, access rides the paid runway
 		"",                // CancelPortalURL (cancels happen on our site)
 		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
-		nil,
-		false,               // OneOffSale
-		NewSubscriptionNone, // retained cohort only; new sales are refused
-		false,               // ServerCardEntry (CCBill's own page takes the card)
+		[]string{"fallback_for", "fallback_after_failures"},
+		false,                     // OneOffSale
+		NewSubscriptionHostedForm, // an order's FlexForm sale; CCBill bills it
+		false,                     // ServerCardEntry (CCBill's own page takes the card)
 	},
 	{
 		models.RailStripe,
@@ -222,7 +224,7 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous keeps events queued on the rotated-out
 		// endpoint verifying, never past webhook_overlap_expires_at.
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"publishable_key", "webhook_overlap_expires_at"},
+		[]string{"publishable_key", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
 		true,                  // OneOffSale
 		NewSubscriptionEngine, // saved PaymentMethod charged by OpenRails
 		false,                 // ServerCardEntry (Stripe's own fields take the card)

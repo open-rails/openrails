@@ -47,7 +47,7 @@ read them, and a request a rail cannot serve is refused, never dropped.
 | | NMI | Stripe | CCBill | Solana |
 |---|---|---|---|---|
 | One-time purchase | yes (gateway sale) | yes | no | yes (Solana Pay) |
-| New subscription | OpenRails collects on the saved card | OpenRails collects on the saved card | no: existing subscribers only | the price's published on-chain plan |
+| New subscription | OpenRails collects on the saved card | OpenRails collects on the saved card | an order's sale on the price's FlexForm; CCBill bills it | the price's published on-chain plan |
 | Trial first phase on a new subscription | no | no | no | no |
 | Renewals of an imported, provider-scheduled subscription | NMI charges; OpenRails retries its declines | Stripe charges and retries | CCBill charges and retries | n/a |
 | Card entry | Collect.js token, or server card entry when the PSP declares it | Stripe Elements; a hosted redirect for one-off without a publishable key | CCBill's own page | none: a wallet |

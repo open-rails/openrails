@@ -1,7 +1,9 @@
 // Shows an order and pays it, on the host's own page: a saved card, a new card
 // in the PSP's own fields (charged and saved in one call), Apple Pay or Google
-// Pay through a Stripe PSP (when asked), or a Solana wallet through a Solana
-// Pay QR. A bank challenge runs in the page, then confirm.
+// Pay through a Stripe PSP (when asked), a Solana wallet through a Solana
+// Pay QR, or a PSP's own page. A bank challenge runs in the page, then
+// confirm. A fallback PSP (the order lists it once the merchant's card PSP
+// cannot take the payment) is offered as the way out of a failing card.
 // Driven only by the order API (GET, pay, confirm), GET /config and GET
 // /me/config; never cancels.
 import * as React from "react"
@@ -185,7 +187,7 @@ export function OrderPayment({
     cardPsps.find((item) => item.psp_id === pspID) ?? cardPsps[0]
   const solana = options.find((option) => option.accepts.includes("solana_pay"))
   // A PSP with no fields in this page takes the order on its hosted page.
-  const hosted = psps.filter(
+  const redirects = psps.filter(
     (item) =>
       cardSetupDriver(item) === null &&
       options.some(
@@ -193,6 +195,10 @@ export function OrderPayment({
           option.psp_id === item.psp_id && option.accepts.includes("redirect")
       )
   )
+  const fallsBack = (item: PspConfig) =>
+    options.some((option) => option.psp_id === item.psp_id && option.fallback)
+  const hosted = redirects.filter((item) => !fallsBack(item))
+  const fallbacks = redirects.filter(fallsBack)
   const tokens = solana ? (merchant?.payment.solana?.tokens ?? []) : []
   const walletPsp = wallets
     ? cardPsps.find(
@@ -315,6 +321,16 @@ export function OrderPayment({
     order.status === "open" &&
     order.payment.status === "requires_action" &&
     order.payment.next_action?.type === "authenticate"
+  // Back from a PSP's page before it reported the payment.
+  const awaitingRedirect =
+    order.collection_owner === "engine" &&
+    order.status === "open" &&
+    order.payment.status === "requires_action" &&
+    order.payment.next_action?.type === "redirect_to_url" &&
+    !!order.payment.next_action.url
+  const redirectPsp = merchant?.payment.psps.find(
+    (item) => item.psp_id === order.payment.next_action?.psp_id
+  )
 
   // A usage order is paid for what it still owes; a written-off one too.
   const due = order.usage?.amount_due ?? order.total
@@ -384,6 +400,23 @@ export function OrderPayment({
         <p role="status" className="text-sm text-muted-foreground">
           This order can no longer be paid.
         </p>
+      ) : awaitingRedirect ? (
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            window.location.assign(order.payment.next_action!.url!)
+          }}
+        >
+          <p className="text-sm text-muted-foreground">
+            Your payment is waiting on{" "}
+            {redirectPsp?.display_name ?? "the payment page"}.
+          </p>
+          <PayButton
+            label={`Continue to ${redirectPsp?.display_name ?? "the payment page"}`}
+            processing={false}
+          />
+        </form>
       ) : awaitingAuthentication ? (
         <form
           className="grid gap-4"
@@ -502,7 +535,7 @@ export function OrderPayment({
                 </form>
               )}
             </>
-          ) : solana || hosted.length > 0 ? null : (
+          ) : solana || hosted.length > 0 || fallbacks.length > 0 ? null : (
             <p role="alert" className="text-sm text-destructive">
               {m.t("paymentMethods.unavailable")}
             </p>
@@ -525,6 +558,29 @@ export function OrderPayment({
               />
             </form>
           ))}
+          {fallbacks.length > 0 ? (
+            <div className="grid gap-2 border-t border-border pt-4">
+              <p className="text-[13px] text-muted-foreground">
+                Card payment isn&apos;t working?
+              </p>
+              {fallbacks.map((item) => (
+                <button
+                  key={item.psp_id}
+                  type="button"
+                  className="h-9 rounded-md border border-border text-sm"
+                  disabled={busy || !open}
+                  onClick={() =>
+                    void pay(async () => ({
+                      return_url: returnUrl ?? window.location.href,
+                      psp_id: item.psp_id,
+                    }))
+                  }
+                >
+                  Pay with {item.display_name}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {solana && tokens.length > 0 ? (
             <div className="grid gap-2 border-t border-border pt-4">
               {tokens.map((token) => (

@@ -1467,6 +1467,7 @@ export type OrderPaymentOption = {
   psp_id: string
   rail: string
   accepts: string[]
+  fallback: boolean
 }
 
 export type OrderPaymentParams = {

@@ -144,7 +144,10 @@ customer's browser, which pays it signed in:
 ```
 
 `onSettled` follows a complete order, or one processing on an asynchronous
-rail. A subscription line names its subscription once paid.
+rail. A subscription line names its subscription once paid. A fallback PSP
+the order lists (CCBill once the card PSP has failed or is unavailable) is
+offered under "Card payment isn't working?"; a customer back from a PSP's
+page before it reported is offered to continue there.
 
 ## Account billing
 

@@ -116,6 +116,7 @@ export type OpenRailsErrorCode =
   | "payment_not_refundable"
   | "payment_not_retryable"
   | "payment_option_unavailable"
+  | "payment_option_withheld"
   | "payment_provider_rejected"
   | "permission_required"
   | "platform_vault_unavailable"
@@ -314,6 +315,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
   payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
+  payment_option_withheld: { status: 409, type: "invalid_request_error", meaning: "The PSP is a fallback: it takes the order only once its primary PSPs are unavailable or have failed on it often enough." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
   platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant." },

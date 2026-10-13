@@ -100,6 +100,12 @@ func sampleFor(t *testing.T, field reflect.Value, name string) any {
 	case *time.Time:
 		*v = time.Date(2026, 10, 8, 12, 0, 0, 0, time.FixedZone("x", 3600))
 		return "2026-10-08T11:00:00Z"
+	case *[]string:
+		*v = []string{"sample-" + name}
+		return []any{"sample-" + name}
+	case *int:
+		*v = 3
+		return 3
 	case *map[string]SolanaToken:
 		*v = map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "mint-" + name, Name: "Xyz"}}
 		return map[string]any{"SOL": map[string]any{}, "XYZ": map[string]any{"mint": "mint-" + name, "name": "Xyz"}}

@@ -66,6 +66,9 @@ type railPublicProfile struct {
 	// declared: the browser can then drive the PSP's own embedded fields.
 	EmbeddedFlow    string
 	EmbeddedSetting string
+	// DisplayName names the PSP to the paying customer when it is not the
+	// rail's subscriber-facing name: the page they are sent to.
+	DisplayName string
 }
 
 // publicRailProfiles is THE WHITELIST. It is the only path by which anything
@@ -94,7 +97,7 @@ var publicRailProfiles = map[string]railPublicProfile{
 	string(models.RailStripe): {Flow: FlowRedirect, EmbeddedFlow: FlowElements, EmbeddedSetting: "publishable_key", Settings: []publicSetting{
 		{Setting: "publishable_key", Field: "publishable_key"},
 	}},
-	string(models.RailCCBill): {Flow: FlowRedirect},
+	string(models.RailCCBill): {Flow: FlowRedirect, DisplayName: "CCBill"},
 	// Solana's browser config (network, chain, mints) is already served, fully
 	// derived, by GET /solana/config; nothing on the PSP row is public.
 	string(models.RailSolana): {Flow: FlowWallet},
@@ -140,6 +143,9 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 		Custodian:   models.CustodianPSP,
 		DisplayName: rails.DisplayName(models.Rail(rail)),
 		Flow:        profile.Flow,
+	}
+	if profile.DisplayName != "" {
+		out.DisplayName = profile.DisplayName
 	}
 
 	entry, err := config.CardEntry(rail, scope.Settings, scope.CustodianID != nil)

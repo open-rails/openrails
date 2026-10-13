@@ -500,14 +500,20 @@ func (s *CCBillWebhookService) validateWebhookAuth(ctx context.Context) error {
 	return nil
 }
 
-// CCBillNewSubscriptionRefused is the refusal code for a NewSaleSuccess that
-// would enroll a new CCBill agreement. OpenRails issues no CCBill FlexForms;
-// it services only imported CCBill memberships.
+// CCBillNewSubscriptionRefused is the refusal code for a NewSaleSuccess no
+// order attempt of OpenRails' issued: a FlexForm link OpenRails did not sign.
 const CCBillNewSubscriptionRefused = "ccbill_new_subscription_unsupported"
 
-// handleNewSaleSuccess never enrolls. A sale for a membership OpenRails holds
-// is a replay and changes nothing; any other sale is refused with an operator
-// repair alert, because CCBill has taken money OpenRails will not honour.
+// CCBillSaleUnhonored is the refusal code for a sale of an order attempt
+// that the order no longer takes, or that contradicts the attempt.
+const CCBillSaleUnhonored = "ccbill_sale_unhonored"
+
+// handleNewSaleSuccess settles the sale of the order attempt its
+// reservationId names: the order completes with the subscription CCBill
+// bills. A sale for a membership OpenRails holds is a replay and changes
+// nothing. A sale no attempt issued, or one its order no longer takes, is
+// refused with an operator repair alert: CCBill has taken money OpenRails
+// will not honour.
 func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 	var data CCBillNewSaleSuccessEvent
 	if err := json.Unmarshal(s.Data.EventBody, &data); err != nil {
@@ -529,8 +535,29 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 			return fmt.Errorf("look up CCBill subscription for NewSaleSuccess: %w", err)
 		}
 	}
+	if attemptID, ok := ccbillReservation(data.ReservationID); ok && s.OrderAttemptService != nil && railSubID != "" && transactionID != "" {
+		err := s.settleOrderSale(ctx, attemptID, &data)
+		var refused *payments.CCBillSaleUnhonored
+		switch {
+		case err == nil:
+			return nil
+		case errors.As(err, &refused):
+			if alertErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
+				Provider: string(models.RailCCBill), Operation: CCBillSaleUnhonored, TransactionID: transactionID,
+				IdempotencyKey: CCBillSaleUnhonored + ":" + transactionID, Err: refused,
+				Metadata: map[string]any{"rail_subscription_id": railSubID, "order_attempt_id": billing.OrderAttemptID(attemptID).String(), "reason": refused.Reason},
+			}); alertErr != nil {
+				return fmt.Errorf("record unhonored CCBill sale repair alert: %w", alertErr)
+			}
+			log.WithContext(ctx).WithFields(log.Fields{"rail_subscription_id": railSubID, "transaction_id": transactionID, "reason": refused.Reason}).
+				Error("Unhonored CCBill sale: refund and cancel it at CCBill")
+			return MarkWebhookErrorNonRetryable(&WebhookRefusal{Code: CCBillSaleUnhonored, Err: refused})
+		case !db.IsNotFound(err):
+			return err
+		}
+	}
 
-	refusal := fmt.Errorf("CCBill NewSaleSuccess for unknown subscription %q refused: new CCBill subscriptions are not supported", railSubID)
+	refusal := fmt.Errorf("CCBill NewSaleSuccess for unknown subscription %q refused: no order attempt issued its FlexForm", railSubID)
 	key := transactionID
 	if key == "" {
 		key = railSubID
@@ -556,6 +583,44 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 		"transaction_id":       transactionID,
 	}).Error("Refused CCBill NewSaleSuccess: OpenRails does not enroll new CCBill subscriptions")
 	return MarkWebhookErrorNonRetryable(&WebhookRefusal{Code: CCBillNewSubscriptionRefused, Err: refusal})
+}
+
+// ccbillReservation is the order attempt a FlexForm's reservationId names.
+func ccbillReservation(raw string) (uuid.UUID, bool) {
+	id, err := billing.ParseOrderAttemptID(strings.TrimSpace(raw))
+	if err != nil || id.IsZero() {
+		return uuid.Nil, false
+	}
+	return id.UUID(), true
+}
+
+// settleOrderSale hands the sale, as CCBill billed it, to its order attempt.
+func (s *CCBillWebhookService) settleOrderSale(ctx context.Context, attemptID uuid.UUID, data *CCBillNewSaleSuccessEvent) error {
+	currency, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
+	if err != nil {
+		return &payments.CCBillSaleUnhonored{Reason: "terms_mismatch", Detail: err.Error()}
+	}
+	initial, err := parseCCBillAmountCents(currency, data.BilledInitialPrice, "billedInitialPrice", "billedInitialPrice", false)
+	if err != nil {
+		return &payments.CCBillSaleUnhonored{Reason: "terms_mismatch", Detail: err.Error()}
+	}
+	sale := payments.CCBillSale{
+		SubscriptionID: strings.TrimSpace(data.SubscriptionID), TransactionID: strings.TrimSpace(data.TransactionID), Username: strings.TrimSpace(data.Username),
+		FlexID: strings.TrimSpace(data.FlexID), FormName: strings.TrimSpace(data.FormName), RecurringBillingOptionID: strings.TrimSpace(data.SubscriptionTypeID),
+		Currency: currency, InitialMinor: int64(initial), SoldAt: ccbillEventPurchasedAt(data.Timestamp),
+	}
+	if strings.TrimSpace(data.BilledRecurringPrice) != "" {
+		recurring, err := parseCCBillAmountCents(currency, data.BilledRecurringPrice, "billedRecurringPrice", "billedRecurringPrice", false)
+		if err != nil {
+			return &payments.CCBillSaleUnhonored{Reason: "terms_mismatch", Detail: err.Error()}
+		}
+		minor := int64(recurring)
+		sale.RecurringMinor = &minor
+	}
+	if sale.NextRenewalAt, err = parseCCBillDateUsingTimestamp(data.NextRenewalDate); err != nil {
+		return &payments.CCBillSaleUnhonored{Reason: "terms_mismatch", Detail: err.Error()}
+	}
+	return s.OrderAttemptService.SettleOrderCCBill(ctx, attemptID, sale)
 }
 
 // ccbillEventPurchasedAt parses a CCBill event `timestamp` ("YYYY-MM-DD HH:MM:SS",
@@ -593,11 +658,26 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	if _, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode"); err != nil {
 		return err
 	}
+	// The decline of an order attempt's sale: the order takes another
+	// payment, and the attempt names its customer.
+	ordered := ""
+	if attemptID, ok := ccbillReservation(data.ReservationID); ok && s.OrderAttemptService != nil {
+		customer, err := s.OrderAttemptService.DeclineOrderCCBill(ctx, attemptID, failureCode, failureReason)
+		switch {
+		case err == nil:
+			ordered = customer.String()
+		case !db.IsNotFound(err):
+			return err
+		}
+	}
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		userID, err := s.resolveUserID(ctx, data.Username)
-		if err != nil {
-			return err
+		userID := ordered
+		if userID == "" {
+			var err error
+			if userID, err = s.resolveUserID(ctx, data.Username); err != nil {
+				return err
+			}
 		}
 
 		if priceLookupErr != nil {

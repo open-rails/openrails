@@ -9,8 +9,9 @@ CCBill is a payment-page payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own
 name such as `mobius`). CCBill owns the card vault and the rebill schedule:
-OpenRails never sees card data, takes no new sales on this rail, and follows
-the subscriptions CCBill already bills through its webhooks.
+OpenRails never sees card data. It sells a subscription on the price's
+FlexForm through an order, usually as a card PSP's fallback, and follows
+every CCBill subscription through its webhooks.
 
 ### Account structure
 
@@ -45,6 +46,10 @@ psps:
     rail: ccbill
     # clientAccnum-clientSubacc, dash-joined:
     account_id: "999999-0000"
+    settings:
+      # Offered only when mobius can't take the order (see below).
+      fallback_for: [mobius]
+      fallback_after_failures: 2   # optional; 2 by default
     secrets:
       salt: replace-with-ccbill-flexform-salt
       # Optional pair — declare both or neither:
@@ -54,6 +59,17 @@ psps:
 
 That is the whole surface: no API key, no webhook signing secret (CCBill has
 no webhook HMAC — see below), and no per-merchant IP allowlist.
+
+### Fallback
+
+`fallback_for` makes CCBill (or any PSP) a fallback for the PSPs it names.
+An order lists it in `payment_options` (with `fallback: true`) only while
+none of them can take the order (unarmed, disarmed by posture, archived, or
+not selling its lines), or once the order has `fallback_after_failures`
+failed attempts through them. Paying through it otherwise is refused with
+`409 payment_option_withheld`. A PSP without `fallback_for`, Solana
+included, is a peer and is always offered. billing-ui's `OrderPayment` shows
+a fallback under "Card payment isn't working?".
 
 ### Catalog: linking prices to FlexForms
 
@@ -74,16 +90,46 @@ prices:
         form_name: "premium"
 ```
 
-The FlexForm's own pricing must match the catalog price: webhooks validate
-billed amounts against the catalog (2% tolerance) and reject a
-`flexId`/`formName` that doesn't match the price's link.
+The FlexForm's own pricing must match the catalog price exactly: a new
+sale must bill the order's total, and renewals are validated against the
+catalog (2% tolerance). A `flexId`/`formName` that doesn't match the price's
+link is rejected. A FlexForm sells subscriptions only: catalog application
+refuses a one-time price only CCBill could sell (`price_not_sellable`).
 
-### New sales and upgrades
+### New sales
 
-OpenRails sells nothing new on CCBill: purchase offers no CCBill option for a
-one-time price or a new subscription, and catalog application refuses a price
-that only CCBill could sell (`price_not_sellable`). Subscriptions that already
-bill at CCBill keep renewing there and stay mirrored.
+An order of one recurring line (one seat) whose price links a FlexForm can
+be paid on CCBill:
+
+- `POST /v1/me/orders/{id}/pay` with `payment: {psp_id: <ccbill>,
+  return_url}` opens an order attempt and answers the order awaiting the
+  customer: `next_action` is `redirect_to_url`, a signed FlexForm link
+  carrying the attempt id as `reservationId`, the customer's verified email
+  and username (from their credential, else the merchant's directory; else
+  `400 customer_email_required`). The payment page follows it in its frame.
+  Point the FlexForm's approval and denial URLs at the page customers return
+  to; the order completes from the webhook, not the return.
+- An order has one live CCBill page: paying again answers it. It lapses after
+  an hour; another payment then closes it.
+- `NewSaleSuccess` naming the attempt completes the order and opens the
+  subscription CCBill bills (`collection_policy: provider`, its
+  `rail_subscription_id`) with its access, in one transaction. The sale must
+  bill the order's currency and total on the attempt's FlexForm and username.
+  A redelivery changes nothing.
+- `NewSaleFailure` naming the attempt fails it: the order takes another
+  payment with `last_payment_error`.
+- A sale the order no longer takes is never granted: the order was paid
+  otherwise, a second sale on the same page, the customer already holds the
+  membership, or the sale contradicts the attempt. It is refused
+  (`ccbill_sale_unhonored`) with a `consistency.ledger.unbooked` finding:
+  refund and cancel it at CCBill. A sale on a lapsed page still pays an order
+  nothing else paid. One for an order that closed meanwhile revives it, or,
+  when what it buys is held, is recorded for refund with a finding to cancel
+  it at CCBill.
+- A `NewSaleSuccess` no OpenRails attempt issued is refused
+  (`ccbill_new_subscription_unsupported`) with the same finding.
+
+### Upgrades
 
 A customer's tier upgrade (`POST /v1/me/subscriptions/{id}/change`)
 answers `requires_action` with a `redirect_to_url` next action, a FlexForm URL

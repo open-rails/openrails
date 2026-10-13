@@ -66,6 +66,16 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 			return models.PSPRoutingSkipCredentialsMissing
 		}
 		return ""
+	case models.RailCCBill:
+		// A subscription sold on the price's own FlexForm, its link signed
+		// with the account's salt.
+		if providerConfig.CCBill == nil || strings.TrimSpace(providerConfig.CCBill.Salt) == "" {
+			return models.PSPRoutingSkipCredentialsMissing
+		}
+		if link == nil || strings.TrimSpace(link[models.RailKeyCCBillFlexID]) == "" || strings.TrimSpace(link[models.RailKeyCCBillFormName]) == "" {
+			return models.PSPRoutingSkipLinkMissing
+		}
+		return ""
 	case models.RailSolana:
 		if providerConfig.Solana == nil || len(providerConfig.Solana.Tokens) == 0 {
 			return models.PSPRoutingSkipCredentialsMissing

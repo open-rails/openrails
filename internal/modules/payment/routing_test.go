@@ -77,7 +77,7 @@ func armedAll() railresolve.FixedSet {
 	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, AccountID: "acct_stripe", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"}},
 		"nmi":    {Rail: models.RailNMI, AccountID: "acct_nmi", NMI: &config.NMIRailConfig{SecurityKey: "security_test"}},
-		"ccbill": {Rail: models.RailCCBill, AccountID: "999999-0000", CCBill: &config.CCBillRailConfig{}},
+		"ccbill": {Rail: models.RailCCBill, AccountID: "999999-0000", CCBill: &config.CCBillRailConfig{Salt: "salt_test"}},
 	}
 }
 
@@ -193,11 +193,10 @@ func TestRouteDefaultPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.PSPRoutingPolicyDefault, decision.Policy)
 	require.Equal(t, "stripe", decision.Selected())
-	require.Equal(t, []string{"stripe", "nmi"}, decision.Eligible())
+	require.Equal(t, []string{"stripe", "nmi", "ccbill"}, decision.Eligible(), "CCBill sells a subscription on its FlexForm")
 	reason := decision.Reason()
-	require.Equal(t, []string{"nmi"}, reason.Fallbacks)
+	require.Equal(t, []string{"nmi", "ccbill"}, reason.Fallbacks)
 	require.Equal(t, []models.PSPRoutingSkip{
-		{Selector: "ccbill", Reason: models.PSPRoutingSkipModeUnsupported},
 		{Selector: "solana", Reason: models.PSPRoutingSkipNotArmed},
 	}, reason.Skipped)
 
@@ -231,10 +230,12 @@ func TestRouteExplicitSelector(t *testing.T) {
 	require.Empty(t, decision.Reason().Skipped)
 
 	// A named PSP still has to be able to make the sale.
-	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.PurchaseSubscription, Selector: "ccbill"})
+	oneOff := recurringPrice()
+	oneOff.BillingIntervalHours = nil
+	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: oneOff, Mode: models.PurchaseOneOff, Selector: "ccbill"})
 	require.ErrorIs(t, err, ErrNoRoutableProcessor)
 	require.Empty(t, decision.Selected())
-	require.Equal(t, models.PSPRoutingSkipModeUnsupported, decision.Candidates[0].Skip)
+	require.Equal(t, models.PSPRoutingSkipModeUnsupported, decision.Candidates[0].Skip, "a FlexForm sells subscriptions only")
 
 	declared := merchants.PSPScope{ID: uuid.New(), Rail: "stripe", Environment: "live", AccountID: "acct_declared", Key: "stripe-declared"}
 	decision, err = routingService(armedAll(), declared).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Selector: "stripe-declared"})
@@ -306,6 +307,8 @@ func TestRailSkipReason(t *testing.T) {
 	noCycle.BillingIntervalHours = nil
 	free := recurringPrice()
 	free.Amount = 0
+	noFlexForm := recurringPrice()
+	delete(noFlexForm.PSPLinks["ccbill"], models.RailKeyCCBillFlexID)
 	oneOff := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD"}
 	solanaLinked := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD", PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana"}}}
 	solanaPlan := recurringPrice()
@@ -325,7 +328,9 @@ func TestRailSkipReason(t *testing.T) {
 		{"nmi engine subscription", "nmi", sub, nmiCfg, S, ""},
 		{"stripe missing key", "stripe", sub, &config.ResolvedPSP{}, S, models.PSPRoutingSkipCredentialsMissing},
 		{"nmi blank key", "nmi", sub, &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "  "}}, S, models.PSPRoutingSkipCredentialsMissing},
-		{"ccbill new enrollment", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, S, models.PSPRoutingSkipModeUnsupported},
+		{"ccbill FlexForm enrollment", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{Salt: "salt"}}, S, ""},
+		{"ccbill without its salt", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, S, models.PSPRoutingSkipCredentialsMissing},
+		{"ccbill without a FlexForm", "ccbill", noFlexForm, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{Salt: "salt"}}, S, models.PSPRoutingSkipLinkMissing},
 		{"solana subscription without a published plan", "solana", sub, solanaCfg, S, models.PSPRoutingSkipLinkMissing},
 		{"solana plan without recurring services", "solana", solanaPlan, solanaCfg, S, models.PSPRoutingSkipServiceUnavailable},
 		{"trial terms", "stripe", trial, stripeCfg, S, models.PSPRoutingSkipModeUnsupported},

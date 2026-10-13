@@ -58,7 +58,7 @@ func (s *OrderAttemptService) payOrderSolana(ctx context.Context, in OrderPayInp
 	case !db.IsNotFound(err):
 		return OrderCharge{}, err
 	}
-	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, in.Order, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}
@@ -114,6 +114,11 @@ func (s *OrderAttemptService) openOrderSolana(ctx context.Context, order *orders
 			return err
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
+		if replaces == uuid.Nil {
+			if err := s.releaseLapsedCCBill(ctx, s.db.NewWithPgxTx(tx), &current, now); err != nil {
+				return err
+			}
+		}
 		awaiting := current.PaymentStatus == string(billing.OrderPaymentRequiresAction)
 		switch {
 		case current.CollectionOwner != string(billing.OrderCollectionEngine):

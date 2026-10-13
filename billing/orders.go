@@ -304,12 +304,16 @@ type OrderLine struct {
 }
 
 // OrderPaymentOption is one PSP that can take an order's lines, and what it
-// accepts: saved_card and new_card on a card PSP, redirect (its hosted page)
-// on Stripe and solana_pay on Solana, both for one-time lines.
+// accepts: saved_card and new_card on a card PSP; redirect (its hosted page)
+// on Stripe for one-time lines and on CCBill for one subscription;
+// solana_pay on Solana. Fallback: the PSP stands in for the merchant's
+// primary PSPs, which are unavailable or have failed on this order; a
+// fallback is listed only then.
 type OrderPaymentOption struct {
-	PSPID   PSPID    `json:"psp_id"`
-	Rail    string   `json:"rail"`
-	Accepts []string `json:"accepts"`
+	PSPID    PSPID    `json:"psp_id"`
+	Rail     string   `json:"rail"`
+	Accepts  []string `json:"accepts"`
+	Fallback bool     `json:"fallback"`
 }
 
 // OrderPreview prices lines as an order would freeze them.

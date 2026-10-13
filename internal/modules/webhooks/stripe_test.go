@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
 func TestRedactStripeClientSecretsPreservesExactNumbers(t *testing.T) {
@@ -115,6 +116,14 @@ type recordingOrderAttemptStore struct {
 
 func (s *recordingOrderAttemptStore) SettleOrderHosted(context.Context, uuid.UUID, string, string, string, int64) error {
 	return nil
+}
+
+func (s *recordingOrderAttemptStore) SettleOrderCCBill(context.Context, uuid.UUID, payments.CCBillSale) error {
+	return nil
+}
+
+func (s *recordingOrderAttemptStore) DeclineOrderCCBill(context.Context, uuid.UUID, string, string) (uuid.UUID, error) {
+	return uuid.Nil, nil
 }
 
 func (s *recordingOrderAttemptStore) CloseOrderHosted(_ context.Context, id uuid.UUID, failed bool) error {

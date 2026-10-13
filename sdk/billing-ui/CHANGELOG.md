@@ -1,5 +1,12 @@
 # Changelog
 
+## Fallback PSPs
+
+- `OrderPayment` offers a payment option marked `fallback` (CCBill once the
+  card PSP failed or is unavailable) under "Card payment isn't working?", and
+  a customer back from a PSP's page before it reported continues there.
+  `OrderPaymentOption` gains `fallback`.
+
 ## An order and its pay URL
 
 - Breaking: "checkout" is gone. `EmbeddedCheckout` is `EmbeddedPayment`,

@@ -261,6 +261,12 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 	if _, err := config.NMIEndpointDeployment(p.Settings); rail == string(models.RailNMI) && err != nil {
 		return err
 	}
+	if err := config.ValidatePSPFallback(key, p.Settings, func(primary string) bool {
+		held, ok := set.PSPs[primary]
+		return ok && held.Value.Environment == p.Environment
+	}); err != nil {
+		return err
+	}
 	if custodian != "" {
 		held, ok := set.Custodians[custodian]
 		if !ok || held.Value.Environment != p.Environment {

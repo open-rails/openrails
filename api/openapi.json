@@ -234,6 +234,7 @@
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
+          "customer_email_required",
           "customer_session_required",
           "embed_origins_required",
           "entitlement_required",
@@ -249,6 +250,7 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
+          "payment_option_withheld",
           "payment_provider_rejected",
           "quantity_not_allowed",
           "resource_conflict",
@@ -473,6 +475,7 @@
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
+          "customer_email_required",
           "entitlement_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -484,6 +487,7 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
+          "payment_option_withheld",
           "payment_provider_rejected",
           "resource_conflict",
           "resource_not_found",
@@ -11556,6 +11560,7 @@
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
+          "customer_email_required",
           "entitlement_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -11567,6 +11572,7 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
+          "payment_option_withheld",
           "payment_provider_rejected",
           "resource_conflict",
           "resource_not_found",
@@ -18638,12 +18644,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "fallback": {
+            "type": "boolean"
           }
         },
         "required": [
           "psp_id",
           "rail",
-          "accepts"
+          "accepts",
+          "fallback"
         ]
       },
       "OrderPaymentParams": {
@@ -23926,6 +23936,11 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "No PSP that can take the order's lines accepts this payment."
+    },
+    "payment_option_withheld": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The PSP is a fallback: it takes the order only once its primary PSPs are unavailable or have failed on it often enough."
     },
     "payment_provider_rejected": {
       "status": 502,

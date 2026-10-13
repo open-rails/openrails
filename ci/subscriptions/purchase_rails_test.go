@@ -111,7 +111,7 @@ func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
 	require.Equal(t, []string{"solana_pay"}, monthly["solana"].Accepts, "a price with a Solana plan subscribes from a wallet: %+v", monthly)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["nmi"].Accepts)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["stripe"].Accepts, "a recurring line is no Stripe hosted sale")
-	require.NotContains(t, monthly, "ccbill", "CCBill never enrolls a new subscription")
+	require.NotContains(t, monthly, "ccbill", "the price links no FlexForm")
 
 	once := w.options(pid(priceID(t, w, key, key+"-once")))
 	require.Equal(t, []string{"solana_pay"}, once["solana"].Accepts)
@@ -154,7 +154,9 @@ func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
 	}
 }
 
-func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
+// A CCBill PSP that is no fallback is a peer: it sells a subscription whose
+// price links a FlexForm, on that form, and nothing one-time.
+func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
 	w := newWorld(t)
 	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
@@ -167,24 +169,23 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
         form_name: %s
         flex_id: %s
         recurring_billing_option_id: "%s"
-`, ccbillFormName, ccbillFlexID, ccbillRBO))
-	require.NoError(t, err, "armed engine rails sell the price on local terms")
+  "{key}-once":
+    currency: usd
+    unit_amount: 5000000
+    billing_interval_hours: null
+    access_duration_hours: 720
+    psps: [ccbill]
+    psp_links:
+      ccbill:
+        form_name: %s
+        flex_id: %s
+`, ccbillFormName, ccbillFlexID, ccbillRBO, ccbillFormName, ccbillFlexID))
+	require.NoError(t, err, "armed engine rails sell the one-time price on local terms")
 	options := w.options(pid(priceID(t, w, key, key+"-monthly")))
-	require.NotContains(t, options, "ccbill")
+	require.Equal(t, []string{"redirect"}, options["ccbill"].Accepts, "%+v", options)
+	require.False(t, options["ccbill"].Fallback)
 	require.Contains(t, options, "nmi")
-
-	// The order takes no payment on CCBill: no option names it.
-	buyer := w.newCustomer()
-	session, err := buyer.sell(embedded, order{price: pid(priceID(t, w, key, key+"-monthly"))})
-	require.NoError(t, err)
-	for _, option := range session.order.PaymentOptions {
-		require.NotEqual(t, "ccbill", option.Rail, "a CCBill PSP is never offered a new subscription")
-	}
-	_, err = session.buy(buyer, order{rail: "ccbill"})
-	require.Error(t, err, "CCBill sells nothing new")
-	var attempts int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.order_attempts WHERE customer_id = $1`), buyer.id).Scan(&attempts))
-	require.Zero(t, attempts, "no attempt is made on CCBill")
+	require.NotContains(t, w.options(pid(priceID(t, w, key, key+"-once"))), "ccbill", "a FlexForm sells subscriptions only")
 }
 
 func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
@@ -194,19 +195,18 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 		delete(psps, "nmi")
 	}
 	w.start()
-	_, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
+	_, err := w.applyCatalog(fmt.Sprintf(`  "{key}-once":
     currency: usd
     unit_amount: 23000000
-    billing_interval_hours: 720
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [ccbill]
     psp_links:
       ccbill:
         form_name: %s
         flex_id: %s
-        recurring_billing_option_id: "%s"
-`, ccbillFormName, ccbillFlexID, ccbillRBO))
-	require.Error(t, err)
+`, ccbillFormName, ccbillFlexID))
+	require.Error(t, err, "a FlexForm sells no one-time price")
 	var status *billing.StatusError
 	require.True(t, errors.As(err, &status), "%v", err)
 	require.Equal(t, "price_not_sellable", status.Code, "%v", err)

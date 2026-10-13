@@ -97,7 +97,7 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, nil, quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,42 @@ func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderAct
 		return payment.OrderCharge{}, err
 	}
 	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	return rt.Attempts.PayOrder(ctx, payment.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user, Prices: quote.prices, Products: quote.products})
+	identify := func(ctx context.Context, user *payment.UserIdentity) error { return s.identify(ctx, actor, user) }
+	return rt.Attempts.PayOrder(ctx, payment.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user,
+		Identify: identify, Prices: quote.prices, Products: quote.products})
+}
+
+// identify names the customer to a provider's own page (a CCBill FlexForm):
+// the verified email and username their credential carries, else the
+// merchant's directory's.
+func (s *Service) identify(ctx context.Context, actor OrderActor, user *payment.UserIdentity) error {
+	if p := actor.Principal; p.EmailVerified && strings.TrimSpace(p.Email) != "" {
+		email := strings.TrimSpace(p.Email)
+		user.Email = &email
+	}
+	user.Username = strings.TrimSpace(actor.Principal.Username)
+	if (user.Email != nil && user.Username != "") || s.rt.Contacts == nil {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	found, err := s.rt.Contacts.Contacts(ctx, mid, []uuid.UUID{actor.Customer.UUID()})
+	if err != nil {
+		return err
+	}
+	contact, ok := found[actor.Customer.UUID()]
+	if !ok {
+		return nil
+	}
+	if email := strings.TrimSpace(contact.Email); user.Email == nil && email != "" {
+		user.Email = &email
+	}
+	if user.Username == "" {
+		user.Username = strings.TrimSpace(contact.Username)
+	}
+	return nil
 }
 
 // ConfirmOrder reads the provider after the customer completed next_action;
@@ -641,7 +676,7 @@ func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]
 	if err != nil {
 		return nil, err
 	}
-	return s.orderOptions(ctx, quote.prices, quote.products)
+	return s.orderOptions(ctx, order, quote.prices, quote.products)
 }
 
 type frozenLines struct {
@@ -669,14 +704,18 @@ func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenL
 	return out, nil
 }
 
-func (s *Service) orderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, prices, products)
+// orderOptions are the PSPs offered for order's lines (nil: an order not
+// yet created); a withheld fallback is not offered.
+func (s *Service) orderOptions(ctx context.Context, order *orders.Order, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, order, prices, products)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]billing.OrderPaymentOption, 0, len(options))
 	for _, o := range options {
-		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts()})
+		if !o.Withheld {
+			out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), Fallback: o.Fallback})
+		}
 	}
 	return out, nil
 }
@@ -687,7 +726,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	if i := quote.Refused(); i >= 0 {
 		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
 	}
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, nil, quote.Prices(), quote.Products())
 	if err != nil {
 		return err
 	}
@@ -714,7 +753,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return fmt.Errorf("%w: the card is %s", payment.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
-		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
+		if !o.Withheld && strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
 			return nil
 		}
 	}

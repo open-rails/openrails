@@ -150,7 +150,7 @@ it (`useConfig()`, `useCustomerConfig()`): `OrderPayment`, `AccountBilling` and
       "config": { "public_api_key": "<public Basis Theory application key>" } },
     { "key": "stripe", "rail": "stripe", "custodian": "psp", "display_name": "Stripe",
       "flow": "elements", "routed": true, "config": { "publishable_key": "pk_test_..." } },
-    { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
+    { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "CCBill", "flow": "redirect" },
     { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
   ]
 }
@@ -210,12 +210,17 @@ sale, per the rail registry:
 |---|---|---|
 | NMI, Stripe | yes | engine-collected on a saved card (no trial phase); an NMI token is saved first |
 | Solana | yes (Solana Pay) | a price with a Solana plan, alone on its order |
-| CCBill | no | no (imported subscriptions keep working) |
+| CCBill | no | a price with a FlexForm, alone on its order, on CCBill's page |
 
-Each payment option carries `psp_id`, `rail` and `accepts` (`saved_card`,
-`new_card`, `redirect`, `solana_pay`); the PSP's browser configuration is
-`payment` above. `@openrails/billing-ui` renders them as they are; hosts add no
-rail logic. Catalog application refuses an active price that declares PSPs when
+Each payment option carries `psp_id`, `rail`, `accepts` (`saved_card`,
+`new_card`, `redirect`, `solana_pay`) and `fallback`; the PSP's browser
+configuration is `payment` above. A PSP the merchant declares a fallback
+(`settings.fallback_for`, e.g. CCBill for the card PSP) is listed only while
+its primaries cannot take the order or have failed on it often enough, with
+`fallback: true`; paying through it otherwise is refused
+(`payment_option_withheld`). `@openrails/billing-ui` renders them as they
+are, a fallback under "Card payment isn't working?"; hosts add no rail
+logic. Catalog application refuses an active price that declares PSPs when
 none of them, nor any armed rail selling on local terms, can sell it
 (`price_not_sellable`).
 

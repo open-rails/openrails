@@ -67,15 +67,19 @@ func (s *OrderAttemptService) saleService() *NMISaleService {
 }
 
 // OrderOption is one PSP that can take every line of an order. Hosted: the
-// order can also be paid on the PSP's hosted page (Stripe Checkout, one-time
-// lines only). Custodian is the kind of the third party holding the cards
-// the PSP charges, CustodianID its account; "" when the PSP holds its own.
+// order can be paid on the PSP's own page (Stripe Checkout for one-time
+// lines, a CCBill FlexForm for one subscription). Custodian is the kind of
+// the third party holding the cards the PSP charges, CustodianID its
+// account; "" when the PSP holds its own. Fallback: the PSP stands in for
+// its primaries; Withheld: they still take the order, so it is not offered.
 type OrderOption struct {
 	PSPID       uuid.UUID
 	Rail        string
 	Hosted      bool
 	Custodian   string
 	CustodianID *uuid.UUID
+	Fallback    bool
+	Withheld    bool
 }
 
 // Solana reports a Solana Pay option.
@@ -88,6 +92,8 @@ func (o OrderOption) Accepts() []string {
 	switch {
 	case o.Solana():
 		return []string{"solana_pay"}
+	case models.Rail(o.Rail) == models.RailCCBill:
+		return []string{"redirect"}
 	case o.Custodian == models.CustodianBasisTheory:
 		return []string{"new_card"}
 	case o.Hosted:
@@ -96,12 +102,13 @@ func (o OrderOption) Accepts() []string {
 	return []string{"saved_card", "new_card"}
 }
 
-// OrderOptions are the PSPs that sell every line on rails OpenRails charges
-// itself: a card on NMI or Stripe, every recurring line an engine-owned
-// subscription; or a Solana wallet, for one-time lines or the one line of a
-// price with a Solana plan. A Basis Theory custodian's PSP sells one-time
-// lines.
-func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
+// OrderOptions are the PSPs that sell every line: a card on NMI or Stripe,
+// every recurring line an engine-owned subscription; a Solana wallet, for
+// one-time lines or the one line of a price with a Solana plan; or a CCBill
+// FlexForm, for the one line of a recurring price. A Basis Theory
+// custodian's PSP sells one-time lines. order is the order paid, nil for one
+// not yet created: its failed attempts unlock fallback PSPs.
+func (s *OrderAttemptService) OrderOptions(ctx context.Context, order *orders.Order, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
 	}
@@ -123,12 +130,17 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		var line []OrderOption
 		for _, c := range decision.Candidates {
 			rail := models.Rail(c.Rail)
-			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe && rail != models.RailSolana) {
+			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe && rail != models.RailSolana && rail != models.RailCCBill) {
 				continue
 			}
-			// A Solana plan subscribes an order of its one line.
+			// A Solana plan subscribes an order of its one line; so does a
+			// CCBill FlexForm, which sells nothing else.
 			plan := rail == models.RailSolana && len(linked) == 1 && priceHasSolanaRecurring(price.ForPSP(c.PSPID))
-			if price.IsRecurring() && !plan && (rail == models.RailSolana || rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine) {
+			form := rail == models.RailCCBill && len(linked) == 1 && price.IsRecurring()
+			if rail == models.RailCCBill && !form {
+				continue
+			}
+			if price.IsRecurring() && !plan && !form && (rail == models.RailSolana || rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine) {
 				continue
 			}
 			if i == 0 || containsOption(out, c.PSPID) {
@@ -143,7 +155,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 	}
 	options := []OrderOption{}
 	for _, o := range out {
-		o.Hosted = oneTime && models.Rail(o.Rail) == models.RailStripe
+		o.Hosted = oneTime && models.Rail(o.Rail) == models.RailStripe || models.Rail(o.Rail) == models.RailCCBill
 		if models.Rail(o.Rail) == models.RailNMI {
 			var err error
 			if o.Custodian, o.CustodianID, err = s.custodyOf(ctx, o); err != nil {
@@ -154,7 +166,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 			options = append(options, o)
 		}
 	}
-	return options, nil
+	return s.withFallbacks(ctx, order, options)
 }
 
 // custodyOf is who holds the cards an NMI option's PSP charges.
@@ -201,8 +213,11 @@ type OrderPayInput struct {
 	Hosted          *OrderHosted
 	Key             string
 	User            *UserIdentity
-	Prices          []*models.Price
-	Products        []*models.Product
+	// Identify fills User's verified email and username, which a provider's
+	// own page (a CCBill FlexForm) names the customer by.
+	Identify func(context.Context, *UserIdentity) error
+	Prices   []*models.Price
+	Products []*models.Product
 }
 
 // OrderCard is a card just entered in a PSP's own fields: its single-use
@@ -346,7 +361,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		return OrderCharge{}, err
 	}
 
-	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, in.Order, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}
@@ -395,7 +410,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			chosen = nil
 			for i, o := range options {
 				// A held card is charged through the PSP its custodian serves.
-				if !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
+				if o.Withheld || !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
 					continue
 				}
 				chosen = &options[i]
@@ -425,6 +440,9 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			return err
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
+		if err := s.releaseLapsedCCBill(ctx, d, &current, now); err != nil {
+			return err
+		}
 		switch {
 		case current.CollectionOwner != string(billing.OrderCollectionEngine):
 			return orders.ErrNotPayable
@@ -529,11 +547,24 @@ func SolanaOption(options []OrderOption, psp uuid.UUID) (*OrderOption, error) {
 }
 
 func pickOption(options []OrderOption, psp uuid.UUID, solana bool) (*OrderOption, error) {
+	return pick(options, psp, func(o OrderOption) bool { return o.Solana() == solana && models.Rail(o.Rail) != models.RailCCBill })
+}
+
+// pick is the option of kind that takes the order: the one named, or the
+// only one. A named fallback its primaries still cover is refused.
+func pick(options []OrderOption, psp uuid.UUID, kind func(OrderOption) bool) (*OrderOption, error) {
 	var found []*OrderOption
 	for i := range options {
-		if options[i].Solana() == solana && (psp == uuid.Nil || options[i].PSPID == psp) {
-			found = append(found, &options[i])
+		if !kind(options[i]) || psp != uuid.Nil && options[i].PSPID != psp {
+			continue
 		}
+		if options[i].Withheld {
+			if psp != uuid.Nil {
+				return nil, ErrFallbackWithheld
+			}
+			continue
+		}
+		found = append(found, &options[i])
 	}
 	switch len(found) {
 	case 0:
@@ -737,7 +768,7 @@ func (s *OrderAttemptService) OrderNextAction(ctx context.Context, order *orders
 		return nil, err
 	case solana:
 		return s.orderSolanaAction(order, attempt), nil
-	case hostedAttempt(attempt):
+	case hostedAttempt(attempt), ccbillAttempt(attempt):
 		return orderHostedAction(attempt), nil
 	}
 	purchase, ok := s.purchaseService.(*PurchaseService)
@@ -778,6 +809,8 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 		return OrderCharge{}, s.confirmOrderSolana(ctx, attempt, signature)
 	case hostedAttempt(attempt):
 		return s.confirmOrderHosted(ctx, attempt)
+	case ccbillAttempt(attempt):
+		return s.confirmOrderCCBill(ctx, attempt)
 	}
 	purchase, ok := s.purchaseService.(*PurchaseService)
 	if !ok {
@@ -821,6 +854,9 @@ func (s *OrderAttemptService) AbandonOrderAttempt(ctx context.Context, attemptID
 		return err
 	case hostedAttempt(attempt):
 		return s.abandonOrderHosted(ctx, attempt)
+	case ccbillAttempt(attempt):
+		// Nothing to close at CCBill: a sale reported later settles late.
+		return nil
 	}
 	operation, err := s.OrderOperation(ctx, attemptID)
 	if err != nil || operation.Status == intents.StatusSucceeded || operation.Status == intents.StatusFailedTerminal {

@@ -243,6 +243,9 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 		}
 	}
+	if err := ValidatePSPFallbacks(m.PSPs); err != nil {
+		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+	}
 	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
 }
@@ -318,6 +321,9 @@ func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
 			if err := ValidatePSPKeys(psp, m.PSPs[psp]); err != nil {
 				return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 			}
+		}
+		if err := ValidatePSPFallbacks(m.PSPs); err != nil {
+			return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 		}
 		out = append(out, m)
 	}

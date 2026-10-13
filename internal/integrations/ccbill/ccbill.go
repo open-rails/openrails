@@ -12,7 +12,8 @@ import (
 )
 
 // GenerateFlexFormURLParams are the inputs of a FlexForm subscription URL.
-// Empty Address1, City and State are omitted from it.
+// Empty customer name and address fields are omitted from it: CCBill's page
+// asks for them.
 type GenerateFlexFormURLParams struct {
 	Username      string `json:"username"`
 	Email         string `json:"email"`
@@ -87,13 +88,13 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	}
 
 	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName, currencyCode)
-	q.Set("customer_fname", params.CustomerFName)
-	q.Set("customer_lname", params.CustomerLName)
+	setOptional(q, "customer_fname", params.CustomerFName)
+	setOptional(q, "customer_lname", params.CustomerLName)
 	setOptional(q, "address1", params.Address1)
 	setOptional(q, "city", params.City)
 	setOptional(q, "state", params.State)
-	q.Set("zipcode", strings.TrimSpace(params.ZipCode))
-	q.Set("country", strings.TrimSpace(params.Country))
+	setOptional(q, "zipcode", params.ZipCode)
+	setOptional(q, "country", params.Country)
 	if reservationID := strings.TrimSpace(params.ReservationID); reservationID != "" {
 		q.Set("reservationId", reservationID)
 	}

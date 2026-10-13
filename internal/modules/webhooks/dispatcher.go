@@ -33,6 +33,11 @@ type webhookOrderAttemptStore interface {
 	// session expired or its delayed payment failed.
 	SettleOrderHosted(ctx context.Context, attemptID uuid.UUID, sessionID, paymentIntent, currency string, amountMinor int64) error
 	CloseOrderHosted(ctx context.Context, attemptID uuid.UUID, failed bool) error
+	// SettleOrderCCBill completes the order a CCBill sale of its FlexForm
+	// pays; DeclineOrderCCBill returns it to requires_payment_method,
+	// answering the attempt's customer.
+	SettleOrderCCBill(ctx context.Context, attemptID uuid.UUID, sale payments.CCBillSale) error
+	DeclineOrderCCBill(ctx context.Context, attemptID uuid.UUID, code, text string) (uuid.UUID, error)
 }
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.

@@ -121,6 +121,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
+| `payment_option_withheld` | 409 | `invalid_request_error` | The PSP is a fallback: it takes the order only once its primary PSPs are unavailable or have failed on it often enough. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
 | `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant. |

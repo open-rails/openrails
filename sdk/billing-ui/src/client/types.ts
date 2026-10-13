@@ -347,6 +347,8 @@ export const orderSchema = z.object({
         psp_id: z.string(),
         rail: z.string(),
         accepts: z.array(z.string()),
+        /** Stands in for the merchant's failing or unavailable card PSP. */
+        fallback: z.boolean().nullish().transform((v) => v ?? false),
       })
     )
     .nullish()
