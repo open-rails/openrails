@@ -482,7 +482,8 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			return err
 		}
 		payload := payments.NMISalePayload{
-			OrderAttemptID: attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,
+			OrderCaptchaSubjects: intents.OrderCaptchaSubjects(ctx),
+			OrderAttemptID:       attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,
 			Amount: current.Total, ListAmount: current.Total, Currency: current.Currency, Description: "Order " + billing.OrderID(order.ID).String(),
 			UserID: order.CustomerID.String(), PaymentID: uuidutil.NewV7(), AcceptedAt: now, Eligibility: string(EligibilityAllowed), OrderID: order.ID, Recurring: order.HasRecurring(),
 		}

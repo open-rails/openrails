@@ -29,6 +29,9 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
+	// OrderCaptchaSubjects preserves the initiating HTTP address for worker completion.
+	OrderCaptchaSubjects []string `json:"order_captcha_subjects,omitempty"`
+
 	LegacyEntitlements map[string]*int             `json:"legacy_entitlements,omitzero"`
 	OrderAttemptID     uuid.UUID                   `json:"order_attempt_id,omitempty"`
 	RequestFingerprint string                      `json:"request_fingerprint"`

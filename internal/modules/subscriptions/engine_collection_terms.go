@@ -20,6 +20,8 @@ const TypeSubscriptionCollection = "subscription_collection"
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd
 // fences the old obligation even when the purchased period starts after a gap.
 type SubscriptionCollectionPayload struct {
+	// OrderCaptchaSubjects preserves the initiating HTTP address for worker completion.
+	OrderCaptchaSubjects     []string                  `json:"order_captcha_subjects,omitempty"`
 	Initiator                charge.Initiator          `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID                `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms              `json:"renewal"`

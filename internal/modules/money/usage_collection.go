@@ -408,7 +408,8 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeOrderCollection,
 			Payload: intents.OrderCollectionPayload{
-				OrderID: orderID, CustomerID: payer.UUID(), PaymentID: paymentID, PaymentMethodID: method.ID, Initiator: opts.initiator,
+				OrderCaptchaSubjects: intents.OrderCaptchaSubjects(ctx),
+				OrderID:              orderID, CustomerID: payer.UUID(), PaymentID: paymentID, PaymentMethodID: method.ID, Initiator: opts.initiator,
 				Rail: normalizeRail(method.Rail), Instrument: instrument,
 				HyperSwitch: custody,
 				Currency:    order.Currency, Amount: due, AmountMinor: amountMinor,

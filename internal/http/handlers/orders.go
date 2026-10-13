@@ -17,7 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -112,6 +115,13 @@ func orderID(r *httprequest.Request) (billing.OrderID, bool) {
 // otherwise), or, when its payment failed, 402 card_error carrying the order,
 // as Stripe's carries its PaymentIntent. A replay says so.
 func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
+	// The blocking ledger updates after inline execution. Refresh its merchant
+	// attack challenge here without counting the payment's decline again.
+	if answer.Code == billing.CodeCardDeclined && !answer.Replayed {
+		ctx := r.Request.Context()
+		mid, _ := merchant.FromContext(ctx)
+		r.State.CardAbuseGuard.RecordChargeFailure(ctx, mid.UUID(), nil, r.State.CardFailureLedger.AttackMode(ctx, mid.UUID()))
+	}
 	r.SetHeader("Cache-Control", "no-store")
 	if answer.Replayed {
 		r.SetHeader("Idempotent-Replayed", "true")
@@ -183,7 +193,8 @@ func CreateMyOrder(r *httprequest.Request) {
 	if svc == nil {
 		return
 	}
-	answer, err := svc.CreateOrder(r.Request.Context(), *actor, body, key)
+	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	answer, err := svc.CreateOrder(ctx, *actor, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return
@@ -213,7 +224,8 @@ func PayMyOrder(r *httprequest.Request) {
 	if key == "" || svc == nil {
 		return
 	}
-	answer, err := svc.PayOrder(r.Request.Context(), *actor, id, body, key)
+	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	answer, err := svc.PayOrder(ctx, *actor, id, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return

@@ -255,3 +255,24 @@ func TestReadAppliesBillingContractOverIntactWire(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderCaptchaSubjectsInArchivePayloads(t *testing.T) {
+	for _, kind := range []string{"nmi_sale", "order_collection", "subscription_collection"} {
+		t.Run(kind, func(t *testing.T) {
+			shape := "provider_intents." + kind + ".payload"
+			for _, subjects := range []string{`[]`, `["ip:198.51.100.55"]`, `["ip:2001:db8::1"]`} {
+				if err := validateJSON(shape, `{"order_captcha_subjects":`+subjects+`}`); err != nil {
+					t.Fatalf("valid captcha subjects rejected: %v", err)
+				}
+			}
+			for _, subjects := range []string{`"ip:198.51.100.55"`, `[42]`, `[{"ip":"198.51.100.55"}]`} {
+				if err := validateJSON(shape, `{"order_captcha_subjects":`+subjects+`}`); err == nil {
+					t.Fatalf("invalid captcha subjects accepted: %s", subjects)
+				}
+			}
+			if err := validateJSON(shape, `{}`); err != nil {
+				t.Fatalf("old payload without captcha subjects rejected: %v", err)
+			}
+		})
+	}
+}
