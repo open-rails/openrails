@@ -87,8 +87,8 @@ type SolanaCrankerConfig struct {
 	PrivateKey string `yaml:"private_key" json:"private_key"`
 }
 
-// Name names the cranker without its secret: its pin's key.
-func (c SolanaCrankerConfig) Name() string {
+// SolanaCrankerName names a cranker without its secret: its pin's key.
+func SolanaCrankerName(c SolanaCrankerConfig) string {
 	if strings.TrimSpace(c.Mode) == CrankerVaultTransit {
 		return CrankerVaultTransit + ":" + strings.TrimSpace(c.Key)
 	}
@@ -128,8 +128,8 @@ func validateSolanaCranker(cfg *Config, listed []SolanaCrankerConfig, c SolanaCr
 		return fmt.Errorf("mode must be %s or %s", CrankerVaultTransit, CrankerLocalKeypair)
 	}
 	for _, other := range listed {
-		if other.Name() == c.Name() {
-			return fmt.Errorf("%s is listed twice", c.Name())
+		if SolanaCrankerName(other) == SolanaCrankerName(c) {
+			return fmt.Errorf("%s is listed twice", SolanaCrankerName(c))
 		}
 	}
 	return nil

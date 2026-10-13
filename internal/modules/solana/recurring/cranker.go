@@ -82,7 +82,7 @@ func BuildCrankers(cfgs []config.SolanaCrankerConfig, transit solanaint.TransitC
 		default:
 			return nil, fmt.Errorf("solana.crankers[%d].mode must be %s or %s", i, config.CrankerVaultTransit, config.CrankerLocalKeypair)
 		}
-		crankers = append(crankers, Cranker{Name: cfg.Name(), Signer: signer})
+		crankers = append(crankers, Cranker{Name: config.SolanaCrankerName(cfg), Signer: signer})
 	}
 	return NewCrankers(pins, crankers...), nil
 }

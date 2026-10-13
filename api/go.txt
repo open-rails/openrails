@@ -136,8 +136,6 @@ pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billin
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
-pkg openrails, method (*CustodianConfig) UnmarshalYAML([]byte) error
-pkg openrails, method (*Custodians) UnmarshalYAML([]byte) error
 pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.MerchantID, billing.DestructiveHoldID, billing.DestructiveOperator, string) (*billing.DestructiveHold, error)
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
@@ -164,13 +162,10 @@ pkg openrails, method (*NotificationConsumer) Acknowledge(context.Context, []bil
 pkg openrails, method (*NotificationConsumer) Pending(context.Context, int) ([]billing.NotificationEvent, error)
 pkg openrails, method (*NotificationConsumer) Register(context.Context) error
 pkg openrails, method (*NotificationConsumer) Retire(context.Context) error
-pkg openrails, method (*PSPConfig) UnmarshalYAML([]byte) error
-pkg openrails, method (*PSPs) UnmarshalYAML([]byte) error
 pkg openrails, method (*Remote) Close(context.Context) error
 pkg openrails, method (*Remote) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Remote) Ready(context.Context) error
 pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
-pkg openrails, method (CustodianConfig) MarshalYAML() (any, error)
 pkg openrails, method (LocalClient) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)
 pkg openrails, method (LocalClient) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (LocalClient) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
@@ -277,8 +272,6 @@ pkg openrails, method (LocalClient) UpdatePrice(context.Context, billing.PriceID
 pkg openrails, method (LocalClient) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (LocalClient) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (NMIPSP) PSPConfig() PSPConfig
-pkg openrails, method (PSPConfig) MarshalYAML() (any, error)
-pkg openrails, method (SolanaCrankerConfig) Name() string
 pkg openrails, method (SolanaPSP) PSPConfig() PSPConfig
 pkg openrails, method (StripePSP) PSPConfig() PSPConfig
 pkg openrails, method (UsageSweepArgs) InsertOpts() river.InsertOpts
