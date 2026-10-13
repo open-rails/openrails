@@ -145,7 +145,8 @@ In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
 deployment:
 
 - URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key, then
-  the PSP's Gateway ID; the payload's Gateway ID must agree with it
+  the PSP's Gateway ID; the payload's Gateway ID must agree with it. An embedded
+  host prefixes its billing mount (e.g. `/billing/v1/webhooks/nmi/{account_id}`)
 - Signing secret: exactly the value you declared as `webhook_signing_secret`
 
 OpenRails verifies every delivery: HMAC-SHA256 over `<timestamp>.<body>` from a
@@ -153,7 +154,12 @@ OpenRails verifies every delivery: HMAC-SHA256 over `<timestamp>.<body>` from a
 Unsigned or mis-signed deliveries are rejected, and an account with no
 `webhook_signing_secret` configured rejects all webhooks.
 
-Enable these event types (what the handler consumes):
+Enable exactly these 14 event types; they are everything the handler consumes.
+Leave the rest of NMI's list off (auth, capture, credit, validate, check,
+settlement, `recurring.plan.*`, network-token events): OpenRails never creates
+those transactions or needs those notices, and records each one as a
+non-retryable unsupported-event error in webhook health.
+
 
 - `recurring.subscription.add` / `.update` / `.delete`
 - `transaction.sale.success` / `.failure` / `.unknown`
@@ -162,7 +168,8 @@ Enable these event types (what the handler consumes):
 - `chargeback.batch.complete` — auto-reconciled: refund recorded, subscription
   canceled
 - `acu.summary.automaticallyupdated` / `.closedaccount` / `.contactcustomer`
-  (Automatic Card Updater). Each notice is one card version of the same payment
+  (Automatic Card Updater; these fire only when ACU is enabled on the gateway,
+  an NMI service usually billed per update). Each notice is one card version of the same payment
   method, in `payment_method_versions`. An updated card is re-read from the
   vault, and memberships waiting on it retry at the next due pass. A card
   reissued under another brand keeps its payment method, but its mandates wait
