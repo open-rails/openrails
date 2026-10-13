@@ -41,13 +41,17 @@ export function cardRetryAfter(psps: readonly PspConfig[]): number | null {
   const waits = psps
     .filter(
       (psp) =>
-        !!psp.status && psp.custodian === "psp" && cardFlows.has(psp.flow)
+        !!psp.status &&
+        (psp.custodian === "psp" ||
+          (psp.custodian === "platform" && psp.rail === "nmi")) &&
+        cardFlows.has(psp.flow)
     )
     .map((psp) => psp.retry_after ?? 30)
   return waits.length > 0 ? Math.min(...waits) : null
 }
 
-export type CardSetupDriver = "collect_js" | "card" | "stripe_elements"
+export type CardSetupDriver =
+  "collect_js" | "card" | "stripe_elements" | "platform"
 
 const usable = (value?: string) => !!value && !value.startsWith("preview_")
 
@@ -56,7 +60,14 @@ const stripeKey = (psp: PspConfig) =>
 
 /** How a card is saved with this PSP in the page, or null when it cannot be. */
 export function cardSetupDriver(psp: PspConfig): CardSetupDriver | null {
-  if (psp.custodian !== "psp" || psp.status) return null
+  if (psp.status) return null
+  if (psp.custodian === "platform")
+    return psp.rail === "nmi" &&
+      psp.flow === "tokenize" &&
+      usable(psp.config?.public_api_key)
+      ? "platform"
+      : null
+  if (psp.custodian !== "psp") return null
   // The PSP takes cards on OpenRails itself (card_entry: server).
   if (psp.flow === "card" && psp.rail === "nmi") return "card"
   if (

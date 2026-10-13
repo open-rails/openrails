@@ -66,6 +66,20 @@ describe("PSP flows", () => {
     expect(cardSetupDriver(stripe)).toBe("stripe_elements")
     expect(cardSetupDriver(ccbill)).toBeNull()
     expect(cardSetupDriver({ ...nmi, custodian: "basis_theory" })).toBeNull()
+    const platform = {
+      ...nmi,
+      custodian: "platform",
+      config: { public_api_key: "key_public_test" },
+    }
+    expect(cardSetupDriver(platform)).toBe("platform")
+    expect(cardSetupDriver({ ...platform, rail: "stripe" })).toBeNull()
+    expect(
+      cardSetupDriver({ ...platform, status: "temporarily_unavailable" })
+    ).toBeNull()
+    expect(cardSetupDriver({ ...platform, config: null })).toBeNull()
+    expect(
+      cardRetryAfter([{ ...platform, status: "temporarily_unavailable", retry_after: 12 }])
+    ).toBe(12)
     expect(canAuthenticatePayment(stripe)).toBe(true)
     expect(canAuthenticatePayment(nmi)).toBe(false)
   })

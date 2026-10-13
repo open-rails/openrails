@@ -17,7 +17,11 @@ export function PlatformCardForm({
   submitLabel,
   disabled,
   onTokenized,
+  purpose = "payment",
+  defaultCountry,
 }: {
+  purpose?: "payment" | "setup"
+  defaultCountry?: string
   publicKey: string
   submitLabel: string
   disabled: boolean
@@ -34,7 +38,7 @@ export function PlatformCardForm({
   )
   const [billing, setBilling] = React.useState(() => ({
     ...emptyNMIBilling,
-    country: initialCountry(),
+    country: initialCountry(defaultCountry),
   }))
   const [ready, setReady] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
@@ -89,6 +93,11 @@ export function PlatformCardForm({
       void bt.destroy()
     }
   }, [publicKey, ids])
+  const retryLabel = purpose === "setup" ? "Retry saving card" : "Retry payment"
+  const unconfirmedMessage =
+    purpose === "setup"
+      ? "The card save is not confirmed. Retry to check the same card."
+      : "The payment result is not confirmed. Retry to check the same payment."
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || submitting.current || submitted || !tokenize.current) return
@@ -120,9 +129,7 @@ export function PlatformCardForm({
       const sent = !!pending.current
       setRetry(sent)
       setError(
-        sent
-          ? "The payment result is not confirmed. Retry to check the same payment."
-          : "Check your card details and try again."
+        sent ? unconfirmedMessage : "Check your card details and try again."
       )
     } finally {
       submitting.current = false
@@ -131,7 +138,11 @@ export function PlatformCardForm({
   }
   return (
     <form
-      aria-label="Secure platform card payment"
+      aria-label={
+        purpose === "setup"
+          ? "Secure platform card setup"
+          : "Secure platform card payment"
+      }
       className="grid gap-4"
       onSubmit={(event) => void submit(event)}
     >
@@ -148,7 +159,7 @@ export function PlatformCardForm({
         </p>
       ) : null}
       <PayButton
-        label={retry ? "Retry payment" : submitLabel}
+        label={retry ? retryLabel : submitLabel}
         processing={busy}
         disabled={disabled || submitted || !ready}
       />

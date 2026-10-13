@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -121,6 +122,35 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		psp, found, readErr := registry.PSPScopeByID(r.Request.Context(), mid, pspID)
 		if readErr != nil {
 			r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
+			return
+		}
+		platform, platformErr := registry.PlatformCardCustodian(r.Request.Context(), mid)
+		if platformErr != nil {
+			r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
+			return
+		}
+		if platform != nil {
+			if !found || psp.Archived || psp.Rail != string(models.RailNMI) {
+				r.APIError(api.Coded(billing.CodeInvalidParam, "platform card setup requires an available NMI PSP").WithParam("psp_id"))
+				return
+			}
+			for _, value := range append(billingDetailStrings(req.BillingDetails), req.Token) {
+				if cardguard.ContainsPAN(value) {
+					r.ErrorCode(billing.CodeInvalidParam, "card details must be entered in the custodian fields")
+					return
+				}
+			}
+			if refuseBlockedCardAttempt(r, user.ID) {
+				return
+			}
+			if r.State.PurchaseService == nil {
+				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
+				return
+			}
+			ctx, cancel := r.Budget(createPaymentMethodTimeout)
+			defer cancel()
+			saved, err := r.State.PurchaseService.SavePlatformCard(db.WithCustodianID(ctx, platform.ID), req, user)
+			writeSavedCard(r, user, http.StatusCreated, saved, err)
 			return
 		}
 		custodianKind := ""

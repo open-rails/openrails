@@ -35,14 +35,15 @@ type TokenIntent struct {
 
 // CardToken is a durable stored card token (container /pci/high/).
 type CardToken struct {
-	Containers  []string     `json:"containers"`
-	ID          string       `json:"id"`
-	TenantID    string       `json:"tenant_id"`
-	Type        string       `json:"type"`
-	Fingerprint string       `json:"fingerprint"`
-	Card        *CardDetails `json:"card"`
-	CreatedAt   time.Time    `json:"created_at"`
-	ExpiresAt   *time.Time   `json:"expires_at"`
+	Metadata    map[string]string `json:"metadata"`
+	Containers  []string          `json:"containers"`
+	ID          string            `json:"id"`
+	TenantID    string            `json:"tenant_id"`
+	Type        string            `json:"type"`
+	Fingerprint string            `json:"fingerprint"`
+	Card        *CardDetails      `json:"card"`
+	CreatedAt   time.Time         `json:"created_at"`
+	ExpiresAt   *time.Time        `json:"expires_at"`
 }
 
 // CardData is raw card input for SERVER-SIDE token-intent creation. Production
@@ -86,6 +87,8 @@ func (c *Client) GetTokenIntent(ctx context.Context, id string) (*TokenIntent, e
 
 // ConvertOpts controls intent -> durable-token conversion.
 type ConvertOpts struct {
+	// ID allows the caller to recover a conversion after losing its response.
+	ID string
 	// Container is fixed by the server for platform custody.
 	Container string
 	// IdempotencyKey derives from the durable intent row so a replay converts
@@ -107,6 +110,9 @@ func (c *Client) ConvertTokenIntent(ctx context.Context, intentID string, opts C
 		return nil, errors.New("basistheory: token intent id is required")
 	}
 	req := map[string]any{"token_intent_id": intentID}
+	if opts.ID != "" {
+		req["id"] = opts.ID
+	}
 	if opts.Container != "" {
 		req["containers"] = []string{opts.Container}
 	}
