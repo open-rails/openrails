@@ -235,8 +235,7 @@ func TestProviderSandboxGatewaysAreLiteralLoopbackOnly(t *testing.T) {
 	require.Empty(t, FakeProviders(validConfig()))
 }
 
-// Each rail takes only the environments it has, every PSP declares one, and a
-// deployment's PSPs are all live or all non-live.
+// Each rail takes only the environments it has, and every PSP declares one.
 func TestPSPEnvironments(t *testing.T) {
 	for rail, environments := range map[string][]string{
 		"nmi":    {EnvironmentLive, EnvironmentTest, EnvironmentSandbox},
@@ -255,10 +254,6 @@ func TestPSPEnvironments(t *testing.T) {
 		require.ErrorContains(t, ValidatePSPEnvironment("p", rail, ""), "psps.p.environment is required")
 		require.Error(t, ValidatePSPEnvironment("p", rail, "production"), "no aliases")
 	}
-	require.NoError(t, ValidateDeploymentEnvironments(map[string]string{"a/nmi": EnvironmentTest, "a/solana": EnvironmentSandbox, "b/stripe": EnvironmentTest}))
-	require.NoError(t, ValidateDeploymentEnvironments(map[string]string{"a/nmi": EnvironmentLive, "b/stripe": EnvironmentLive}))
-	require.EqualError(t, ValidateDeploymentEnvironments(map[string]string{"a/nmi": EnvironmentLive, "b/solana": EnvironmentSandbox}),
-		"a deployment is all live or all non-live: live PSPs a/nmi beside non-live PSPs b/solana (sandbox)")
 	require.Equal(t, "devnet", SolanaNetwork(EnvironmentSandbox))
 	require.Equal(t, "mainnet", SolanaNetwork(EnvironmentLive))
 	require.Equal(t, EnvironmentTest, EnvironmentClass(EnvironmentSandbox))

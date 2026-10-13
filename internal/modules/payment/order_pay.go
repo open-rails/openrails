@@ -317,6 +317,20 @@ func (s *OrderAttemptService) requireEngineOrder(ctx context.Context, order *ord
 	})
 }
 
+// orderComplete reports whether the order is complete now.
+func (s *OrderAttemptService) orderComplete(ctx context.Context, id uuid.UUID) bool {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false
+	}
+	var current gen.BillingOrder
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		current, err = s.db.Gen(ctx).GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: id})
+		return err
+	})
+	return err == nil && current.Status == string(billing.OrderComplete)
+}
+
 // newCard is a card just entered, as the order's charge saves it.
 type newCard struct {
 	instrument  charge.FrozenInstrument
@@ -802,6 +816,11 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 		return OrderCharge{}, orders.ErrNotPayable
 	}
 	if err := s.requireEngineOrder(ctx, order); err != nil {
+		// Settled since it was read (the poller enrolled it): it answers as
+		// it stands.
+		if errors.Is(err, orders.ErrNotPayable) && s.orderComplete(ctx, order.ID) {
+			return OrderCharge{}, nil
+		}
 		return OrderCharge{}, err
 	}
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {

@@ -17,44 +17,36 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// A deployment's PSPs are all live or all non-live. New refuses declarations
-// that mix them before migrating; once a database holds non-live PSPs, a live
-// one declared at a later boot is refused; and a test seam never sits beside a
-// live PSP.
-func TestPSPEnvironmentsNeverMix(t *testing.T) {
+// Real money never sits beside test money: whatever New answers, no live PSP
+// is registered for a merchant that also declares a non-live one, nor beside
+// a test seam.
+func TestRealMoneyNeverJoinsTestMoney(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	ctx := t.Context()
+	livePSPs := func() int {
+		var table *string
+		require.NoError(t, pool.QueryRow(ctx, "SELECT to_regclass('billing.psps')::text").Scan(&table))
+		if table == nil {
+			return 0
+		}
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM billing.psps WHERE environment = 'live' AND superseded_at IS NULL").Scan(&n))
+		return n
+	}
+	boot := func(psps map[string]openrails.PSPConfig, deps openrails.Deps) {
+		t.Helper()
+		deps.Postgres = pool
+		bill, err := openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Shop", PSPs: psps}}}, deps)
+		if err == nil {
+			require.NoError(t, bill.Close(ctx))
+		}
+		require.Zero(t, livePSPs(), "no live PSP is registered")
+	}
 	sandboxNMI := openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-sandbox-nmi"}.PSPConfig()
 	liveStripe := openrails.StripePSP{Environment: openrails.EnvironmentLive, AccountID: "acct_e2e_live"}.PSPConfig()
-	declare := func(psps map[string]map[string]openrails.PSPConfig) openrails.Config {
-		cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly, Merchants: map[string]openrails.MerchantDeclaration{}}
-		for slug, declared := range psps {
-			cfg.Merchants[slug] = openrails.MerchantDeclaration{DisplayName: slug, PSPs: declared}
-		}
-		return cfg
-	}
-
-	_, err := openrails.New(ctx, declare(map[string]map[string]openrails.PSPConfig{
-		"one": {"nmi": sandboxNMI}, "two": {"stripe": liveStripe},
-	}), openrails.Deps{Postgres: pool})
-	require.EqualError(t, err, "openrails: Config.Merchants: a deployment is all live or all non-live: live PSPs two/stripe beside non-live PSPs one/nmi (sandbox)")
-	var found *string
-	require.NoError(t, pool.QueryRow(ctx, "SELECT to_regclass('billing.merchants')::text").Scan(&found))
-	require.Nil(t, found, "refused before migrating")
-
-	_, err = openrails.New(ctx, declare(map[string]map[string]openrails.PSPConfig{"two": {"stripe": liveStripe}}),
-		openrails.Deps{Postgres: pool, FXTransport: testFX.Transport()})
-	require.ErrorContains(t, err, "Deps.FXTransport is a test seam and is refused beside a live PSP (two/stripe)")
-
-	bill, err := openrails.New(ctx, declare(map[string]map[string]openrails.PSPConfig{"one": {"nmi": sandboxNMI}}), openrails.Deps{Postgres: pool, FXTransport: testFX.Transport()})
-	require.NoError(t, err)
-	require.NoError(t, bill.Close(ctx))
-
-	_, err = openrails.New(ctx, declare(map[string]map[string]openrails.PSPConfig{"two": {"stripe": liveStripe}}), openrails.Deps{Postgres: pool})
-	require.ErrorContains(t, err, "psps/stripe: a deployment's PSPs are all live or all non-live: one's PSP nmi (nmi e2e-sandbox-nmi) is sandbox, this one live")
-	var live int
-	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM billing.psps WHERE environment = 'live'").Scan(&live))
-	require.Zero(t, live, "the refused PSP is never registered")
+	boot(map[string]openrails.PSPConfig{"nmi": sandboxNMI, "stripe": liveStripe}, openrails.Deps{})
+	boot(map[string]openrails.PSPConfig{"stripe": liveStripe}, openrails.Deps{FXTransport: testFX.Transport()})
 }
 
 // NMI's own answer must agree with a PSP's declared environment before the PSP

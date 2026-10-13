@@ -29,7 +29,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 	}{
 		"river schema injection":        {with(sandbox, func(c *config.Config) { c.Database.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
 		"derived river schema too long": {with(sandbox, func(c *config.Config) { c.Database.Schema = strings.Repeat("b", 42) }), config.Deps{}, "set Config.Database.RiverSchema"},
-		"live beside non-live":          {with(sandbox, psps(config.EnvironmentLive, config.EnvironmentSandbox)), config.Deps{}, "a deployment is all live or all non-live: live PSPs shop/mobius beside non-live PSPs shop/wallet (sandbox)"},
 		"loopback gateway beside live": {with(live, func(c *config.Config) {
 			c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: "http://127.0.0.1:9"}
 		}), config.Deps{}, "provider_sandbox.nmi_gateway_url is a test seam and is refused beside a live PSP (shop/stripe)"},

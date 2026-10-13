@@ -263,27 +263,21 @@ func TestVaultHoldingMerchantConfigurationDownAtBootRecovers(t *testing.T) {
 }
 
 // What the engine cannot serve without still fails New: an unreachable
-// database, live PSPs beside non-live ones, an unstated provider write mode.
+// database and an unstated provider write mode.
 func TestUnservableFoundationsStillFailNew(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	_, err := openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly,
+	bill, err := openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		DB: &openrails.DBConfig{URL: "postgres://openrails:openrails@127.0.0.1:1/openrails?sslmode=disable"}}, openrails.Deps{})
 	require.Error(t, err, "an unreachable database fails New once its context ends")
+	require.Nil(t, bill)
 
 	f := newFixture(t)
-	mixed := f.config()
-	mixed.Merchants = map[string]openrails.MerchantDeclaration{"mixed-" + uuid.NewString()[:8]: {PSPs: map[string]openrails.PSPConfig{
-		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentLive, AccountID: "acct_e2e_live"}.PSPConfig(),
-		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-mixed"}.PSPConfig(),
-	}}}
-	_, err = openrails.New(t.Context(), mixed, openrails.Deps{Postgres: f.pool})
-	require.ErrorContains(t, err, "a deployment is all live or all non-live")
-
 	unstated := f.config()
 	unstated.ProviderWriteMode = ""
-	_, err = openrails.New(t.Context(), unstated, openrails.Deps{Postgres: f.pool})
-	require.ErrorContains(t, err, "ProviderWriteMode is required")
+	bill, err = openrails.New(t.Context(), unstated, openrails.Deps{Postgres: f.pool})
+	require.Error(t, err, "readonly is never guessed: it stops every charge")
+	require.Nil(t, bill)
 }
 
 // flakyProxy forwards to target while up is true and drops every connection

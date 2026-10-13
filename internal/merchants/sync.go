@@ -63,8 +63,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 			return err
 		}
 		var declared []DeclaredCredential
-		var accepted []string
-		labels := map[pspIdentity]string{}
+		candidates := map[pspIdentity][]string{}
 		for _, key := range set.PSPKeys() {
 			p := set.PSPs[key].Value
 			if _, refused := set.Rejected[merchantdocs.PSPDoc(key)]; refused {
@@ -80,14 +79,18 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), why)
 				continue
 			}
-			identity := docIdentity(p)
-			if other, ok := labels[identity]; ok {
-				reject(merchantdocs.PSPDoc(key), fmt.Sprintf("%s account %s is already declared as psps/%s; an account is one PSP", identity.rail, identity.account, other))
+			// Refused before any label moves: an account another merchant
+			// owns never costs this merchant's PSP its label.
+			if err := AssertPSPUnowned(ctx, q, id.UUID(), p.Rail, p.Environment, p.AccountID); errors.Is(err, ErrPSPOwnedByAnotherMerchant) {
+				reject(merchantdocs.PSPDoc(key), "the account belongs to another merchant's PSP")
 				continue
+			} else if err != nil {
+				return err
 			}
-			labels[identity] = key
-			accepted = append(accepted, key)
+			candidates[docIdentity(p)] = append(candidates[docIdentity(p)], key)
 		}
+		labels := oneLabelPerAccount(rows, candidates, reject)
+		accepted := slices.Sorted(maps.Values(labels))
 		if err := moveLabels(ctx, q, id, rows, labels); err != nil {
 			return err
 		}
@@ -136,6 +139,34 @@ func docIdentity(p merchantdocs.PSP) pspIdentity {
 
 func rowIdentity(row gen.BillingPsp) pspIdentity {
 	return pspIdentity{row.Rail, config.EnvironmentClass(row.Environment), row.AccountID}
+}
+
+// oneLabelPerAccount keeps one label for each declared account: the label
+// already holding it, else the first. Every other label declaring it is
+// refused: an account is one PSP.
+func oneLabelPerAccount(rows []gen.BillingPsp, candidates map[pspIdentity][]string, reject func(path, why string)) map[pspIdentity]string {
+	held := map[pspIdentity]string{}
+	for _, row := range rows {
+		if row.SupersededAt == nil {
+			held[rowIdentity(row)] = strings.ToLower(row.Key)
+		}
+	}
+	labels := map[pspIdentity]string{}
+	for identity, keys := range candidates {
+		winner := keys[0]
+		for _, key := range keys {
+			if strings.EqualFold(key, held[identity]) {
+				winner = key
+			}
+		}
+		labels[identity] = winner
+		for _, key := range keys {
+			if key != winner {
+				reject(merchantdocs.PSPDoc(key), fmt.Sprintf("%s account %s is already declared as psps/%s; an account is one PSP", identity.rail, identity.account, winner))
+			}
+		}
+	}
+	return labels
 }
 
 // moveLabels frees each label the documents now give another account. A
