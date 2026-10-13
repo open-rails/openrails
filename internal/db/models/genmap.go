@@ -170,6 +170,8 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 		TrialUnitAmount:      p.TrialUnitAmount,
 		TrialDurationHours:   DerefIntPtr(p.TrialDurationHours),
 		Key:                  p.Key,
+		ProviderOwned:        p.ProviderOwned,
+		SellVia:              p.SellVia,
 		CreatedAt:            p.CreatedAt,
 		UpdatedAt:            p.UpdatedAt,
 	}

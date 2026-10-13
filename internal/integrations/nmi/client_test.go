@@ -131,10 +131,6 @@ func TestDirectPostWireShapes(t *testing.T) {
 		}, map[string]string{"type": "sale", "recurring": "rebill_subscription", "subscription_id": "s1", "customer_vault_id": "v1", "billing_id": "b1", "orderid": "ord", "ponumber": "ord",
 			"billing_method": "recurring", "initiated_by": "merchant", "stored_credential_indicator": "used", "initial_transaction_id": "initial-txn"},
 			[]string{"amount"}},
-		{"edit plan sends only mutable fields", func(t *testing.T, c *NMIClient) {
-			require.NoError(t, c.EditRecurringPlan(t.Context(), "plan-1", "New", 1999, "USD"))
-		}, map[string]string{"recurring": "edit_plan", "current_plan_id": "plan-1", "plan_amount": "19.99", "plan_name": "New"},
-			[]string{"plan_id", "day_frequency", "plan_payments"}},
 		{"recurring agreement verification moves no funds", func(t *testing.T, c *NMIClient) {
 			id, err := c.VerifyStoredCredential(t.Context(), " v1 ", "b1", "ord", true)
 			require.NoError(t, err)
@@ -206,9 +202,6 @@ func TestV5WireShapes(t *testing.T) {
 			return err
 		}},
 		{"void", "POST", "/payments/t1/void", `{}`, func() error { return c.Void(t.Context(), "t1") }},
-		{"create plan", "POST", "/plans", `{"id":"p1","plan_name":"Premium","plan_amount":9.99,"plan_payments":0,"day_frequency":30}`, func() error {
-			return c.AddRecurringPlan(t.Context(), "p1", "Premium", 999, "USD", 30, 0)
-		}},
 		{"create vault", "POST", "/customers", `{"billing":{"currency":"USD","payment_details":{"payment_token":"tok"},"first_name":"Ada"}}`, func() error {
 			got, err := c.CreateCustomerVault(t.Context(), CreateCustomerVaultData{PaymentToken: " tok ", FirstName: "Ada"})
 			if err == nil {
@@ -286,9 +279,6 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 			_, err := c.AttemptManualRebill(ctx, ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s", StoredCredential: &StoredCredential{InitiatedBy: InitiatedByMerchant, Indicator: IndicatorUsed, Recurring: true}})
 			return err
 		}(),
-		"plan without frequency": c.AddRecurringPlan(ctx, "p", "n", 100, "USD", 0, 0),
-		"plan without name":      c.AddRecurringPlan(ctx, "p", "", 100, "USD", 30, 0),
-		"plan edit without id":   c.EditRecurringPlan(ctx, "", "n", 100, "USD"),
 		"agreement order id over 50": func() error {
 			_, err := c.VerifyStoredCredential(ctx, "v", "", strings.Repeat("o", 51), true)
 			return err

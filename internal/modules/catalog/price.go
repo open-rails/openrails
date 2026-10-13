@@ -75,6 +75,8 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		TrialUnitAmount:      price.TrialUnitAmount,
 		TrialDurationHours:   models.IntPtrTo32(price.TrialDurationHours),
 		Key:                  price.Key,
+		ProviderOwned:        price.ProviderOwned,
+		SellVia:              price.SellVia,
 		CreatedAt:            price.CreatedAt,
 		UpdatedAt:            price.UpdatedAt,
 	})
@@ -427,6 +429,23 @@ func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
 }
 
 // SetArchived sets the archived lifecycle flag on a price.
+// SetSellVia sets the methods one of our prices sells through; nil is every
+// method.
+func (s *PriceService) SetSellVia(ctx context.Context, id uuid.UUID, methods []string) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	n, err := s.db.Gen(ctx).UpdatePriceSellVia(ctx, gen.UpdatePriceSellViaParams{MerchantID: mid.UUID(), ID: id, SellVia: methods})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

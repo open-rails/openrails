@@ -543,16 +543,6 @@ func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string)
 	return out, true, nil
 }
 
-// v5PlanCreateRequest: the docs call the identifier `plan_id`, but the live
-// gateway rejects that as an extra parameter and wants `id`.
-type v5PlanCreateRequest struct {
-	PlanID       string          `json:"id"`
-	PlanName     string          `json:"plan_name"`
-	PlanAmount   json.RawMessage `json:"plan_amount"`
-	PlanPayments int             `json:"plan_payments"`
-	DayFrequency int             `json:"day_frequency,omitempty"`
-}
-
 // PlanPage is one cursor page of the v5 plan list.
 type PlanPage struct {
 	Plans      []V5Plan `json:"plans"`

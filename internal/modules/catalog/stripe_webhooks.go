@@ -49,6 +49,9 @@ var ErrWebhookEndpointBudgetExhausted = errors.New("managed stripe webhook endpo
 
 // webhookPost POSTs a form and returns the full response body + status (unlike
 // stripePostForm, which parses only {id} — webhook create needs the `secret`).
+// StripeMetadataOpenRailsManaged marks a Stripe object OpenRails owns.
+const StripeMetadataOpenRailsManaged = "openrails_managed"
+
 func (s *StripeCatalogService) webhookPost(ctx context.Context, secretKey, endpoint string, form url.Values) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {

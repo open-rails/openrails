@@ -150,6 +150,14 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		return "", nil, fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}
 
+	if current.ProviderOwned {
+		refusal := &billing.CatalogDraftRefusal{
+			Code:       "provider_price",
+			Reason:     "This price is owned and run by its provider; OpenRails reads its terms and never changes them.",
+			Workaround: "Change the price at the provider, then apply the catalog again to read its terms.",
+		}
+		return refusal.Reason + " " + refusal.Workaround, &billing.CatalogDraft{Kind: billing.CatalogDraftRefused, Refusal: refusal}, nil
+	}
 	if current.CustomerAmount != nil {
 		refusal := &billing.CatalogDraftRefusal{
 			Code:       "customer_amount_price",
@@ -213,12 +221,6 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	reviewText := buildPriceChangeReviewText(current.Currency, current.Amount, args.NewAmount, affected, mode, effectiveAt, now)
 
-	// A new price on the same PSPs; each creates its own object for the terms.
-	psps := make(map[string]map[string]string, len(current.PSPLinks))
-	for psp := range current.PSPLinks {
-		psps[psp] = map[string]string{}
-	}
-
 	draft := &billing.PriceChangeDraft{
 		ProductKey:    args.ProductKey,
 		PriceKey:      key,
@@ -232,7 +234,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 			UnitAmount: args.NewAmount, Currency: current.Currency,
 			AccessDurationHours: current.AccessDurationHours, BillingIntervalHours: current.BillingIntervalHours,
 			TrialUnitAmount: current.TrialUnitAmount, TrialDurationHours: current.TrialDurationHours,
-			PSPs: psps,
+			SellVia: current.SellVia,
 		},
 	}
 	if mode == "migrate" {

@@ -240,7 +240,7 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 		}
 		return s.pspByKey(ctx, id, key)
 	}
-	if err := s.refusePSPForCardCustody(set.Merchant.Value.MerchantSettings, key, doc); err != nil {
+	if err := s.refusePSPForCardVault(set.Merchant.Value.MerchantSettings, set.PSPs, key, doc); err != nil {
 		return billing.PSP{}, err
 	}
 	// An identity this merchant declared under the same key (imported
