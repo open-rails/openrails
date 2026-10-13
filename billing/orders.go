@@ -309,10 +309,13 @@ type OrderLine struct {
 // solana_pay on Solana. FailedAttempts counts the order's failed payments
 // through the PSP; 0 before the order exists.
 type OrderPaymentOption struct {
-	PSPID          PSPID    `json:"psp_id"`
-	Rail           string   `json:"rail"`
-	Accepts        []string `json:"accepts"`
-	FailedAttempts int      `json:"failed_attempts"`
+	// SavedPaymentMethodIDs are platform cards this customer may reuse through
+	// this PSP. PSP-held cards remain identified by their own psp_id.
+	SavedPaymentMethodIDs []PaymentMethodID `json:"saved_payment_method_ids,omitempty"`
+	PSPID                 PSPID             `json:"psp_id"`
+	Rail                  string            `json:"rail"`
+	Accepts               []string          `json:"accepts"`
+	FailedAttempts        int               `json:"failed_attempts"`
 }
 
 // OrderPreview prices lines as an order would freeze them.

@@ -104,7 +104,7 @@ func (s *Service) cartView(ctx context.Context, rt *orderRuntime, customer billi
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}

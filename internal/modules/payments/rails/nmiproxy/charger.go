@@ -93,15 +93,15 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	return c.chargeThroughProxy(ctx, req, src, nil)
 }
 
-// Sale is a customer-present charge of the card a token intent collected,
+// Sale is a customer-present charge of a collected or saved card,
 // answering the gateway's refusal itself. A BT pre-forward failure reached
 // no gateway.
 func (c *Charger) Sale(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
 	if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
 		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
 	}
-	if c == nil || c.BT == nil || strings.TrimSpace(c.Source.TokenIntentID) == "" || req.Context.Initiator != charge.InitiatorCustomer {
-		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, errors.New("a proxy sale charges a collected card in the customer's presence"))
+	if c == nil || c.BT == nil || (strings.TrimSpace(c.Source.TokenIntentID) == "" && strings.TrimSpace(c.Source.TokenID) == "") || req.Context.Initiator != charge.InitiatorCustomer {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, errors.New("a proxy sale requires a card in the customer's presence"))
 	}
 	res, refusal, err := c.proxySale(ctx, req, c.Source, nil)
 	if pe, ok := basistheory.IsBTProxyError(err); ok && !basistheory.IsTransportAmbiguous(err) {

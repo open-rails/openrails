@@ -347,6 +347,7 @@ export const orderSchema = z.object({
         psp_id: z.string(),
         rail: z.string(),
         accepts: z.array(z.string()),
+        saved_payment_method_ids: z.array(z.string()).optional(),
         /** The order's failed payments through the PSP. */
         failed_attempts: z
           .number()

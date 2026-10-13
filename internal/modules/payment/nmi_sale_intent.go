@@ -130,7 +130,15 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 			return intents.Parked("Basis Theory custody cannot be armed: " + err.Error())
 		}
 		held = proxy
-		if p.Instrument.Custodian == models.CustodianPlatform {
+		if p.Instrument.Custodian == models.CustodianPlatform && p.Token == "" {
+			token, err := bt.GetToken(ctx, p.Instrument.RailMethodRef)
+			if err != nil {
+				return intents.Parked("platform saved card cannot be verified")
+			}
+			if token.ID != p.Instrument.RailMethodRef || token.Type != "card" || token.TenantID != cfg.Custody.AccountID || len(token.Containers) != 1 || token.Containers[0] != cfg.Custody.Container {
+				return h.complete(ctx, in, nil, intents.TerminalWithEvidence("platform saved card belongs to another merchant", map[string]any{"not_executed": true}))
+			}
+		} else if p.Instrument.Custodian == models.CustodianPlatform {
 			token, err := bt.GetTokenIntent(ctx, p.Token)
 			if err != nil {
 				return intents.Parked("platform collection cannot be verified")
@@ -207,10 +215,14 @@ func (h *NMISaleIntentHandler) submitHyperSwitchSale(ctx context.Context, in gen
 	return h.proxyOutcome(ctx, in, client, result, refusal, err)
 }
 
-// submitBasisTheorySale charges the card a Basis Theory token intent
-// collected through the custodian's proxy, in the customer's presence.
+// submitBasisTheorySale charges a collected or saved Basis Theory card
+// through the custodian's proxy, in the customer's presence.
 func (h *NMISaleIntentHandler) submitBasisTheorySale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, proxy *nmiproxy.Charger, client *nmi.NMIClient, minor moneyutil.Cents) intents.Outcome {
-	result, refusal, err := proxy.WithSource(nmiproxy.Source{TokenIntentID: p.Token}).Sale(ctx, charge.Request{Instrument: charge.Instrument{Rail: nmiproxy.Rail},
+	source := nmiproxy.Source{TokenIntentID: p.Token}
+	if p.Token == "" {
+		source.TokenID = p.Instrument.RailMethodRef
+	}
+	result, refusal, err := proxy.WithSource(source).Sale(ctx, charge.Request{Instrument: charge.Instrument{Rail: nmiproxy.Rail},
 		AmountMinor: minor, Currency: p.Currency, Description: p.Description, OrderRef: payments.NMISaleOrderReference(in.ID, p.E2ERunID), Context: p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement())})
 	return h.proxyOutcome(ctx, in, client, result, refusal, err)
 }

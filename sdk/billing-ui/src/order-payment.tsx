@@ -107,6 +107,7 @@ export function OrderPayment({
   const [pspID, setPspID] = React.useState<string>()
   const [error, setError] = React.useState<string>()
   const [busy, setBusy] = React.useState(false)
+  const [pendingSaved, setPendingSaved] = React.useState<string>()
   const [walletShown, setWalletShown] = React.useState(false)
   // One key per pay attempt, minted at render: a retry of the same request
   // answers what the first did. A failed answer mints the next.
@@ -192,7 +193,12 @@ export function OrderPayment({
         (method.status ?? "active") === "active" &&
         method.reusable !== false &&
         method.health?.active !== false &&
-        usable.some((psp) => psp.psp_id === method.psp_id)
+        usable.some((psp) =>
+          psp.psp_id === method.psp_id || options.some((option) =>
+            option.psp_id === psp.psp_id &&
+            option.saved_payment_method_ids?.includes(method.id)
+          )
+        )
     )
     .map((method) => ({
       id: method.id,
@@ -484,7 +490,7 @@ export function OrderPayment({
               methods={saved}
               value={choice}
               onChange={setChoice}
-              disabled={busy || !open}
+              disabled={busy || !open || !!pendingSaved}
               idPrefix={`orck-order-${order.id}`}
             />
           ) : null}
@@ -493,10 +499,20 @@ export function OrderPayment({
               className="grid gap-4"
               onSubmit={(event) => {
                 event.preventDefault()
-                void pay(async () => ({ payment_method_id: choice }))
+                const method = pendingSaved ?? choice
+                const platform = options.some((option) =>
+                  option.saved_payment_method_ids?.includes(method)
+                )
+                void pay(async () => ({ payment_method_id: method }), platform)
+                  .then(() => setPendingSaved(undefined))
+                  .catch(() => setPendingSaved(method))
               }}
             >
-              <PayButton label={payLabel} processing={busy} disabled={!open} />
+              <PayButton
+                label={pendingSaved ? "Retry payment" : payLabel}
+                processing={busy}
+                disabled={!open}
+              />
             </form>
           ) : psp ? (
             <>

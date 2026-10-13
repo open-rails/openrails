@@ -12,7 +12,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/paymentpage"
+	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
@@ -208,5 +211,175 @@ func TestPlatformCrossMerchantCollection(t *testing.T) {
 	require.Len(t, bt.containers, 1)
 	for _, containers := range bt.containers {
 		require.Equal(t, []string{"/merchants/" + firstID + "/"}, containers)
+	}
+}
+
+func TestPlatformSavedCardOrder(t *testing.T) {
+	for _, scenario := range []string{"paid replay", "response lost", "concurrent", "declined", "custody switched", "consent revoked", "consent revoked before submission", "closed", "foreign customer", "foreign container", "foreign tenant", "original account unavailable", "recurring order"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			w := prepareWorld(t, 12, withPlatformVault)
+			w.vault = vaulttest.New(t)
+			if scenario == "original account unavailable" {
+				routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi", "nmi-again"}}}
+				w.settings = billing.MerchantSettings{PSPRouting: &routing}
+				w.declare = func(psps map[string]openrails.PSPConfig) {
+					psps["nmi-again"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-again", SecurityKey: "e2e-nmi-again-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
+				}
+			}
+			w.start()
+			client := w.client[remote]
+			_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
+			require.NoError(t, err)
+			_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+			require.NoError(t, err)
+			mid := w.client[embedded].MerchantID().UUID().String()
+			application := uuid.NewString()
+			w.vault.Put(t, "openrails/platform_vault/"+platformTenant, map[string]any{"api_key": "platform-private-test", "collection_applications": map[string]any{
+				mid: map[string]any{"id": application, "public_api_key": "platform-public-test"},
+			}})
+			bt, endpoint := newBTFake(t)
+			bt.tenant, bt.application = platformTenant, application
+			custody := engine.Graph(w.rt).Runtime.PurchaseService.CustodianSaleService
+			custody.BTBaseURLOverride, custody.GatewayDirectPostURLOverride = endpoint, endpoint+"/nmi"
+			keyed := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
+			bt.gateway = func(form url.Values, _ string) string {
+				return w.nmi.AddSale(nmimock.Sale{Vault: keyed, OrderID: form.Get("orderid"), Amount: form.Get("amount"),
+					InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator")}).TransactionID
+			}
+			c := w.newCustomer()
+			const number = "4111111111111111"
+			first, err := c.buyOrder(remote, order{price: w.permanent("platform:first").ID, rail: "nmi", token: bt.collect(number)})
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", first.Status)
+			methods := c.paymentMethods()
+			require.Len(t, methods, 1)
+			method := methods[0]["id"].(string)
+			require.Equal(t, true, methods[0]["reusable"])
+			next := order{price: w.permanent("platform:next").ID, method: method}
+			sale, err := c.sell(remote, next)
+			require.NoError(t, err)
+			view := sale.read(c).Order
+			require.NotEmpty(t, view.PaymentOptions)
+			if scenario == "original account unavailable" {
+				require.Len(t, view.PaymentOptions, 2)
+			}
+			for _, option := range view.PaymentOptions {
+				if option.PSPID == w.psp["nmi"] {
+					require.Equal(t, []billing.PaymentMethodID{*first.Order.Payment.PaymentMethodID}, option.SavedPaymentMethodIDs)
+					require.Contains(t, option.Accepts, "saved_card")
+				} else {
+					require.Empty(t, option.SavedPaymentMethodIDs)
+				}
+			}
+
+			if scenario == "paid replay" {
+				svc, err := service.New(engine.Graph(w.rt).Runtime)
+				require.NoError(t, err)
+				ctx := paymentpage.WithPayURL(merchant.WithID(t.Context(), w.client[embedded].MerchantID()), paymentpage.PayURL{CustomerID: c.cid(), OrderID: sale.order.ID, SavedPaymentMethods: false})
+				hidden, err := svc.GetOrder(ctx, service.OrderActor{Customer: c.cid()}, sale.order.ID)
+				require.NoError(t, err)
+				for _, option := range hidden.PaymentOptions {
+					require.Empty(t, option.SavedPaymentMethodIDs)
+				}
+			}
+
+			switch scenario {
+			case "original account unavailable":
+				_, err = client.UpdatePSP(t.Context(), w.psp["nmi"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
+				require.NoError(t, err)
+				remaining := sale.read(c).Order.PaymentOptions
+				require.NotEmpty(t, remaining)
+				for _, option := range remaining {
+					require.Equal(t, w.psp["nmi-again"], option.PSPID)
+					require.Empty(t, option.SavedPaymentMethodIDs)
+				}
+			case "recurring order":
+				next.price = w.membership("platform:recurring", 10_000_000).ID
+				sale, err = c.sell(remote, next)
+				require.NoError(t, err)
+			case "custody switched":
+				_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyMerchant))
+				require.NoError(t, err)
+			case "consent revoked":
+				c.must(http.MethodPatch, "/payment-methods/"+method, "", map[string]any{"reusable": false})
+			case "consent revoked before submission":
+				bt.mu.Lock()
+				bt.beforeTokenRead = func() {
+					_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.mandates SET status = 'revoked', end_reason = 'customer_revoked', ended_at = now() WHERE payment_method_id = $1 AND kind = 'card_on_file'`), first.Order.Payment.PaymentMethodID.UUID())
+					if err != nil {
+						t.Error(err)
+					}
+				}
+				bt.mu.Unlock()
+			case "closed":
+				_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.payment_methods SET status = 'closed' WHERE id = $1`), first.Order.Payment.PaymentMethodID.UUID())
+				require.NoError(t, err)
+			case "foreign customer":
+				c = w.newCustomer()
+				sale, err = c.sell(remote, next)
+				require.NoError(t, err)
+			case "foreign container":
+				bt.mu.Lock()
+				for token := range bt.tokens {
+					bt.containers[token] = []string{"/merchants/" + uuid.NewString() + "/"}
+				}
+				bt.mu.Unlock()
+			case "foreign tenant":
+				bt.mu.Lock()
+				bt.tenant = uuid.NewString()
+				bt.mu.Unlock()
+			case "response lost":
+				bt.mu.Lock()
+				bt.loseSaleResponse = true
+				bt.mu.Unlock()
+			case "declined":
+				bt.mu.Lock()
+				bt.decline = true
+				bt.mu.Unlock()
+			}
+			if scenario == "concurrent" {
+				var group sync.WaitGroup
+				for range 2 {
+					group.Go(func() { _, _ = sale.payAt(t.Context(), w.server.URL, c, next) })
+				}
+				group.Wait()
+			}
+			paid, err := sale.buy(c, next)
+			switch scenario {
+			case "consent revoked", "closed", "foreign customer", "original account unavailable", "recurring order":
+				require.Error(t, err)
+				for _, option := range sale.read(c).Order.PaymentOptions {
+					require.Empty(t, option.SavedPaymentMethodIDs)
+				}
+				require.Len(t, bt.salesOf(number), 1)
+				return
+			case "foreign container", "foreign tenant", "consent revoked before submission":
+				require.NoError(t, err)
+				require.Equal(t, "failed", paid.Status)
+				require.Len(t, bt.salesOf(number), 1)
+				return
+			case "declined":
+				require.NoError(t, err)
+				require.Equal(t, "failed", paid.Status)
+				_, err = sale.buy(c, next)
+				require.NoError(t, err)
+				require.Len(t, bt.salesOf(number), 2)
+				return
+			}
+			require.NoError(t, err)
+			w.until(func() bool { return sale.read(c).Status == "succeeded" }, "the saved card order settles")
+			_, err = sale.buy(c, next)
+			require.NoError(t, err)
+			sales := bt.salesOf(number)
+			require.Len(t, sales, 2, "replay and recovery never submit another payment")
+			require.Equal(t, "token", sales[1].Source)
+			require.Empty(t, sales[1].CVV)
+			require.Equal(t, "customer", sales[1].InitiatedBy)
+			require.Equal(t, "used", sales[1].Indicator)
+			require.Equal(t, sales[0].TransactionID, sales[1].InitialTxnID)
+			require.Equal(t, sales[0].SecurityKey, sales[1].SecurityKey)
+			require.Len(t, c.paymentMethods(), 1, "reuse does not create another card")
+		})
 	}
 }

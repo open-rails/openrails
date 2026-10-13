@@ -31,7 +31,7 @@ charges through that PSP, provided it still reaches the custodian.
 | `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
-| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | new-card, one-time orders; live vendor qualification pending |
+| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | new and saved cards on one-time orders; saved reuse stays on an account with active card-on-file consent; live vendor qualification pending |
 | JusPay / Spreedly | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
 | — no row — | `solana` | an on-chain delegation, not a stored instrument | yes |
@@ -106,8 +106,15 @@ custodian. The key `platform` is reserved: no merchant custodian takes it.
 Platform collection currently supports a new card on a one-time NMI order.
 `OrderPayment` collects it with Basis Theory Web Elements, sends only the token
 intent and billing details to OpenRails, and charges through the existing NMI
-sale operation. Recurring purchases, saved-card-only charging, migration,
-network tokens, and Stripe platform collection are not enabled by this path.
+sale operation. A saved platform card can pay another one-time order through
+an offered NMI account where it has active card-on-file consent and a storing
+transaction reference. Order payment options include the eligible
+`saved_payment_method_ids`; the pay request sends only `payment_method_id`.
+Before submitting, the operation verifies the stored token's tenant and merchant
+container and rechecks the card and its consent. Changing custody for new cards
+does not move the saved card. Recurring purchases, routing reuse to a new NMI
+account, migration, network tokens, and Stripe platform collection are not enabled
+by this path.
 Existing merchant custody remains the default.
 
 The operator-managed KV document at the path above has this shape:
@@ -126,7 +133,7 @@ The operator-managed KV document at the path above has this shape:
 
 Provision a distinct public collection application for each merchant in the
 configured tenant, with only token-intent creation permission and the merchant's
-allowed browser origins. The private application needs token-intent reads,
+allowed browser origins. The private application needs token-intent reads, token reads,
 token creation and the detokenizing proxy permissions. Do not grant token
 reveal or proxy access to a browser application. Application provisioning and
 permission verification are operator steps; OpenRails does not create them.
@@ -141,9 +148,9 @@ OpenRails verifies the returned tenant and container before storing an active
 `custodian=platform` method. A decline does not convert or accept a method.
 Existing card retention/consent policy still applies.
 
-An unconfirmed browser request retries the same token, billing details and
-idempotency key. An accepted sale's durable submission fence prevents another
-charge; the existing verifier completes conversion from the retained receipt.
+An unconfirmed browser request retries the same payment details and
+idempotency key, including when paying with a saved card. An accepted sale's
+durable submission fence prevents another charge; the existing verifier completes conversion from the retained receipt.
 An expired token intent can leave a confirmed payment with no saved method,
 following the existing Basis Theory recovery policy.
 
