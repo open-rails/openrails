@@ -22,11 +22,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// ApplyCatalog applies a catalog document as the apply manager. Its only
-// provider write publishes the Solana plan of a recurring price declared
-// without one, before local mutation; other provider-link changes fail before
-// local mutation. An object whose named field an edit set differently is
-// skipped and reported unless params.Force.
+// ApplyCatalog applies a catalog document as the apply manager. Nothing is
+// written to a provider's catalog: provider prices are read from their
+// provider, and the only provider write publishes the Solana plan a recurring
+// price of ours sells on, before local mutation. An object whose named field
+// an edit set differently is skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	return s.applyCatalog(ctx, document, params.Force, "")
 }
@@ -139,7 +139,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		plan, err := planCatalogApplication(params, scoped.catalogBefore, owners, prepared.links, force)
+		plan, err := planCatalogApplication(withoutRefused(params, prepared.refused), scoped.catalogBefore, owners, prepared.providers, force)
 		if err != nil {
 			return nil, err
 		}
@@ -150,8 +150,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
+		scoped.catalogPreparedProviders = prepared.providers
 		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision,
-			EntitlementChanges: []billing.EntitlementChange{}, Changes: []billing.CatalogChange{}, Conflicts: plan.conflicts}
+			EntitlementChanges: []billing.EntitlementChange{}, Changes: []billing.CatalogChange{}, Conflicts: plan.conflicts, Warnings: prepared.warnings}
 		scoped.catalogKeyActor = receipt.ApplicationID
 		scoped.catalogKeyChanges = &receipt.EntitlementChanges
 		if err := scoped.replaceEntitlements(ctx, plan.document.EntitlementReplacements, receipt); err != nil {
@@ -184,7 +185,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 				receipt.PricesChanged++
 			}
 		}
-		recorded := len(plan.conflicts) == 0
+		recorded := len(plan.conflicts) == 0 && len(prepared.warnings) == 0
 		receipt.AppliedRevision = revision
 		if recorded || len(changes) > 0 {
 			if receipt.AppliedRevision, err = q.AdvanceCatalogRevision(ctx, mid.UUID()); err != nil {
@@ -304,6 +305,9 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 		if err := s.applyCatalogPrices(ctx, p, decl.Prices, receipt); err != nil {
 			return err
 		}
+		if err := s.applyCatalogProviderPrices(ctx, p, decl.ProviderPrices, receipt); err != nil {
+			return err
+		}
 		if !p.Archived {
 			if err := s.validateProductCreditUpdate(ctx, p.ID, p.CreditGrant); err != nil {
 				return err
@@ -346,17 +350,23 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 			return fmt.Errorf("price %q has no prepared application state", key)
 		}
 		if same {
+			prices, err := s.requirePriceService()
+			if err != nil {
+				return err
+			}
+			stored, err := prices.GetByPublicID(ctx, current.ID)
+			if err != nil {
+				return err
+			}
 			changed := false
-			if !sameCatalogLinks(catalogPriceLinks(current), preparedLinks) {
-				prices, err := s.requirePriceService()
-				if err != nil {
+			if !sameCatalogLinks(stored.PSPLinks, preparedLinks) {
+				if err := prices.UpdatePSPLinks(ctx, stored.ID, preparedLinks); err != nil {
 					return err
 				}
-				resolved, err := prices.GetByPublicID(ctx, current.ID)
-				if err != nil {
-					return err
-				}
-				if err := prices.UpdatePSPLinks(ctx, resolved.ID, preparedLinks); err != nil {
+				changed = true
+			}
+			if !slices.Equal(stored.SellVia, req.SellVia) {
+				if err := prices.SetSellVia(ctx, stored.ID, req.SellVia); err != nil {
 					return err
 				}
 				changed = true
@@ -383,6 +393,56 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 		receipt.PricesChanged++
 	}
 	return nil
+}
+
+// applyCatalogProviderPrices writes the prepared provider prices of a product.
+func (s *Service) applyCatalogProviderPrices(ctx context.Context, product *billing.Product, declarations map[string]catalogwire.ApplyProviderPrice, receipt *billing.CatalogApplicationReceipt) error {
+	if len(declarations) == 0 {
+		return nil
+	}
+	products, err := s.requireProductService()
+	if err != nil {
+		return err
+	}
+	stored, err := products.GetByID(ctx, product.ID.UUID())
+	if err != nil {
+		return productLookup(err)
+	}
+	for _, key := range slices.Sorted(maps.Keys(declarations)) {
+		prepared, ok := s.catalogPreparedProviders[[2]string{product.Key, key}]
+		if !ok {
+			return fmt.Errorf("provider price %q has no prepared application state", key)
+		}
+		_, changed, err := s.writeProviderPrice(ctx, stored, prepared)
+		if err != nil {
+			return err
+		}
+		if changed {
+			receipt.PricesChanged++
+		}
+	}
+	return nil
+}
+
+// withoutRefused is the document without the prices preparation refused.
+func withoutRefused(params catalogwire.Application, refused map[[2]string]bool) catalogwire.Application {
+	if len(refused) == 0 {
+		return params
+	}
+	products := make(map[string]catalogwire.ApplyProduct, len(params.Products))
+	for key, product := range params.Products {
+		prices, providers := maps.Clone(product.Prices), maps.Clone(product.ProviderPrices)
+		for ref := range refused {
+			if ref[0] == key {
+				delete(prices, ref[1])
+				delete(providers, ref[1])
+			}
+		}
+		product.Prices, product.ProviderPrices = prices, providers
+		products[key] = product
+	}
+	params.Products = products
+	return params
 }
 
 func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Application) error {
@@ -518,6 +578,7 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		req.TrialUnitAmount = current.TrialUnitAmount
 		req.TrialDurationHours = current.TrialDurationHours
 		req.Archived = current.Archived
+		req.SellVia = current.SellVia
 	}
 	if current == nil {
 		if decl.Archived.Set && decl.Archived.Value && (!decl.Currency.Set || !decl.UnitAmount.Set) {
@@ -575,6 +636,9 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 	if decl.Archived.Set {
 		req.Archived = decl.Archived.Value
 	}
+	if decl.SellVia.Set {
+		req.SellVia = decl.SellVia.Value
+	}
 	if product.Archived && decl.Archived.Set && !decl.Archived.Value {
 		return nil, req, apperr.Invalidf("cannot explicitly activate price %q under archived product", key)
 	}
@@ -583,8 +647,7 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		return nil, req, apperr.Invalidf("price id pins immutable terms; omit id to create a new price revision")
 	}
 	// A rollback or archived declaration may select a historical financial
-	// version. Preserve that version's own provider bindings, not the currently
-	// active version's links, when links were omitted.
+	// version: it keeps that version's own Solana plan.
 	for _, candidate := range byKey[key] {
 		if samePriceTerms(candidate, req) {
 			copy := candidate

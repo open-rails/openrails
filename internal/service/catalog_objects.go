@@ -21,7 +21,7 @@ import (
 )
 
 // A catalog object is what a document declares and an edit changes: a
-// product, one of its price keys (every version and its PSP links) or a
+// product, one of its price keys (every version, ours or a provider's) or a
 // meter. Each carries a revision and per-field ownership; a document applies
 // an object whole or skips it.
 type catalogObject struct {
@@ -70,7 +70,7 @@ func compareCatalogObjects(a, b catalogObject) int {
 // catalogFields are each object's owned fields, in the order results list them.
 var catalogFields = map[billing.CatalogObjectKind][]string{
 	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards"},
-	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "psps"},
+	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "sell_via", "provider"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
 }
 
@@ -206,10 +206,19 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 		if err := json.Unmarshal(p.PspLinks, &links); err != nil {
 			return nil, fmt.Errorf("price %q links: %w", p.Key, err)
 		}
-		if links == nil {
-			links = map[string]map[string]string{}
+		provider, plans := json.RawMessage("null"), map[string]map[string]string{}
+		for key, link := range links {
+			if p.ProviderOwned {
+				provider = catalogJSON(providerFieldValue(key, link))
+			} else {
+				plans[key] = link
+			}
 		}
-		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, fields: map[string]json.RawMessage{
+		sellVia := json.RawMessage("null")
+		if p.SellVia != nil {
+			sellVia = catalogJSON(p.SellVia)
+		}
+		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
 			"currency":               catalogJSON(p.Currency),
 			"unit_amount":            catalogMoney(p.Amount),
 			"access_duration_hours":  catalogOptionalHours(p.AccessDurationHours),
@@ -219,7 +228,8 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			"customer_amount":        customer,
 			"quantity":               quantity,
 			"archived":               catalogJSON(p.Archived),
-			"psps":                   catalogJSON(links),
+			"sell_via":               sellVia,
+			"provider":               provider,
 		}}
 	}
 	revisions, err := q.ListCatalogMeterRevisions(ctx, merchantID)
@@ -365,9 +375,8 @@ func documentProductFields(key string, d catalogwire.ApplyProduct) (map[string]j
 	return out, nil
 }
 
-// documentPriceFields are the fields a price declaration names. Its PSP links
-// are what the application prepared for it.
-func documentPriceFields(d catalogwire.ApplyPrice, links map[string]map[string]string) map[string]json.RawMessage {
+// documentPriceFields are the fields a price declaration names.
+func documentPriceFields(d catalogwire.ApplyPrice) map[string]json.RawMessage {
 	hours := func(f catalogwire.Field[int]) json.RawMessage {
 		if f.Null {
 			return json.RawMessage("null")
@@ -384,9 +393,6 @@ func documentPriceFields(d catalogwire.ApplyPrice, links map[string]map[string]s
 	if !d.TrialUnitAmount.Null {
 		trial = catalogMoney(d.TrialUnitAmount.Value)
 	}
-	if links == nil {
-		links = map[string]map[string]string{}
-	}
 	values := map[string]json.RawMessage{
 		"currency":               catalogJSON(moneyutil.NormalizeCurrency(d.Currency.Value)),
 		"unit_amount":            catalogMoney(d.UnitAmount.Value),
@@ -397,14 +403,14 @@ func documentPriceFields(d catalogwire.ApplyPrice, links map[string]map[string]s
 		"customer_amount":        nullable(d.CustomerAmount.Null, d.CustomerAmount.Value),
 		"quantity":               nullable(d.Quantity.Null, d.Quantity.Value),
 		"archived":               catalogJSON(d.Archived.Value),
-		"psps":                   catalogJSON(links),
+		"sell_via":               nullable(d.SellVia.Null, d.SellVia.Value),
 	}
 	named := map[string]bool{
 		"currency": d.Currency.Set, "unit_amount": d.UnitAmount.Set,
 		"access_duration_hours": d.AccessDurationHours.Set, "billing_interval_hours": d.BillingIntervalHours.Set,
 		"trial_unit_amount": d.TrialUnitAmount.Set, "trial_duration_hours": d.TrialDurationHours.Set,
 		"customer_amount": d.CustomerAmount.Set, "quantity": d.Quantity.Set, "archived": d.Archived.Set,
-		"psps": d.PSPs.Set,
+		"sell_via": d.SellVia.Set,
 	}
 	for field := range values {
 		if !named[field] {
@@ -412,6 +418,34 @@ func documentPriceFields(d catalogwire.ApplyPrice, links map[string]map[string]s
 		}
 	}
 	return values
+}
+
+// documentProviderPriceFields are the fields a provider price declaration
+// names: its provider object, the terms read for it, and archived when set.
+func documentProviderPriceFields(d catalogwire.ApplyProviderPrice, prepared *providerPrice) map[string]json.RawMessage {
+	values := map[string]json.RawMessage{}
+	if prepared != nil {
+		req := prepared.request
+		values["provider"] = catalogJSON(providerFieldValue(d.PSP, prepared.link))
+		values["currency"] = catalogJSON(req.Currency)
+		values["unit_amount"] = catalogMoney(req.UnitAmount)
+		values["access_duration_hours"] = catalogJSON(req.AccessDurationHours)
+		values["billing_interval_hours"] = catalogJSON(req.BillingIntervalHours)
+		values["trial_unit_amount"] = catalogOptionalMoney(req.TrialUnitAmount)
+		values["trial_duration_hours"] = catalogJSON(req.TrialDurationHours)
+	}
+	if d.Archived.Set {
+		values["archived"] = catalogJSON(d.Archived.Value)
+	}
+	return values
+}
+
+// providerFieldValue is a provider price's provider field: its PSP and the
+// provider's identifiers.
+func providerFieldValue(psp string, link map[string]string) map[string]string {
+	out := providerRefs(link)
+	out["psp"] = psp
+	return out
 }
 
 // documentMeterFields are the meter fields a declaration names, normalized as

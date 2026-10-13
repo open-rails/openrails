@@ -5,17 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"maps"
-	"reflect"
-	"slices"
-	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
@@ -252,6 +253,15 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 	}
 }
 
+// statePlans are a price object's stored Solana plans.
+func statePlans(state *catalogObjectState) map[string]map[string]string {
+	var plans map[string]map[string]string
+	if state != nil {
+		_ = json.Unmarshal(state.hidden, &plans)
+	}
+	return plans
+}
+
 func applicationAdmissionPlan(document catalogwire.Application, prepared *catalogApplicationPreparation, force bool) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
 		mid, err := merchant.Require(ctx)
@@ -262,7 +272,7 @@ func applicationAdmissionPlan(document catalogwire.Application, prepared *catalo
 		if err != nil {
 			return nil, err
 		}
-		plan, err := planCatalogApplication(document, state, owners, prepared.links, force)
+		plan, err := planCatalogApplication(withoutRefused(document, prepared.refused), state, owners, prepared.providers, force)
 		if err != nil {
 			return nil, err
 		}
@@ -279,7 +289,13 @@ func applicationAdmissionPlan(document catalogwire.Application, prepared *catalo
 
 			for name, price := range product.Prices {
 				obj := priceObject(key, name)
-				if catalogFieldsChanged(obj, state[obj], documentPriceFields(price, prepared.links[[2]string{key, name}])) {
+				if catalogFieldsChanged(obj, state[obj], documentPriceFields(price)) || !sameCatalogLinks(statePlans(state[obj]), prepared.links[[2]string{key, name}]) {
+					targets[obj] = true
+				}
+			}
+			for name, price := range product.ProviderPrices {
+				obj := priceObject(key, name)
+				if catalogFieldsChanged(obj, state[obj], documentProviderPriceFields(price, prepared.providers[[2]string{key, name}])) {
 					targets[obj] = true
 				}
 			}
@@ -375,16 +391,7 @@ func priceEditPlan(id billing.PriceID, req UpdatePriceRequest) catalogClassifica
 		if err = checkRevision(obj.String(), req.ExpectedRevision, current.KeyRevision); err != nil {
 			return nil, err
 		}
-		changed := req.Archived != nil && *req.Archived != current.Archived
-		for key, link := range req.PSPs {
-			key = strings.ToLower(strings.TrimSpace(key))
-			link = normalizeLinkMap(link)
-			if len(link) == 0 {
-				changed = changed || len(current.PSPLinks[key]) > 0
-			} else {
-				changed = changed || !catalogLinkContains(current.PSPLinks[key], link)
-			}
-		}
+		changed := req.Archived != nil && *req.Archived != current.Archived || req.SetSellVia && !slices.Equal(req.SellVia, current.SellVia)
 		if changed {
 			return []catalogObject{obj}, nil
 		}
@@ -444,19 +451,10 @@ func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 			"billing_interval_hours": catalogJSON(req.BillingIntervalHours), "trial_unit_amount": catalogOptionalMoney(req.TrialUnitAmount),
 			"trial_duration_hours": catalogJSON(req.TrialDurationHours), "archived": catalogJSON(req.Archived), "customer_amount": catalogJSON(req.CustomerAmount), "quantity": catalogJSON(req.Quantity),
 		}
-		changed := catalogFieldsChanged(obj, old, fields)
-		if !changed && old != nil {
-			var links map[string]map[string]string
-			if err := json.Unmarshal(old.fields["psps"], &links); err != nil {
-				return nil, err
-			}
-			for key, link := range req.PSPs {
-				if _, ok := links[key]; !ok || !catalogLinkContains(links[key], normalizeLinkMap(link)) {
-					changed = true
-				}
-			}
+		if req.SellVia != nil {
+			fields["sell_via"] = catalogJSON(req.SellVia)
 		}
-		if changed {
+		if catalogFieldsChanged(obj, old, fields) {
 			targets = append(targets, obj)
 		}
 		return targets, nil

@@ -227,8 +227,11 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}
-	if patch.CardCustody != "" {
-		current.CardCustody = patch.CardCustody
+	if patch.CardVault != "" {
+		current.CardVault = patch.CardVault
+	}
+	if patch.ChargePSPs != nil {
+		current.ChargePSPs = patch.ChargePSPs
 	}
 	if patch.AlertEmail != nil {
 		current.AlertEmail = patch.AlertEmail
