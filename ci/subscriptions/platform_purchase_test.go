@@ -21,7 +21,7 @@ import (
 )
 
 func TestPlatformNewCardPurchase(t *testing.T) {
-	for _, scenario := range []string{"approved replay", "unavailable merchant custodian", "declined", "foreign application", "foreign tenant", "conversion retry", "conversion response lost", "concurrent"} {
+	for _, scenario := range []string{"approved replay", "unavailable merchant custodian", "declined", "duplicate refused", "foreign application", "foreign tenant", "conversion retry", "conversion response lost", "concurrent"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			w := prepareWorld(t, 12, withPlatformVault)
@@ -51,6 +51,9 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 			bt, endpoint := newBTFake(t)
 			bt.tenant, bt.application = platformTenant, application
 			bt.decline, bt.failConversion = scenario == "declined", scenario == "conversion retry"
+			if scenario == "duplicate refused" {
+				bt.saleResponse = "response=3&response_code=300&responsetext=Duplicate+transaction+REFID%3A123"
+			}
 			bt.loseConversionResponse = scenario == "conversion response lost"
 			if scenario == "foreign application" {
 				bt.application = uuid.NewString()
@@ -109,8 +112,12 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Len(t, bt.salesOf(number), 1)
-			if scenario == "declined" {
+			if scenario == "declined" || scenario == "duplicate refused" {
 				require.Equal(t, "failed", paid.Status)
+				if scenario == "duplicate refused" {
+					require.NotNil(t, paid.Failure)
+					require.Equal(t, "processing_error", paid.Failure.Reason)
+				}
 				require.Zero(t, countMethods())
 				bt.mu.Lock()
 				require.Empty(t, bt.tokens)
@@ -215,7 +222,7 @@ func TestPlatformCrossMerchantCollection(t *testing.T) {
 }
 
 func TestPlatformSavedCardOrder(t *testing.T) {
-	for _, scenario := range []string{"paid replay", "response lost", "concurrent", "declined", "custody switched", "consent revoked", "consent revoked before submission", "closed", "foreign customer", "foreign container", "foreign tenant", "original account unavailable", "recurring order"} {
+	for _, scenario := range []string{"paid replay", "response lost", "concurrent", "declined", "duplicate refused", "custody switched", "consent revoked", "consent revoked before submission", "closed", "foreign customer", "foreign container", "foreign tenant", "original account unavailable", "recurring order"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			w := prepareWorld(t, 12, withPlatformVault)
@@ -333,6 +340,10 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 				bt.mu.Lock()
 				bt.loseSaleResponse = true
 				bt.mu.Unlock()
+			case "duplicate refused":
+				bt.mu.Lock()
+				bt.saleResponse = "response=3&response_code=300&responsetext=Duplicate+transaction+REFID%3A123"
+				bt.mu.Unlock()
 			case "declined":
 				bt.mu.Lock()
 				bt.decline = true
@@ -359,8 +370,17 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 				require.Equal(t, "failed", paid.Status)
 				require.Len(t, bt.salesOf(number), 1)
 				return
-			case "declined":
+			case "declined", "duplicate refused":
 				require.NoError(t, err)
+				if scenario == "duplicate refused" {
+					require.NotNil(t, paid.Failure)
+					require.Equal(t, "processing_error", paid.Failure.Reason)
+					require.Len(t, w.nmi.ledger(""), 1, "the refused request creates no second charge")
+					var terminal, duplicate bool
+					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status = 'failed_terminal', (result_evidence->>'duplicate_refused')::boolean FROM billing.provider_intents WHERE payload->>'order_id' = $1 AND intent_type = 'nmi_sale'`), sale.order.ID.UUID().String()).Scan(&terminal, &duplicate))
+					require.True(t, terminal)
+					require.True(t, duplicate)
+				}
 				require.Equal(t, "failed", paid.Status)
 				_, err = sale.buy(c, next)
 				require.NoError(t, err)

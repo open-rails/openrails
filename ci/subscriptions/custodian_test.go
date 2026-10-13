@@ -35,6 +35,7 @@ type btFake struct {
 	tenant, application    string
 	containers             map[string][]string
 	decline                bool
+	saleResponse           string
 	failConversion         bool
 	loseConversionResponse bool
 	loseSaleResponse       bool
@@ -184,6 +185,12 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok {
 			reply(http.StatusBadRequest, map[string]any{"proxy_error": map[string]any{"title": "detokenization failed"}})
+			return
+		}
+		if f.saleResponse != "" {
+			f.sales = append(f.sales, btSale{Number: number})
+			w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
+			_, _ = w.Write([]byte(f.saleResponse))
 			return
 		}
 		if f.decline {

@@ -235,6 +235,10 @@ func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingP
 	switch {
 	case errors.Is(err, charge.ErrNotDispatched):
 		evidence, reason = map[string]any{"request_refused": true}, "the custodian refused the sale before sending it"
+	case errors.Is(err, nmi.ErrDuplicateTransaction):
+		// The gateway refused this unique order without processing it.
+		evidence = map[string]any{"request_refused": true, "duplicate_refused": true, "failure_code": billing.CodePaymentDuplicateRefused}
+		reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
 	case err != nil:
 		return intents.Ambiguous("sale outcome requires provider verification")
 	case refusal != nil:
