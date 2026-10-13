@@ -102,7 +102,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			PublicBillingBaseURL: api, RateLimitsDisabled: true,
+			PublicBillingBaseURL: api, RateLimitsDisabled: true, ProviderWriteMode: openrails.ProviderWritesFull,
 			ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.

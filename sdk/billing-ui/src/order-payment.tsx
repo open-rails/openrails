@@ -2,8 +2,8 @@
 // in the PSP's own fields (charged and saved in one call), Apple Pay or Google
 // Pay through a Stripe PSP (when asked), a Solana wallet through a Solana
 // Pay QR, or a PSP's own page. A bank challenge runs in the page, then
-// confirm. A fallback PSP (the order lists it once the merchant's card PSP
-// cannot take the payment) is offered as the way out of a failing card.
+// confirm. A fallback PSP (`fallbacks`) waits until the PSPs it stands in for
+// fail, then is offered as the way out of a failing card.
 // Driven only by the order API (GET, pay, confirm), GET /config and GET
 // /me/config; never cancels.
 import * as React from "react"
@@ -26,6 +26,7 @@ import {
 } from "./components/stripe-card"
 import { StripeWallets } from "./components/stripe-wallets"
 import { useMessages } from "./i18n/context"
+import { hiddenFallbacks, type PaymentFallbacks } from "./fallbacks"
 import { billingDetailsOf } from "./lib/billing"
 import { amountToMinorUnits, formatAmount } from "./lib/money"
 import { loadStripeFor } from "./lib/stripe"
@@ -58,6 +59,12 @@ export interface OrderPaymentProps {
    * that Stripe account. Default false.
    */
   wallets?: boolean
+  /**
+   * PSPs kept back until the PSPs they stand in for are not offered, or have
+   * failed `afterFailures` times on the order; then offered under "Card
+   * payment isn't working?". `{ ccbill: { for: ["mobius"], afterFailures: 2 } }`.
+   */
+  fallbacks?: PaymentFallbacks
   /** Once the order is complete, or processing on an asynchronous rail. */
   onSettled?: (order: Order) => void
   appearance?: BillingAppearance
@@ -78,6 +85,7 @@ export function OrderPayment({
   savedPaymentMethods = true,
   serverCardEntry = true,
   wallets = false,
+  fallbacks,
   onSettled,
   appearance,
   className,
@@ -143,17 +151,21 @@ export function OrderPayment({
     return () => window.clearInterval(timer)
   }, [awaitingWallet, client, order])
 
-  const options = React.useMemo(
-    () => order?.collection_owner === "engine" ? order.payment_options : [],
+  // What the order offers here, less the fallbacks still kept back.
+  const offered = React.useMemo(
+    () => (order?.collection_owner === "engine" ? order.payment_options : []),
     [order]
   )
-  const psps = React.useMemo(
+  const known = React.useMemo(
     () =>
       (merchant?.payment.psps ?? []).filter((psp) =>
-        options.some((option) => option.psp_id === psp.psp_id)
+        offered.some((option) => option.psp_id === psp.psp_id)
       ),
-    [merchant, options]
+    [merchant, offered]
   )
+  const hidden = hiddenFallbacks(fallbacks, offered, known)
+  const options = offered.filter((option) => !hidden.has(option.psp_id))
+  const psps = known.filter((psp) => !hidden.has(psp.psp_id))
   // New cards: PSPs whose own fields make a token, where the order takes
   // one (a renewal takes saved cards only).
   const cardPsps = psps.filter((psp) => {
@@ -196,9 +208,12 @@ export function OrderPayment({
       )
   )
   const fallsBack = (item: PspConfig) =>
-    options.some((option) => option.psp_id === item.psp_id && option.fallback)
+    !!fallbacks &&
+    Object.keys(fallbacks).some(
+      (key) => key.toLowerCase() === item.key.toLowerCase()
+    )
   const hosted = redirects.filter((item) => !fallsBack(item))
-  const fallbacks = redirects.filter(fallsBack)
+  const revealed = redirects.filter(fallsBack)
   const tokens = solana ? (merchant?.payment.solana?.tokens ?? []) : []
   const walletPsp = wallets
     ? cardPsps.find(
@@ -535,7 +550,7 @@ export function OrderPayment({
                 </form>
               )}
             </>
-          ) : solana || hosted.length > 0 || fallbacks.length > 0 ? null : (
+          ) : solana || hosted.length > 0 || revealed.length > 0 ? null : (
             <p role="alert" className="text-sm text-destructive">
               {m.t("paymentMethods.unavailable")}
             </p>
@@ -558,12 +573,12 @@ export function OrderPayment({
               />
             </form>
           ))}
-          {fallbacks.length > 0 ? (
+          {revealed.length > 0 ? (
             <div className="grid gap-2 border-t border-border pt-4">
               <p className="text-[13px] text-muted-foreground">
                 Card payment isn&apos;t working?
               </p>
-              {fallbacks.map((item) => (
+              {revealed.map((item) => (
                 <button
                   key={item.psp_id}
                   type="button"

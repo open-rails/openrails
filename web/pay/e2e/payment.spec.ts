@@ -323,6 +323,20 @@ test("an embedded payment page pays in the shop's frame and tells only the shop"
   await expect.poll(() => completed(order.order_id)).toBe(true)
 })
 
+test("an embedded payment page keeps back the fallback its frame names, as the shop's checkout does", async ({ page }) => {
+  const order = await newOrder({ embedded: true })
+  const fallbacks = encodeURIComponent(JSON.stringify({ stripe: { for: ["nmi"], afterFailures: 1 } }))
+  await page.goto(`${api()}/__test/embed?src=${encodeURIComponent(`${order.url}&fallbacks=${fallbacks}`)}`)
+  const frame = page.frameLocator("iframe")
+  await expect(frame.getByRole("button", { name: /^Pay \$12\.50/ })).toBeVisible()
+  await expect(frame.getByLabel("Pay with")).toHaveCount(0)
+
+  // Without fallbacks the frame offers both card PSPs.
+  const plain = await newOrder({ embedded: true })
+  await page.goto(`${api()}/__test/embed?src=${encodeURIComponent(plain.url)}`)
+  await expect(page.frameLocator("iframe").getByLabel("Pay with")).toBeVisible()
+})
+
 test("a site the shop did not register cannot frame its embedded payment page", async ({ page }) => {
   const order = await newOrder({ embedded: true })
   const { other } = await health()

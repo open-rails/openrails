@@ -6,6 +6,7 @@ import {
   OrderPayment,
   createBillingClient,
   type BillingClient,
+  type PaymentFallbacks,
 } from "@openrails/billing-ui"
 import { isBillingError, type Order, type PublicConfig, type PublicMerchant } from "@openrails/billing-ui/client"
 
@@ -35,7 +36,9 @@ const tellFrame = (origins: string[], message: Record<string, unknown>) => {
   for (const origin of origins) window.parent.postMessage(message, origin)
 }
 
-export function App({ orderId, secret }: { orderId: string; secret: string | null }) {
+// fallbacks are the checkout's, from the pay URL's fragment: applied as on
+// the merchant's own page.
+export function App({ orderId, secret, fallbacks }: { orderId: string; secret: string | null; fallbacks?: PaymentFallbacks }) {
   const config = useRef<PublicConfig | null>(null)
   // billing-ui's client: every call carries the secret, and a pay the server
   // challenges is resent with the customer's captcha token.
@@ -123,6 +126,7 @@ export function App({ orderId, secret }: { orderId: string; secret: string | nul
             savedPaymentMethods={order.saved_payment_methods}
             serverCardEntry={false}
             wallets
+            fallbacks={fallbacks}
             onSettled={done}
           />
           <CaptchaPrompt />

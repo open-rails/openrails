@@ -3,7 +3,7 @@ import { createBillingClient } from "@openrails/billing-ui"
 
 import { paymentPageFetch } from "./api"
 import { SIGN_IN_MESSAGE, finishSignIn, pendingOrder, popupState } from "./network"
-import { takeSecret } from "./secret"
+import { takeFragment } from "./secret"
 
 // The network sign-in's return (/pay/sign-in): a popup hands the code to the
 // framed page that opened it; a return in this tab links the order's
@@ -28,7 +28,7 @@ export function SignInReturn() {
       return
     }
     const pending = pendingOrder(state)
-    const secret = pending ? takeSecret(pending) : null
+    const secret = pending ? takeFragment(pending).secret : null
     if (!pending || !secret) {
       setMessage("This sign-in is no longer pending. Return to the store to start again.")
       return

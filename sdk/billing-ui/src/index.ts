@@ -51,6 +51,12 @@ export {
   type EmbeddedPaymentProps,
 } from "./embedded-payment"
 export { Cart, type CartProps } from "./cart"
+export {
+  readPaymentFragment,
+  withPaymentFallbacks,
+  type PaymentFallback,
+  type PaymentFallbacks,
+} from "./fallbacks"
 export { authenticateChange } from "./authenticate"
 export {
   canAuthenticatePayment,

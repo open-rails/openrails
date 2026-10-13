@@ -12,6 +12,7 @@ import {
 import type { BillingClient } from "./client/client"
 import type { Cart as CartData, Order } from "./client/types"
 import { PayButton } from "./components/pay-button"
+import type { PaymentFallbacks } from "./fallbacks"
 import { LoadingSkeleton } from "./components/states"
 import { useMessages } from "./i18n/context"
 import { formatAmount } from "./lib/money"
@@ -29,6 +30,8 @@ export interface CartProps {
   onOrder?: (order: Order) => void
   /** Passed to OrderPayment: the order is complete, or processing. */
   onSettled?: (order: Order) => void
+  /** Passed to OrderPayment: PSPs kept back until others fail on the order. */
+  fallbacks?: PaymentFallbacks
   appearance?: BillingAppearance
   className?: string
 }
@@ -38,6 +41,7 @@ export function Cart({
   client: given,
   onOrder,
   onSettled,
+  fallbacks,
   appearance,
   className,
 }: CartProps) {
@@ -79,6 +83,7 @@ export function Cart({
         orderId={order.id}
         client={client}
         onSettled={onSettled}
+        fallbacks={fallbacks}
         appearance={appearance}
         className={className}
       />

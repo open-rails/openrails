@@ -1,5 +1,18 @@
 # Changelog
 
+## Fallbacks are a checkout option
+
+- Breaking: OpenRails no longer marks or withholds fallback PSPs
+  (`OrderPaymentOption.fallback` and `payment_option_withheld` are gone). Each
+  option reports `failed_attempts` on the order.
+- `OrderPayment`, `BuyButton`, `ProductList`, `Cart` and `EmbeddedPayment` take
+  `fallbacks`, e.g. `{ ccbill: { for: ["mobius"], afterFailures: 2 } }`: the
+  PSP stays hidden until none of its `for` PSPs is offered, or they have failed
+  `afterFailures` times on the order, then shows under "Card payment isn't
+  working?". `EmbeddedPayment` hands it to the framed pay page in the URL
+  fragment (`withPaymentFallbacks`; the page reads it with
+  `readPaymentFragment`).
+
 ## A price's PSPs are one map
 
 - Breaking: `CreatePriceParams.psps` and `UpdatePriceParams.psps` map each PSP

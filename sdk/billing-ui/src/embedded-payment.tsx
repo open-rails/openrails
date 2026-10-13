@@ -3,8 +3,11 @@
 // iframe the payment origin allows only on the merchant's registered origins.
 // The framed page reports its height and the order's completion, and only
 // messages from the pay URL's origin and this iframe are heard. Fulfil
-// on order.completed, never on the completion message.
+// on order.completed, never on the completion message. Fallbacks reach the
+// framed page in the URL fragment, never through the server.
 import * as React from "react"
+
+import { withPaymentFallbacks, type PaymentFallbacks } from "./fallbacks"
 
 /** The framed page's message once the order completes. */
 export const PAYMENT_COMPLETE_MESSAGE = "openrails.payment.complete"
@@ -28,6 +31,8 @@ export interface EmbeddedPaymentProps {
    * order's success_url, if it has one.
    */
   onComplete?: (completion: EmbeddedPaymentCompletion) => void
+  /** As OrderPayment's: the framed page keeps these PSPs back the same way. */
+  fallbacks?: PaymentFallbacks
   title?: string
   className?: string
 }
@@ -35,6 +40,7 @@ export interface EmbeddedPaymentProps {
 export function EmbeddedPayment({
   url,
   onComplete,
+  fallbacks,
   title = "Payment",
   className,
 }: EmbeddedPaymentProps) {
@@ -99,7 +105,7 @@ export function EmbeddedPayment({
   return (
     <iframe
       ref={frame}
-      src={url}
+      src={withPaymentFallbacks(url, fallbacks)}
       title={title}
       className={className}
       allow="payment *; publickey-credentials-get *; publickey-credentials-create *"

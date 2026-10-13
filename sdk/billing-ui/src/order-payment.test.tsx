@@ -587,7 +587,7 @@ describe("OrderPayment", () => {
     })
   })
 
-  it("offers CCBill as the fallback after the card fails, and continues on its page", async () => {
+  describe("fallbacks", () => {
     const fallbackConfig = {
       ...config,
       payment: {
@@ -604,100 +604,200 @@ describe("OrderPayment", () => {
         ],
       },
     }
-    const cardOnly = [
-      { psp_id: "psp_stripe", rail: "stripe", accepts: ["saved_card", "new_card"], fallback: false },
-    ]
-    const withFallback = [
-      ...cardOnly,
-      { psp_id: "psp_ccbill", rail: "ccbill", accepts: ["redirect"], fallback: true },
-    ]
-    const flexForm = "https://sandbox-api.ccbill.com/wap-frontflex/flexforms/flex-1?reservationId=oat_1"
-    const pays: { payment: Record<string, unknown> }[] = []
-    const fetch = vi.fn(async (input: string, init: RequestInit) => {
-      if (input.endsWith("/me/config")) return Response.json(fallbackConfig)
-      if (input.endsWith("/config")) return Response.json(deployment)
-      if (input.includes("/me/payment-methods"))
-        return Response.json({ data: [], next_cursor: null })
-      if (input.endsWith("/me/orders/ord_1"))
-        return Response.json({ ...order({}), payment_options: cardOnly })
-      if (input.endsWith("/me/orders/ord_1/pay")) {
-        const body = JSON.parse(String(init.body))
-        pays.push(body)
-        if (body.payment.psp_id === "psp_stripe")
-          return Response.json(
-            {
-              error: {
-                type: "card_error",
-                code: "card_declined",
-                message: "Your card was declined.",
-                order: {
-                  ...order({ last_payment_error: { reason: "generic_decline", message: "Your card was declined." } }),
-                  payment_options: withFallback,
+    const card = (failed: number) => ({
+      psp_id: "psp_stripe",
+      rail: "stripe",
+      accepts: ["saved_card", "new_card"],
+      failed_attempts: failed,
+    })
+    const ccbill = {
+      psp_id: "psp_ccbill",
+      rail: "ccbill",
+      accepts: ["redirect"],
+      failed_attempts: 0,
+    }
+    const fallbacks = { ccbill: { for: ["stripe"], afterFailures: 2 } }
+    const flexForm =
+      "https://sandbox-api.ccbill.com/wap-frontflex/flexforms/flex-1?reservationId=oat_1"
+
+    // The order as OpenRails answers it, with its options, and every pay.
+    const server = (options: () => unknown[]) => {
+      const pays: { payment: Record<string, unknown> }[] = []
+      let failed = 0
+      const fetch = vi.fn(async (input: string, init: RequestInit) => {
+        if (input.endsWith("/me/config")) return Response.json(fallbackConfig)
+        if (input.endsWith("/config")) return Response.json(deployment)
+        if (input.includes("/me/payment-methods"))
+          return Response.json({ data: [], next_cursor: null })
+        if (input.endsWith("/me/orders/ord_1"))
+          return Response.json({ ...order({}), payment_options: options() })
+        if (input.endsWith("/me/orders/ord_1/pay")) {
+          const body = JSON.parse(String(init.body))
+          pays.push(body)
+          if (body.payment.psp_id === "psp_stripe") {
+            failed++
+            return Response.json(
+              {
+                error: {
+                  type: "card_error",
+                  code: "card_declined",
+                  message: "Your card was declined.",
+                  order: {
+                    ...order({
+                      last_payment_error: {
+                        reason: "generic_decline",
+                        message: "Your card was declined.",
+                      },
+                    }),
+                    payment_options: [card(failed), ccbill],
+                  },
                 },
               },
-            },
-            { status: 402 }
+              { status: 402 }
+            )
+          }
+          return Response.json({
+            ...order({
+              status: "requires_action",
+              next_action: {
+                type: "redirect_to_url",
+                url: flexForm,
+                psp_id: "psp_ccbill",
+                payload: {},
+              },
+            }),
+            payment_options: [card(failed), ccbill],
+          })
+        }
+        return Response.json({}, { status: 404 })
+      })
+      return { fetch, pays }
+    }
+
+    it("keeps CCBill back until the card fails afterFailures times, then continues on its page", async () => {
+      const { fetch, pays } = server(() => [card(0), ccbill])
+      const assign = vi.fn()
+      const location = window.location
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...location, href: "https://shop.test/pay", assign },
+      })
+      try {
+        render(
+          <BillingProvider client={createBillingClient({ fetch })}>
+            <OrderPayment
+              orderId="ord_1"
+              returnUrl="https://shop.test/done"
+              fallbacks={fallbacks}
+            />
+          </BillingProvider>
+        )
+        const pay = await screen.findByRole("button", { name: "Pay $15.00" })
+        expect(
+          screen.queryByRole("button", { name: /CCBill/ })
+        ).not.toBeInTheDocument()
+
+        fireEvent.click(pay)
+        expect(
+          await screen.findByText(
+            "Your card was declined.",
+            {},
+            { timeout: 5000 }
           )
-        return Response.json({
-          ...order({
-            status: "requires_action",
-            next_action: { type: "redirect_to_url", url: flexForm, psp_id: "psp_ccbill", payload: {} },
-          }),
-          payment_options: withFallback,
+        ).toBeInTheDocument()
+        expect(
+          screen.queryByText("Card payment isn't working?")
+        ).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name: /CCBill/ })
+        ).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
+        expect(
+          await screen.findByText(
+            "Card payment isn't working?",
+            {},
+            { timeout: 5000 }
+          )
+        ).toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name: "Pay $15.00 with CCBill" })
+        ).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Pay with CCBill" }))
+        await waitFor(() => expect(assign).toHaveBeenCalledWith(flexForm))
+        expect(pays.map((p) => p.payment.psp_id)).toEqual([
+          "psp_stripe",
+          "psp_stripe",
+          "psp_ccbill",
+        ])
+        expect(pays[2].payment).toEqual({
+          return_url: "https://shop.test/done",
+          psp_id: "psp_ccbill",
+        })
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Continue to CCBill" })
+        )
+        expect(assign).toHaveBeenLastCalledWith(flexForm)
+      } finally {
+        Object.defineProperty(window, "location", {
+          configurable: true,
+          value: location,
         })
       }
-      return Response.json({}, { status: 404 })
     })
-    const assign = vi.fn()
-    const location = window.location
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { ...location, href: "https://shop.test/pay", assign },
-    })
-    try {
+
+    it.each([
+      ["no PSP it stands in for is offered", () => [ccbill]],
+      ["the order already failed often enough", () => [card(2), ccbill]],
+    ])("offers CCBill at once when %s", async (_, options) => {
+      const { fetch } = server(options)
       render(
         <BillingProvider client={createBillingClient({ fetch })}>
-          <OrderPayment orderId="ord_1" returnUrl="https://shop.test/done" />
+          <OrderPayment orderId="ord_1" fallbacks={fallbacks} />
         </BillingProvider>
       )
-      fireEvent.click(await screen.findByRole("button", { name: "Pay $15.00" }))
-      expect(await screen.findByText("Card payment isn't working?", {}, { timeout: 5000 })).toBeInTheDocument()
-      fireEvent.click(screen.getByRole("button", { name: "Pay with CCBill" }))
-      await waitFor(() => expect(assign).toHaveBeenCalledWith(flexForm))
-      expect(pays.map((p) => p.payment.psp_id)).toEqual(["psp_stripe", "psp_ccbill"])
-      expect(pays[1].payment).toEqual({ return_url: "https://shop.test/done", psp_id: "psp_ccbill" })
-      fireEvent.click(await screen.findByRole("button", { name: "Continue to CCBill" }))
-      expect(assign).toHaveBeenLastCalledWith(flexForm)
-    } finally {
-      Object.defineProperty(window, "location", { configurable: true, value: location })
-    }
-  })
-
-  it("never offers a fallback the order does not list", async () => {
-    const fallbackConfig = {
-      ...config,
-      payment: {
-        psps: [
-          ...config.payment.psps,
-          { psp_id: "psp_ccbill", key: "ccbill", rail: "ccbill", custodian: "psp", display_name: "CCBill", flow: "redirect" },
-        ],
-      },
-    }
-    const fetch = vi.fn(async (input: string) => {
-      if (input.endsWith("/me/config")) return Response.json(fallbackConfig)
-      if (input.endsWith("/config")) return Response.json(deployment)
-      if (input.includes("/me/payment-methods"))
-        return Response.json({ data: [], next_cursor: null })
-      if (input.endsWith("/me/orders/ord_1")) return Response.json(order({}))
-      return Response.json({}, { status: 404 })
+      expect(
+        await screen.findByText("Card payment isn't working?")
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Pay with CCBill" })
+      ).toBeInTheDocument()
     })
-    render(
-      <BillingProvider client={createBillingClient({ fetch })}>
-        <OrderPayment orderId="ord_1" />
-      </BillingProvider>
-    )
-    expect(await screen.findByRole("button", { name: "Pay $15.00" })).toBeInTheDocument()
-    expect(screen.queryByText("Card payment isn't working?")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /CCBill/ })).not.toBeInTheDocument()
+
+    it("offers every PSP as itself without fallbacks", async () => {
+      const { fetch } = server(() => [card(0), ccbill])
+      render(
+        <BillingProvider client={createBillingClient({ fetch })}>
+          <OrderPayment orderId="ord_1" />
+        </BillingProvider>
+      )
+      expect(
+        await screen.findByRole("button", { name: "Pay $15.00 with CCBill" })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Pay $15.00" })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText("Card payment isn't working?")
+      ).not.toBeInTheDocument()
+    })
+
+    it("never offers a fallback the order does not list", async () => {
+      const { fetch } = server(() => [card(5)])
+      render(
+        <BillingProvider client={createBillingClient({ fetch })}>
+          <OrderPayment orderId="ord_1" fallbacks={fallbacks} />
+        </BillingProvider>
+      )
+      expect(
+        await screen.findByRole("button", { name: "Pay $15.00" })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText("Card payment isn't working?")
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: /CCBill/ })
+      ).not.toBeInTheDocument()
+    })
   })
 })

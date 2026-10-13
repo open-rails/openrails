@@ -8,6 +8,7 @@ import { cn } from "cn"
 import type { BillingAppearance } from "#orck/appearance"
 import { isBillingError, localError, toBillingError } from "#orck/client/errors"
 import type { Order, Price } from "#orck/client/types"
+import type { PaymentFallbacks } from "#orck/fallbacks"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
 import { priceLabel } from "#orck/lib/price-label"
@@ -32,6 +33,8 @@ export interface BuyButtonProps {
   amount?: string
   /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
   returnUrl?: string
+  /** PSPs kept back until others fail on the order; see OrderPayment. */
+  fallbacks?: PaymentFallbacks
   /**
    * The order is paid. A hint: the host's own gate decides access, so send
    * the buyer to the content it guards.
@@ -74,6 +77,7 @@ export function BuyButton({
   label,
   amount,
   returnUrl,
+  fallbacks,
   onPaid,
   onSignInRequired,
   signedIn,
@@ -158,6 +162,7 @@ export function BuyButton({
           onOpenChange={close}
           orderId={paying.orderId}
           returnUrl={returnUrl}
+          fallbacks={fallbacks}
           appearance={appearance}
           onSettled={paid}
         />
@@ -167,6 +172,7 @@ export function BuyButton({
           open
           onOpenChange={close}
           url={paying.url}
+          fallbacks={fallbacks}
           appearance={appearance}
           // The frame's word is a hint: the order says whether it is paid.
           onComplete={() =>

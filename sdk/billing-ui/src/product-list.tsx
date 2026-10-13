@@ -10,6 +10,7 @@ import { EmptyState } from "#orck/account/section"
 import type { BillingAppearance } from "#orck/appearance"
 import { BuyButton } from "#orck/buy-button"
 import type { Order, Product } from "#orck/client/types"
+import type { PaymentFallbacks } from "#orck/fallbacks"
 import {
   Card,
   CardContent,
@@ -41,6 +42,8 @@ export interface ProductListProps {
   signedIn?: boolean
   /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
   returnUrl?: string
+  /** PSPs kept back until others fail on the order; see OrderPayment. */
+  fallbacks?: PaymentFallbacks
   appearance?: BillingAppearance
   className?: string
 }
@@ -51,6 +54,7 @@ export function ProductList({
   onSignInRequired,
   signedIn,
   returnUrl,
+  fallbacks,
   appearance,
   className,
 }: ProductListProps) {
@@ -89,6 +93,7 @@ export function ProductList({
               onSignInRequired={onSignInRequired}
               signedIn={signedIn}
               returnUrl={returnUrl}
+              fallbacks={fallbacks}
               appearance={appearance}
             />
           ))}

@@ -108,6 +108,19 @@ anything.
 `returnUrl` returns the buyer from a redirect step (Stripe's hosted page); it
 must be on one of your app's return origins.
 
+`fallbacks` keeps a PSP back until the PSPs it stands in for are not offered,
+or have failed `afterFailures` times on the order combined (each payment
+option reports its `failed_attempts`); it then shows under "Card payment isn't
+working?". CCBill after Mobius declines twice:
+
+```tsx
+<ProductList products={products} fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }} {...handlers} />
+```
+
+`BuyButton`, `Cart`, `OrderPayment` and `EmbeddedPayment` take it too.
+`EmbeddedPayment` passes it to the framed pay page in the URL fragment
+(`withPaymentFallbacks(payUrl, fallbacks)` does the same for a hosted pay URL).
+
 For prepaid credits, a fixed pack is another product/price. A
 `customer_amount` price takes the buyer's `amount`: collect it on your product
 page, and the purchase charges exactly that:
@@ -144,10 +157,8 @@ customer's browser, which pays it signed in:
 ```
 
 `onSettled` follows a complete order, or one processing on an asynchronous
-rail. A subscription line names its subscription once paid. A fallback PSP
-the order lists (CCBill once the card PSP has failed or is unavailable) is
-offered under "Card payment isn't working?"; a customer back from a PSP's
-page before it reported is offered to continue there.
+rail. A subscription line names its subscription once paid. A customer back
+from a PSP's page before it reported is offered to continue there.
 
 ## Account billing
 
