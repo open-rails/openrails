@@ -186,7 +186,7 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, psp, route)
 
-	second := map[string]any{"rail": "nmi", "environment": "test", "account_id": "e2e-" + uuid.NewString(), "custodian": "vault",
+	second := map[string]any{"rail": "nmi", "environment": "test", "gateway_id": "e2e-" + uuid.NewString(), "custodian": "vault",
 		"secrets": map[string]string{"security_key": "e2e-second-key"}}
 	w.editDoc("psps/nmi-two", func(doc map[string]any) { maps.Copy(doc, second) })
 	_, err = charge.RoutePSP(ctx, custody, method(vaulted))

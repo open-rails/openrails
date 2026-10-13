@@ -237,21 +237,22 @@ reconcile-if-present on every boot, before routes or workers can observe it.
 `Issuer` and `Catalog` are set in your code, never in a merchant file: an
 issuer belongs to one merchant of an engine, and `New` refuses one declared
 twice. The fields are the merchant manifest's
-(same shape as `config/merchants_config.example.yaml`). `Settings` is the
-`billing.MerchantSettings` document the configuration API reads and applies:
-one shape, one validator, in YAML and over the API.
+(same shape as `config/merchants_config.example.yaml`). It embeds
+`billing.MerchantSettings`, the document the configuration API reads and
+applies: one shape, one validator, in YAML and over the API.
 
 ```go
-cfg.Merchant = openrails.MerchantDeclaration{
-    Slug:        "myapp",
+cfg.Merchants["myapp"] = openrails.MerchantDeclaration{
     DisplayName: "My App",
-    Settings: billing.MerchantSettings{
+    Sandbox:     true, // its PSPs move no money
+    MerchantSettings: billing.MerchantSettings{
         Profile:                &billing.MerchantProfile{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
         BillingPeriodBoundary:  "calendar_month",
     },
-    PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
+    PSPs: openrails.PSPs{ // PSP key -> account
         "my-nmi-sandbox": openrails.NMIPSP{
-            AccountID:            "000000", // NMI dashboard "Gateway ID"
+            Environment:          openrails.EnvironmentSandbox,
+            GatewayID:            "000000", // NMI dashboard "Gateway ID"
             TokenizationKey:      "placeholder-tokenization-key",
             SecurityKey:          "placeholder-security-key",
             WebhookSigningSecret: "placeholder-webhook-secret",
@@ -267,8 +268,8 @@ YAML file: `openrails.ReadMerchantFile(path)` reads one merchant strictly
 (unknown fields refused; `openrails.ParseMerchantDeclaration` takes the bytes).
 The file names its merchant with a required top-level `slug:`; a standalone
 manifest keys each merchant by slug instead and refuses the field inside an
-entry. `MerchantDeclaration` and `PSPConfig` carry `yaml` tags, so they
-can also sit inside the host's own YAML config. The file holds PSP secrets: keep
+entry. `MerchantDeclaration` and `PSPConfig` decode from YAML (go-yaml) as
+the file spells them, so they can also sit inside the host's own YAML config. The file holds PSP secrets: keep
 it out of version control.
 
 In Go, `openrails.NMIPSP`, `StripePSP`, `CCBillPSP` and `SolanaPSP` name each

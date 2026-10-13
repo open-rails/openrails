@@ -142,9 +142,9 @@ A price is offered on NMI when the PSP is armed.
 In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
 deployment:
 
-- URL: `https://<your-host>/v1/webhooks/nmi/{gateway_id}` — the rail, not the PSP key, then
-  the PSP's Gateway ID; the payload's Gateway ID must agree with it. An embedded
-  host prefixes its billing mount (e.g. `/billing/v1/webhooks/nmi/{gateway_id}`)
+- URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key, then
+  the PSP's account, its Gateway ID; the payload's Gateway ID must agree with it. An embedded
+  host prefixes its billing mount (e.g. `/billing/v1/webhooks/nmi/{account_id}`)
 - Signing secret: exactly the value you declared as `webhook_signing_secret`
 
 OpenRails verifies every delivery: HMAC-SHA256 over `<timestamp>.<body>` from a

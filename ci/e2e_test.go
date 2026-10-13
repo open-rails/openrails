@@ -139,7 +139,7 @@ func declared(t testing.TB, bill *openrails.Engine, cfg openrails.Config) *openr
 func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) (*openrails.Engine, *openrails.Client) {
 	t.Helper()
 	cfg := f.config()
-	m := openrails.MerchantDeclaration{DisplayName: slug}
+	m := openrails.MerchantDeclaration{DisplayName: slug, Sandbox: true}
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	if transport != nil {
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull

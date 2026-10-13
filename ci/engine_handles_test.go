@@ -35,7 +35,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	// A second merchant in the same directory, provisioned by an engine that
 	// is gone before any handle is used.
 	other := f.config()
-	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B"}}
+	other.Merchants = map[string]openrails.MerchantDeclaration{slug + "-b": {DisplayName: "B", Sandbox: true}}
 	provisioner, err := openrails.New(ctx, other, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	theirs, err := provisioner.MerchantBySlug(slug + "-b")
