@@ -16,8 +16,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/openrailstest"
 	"github.com/open-rails/openrails/internal/solanafake"
+	"github.com/open-rails/openrails/openrailstest"
 )
 
 // CCBill sells a membership on its FlexForm through an order attempt, as the
