@@ -406,7 +406,7 @@ func (n *Node) createPlan(accounts []*solanago.AccountMeta, data []byte, blockTi
 	plan := make([]byte, 0, subscriptions.PlanAccountSize)
 	plan = append(append(plan, 1), owner[:]...)
 	plan = append(append(plan, bump, subscriptions.PlanStatusActive), data[1:57]...)
-	plan = binary.LittleEndian.AppendUint64(plan, uint64(blockTime.Unix()))
+	plan = binary.LittleEndian.AppendUint64(plan, uint64(blockTime.Unix())) // #nosec G115 -- the fake's clock is after 1970
 	plan = append(plan, data[65:]...)
 	n.accounts[address.String()] = account{owner: subscriptions.ProgramID, data: plan}
 	return address.String(), nil
