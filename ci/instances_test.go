@@ -67,9 +67,10 @@ type gcJob struct{}
 func (gcJob) Kind() string { return riverjobs.KindIdempotencyGC }
 
 // Three replicas of one host app share a database, as a deployment scaled to
-// three runs them: they boot together, share River's work and schedule, answer
-// one provider webhook with one effect, count one rate limit, and read each
-// other's catalog edits at once.
+// three runs them: they boot together without touching the catalog, apply one
+// catalog document once however many replicas send it, share River's work and
+// schedule, answer one provider webhook with one effect, count one rate limit,
+// and read each other's catalog edits at once.
 func TestInstancesShareOneDatabase(t *testing.T) {
 	dsn := emptyDatabase(t)
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
@@ -92,12 +93,12 @@ products:
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ReturnOrigins:     []string{"https://e2e.test"},
 		Redis:             &openrails.RedisConfig{Addr: e2eRedis(t)},
-		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Instances", Catalog: declared, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: account,
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Instances", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: account,
 			Secrets: map[string]string{"secret_key": "sk_test_instances", "webhook_signing_secret": secret}}}}},
 	}
 
 	// Boot: every replica runs New at once on the empty database. One migrates
-	// while the others wait, and the declared merchant and catalog land once.
+	// while the others wait, and the declared merchant lands once.
 	instances := make([]*instance, 3)
 	errs := make([]error, len(instances))
 	start := make(chan struct{})
@@ -136,8 +137,25 @@ products:
 	files, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	require.NoError(t, err)
 	require.Equal(t, len(files), count(`SELECT count(*) FROM public.migrations WHERE app = 'openrails'`), "each migration applied once")
-	require.Equal(t, 1, count(`SELECT count(*) FROM billing.catalog_applications`), "the declared catalog applied once")
 	require.Equal(t, 1, count(`SELECT count(*) FROM billing.psps WHERE key = 'stripe'`))
+	require.Zero(t, count(`SELECT count(*) FROM billing.products`), "starting never applies a catalog")
+
+	// An operator's catalog apply reaches every replica at once: it commits once.
+	receipts := make([]*billing.CatalogApplicationReceipt, len(instances))
+	applied := make(chan struct{})
+	for i, in := range instances {
+		wg.Go(func() {
+			<-applied
+			receipts[i], errs[i] = in.client.ApplyCatalog(t.Context(), declared, billing.ApplyCatalogParams{})
+		})
+	}
+	close(applied)
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "replica %d applies", i)
+		require.Equal(t, receipts[0].ApplicationID, receipts[i].ApplicationID)
+	}
+	require.Equal(t, 1, count(`SELECT count(*) FROM billing.catalog_applications`), "the catalog applied once")
 
 	// River: the first replica to start leads; the others join its fleet.
 	leader := func() (id string) {

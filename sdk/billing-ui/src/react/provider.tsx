@@ -9,6 +9,7 @@ import {
 
 import type { BillingAppearance } from "../appearance"
 import type { BillingClient } from "../client/client"
+import type { PublicConfig } from "../client/types"
 import { MessagesContext } from "../i18n/context"
 import {
   createTranslator,
@@ -17,7 +18,7 @@ import {
   type BillingUiTranslate,
 } from "../i18n/messages"
 import { UiContext, type Navigate } from "../scope-context"
-import { createConfigStore } from "./config"
+import { createConfigStore, suppliedConfigStore } from "./config"
 import { BillingContext, type BillingChange } from "./context"
 
 export interface BillingProviderProps {
@@ -27,6 +28,12 @@ export interface BillingProviderProps {
    * customer is signed in, such as the shared payment page.
    */
   client?: BillingClient
+  /**
+   * The deployment's configuration as `GET /config` answers it, from the
+   * host's own page response (Go: `Engine.PublicConfig`, or a remote
+   * `Client.GetPublicConfig`). Supplied, billing-ui never requests it.
+   */
+  config?: PublicConfig
   /** Fires after each successful mutation: the host's cache-invalidation hook. */
   onChange?: (change: BillingChange) => void
   appearance?: BillingAppearance
@@ -48,6 +55,7 @@ export interface BillingProviderProps {
  */
 export function BillingProvider({
   client,
+  config,
   onChange,
   appearance,
   messages,
@@ -68,7 +76,7 @@ export function BillingProvider({
     <UiContext.Provider value={ui}>
       <MessagesContext.Provider value={translator}>
         {client ? (
-          <ClientProvider client={client} onChange={onChange}>
+          <ClientProvider client={client} config={config} onChange={onChange}>
             {children}
           </ClientProvider>
         ) : (
@@ -81,10 +89,12 @@ export function BillingProvider({
 
 function ClientProvider({
   client,
+  config: supplied,
   onChange,
   children,
 }: {
   client: BillingClient
+  config?: PublicConfig
   onChange?: (change: BillingChange) => void
   children?: ReactNode
 }) {
@@ -99,8 +109,11 @@ function ClientProvider({
   }, [])
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
   const config = useMemo(
-    () => createConfigStore(() => client.getConfig()),
-    [client]
+    () =>
+      supplied
+        ? suppliedConfigStore(supplied)
+        : createConfigStore(() => client.getConfig()),
+    [client, supplied]
   )
   const customerConfig = useMemo(
     () => createConfigStore(() => client.getCustomerConfig()),

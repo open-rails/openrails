@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
-	"github.com/open-rails/openrails/internal/service"
 )
 
 // CatalogApplyOptions is local operator authority. The file never selects its
@@ -32,9 +31,10 @@ type CatalogApplyOptions struct {
 	Manifest             []byte
 	// Force overwrites the fields an edit set and takes them.
 	Force bool
-	Out   io.Writer
 }
 
+// ApplyMerchantCatalog applies opts' document to opts.Merchant with local
+// operator authority.
 func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billing.CatalogApplicationReceipt, error) {
 	if strings.TrimSpace(opts.Merchant) == "" {
 		return nil, fmt.Errorf("catalog merchant is required")
@@ -67,41 +67,5 @@ func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billi
 	if err != nil {
 		return nil, err
 	}
-	receipt, err := svc.ApplyOperatorCatalog(ctx, *params, billing.ApplyCatalogParams{Force: opts.Force})
-	if err != nil {
-		return nil, err
-	}
-	if opts.Out != nil {
-		if err := WriteCatalogReceipt(opts.Out, receipt); err != nil {
-			return nil, fmt.Errorf("write catalog receipt (application committed): %w", err)
-		}
-	}
-	return receipt, nil
-}
-
-// WriteCatalogReceipt writes a catalog application's result for a person:
-// each object it changed, and each it skipped with readable values.
-func WriteCatalogReceipt(w io.Writer, r *billing.CatalogApplicationReceipt) error {
-	var b strings.Builder
-	switch {
-	case r.Replayed:
-		fmt.Fprintf(&b, "%s was already applied; nothing changed\n", r.ApplicationID)
-	default:
-		fmt.Fprintf(&b, "%s: catalog revision %d -> %d\n", r.ApplicationID, r.BaseRevision, r.AppliedRevision)
-	}
-	for _, c := range r.Changes {
-		name := fmt.Sprintf("%s %s", c.Object, c.Key)
-		if c.ProductKey != nil {
-			name = fmt.Sprintf("price %s of product %s", c.Key, *c.ProductKey)
-		}
-		fmt.Fprintf(&b, "  changed %s (%s), now revision %d\n", name, strings.Join(c.Fields, ", "), c.Revision)
-	}
-	for _, line := range service.ReadableCatalogConflicts(r.Conflicts) {
-		fmt.Fprintf(&b, "  %s\n", line)
-	}
-	if len(r.Conflicts) > 0 {
-		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with --force-conflicts.\n", len(r.Conflicts))
-	}
-	_, err := io.WriteString(w, b.String())
-	return err
+	return svc.ApplyOperatorCatalog(ctx, *params, billing.ApplyCatalogParams{Force: opts.Force})
 }

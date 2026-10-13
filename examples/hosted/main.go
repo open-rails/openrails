@@ -1,10 +1,10 @@
 // Command hosted is the embedded example's course site on the hosted
 // platform: OpenRails runs there, for many merchants, and this app is one
 // merchant's. Its backend calls the platform with the service token the
-// console issued, and applies catalog.yaml with it at boot; its
-// AuthKit mints the browser's DPoP-bound tokens for /v1/me and pushes its
-// users over SCIM. content.go and web/src/pages.tsx are the embedded
-// example's, unchanged.
+// console issued (`go run . catalog apply catalog.yaml` applies the catalog
+// with it; starting the app never does); its AuthKit mints the browser's
+// DPoP-bound tokens for /v1/me and pushes its users over SCIM. content.go and
+// web/src/pages.tsx are the embedded example's, unchanged.
 //
 // Run it from this directory with DATABASE_URL, after building the app
 // (cd web && pnpm install && pnpm build) and connecting it (README.md):
@@ -37,7 +37,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 )
 
 // settings are the app's deployment: where it is, its merchant on the
@@ -104,21 +103,9 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 
 // newBilling is the remote handle: the same *openrails.Client as embedded,
 // over HTTP to the platform, with the service token, which is the
-// merchant's: every call acts on that merchant. Like embedded, catalog.yaml
-// is the truth: each distinct document applies once.
-func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
-	bill, err := openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{APIKey: s.ServiceToken})
-	if err != nil {
-		return nil, err
-	}
-	products, err := catalog.ReadFile("catalog.yaml")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := bill.ApplyCatalog(ctx, products, billing.ApplyCatalogParams{}); err != nil { // a field the console edited since is skipped, not overwritten
-		return nil, err
-	}
-	return bill, nil
+// merchant's: every call acts on that merchant.
+func newBilling(s settings) (*openrails.Client, error) {
+	return openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{APIKey: s.ServiceToken})
 }
 
 // newApp builds the app: its AuthKit (started: its River workers push the
@@ -128,7 +115,7 @@ func newApp(ctx context.Context, db *pgxpool.Pool, s settings, media mediaKey) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	bill, err := newBilling(ctx, s)
+	bill, err := newBilling(s)
 	if err == nil {
 		err = ak.Start(ctx)
 	}
@@ -175,6 +162,13 @@ func run(ctx context.Context) error {
 	if s.OpenRailsURL == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
 		return errors.New("OPENRAILS_URL, OPENRAILS_RESOURCE, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
 	}
+	if len(os.Args) == 4 && os.Args[1] == "catalog" && os.Args[2] == "apply" {
+		bill, err := newBilling(s)
+		if err != nil {
+			return err
+		}
+		return applyCatalog(ctx, bill, os.Args[3], os.Stdout)
+	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		return err
@@ -186,14 +180,15 @@ func run(ctx context.Context) error {
 		media = make(mediaKey, 32)
 		_, _ = rand.Read(media)
 	}
-	ak, _, r, err := newApp(ctx, db, s, media)
+	ak, bill, r, err := newApp(ctx, db, s, media)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
-		return nil // newBilling reached the platform: it applied the catalog
+		_, err := bill.ListMeters(ctx, billing.PageRequest{Limit: 1}) // reaches the platform as the app's merchant
+		return err
 	}
 	addr := cmp.Or(os.Getenv("ADDR"), ":8080")
 	server := &http.Server{Addr: addr, Handler: r, ReadHeaderTimeout: 5 * time.Second}

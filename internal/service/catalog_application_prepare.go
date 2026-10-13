@@ -24,8 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type catalogReferenceVerifier func(context.Context, string, string, string, string, billing.CreatePriceParams, map[string]string) (map[string]string, error)
-
 type catalogReferenceCheck struct {
 	key, provider, productKey string
 	account                   merchants.PSPScope
@@ -71,7 +69,7 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 // Prepare only observes remote references. Snapshot collection and the final
 // local commit each fence the merchant, but no transaction spans provider I/O.
 // A committed retry returns before resolving targets or contacting a provider.
-func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, verify catalogReferenceVerifier, declaredPSPs map[string]bool) (*catalogApplicationPreparation, error) {
+func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogReadLocked(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil {
@@ -89,8 +87,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, err
 		}
-		// Declared PSPs with no account yet: their signer awaits Vault.
-		awaiting := map[string]bool{}
 		for _, productKey := range slices.Sorted(maps.Keys(params.Products)) {
 			declared := params.Products[productKey]
 			product, err := scoped.GetProductByKey(ctx, productKey)
@@ -192,7 +188,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				}
 				sort.Strings(names)
 				declaredRails := make([]string, 0, len(names))
-				unresolved := false
 				for _, key := range names {
 					link := links[key]
 					if supplied, ok := decl.PSPLinks.Value[key]; ok {
@@ -217,10 +212,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					account, found, err := selectCatalogApplicationPSP(accounts, key, link, scoped.catalogProviderEnvironment())
 					if err != nil {
 						return nil, err
-					}
-					if !found && declaredPSPs[strings.ToLower(key)] {
-						awaiting[key], unresolved = true, true
-						continue
 					}
 					rail := key
 					if found {
@@ -251,16 +242,12 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					verificationRequest.Archived = verificationRequest.Archived || product.Archived
 					out.checks = append(out.checks, catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
 				}
-				if len(declaredRails) > 0 && !unresolved && !request.Archived && !product.Archived {
+				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
 					if err := requireSellablePrice(priceKey, request, declaredRails, accounts, scoped.catalogProviderEnvironment()); err != nil {
 						return nil, err
 					}
 				}
 			}
-		}
-		if len(awaiting) > 0 {
-			keys := slices.Sorted(maps.Keys(awaiting))
-			return nil, fmt.Errorf("%w: declared PSP %s not provisioned yet: its account waits on its signer", ErrCatalogProviderUnconfirmed, strings.Trim(fmt.Sprintf("%q", keys), "[]"))
 		}
 		return out, nil
 	})
@@ -277,7 +264,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 	for _, check := range prepared.checks {
 		link := cloneStringMap(check.link)
 		delete(link, "psp_id")
-		verified, err := verify(ctx, check.provider, check.account.Rail, check.account.AccountID, check.productKey, check.request, link)
+		verified, err := s.verifyCatalogProviderReference(ctx, check.provider, check.account.Rail, check.account.AccountID, check.productKey, check.request, link)
 		if err != nil {
 			return nil, err
 		}

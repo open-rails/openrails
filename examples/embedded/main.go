@@ -7,10 +7,11 @@
 // with billing-ui.
 //
 // Run it from this directory with DATABASE_URL, after building the app
-// (cd web && pnpm install && pnpm build). It reads catalog.yaml and
-// merchant.yaml: copy merchant.example.yaml to merchant.yaml and fill in your
-// NMI gateway's IDs and keys (merchant.yaml is git-ignored). ADDR is the
-// listen address (default :8080); EXAMPLE_CHECK_ONLY=1 boots, checks
+// (cd web && pnpm install && pnpm build). It reads merchant.yaml: copy
+// merchant.example.yaml to merchant.yaml and fill in your NMI gateway's IDs
+// and keys (merchant.yaml is git-ignored). `go run . catalog apply
+// catalog.yaml` applies the catalog; starting the site never does. ADDR is
+// the listen address (default :8080); EXAMPLE_CHECK_ONLY=1 boots, checks
 // readiness and exits.
 package main
 
@@ -34,7 +35,6 @@ import (
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 )
 
 // issuer is your AuthKit's: the tokens it issues act at your merchant.
@@ -64,14 +64,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 		return nil, nil, err
 	}
 
-	// What you sell. New applies each distinct catalog once, even across restarts.
-	// Later edits through the Go client remain available and are not undone by a replay.
-	products, err := catalog.ReadFile("catalog.yaml")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	merchant.Catalog = products
 	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
@@ -134,6 +126,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer bill.Close(context.WithoutCancel(ctx))
+	if len(os.Args) == 4 && os.Args[1] == "catalog" && os.Args[2] == "apply" {
+		return applyCatalog(ctx, shop, os.Args[3], os.Stdout)
+	}
 
 	// Background work. OpenRails runs its own River workers: rebills, retries of
 	// failed payments, invoices.

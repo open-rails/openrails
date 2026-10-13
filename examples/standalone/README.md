@@ -14,7 +14,7 @@ OAuth issuer the server trusts. The walkthrough is the root README's
 | `web/src/clients.ts` | the browser's clients: AuthKit's, which trades the session for a DPoP-bound token to the server, and billing-ui's, which calls the server directly with it |
 | `openrails/config.yaml` | the server's configuration: database, Redis, its own AuthKit (a resource server), route groups, SMTP |
 | `openrails/merchant.example.yaml` | the merchant the server serves, the app's AuthKit as its trusted issuer, and its NMI PSP; copy it to `merchant.yaml` |
-| `compose.yaml` | the stack: PostgreSQL, Redis, Mailpit, the server, a one-shot `apply-catalog`, and the app |
+| `compose.yaml` | the stack: PostgreSQL, Redis, Mailpit, the server, a one-shot `catalog apply`, and the app |
 | `compose.e2e.yaml`, `e2e-seed.mjs` | the same stack with NMI played by the server's fake gateway, running `web/e2e` in a browser |
 | `Dockerfile`, `postgres-init.sql` | the app's image; the app's database beside the server's |
 
@@ -41,7 +41,7 @@ Redis and an SMTP server of your own, set `DB_URL`, `REDIS_ADDR`,
 
 ```sh
 openrails run-server --config openrails/config.yaml --merchant-manifest openrails/merchant.yaml
-openrails apply-catalog --config openrails/config.yaml --merchant-manifest openrails/merchant.yaml --merchant onlydemo --file catalog.yaml
+openrails catalog apply catalog.yaml --config openrails/config.yaml --merchant-manifest openrails/merchant.yaml --merchant onlydemo
 (cd web && pnpm install && pnpm build)
 DATABASE_URL=postgres://… OPENRAILS_CLIENT_SECRET=… EMAIL_SMTP_HOST=… go run .
 ```
@@ -55,7 +55,7 @@ the `openrails` binary (`OPENRAILS_BIN`, else built from `../../server`)
 with `openrails/config.yaml` and `merchant.example.yaml`, only their ports
 changed (and without Redis when none is named: one server counting its limits
 in memory), applies the catalog with
-`apply-catalog`, and plays NMI with `openrailstest/nmimock` and SMTP with
+`catalog apply`, and plays NMI with `openrailstest/nmimock` and SMTP with
 `smtptest`.
 
 - `TestGatedContent`, `TestCourseList`, `TestMediaURLs`: the embedded

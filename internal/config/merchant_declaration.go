@@ -14,7 +14,6 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -37,13 +36,8 @@ type MerchantDeclaration struct {
 	// it, since several hosts with their own issuers may share one. Empty
 	// binds by scope only: a credential must be bound to the merchant's
 	// group (authkit/auth Bound), whose id is the merchant's.
-	Issuer string `yaml:"-"`
-	// Catalog optionally applies the merchant's catalog document at startup,
-	// using the same permanent content-hash replay as Client.ApplyCatalog. A
-	// field an edit changed last is not overwritten by it. Nil skips it. A
-	// merchant file never carries it.
-	Catalog     *catalog.Application `yaml:"-"`
-	DisplayName string               `yaml:"display_name"`
+	Issuer      string `yaml:"-"`
+	DisplayName string `yaml:"display_name"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty"`

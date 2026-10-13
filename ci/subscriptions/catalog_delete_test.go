@@ -100,8 +100,8 @@ func TestDeletingAProductNothingReferences(t *testing.T) {
 
 // A catalog file with prune: true deletes the omitted products and price keys
 // only files set when nothing ever referred to them, and archives the rest,
-// through POST /v1/catalog/apply and at start alike. A file without
-// prune deletes nothing.
+// in process and through POST /v1/catalog/apply alike. A file without prune
+// deletes nothing.
 func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -109,20 +109,14 @@ func TestPruneDeletesWhatNothingReferences(t *testing.T) {
 	price := func(amount int64) catalog.ApplyPrice {
 		return catalog.ApplyPrice{Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}
 	}
-	for _, through := range []string{"apply", "start"} {
-		t.Run(through, func(t *testing.T) {
+	for _, through := range []topology{remote, embedded} {
+		t.Run(string(through), func(t *testing.T) {
 			apply := func(app *catalog.Application) {
 				t.Helper()
-				if through == "apply" {
-					_, err := c.ApplyCatalog(t.Context(), app, billing.ApplyCatalogParams{})
-					require.NoError(t, err)
-					return
-				}
-				bill, _, err := w.bootDeclared(t.Context(), app)
+				_, err := w.client[through].ApplyCatalog(t.Context(), app, billing.ApplyCatalogParams{})
 				require.NoError(t, err)
-				require.NoError(t, bill.Close(t.Context()))
 			}
-			kept, unsold, sold := through+"-kept", through+"-unsold", through+"-sold"
+			kept, unsold, sold := string(through)+"-kept", string(through)+"-unsold", string(through)+"-sold"
 			apply(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 				kept: {DisplayName: catalog.Value("Kept"), Prices: map[string]catalog.ApplyPrice{"buy": price(1_000_000), "extra": price(2_000_000), "bought": price(3_000_000)}},
 				// Priceless, so the prune stays within one actor's destructive

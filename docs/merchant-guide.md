@@ -27,10 +27,11 @@ only documents set: deleted when nothing ever referred to them, archived otherwi
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
-The API is `POST /v1/catalog/apply`, and the in-process client
-method is `ApplyCatalog`. The operator CLI (`openrails apply-catalog`) applies the
-same document with local authority. No application ID or expected revision is
-written by the caller.
+The API is `POST /v1/catalog/apply`, and the client method (in process or
+over HTTP) is `ApplyCatalog`. The operator CLI (`openrails catalog apply`) applies
+the same document with local authority. No application ID or expected revision
+is written by the caller. Applying a catalog is an operator action: starting
+OpenRails never does it.
 
 ### Authoring the catalog
 
@@ -173,7 +174,7 @@ and never duplicated; a mismatch fails the apply loudly:
 ### Applying and verifying
 
 ```bash
-openrails apply-catalog --merchant your-merchant --file catalog.yaml
+openrails catalog apply catalog.yaml --merchant your-merchant
 ```
 
 Without Vault, `--merchant-manifest PATH` loads the merchant's configuration and

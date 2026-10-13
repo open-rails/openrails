@@ -14,9 +14,7 @@ import (
 	"context"
 
 	"fmt"
-	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 
@@ -24,7 +22,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -38,9 +35,6 @@ type Engine struct {
 
 	// declared are Config.Merchants' ids, by slug.
 	declared map[string]billing.MerchantID
-	// catalogPending is why each declared catalog is not applied yet, by slug.
-	catalogMu      sync.Mutex
-	catalogPending map[string]error
 
 	mu          sync.Mutex
 	closed      bool
@@ -74,10 +68,10 @@ func Graph(client any) *app.App {
 // New builds the engine. It first creates or upgrades OpenRails' tables, this
 // month's partitions and River's tables (Migrate's work); the control plane's
 // AuthKit migrates itself as it is built. ctx bounds the wait for the
-// database; nothing else does. Only Postgres and a refused declared catalog
-// fail construction: Vault login, PSP posture, Redis and a declared catalog's
-// unconfirmed provider references recover in the background (see Ready and
-// Probes).
+// database; nothing else does. Only Postgres fails construction: Vault login,
+// PSP posture and Redis recover in the background (see Ready and Probes). It
+// never changes a catalog: a catalog document applies by an explicit
+// ApplyCatalog.
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -85,12 +79,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	declarations, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
-	}
-	catalogs := make([]*catalog.Application, len(declarations))
-	for i, m := range declarations {
-		if catalogs[i], err = declaredCatalog(m); err != nil {
-			return nil, err
-		}
 	}
 	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
 		url := deps.Postgres.Config().ConnString()
@@ -155,15 +143,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
-	}
-	for i, doc := range catalogs {
-		if doc == nil {
-			continue
-		}
-		psps := slices.Sorted(maps.Keys(declarations[i].PSPs))
-		if err := e.applyDeclaredCatalog(ctx, ids[i], declarations[i].Slug, psps, *doc); err != nil {
-			return fail(err)
-		}
 	}
 	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
 		return approveSolanaSigner(ctx, application, bySlug[mid], mid, key)

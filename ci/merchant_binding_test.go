@@ -99,24 +99,24 @@ func bind(auth *authtest.Fake, mid billing.MerchantID) boundTo {
 	return b
 }
 
-// declaredCatalog is a catalog of one product, key, granting key.
-func declaredCatalog(key string) *catalog.Application {
+// oneProduct is a catalog of one product, key, granting key.
+func oneProduct(key string) *catalog.Application {
 	return &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 		key: {DisplayName: catalog.Value(key), Entitlements: catalog.Value([]string{key})},
 	}}
 }
 
-// One engine and one mount serve two merchants, each declared with its own
-// catalog. A credential bound to one merchant's group reads that merchant's
-// rows on every tier and none of the other's, and the other's object ids are
+// One engine and one mount serve two merchants, each with its own catalog. A
+// credential bound to one merchant's group reads that merchant's rows on every
+// tier and none of the other's, and the other's object ids are
 // not found; a credential bound to neither reaches neither.
 func TestEmbeddedEngineServesTwoMerchants(t *testing.T) {
 	f := newFixture(t)
 	ka, kb := "a-"+uuid.NewString()[:8], "b-"+uuid.NewString()[:8]
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		ka: {DisplayName: "A", Catalog: declaredCatalog(ka)},
-		kb: {DisplayName: "B", Catalog: declaredCatalog(kb)},
+		ka: {DisplayName: "A"},
+		kb: {DisplayName: "B"},
 	}
 	bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
@@ -136,9 +136,11 @@ func TestEmbeddedEngineServesTwoMerchants(t *testing.T) {
 		key  string
 		who  boundTo
 	}{{shopA, ka, a}, {shopB, kb, b}} {
+		_, err := s.shop.ApplyCatalog(t.Context(), oneProduct(s.key), billing.ApplyCatalogParams{})
+		require.NoError(t, err)
 		products, err := s.shop.ListProducts(t.Context(), billing.ProductListParams{})
 		require.NoError(t, err)
-		require.Len(t, products.Items, 1, "each merchant's catalog applied from its declaration")
+		require.Len(t, products.Items, 1, "each merchant's catalog is its own")
 		require.Equal(t, s.key, products.Items[0].Key)
 		productOf[s.who.mid] = products.Items[0].ID
 		_, err = s.shop.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: s.who.customerID, ProductID: products.Items[0].ID}}})

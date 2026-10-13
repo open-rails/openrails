@@ -37,29 +37,37 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cmd  *cobra.Command
 		body string
-		args []string
 		want string
 	}{
-		"authkit authority rejects merchants":  {newPushAuthBootstrapCmd(), "merchants: []\n", nil, "invalid_bootstrap_manifest"},
-		"merchant config rejects authority":    {newPushMerchantConfigCmd(), "users:\n  - username: operator\n", nil, "users"},
-		"catalog rejects merchants":            {newApplyCatalogCmd(), "schema_version: 1\nmerchants: []\n", []string{"--merchant", "example"}, "merchants"},
-		"catalog application rejects snapshot": {newApplyCatalogCmd(), "schema_version: 1\nkind: catalog_snapshot\n", []string{"--merchant", "example"}, "kind"},
+		"authkit authority rejects merchants": {newPushAuthBootstrapCmd(), "merchants: []\n", "invalid_bootstrap_manifest"},
+		"merchant config rejects authority":   {newPushMerchantConfigCmd(), "users:\n  - username: operator\n", "users"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := execute(tc.cmd, append([]string{"--file", writeTemp(t, "manifest.yaml", tc.body)}, tc.args...)...)
+			_, err := execute(tc.cmd, "--file", writeTemp(t, "manifest.yaml", tc.body))
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
-	_, err := execute(newPushMerchantConfigCmd(), "--file", filepath.Join(t.TempDir(), "missing.yaml"))
+	for name, tc := range map[string]struct{ body, want string }{
+		"catalog rejects merchants":            {"schema_version: 1\nmerchants: []\n", "merchants"},
+		"catalog application rejects snapshot": {"schema_version: 1\nkind: catalog_snapshot\n", "kind"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := execute(newCatalogCmd(), "apply", writeTemp(t, "catalog.yaml", tc.body), "--merchant", "example")
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+	_, err := execute(newCatalogCmd(), "apply", "--merchant", "example")
+	require.ErrorContains(t, err, "accepts 1 arg", "the file is named, never defaulted")
+	_, err = execute(newPushMerchantConfigCmd(), "--file", filepath.Join(t.TempDir(), "missing.yaml"))
 	require.ErrorContains(t, err, "read merchant config manifest")
 }
 
 // Mutation intent lives in documents and explicit verbs, never in flags that
 // could silently widen or narrow an operation.
 func TestMutationFlagSurface(t *testing.T) {
-	apply := newApplyCatalogCmd()
-	for _, retired := range []string{"dry-run", "insert", "overwrite", "prune", "force"} {
-		require.Nil(t, apply.Flags().Lookup(retired), "apply-catalog --%s", retired)
+	apply := newCatalogApplyCmd()
+	for _, retired := range []string{"dry-run", "insert", "overwrite", "prune", "force", "file"} {
+		require.Nil(t, apply.Flags().Lookup(retired), "catalog apply --%s", retired)
 	}
 	require.NotNil(t, apply.Flags().Lookup("merchant"))
 	require.Nil(t, newPushMerchantConfigCmd().Flags().Lookup("dry-run"), "a bare push is already plan-only")

@@ -51,7 +51,7 @@ config:
 #   merchants.yaml  merchant manifest, applied at every boot (its secrets go in
 #                   secrets.merchantOverlays)
 #   bootstrap.yaml  AuthKit's first-run operators and trusted applications
-#   catalog.yaml    the default of `openrails apply-catalog --file`
+#   catalog.yaml    the catalog document `openrails catalog apply` takes
 files: {}
 
 # Secrets come from existing Secrets; the chart creates none.

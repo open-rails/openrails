@@ -47,6 +47,7 @@ var engineMethods = map[string]string{
 	"Ready":                    "the readiness probe",
 	"Probes":                   "the optional dependencies, for the host's supervisor",
 	"Routes":                   "the HTTP surface the host mounts",
+	"PublicConfig":             "what a mount's GET /v1/config serves, for the host's own page response",
 	"RiverJobs":                "the jobs a host-owned River fleet runs",
 	"Merchant":                 "a merchant's handle",
 	"LocalMerchant":            "an embedded extension of a merchant's handle",

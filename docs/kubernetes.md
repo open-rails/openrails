@@ -73,8 +73,9 @@ ingress:
 `host`, `port` and `private_port` itself (`ports.http`, `metrics.port`), and
 refuses them in `config`. `files` adds more files beside it; the server reads
 `merchants.yaml` at every boot, `bootstrap.yaml` (AuthKit's first operators) on
-first run, and `catalog.yaml` is the default of `openrails apply-catalog`. A
-change to `config` or `files` rolls the pods.
+first run, and `catalog.yaml` is there for `openrails catalog apply`, which an
+operator runs: starting the server never applies a catalog. A change to
+`config` or `files` rolls the pods.
 
 The server refuses to boot on an unknown key, an unset `test_mode` or
 `provider_write_mode`, or an `http` issuer. Its log names the key.
@@ -289,7 +290,7 @@ The image is the CLI. Commands that read the database run in the pod:
 
 ```bash
 kubectl -n openrails exec deploy/openrails -- \
-  openrails --config /etc/openrails/config.yaml apply-catalog --merchant shop
+  openrails --config /etc/openrails/config.yaml catalog apply /etc/openrails/catalog.yaml --merchant shop
 kubectl -n openrails exec deploy/openrails -- \
   openrails --config /etc/openrails/config.yaml intents --merchant shop
 ```

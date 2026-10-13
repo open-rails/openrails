@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -32,7 +33,7 @@ const publicConfigMaxAge = "public, max-age=300"
 // the same document and a cache may share it.
 func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		doc := publicConfigDocument(r, capabilities)
+		doc := PublicConfigDocument(r.State, capabilities)
 		encoded, err := json.Marshal(doc)
 		if err != nil {
 			r.ErrorCode(billing.CodeInternalError, "failed to encode the configuration")
@@ -82,15 +83,15 @@ func GetCustomerConfig(r *httprequest.Request) {
 	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who})
 }
 
-// publicConfigDocument is the configuration every merchant of the
-// deployment shares.
-func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilities) billing.PublicConfig {
+// PublicConfigDocument is GET /v1/config on a mount reporting capabilities:
+// the configuration every merchant of the deployment shares.
+func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) billing.PublicConfig {
 	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
-	if r.State != nil {
-		doc.Network = r.State.PaymentPageNetwork
+	if rt != nil {
+		doc.Network = rt.PaymentPageNetwork
 	}
-	if r.State != nil && r.State.Config != nil && config.CaptchaEnabled(r.State.Config.Captcha) {
-		cfg := r.State.Config.Captcha
+	if rt != nil && rt.Config != nil && config.CaptchaEnabled(rt.Config.Captcha) {
+		cfg := rt.Config.Captcha
 		doc.Captcha = &billing.CaptchaConfig{
 			Provider: config.CaptchaProvider(cfg), SiteKey: strings.TrimSpace(cfg.SiteKey), ScriptURL: config.CaptchaScriptURL(cfg),
 			Action: config.CaptchaAction, TokenHeader: captcha.TokenHeader,

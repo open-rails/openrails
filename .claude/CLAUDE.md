@@ -131,10 +131,12 @@ through `host-four`; these are placeholders, not customer or repository names.
     Where an authoritative source exists, derive from it and delete the knob.
 
 ## Catalog
-- One document model, `catalog.Application` (`catalog.ParseApplicationYAML`); a host
-  with a catalog file sets `MerchantDeclaration.Catalog` in `Config.Merchants`, and `New` applies it on every start. Files
-  and console edits share fields by ownership: a field an edit changed last is not
-  overwritten by the file, and the conflict is reported.
+- One document model, `catalog.Application` (`catalog.ParseApplicationYAML`). Applying
+  one is an operator action: `Client.ApplyCatalog` (a host's own command),
+  `POST /v1/catalog/apply` or `openrails catalog apply FILE`. Startup never applies or
+  mutates a catalog; don't add a boot-time apply. Files and console edits share
+  fields by ownership: a field an edit changed last is not overwritten by the
+  file, and the conflict is reported.
 - The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
   ALERT-ONLY: it never mutates providers.
 - The **push** path is the provider adapter, e.g. `AutoCreate` in

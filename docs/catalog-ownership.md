@@ -2,9 +2,10 @@
 
 A merchant's catalog changes in two ways, and both may be used at once:
 
-- **Documents**, the `apply` manager: `MerchantDeclaration.Catalog` on every start,
-  `Client.ApplyCatalog`, `POST /v1/catalog/apply` and
-  `openrails apply-catalog`.
+- **Documents**, the `apply` manager: `Client.ApplyCatalog` (in process or over
+  HTTP), `POST /v1/catalog/apply` and `openrails catalog apply`. Applying one
+  is an operator action, run from a command or the console and reviewed like a
+  deploy; starting OpenRails never applies a catalog.
 - **Edits**, the `edit` manager: the console, the product, price and meter
   routes, and the `Client` edit methods (`UpdateProduct`,
   `CreatePrice`, `UpdatePrice`, `SetMeter`, …).
@@ -34,15 +35,14 @@ product, and the other way round.
 - The receipt's `changes` lists every object changed, its fields and its new
   revision; `conflicts` lists every object skipped, with each field's file
   value, live value (as the document writes them), who set it and when. Over
-  HTTP it is a `200`; `openrails apply-catalog` prints it readably and exits
-  non-zero when anything was skipped.
+  HTTP it is a `200`; `openrails catalog apply` prints it readably
+  (`openrails.WriteCatalogReceipt` for a host's own command) and exits non-zero
+  when anything was skipped or the document is refused.
 - A document that skipped nothing is recorded by its canonical content hash
   and replays from then on. One that skipped something is not recorded: the
-  next start or apply retries it, and what already applied is a no-op. One
+  next apply retries it, and what already applied is a no-op. One
   finding, `life.catalog.conflicts`, lists the skipped objects and closes when a
   document applies whole.
-- A conflict never fails `openrails.New`: the uncontested objects apply and the
-  finding opens.
 
 To resolve a conflict:
 
@@ -50,9 +50,8 @@ To resolve a conflict:
 2. Remove the field, or the entry, from the document: the file relinquishes it
    and the live value stays.
 3. Force it: `billing.ApplyCatalogParams{Force: true}`, `?force=true` or
-   `--force-conflicts` overwrites the edit and takes the field. Start-up never
-   forces, and force never undoes a replay: a document already recorded as
-   applied changes nothing.
+   `--force-conflicts` overwrites the edit and takes the field. Force never
+   undoes a replay: a document already recorded as applied changes nothing.
 
 Edits never conflict: they always apply and take the fields they change.
 
@@ -67,8 +66,7 @@ key that documents alone set is deleted when nothing ever referred to it, and
 archived otherwise (see [deleting a product](merchant-guide.md#deleting-a-product)).
 An omitted one an edit touched or created stays, and the file lets go of its
 fields. Without `prune`, an omitted product or price is never touched: a
-partial file deletes nothing. This holds for `MerchantDeclaration.Catalog` at
-start and for `POST /v1/catalog/apply` alike.
+partial file deletes nothing.
 
 ## Revisions and concurrent edits
 

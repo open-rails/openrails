@@ -167,7 +167,7 @@ var ErrUnauthenticated = billingauth.ErrUnauthenticated
 
 // ParseMerchantDeclaration reads an entry of Config.Merchants from one YAML
 // document that names its merchant with a required slug, the entry's key,
-// refusing unknown fields. Issuer and Catalog are set in code.
+// refusing unknown fields. Issuer is set in code.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
 }

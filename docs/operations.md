@@ -17,7 +17,7 @@ exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | separate provider workflow | `apply-catalog` commits local catalog changes and read-verifies existing provider bindings; it never creates/updates provider objects or queues provider work. Changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
+| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings; it never creates/updates provider objects or queues provider work. Changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; **`pull-provider`** as the manual batch truth-pull |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
@@ -109,9 +109,10 @@ instance and no sticky session. Without Redis, run one instance.
 
 - **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`, the
   merchant's configuration (`Config.Merchants` with its PSPs and secrets, or the
-  same Vault KV mount), `MerchantDeclaration.Catalog`,
-  `Config.RateLimits`, `Config.Captcha`, `Config.TrustedProxies` and
-  `Config.ReturnOrigins`. Every start applies the declaration: instances
+  same Vault KV mount), `Config.RateLimits`, `Config.Captcha`,
+  `Config.TrustedProxies` and `Config.ReturnOrigins`. Every start applies the
+  declaration (never a catalog, which an operator applies once for all
+  instances): instances
   declaring different SCIM tokens replace each other's token at each start.
 - **Routes**: every instance mounts the same `openrails.Routes` (prefix,
   permission bundles, admin console). A load balancer sends any request to any
@@ -219,7 +220,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local, or a `--server-url` remote Client acting on its token's merchant (no `--merchant`) |
-| `apply-catalog --merchant NAME --file PATH [--force-conflicts]` | apply a catalog document: each product, price and meter applies whole unless an edit set a field it names differently, which is skipped, listed, and exits non-zero (`--force-conflicts` overwrites it). A document that applied whole replays by content hash; omission is preserved unless `prune: true` ([catalog ownership](catalog-ownership.md)) |
+| `catalog apply PATH --merchant NAME [--force-conflicts]` | apply a catalog document and print what changed: each product, price and meter applies whole unless an edit set a field it names differently, which is skipped, listed, and exits non-zero (`--force-conflicts` overwrites it); a refused document exits non-zero. A document that applied whole replays by content hash; omission is preserved unless `prune: true` ([catalog ownership](catalog-ownership.md)). Starting the server never applies a catalog |
 | `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
@@ -251,7 +252,7 @@ an init job or manual operation:
 ```bash
 openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
+openrails catalog apply /run/openrails/catalog.yaml --merchant your-merchant --config /etc/openrails/config.yaml
 ```
 
 `push-auth-bootstrap` runs first because it creates the initial AuthKit root
@@ -1247,7 +1248,7 @@ in any mode):
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
 | Usage order collection, Solana pulls | yes | no | no |
-| `apply-catalog` local changes + existing binding verification | yes — no provider writes | yes — no provider writes | yes — no provider writes |
+| `catalog apply` local changes + existing binding verification | yes — no provider writes | yes — no provider writes | yes — no provider writes |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |
 

@@ -9,6 +9,7 @@ the root README's [Sell Your Content](../../README.md#sell-your-content).
 | File | What it is |
 |---|---|
 | `main.go` | AuthKit, the OpenRails client (`newBilling`) and the mounted routes |
+| `catalog.go` | the site's catalog command, `go run . catalog apply catalog.yaml`: `Client.ApplyCatalog`, printing what changed; starting the site never applies it |
 | `content.go` | the app's API: `/api/courses` lists the courses with their prices as a buyer sees them (`billing.BuyerPrices`) and what the user owns (one product read and one entitlement read per page); `/api/courses/:course` answers whoever holds a key that unlocks the video (its course's, or the membership) its signed URL, and anyone else `402` with the products on sale that unlock it and the buy page; `/media/*path` serves signed, unexpired URLs |
 | `web/` | the React app, under one `BillingProvider`: the store (a billing-ui `<BuyButton>` per price the server answered), each course's player, and its buy page, where `<ProductList>` sells the products the `402` carried; the browser never reads the catalog and the app never handles an order itself. `web/src/clients.ts` builds the auth and billing clients, the one page file the [standalone](../standalone) and [hosted](../hosted) versions change |
 | `media/` | the courses' sample videos |
@@ -25,6 +26,7 @@ paywall names the entitlement to sell, your server reads the products granting i
 ```sh
 cp merchant.example.yaml merchant.yaml    # your NMI sandbox gateway's IDs and keys
 (cd web && pnpm install && pnpm build)    # the React app, into web/dist
+DATABASE_URL=postgres://… go run . catalog apply catalog.yaml   # once, and whenever it changes
 DATABASE_URL=postgres://… go run .        # http://localhost:8080 (MEDIA_KEY signs video URLs)
 ```
 

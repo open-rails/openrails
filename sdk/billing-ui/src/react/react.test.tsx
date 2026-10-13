@@ -62,6 +62,49 @@ describe("useConfig", () => {
   })
 })
 
+describe("BillingProvider config", () => {
+  // The host's page response carries GET /config's document.
+  const page = () =>
+    JSON.parse(
+      JSON.stringify({
+        billing_config: {
+          capabilities: { route_groups: { admin: false }, features: {} },
+          currencies: [{ code: "XTS", decimals: 3, minor_decimals: 3 }],
+          rails: [],
+          captcha: null,
+          network: null,
+        },
+      })
+    )
+
+  it("reads the host's config and never requests it", async () => {
+    const server = fakeBilling()
+    const { result } = setup(
+      () => ({ a: useConfig(), b: useConfig(), scales: useCurrencyScales() }),
+      server,
+      { config: page().billing_config }
+    )
+    expect(result.current.a).toMatchObject({ loading: false, error: null })
+    expect(result.current.b.config).toBe(result.current.a.config)
+    expect(result.current.a.config?.capabilities.route_groups.admin).toBe(false)
+    expect(result.current.scales.XTS).toBe(3)
+    act(() => result.current.a.refetch())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(result.current.a.loading).toBe(false)
+    expect(server.calls).toEqual([])
+  })
+
+  it("names a malformed config instead of fetching", () => {
+    const server = fakeBilling()
+    const { result } = setup(() => useConfig(), server, {
+      config: { capabilities: null } as never,
+    })
+    expect(result.current.config).toBeNull()
+    expect(result.current.error?.code).toBe("invalid_config")
+    expect(server.calls).toEqual([])
+  })
+})
+
 describe("useCustomerConfig", () => {
   it("fetches GET /me/config once for every reader", async () => {
     const server = fakeBilling({

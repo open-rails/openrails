@@ -6,10 +6,13 @@ import (
 
 	auth "github.com/open-rails/authkit/auth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 // ValidateRoutes refuses a selection without the Auth its routes need,
@@ -40,13 +43,10 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	}
 	asm := FromApp(a)
 	asm.Auth = sel.Auth
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
+	providers, err := mountedProviderRoutes(a)
 	if err != nil {
 		return nil, err
 	}
-	// Generic callbacks remain registered as API-owned accounts are added after
-	// startup. Request-time account/signature verification is authoritative.
-	providers.Webhooks = true
 	table := asm.NewRoutes(Options{Groups: sel.RouteGroups, ProviderRoutes: &providers})
 	extra, err := BuildCustomerRoutes(a, sel.Auth)
 	if err != nil {
@@ -57,4 +57,29 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 		table.Entries = append(table.Entries, entry)
 	}
 	return table, nil
+}
+
+// mountedProviderRoutes is the provider routes ConfiguredRoutes mounts.
+func mountedProviderRoutes(a *app.App) (routesurface.ProviderRoutes, error) {
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
+	if err != nil {
+		return providers, err
+	}
+	// Generic callbacks remain registered as API-owned accounts are added after
+	// startup. Request-time account/signature verification is authoritative.
+	providers.Webhooks = true
+	return providers, nil
+}
+
+// ConfiguredPublicConfig is the document GET /v1/config serves on the mount
+// ConfiguredRoutes builds for sel, without a request.
+func ConfiguredPublicConfig(a *app.App, sel config.Routes) (billing.PublicConfig, error) {
+	if a == nil || a.Runtime == nil || a.Config == nil {
+		return billing.PublicConfig{}, fmt.Errorf("openrails HTTP: runtime is not initialized")
+	}
+	providers, err := mountedProviderRoutes(a)
+	if err != nil {
+		return billing.PublicConfig{}, err
+	}
+	return handlers.PublicConfigDocument(a.Runtime, CapabilitiesFor(a.Runtime, sel.RouteGroups, providers, nil)), nil
 }

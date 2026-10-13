@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	pkgcatalog "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
@@ -156,8 +155,6 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 	for _, path := range []string{"/api/pay/v1/catalog/products", "/api/pay/v1/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
-	// Mounts choose independently; a host's catalog document never closes them.
-	rt.App.Config.Merchants = map[string]config.MerchantDeclaration{"acme": {Catalog: &pkgcatalog.Application{}}}
 	reads, n = writes(rt, config.Routes{Auth: fake, RouteGroups: config.RouteGroups{Catalog: true}})
 	require.Positive(t, reads)
 	require.Positive(t, n)

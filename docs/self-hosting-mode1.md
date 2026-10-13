@@ -14,7 +14,7 @@ instead, put the configuration in Vault ([vault.md](vault.md)).
 |---|---|---|
 | `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `vault`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, display name, settings, alert webhooks, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchants` |
-| catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `MerchantDeclaration.Catalog`, applied by `openrails.New` (embedded hosts) |
+| catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | an operator, never a boot: `openrails catalog apply PATH --merchant NAME` (standalone) / the host's own command calling `Client.ApplyCatalog` (embedded hosts) |
 
 Manifest anatomy and field semantics:
 [merchant-provisioning.md](merchant-provisioning.md).

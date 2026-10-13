@@ -286,9 +286,6 @@ type world struct {
 	riverWorkers int
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]openrails.PSPConfig)
-	// catalog is the merchant's declared catalog, read and applied on every
-	// start.
-	catalog func() *catalog.Application
 	// custodians are the merchant's declared card custodians.
 	custodians map[string]openrails.CustodianConfig
 	// alertWebhooks are the merchant's declared alert webhooks.
@@ -498,12 +495,12 @@ func (w *world) start() {
 	// The harness host's own issuer binds its merchant, as a single-merchant
 	// host declares it.
 	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, Settings: w.settings,
-		Issuer: issuer, Catalog: w.declaredCatalog()}
+		Issuer: issuer}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: declared}
 	if w.vault != nil {
 		// Vault holds the configuration: the engine is told only the slug, and
 		// the documents are written as an operator writes them.
-		cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: {Issuer: issuer, Catalog: w.declaredCatalog()}}
+		cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: {Issuer: issuer}}
 		cfg.Vault = w.vault.Config()
 		if w.vaultAddr != "" {
 			cfg.Vault.Address = w.vaultAddr
@@ -563,14 +560,6 @@ func (w *world) start() {
 			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", listed.Items, w.stripe.Unexpected(), w.nmi.Unexpected())
 		}
 	}
-}
-
-// declaredCatalog is the catalog the merchant declares at this start.
-func (w *world) declaredCatalog() *catalog.Application {
-	if w.catalog == nil {
-		return nil
-	}
-	return w.catalog()
 }
 
 // retiredMerchantHeader is the request header that once named a merchant:

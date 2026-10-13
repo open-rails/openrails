@@ -23,7 +23,7 @@ type ReadinessDependency struct {
 
 // Ready is the readiness shared by the standalone /readyz and embedded
 // Runtime.Ready. Postgres, River (the host's fleet bound to RiverJobs, or
-// OpenRails' own running) and a declared catalog (applied) are required. Redis, Vault and PSP
+// OpenRails' own running) are required. Redis, Vault and PSP
 // posture are reported from cached background state as optional (degraded)
 // entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
@@ -50,9 +50,6 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		merchantsErr = fmt.Errorf("merchants service not armed (#699)")
 	}
 	add("merchants", false, merchantsErr)
-	if observed, err := r.declaredCatalog.observed(); observed {
-		add("catalog", false, err)
-	}
 
 	var riverErr error
 	if !r.RiverBound() {

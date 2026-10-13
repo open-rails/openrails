@@ -44,6 +44,13 @@ func (w *world) fieldOwners(object, key, priceKey, field string) []string {
 	return managers
 }
 
+func (w *world) catalogRevision() int64 {
+	w.t.Helper()
+	var revision int64
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.sql(`SELECT catalog_revision FROM billing.merchants WHERE slug = $1`), w.slug).Scan(&revision))
+	return revision
+}
+
 func (w *world) amountOf(product, price string) int64 {
 	w.t.Helper()
 	p, err := priceByKey(w.t.Context(), w.client[embedded], product, price)
@@ -371,42 +378,6 @@ func TestCatalogReplacementsRenameEditedProducts(t *testing.T) {
 	got, err = c.GetProduct(t.Context(), edited.ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{premium, vip}, got.Entitlements)
-}
-
-// Every start applies the declared catalog's uncontested objects; New never fails
-// on a conflict, the finding names it and closes once the file agrees.
-func TestDeclaredCatalogSkipsEditsOnEveryStart(t *testing.T) {
-	w := prepareWorld(t, 12)
-	key := "boot-" + uuid.NewString()[:8]
-	a, b := int64(1_000_000), int64(2_000_000)
-	w.catalog = func() *catalog.Application {
-		return catalogDocument(map[string]catalog.ApplyProduct{key: {DisplayName: catalog.Value("Boot"), Prices: map[string]catalog.ApplyPrice{"a": usd(a), "b": usd(b)}}})
-	}
-	w.start()
-	product, err := productByKey(t.Context(), w.client[embedded], key)
-	require.NoError(t, err)
-	_, err = w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "a", Currency: "USD", UnitAmount: 1_500_000})
-	require.NoError(t, err)
-
-	revision := w.catalogRevision()
-	w.restart()
-	require.Equal(t, revision, w.catalogRevision(), "an applied file replays after an edit")
-	require.Empty(t, w.openFindings(catalogConflictsFinding))
-
-	b = 2_500_000
-	w.restart()
-	require.EqualValues(t, 1_500_000, w.amountOf(key, "a"), "New succeeded and kept the edit")
-	require.EqualValues(t, 2_500_000, w.amountOf(key, "b"))
-	require.Equal(t, []string{"catalog"}, w.openFindings(catalogConflictsFinding))
-	revision = w.catalogRevision()
-	w.restart()
-	require.Equal(t, revision, w.catalogRevision(), "a retried start that changes nothing does not move the catalog")
-	require.Equal(t, []string{"catalog"}, w.openFindings(catalogConflictsFinding), "one finding, not one per start")
-
-	a = 1_500_000
-	w.restart()
-	require.Empty(t, w.openFindings(catalogConflictsFinding), "the finding closes once the file agrees")
-	require.EqualValues(t, 1_500_000, w.amountOf(key, "a"))
 }
 
 // Every catalog object carries a revision. An edit sent with a revision the

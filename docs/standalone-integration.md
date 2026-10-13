@@ -114,7 +114,7 @@ for catalog edits. Each one's `root:` twin, held in the server's root group,
 reaches every merchant.
 
 Catalogs always use database state, edited over HTTP (the remote Client
-included). `openrails apply-catalog` and the
+included). `openrails catalog apply` and the
 applications route apply documents that share the catalog with those edits: a
 document skips a product, price or meter whose field an edit set differently,
 reports it and exits non-zero, unless `--force-conflicts` ([catalog
@@ -156,12 +156,13 @@ openrails push-merchant-config --config /etc/openrails/config.yaml --file /etc/o
 
 # 3. Catalog: products, entitlements, prices and validated provider bindings.
 #    Provider creation and mutation use their separate workflows.
-openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /etc/openrails/catalog.yaml
+openrails catalog apply /etc/openrails/catalog.yaml --merchant your-merchant --config /etc/openrails/config.yaml
 ```
 
 Startup provisions the manifest's missing merchants and, without Vault, reads
-their configuration. AuthKit bootstrap is first-run only; catalog application
-is always explicit.
+their configuration. AuthKit bootstrap is first-run only; starting never
+applies a catalog: catalog changes are an operator's `catalog apply` (or the
+console), reviewed like a deploy.
 
 **Backend credentials.** Your backend is a client of the issuer you
 registered in step 2 (see [trusted issuers](#trusted-issuers-staff-machines-and-customers)):
@@ -467,7 +468,7 @@ embedded host mounts them, and each merchant's group as its scope.
 
 | `server.Config` | Meaning |
 |---|---|
-| `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
+| `Engine` | The engine's `openrails.Config`. A declared merchant's `Issuer` is refused; each merchant manages its catalog through the API or `openrails catalog apply`. |
 | `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; invitation-only registration and `/admin` link landings for local staff (closed without local sign-in), and the engine's trusted proxies when unset. Explicit closed enrollment stays restrictive; standalone open self-registration is refused. Hosted products supplying `server.Config.MerchantCreation` may explicitly enable open registration with local sign-in; verification still defaults to required. |
 | `LocalSignIn` | Serve sign-in to the server's own accounts. Without it people sign in at a trusted issuer. |
 | `Naming` | The rename policy for merchant names. |

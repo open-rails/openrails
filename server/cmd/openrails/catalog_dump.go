@@ -23,7 +23,7 @@ func newDumpCatalogCmd() *cobra.Command {
 			"Includes prepaid credit grants and customer-selected amount ranges. " +
 			"Archived revisions, immutable IDs, purchases and balances require billing export. " +
 			"Provider links refer to the selected merchant's configured PSP accounts. " +
-			"Reimport with apply-catalog; an already applied document remains a replay, not a rollback.",
+			"Reimport with catalog apply; an already applied document remains a replay, not a rollback.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpCatalog(cmd, opts)

@@ -6,11 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"reflect"
 	"slices"
-	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -26,53 +23,17 @@ import (
 // before local mutation. An object whose named field an edit set differently
 // is skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil, "")
+	return s.applyCatalog(ctx, document, params.Force, "")
 }
 
 // ApplyOperatorCatalog applies a catalog file for trusted operator tooling,
-// which carries no verified identity. Like the declared catalog on start, its
-// substantive changes are admitted on the merchant's autonomous budget.
+// which carries no verified identity. Its substantive changes are admitted on
+// the merchant's autonomous budget.
 func (s *Service) ApplyOperatorCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil, "operator_catalog")
+	return s.applyCatalog(ctx, document, params.Force, "operator_catalog")
 }
 
-// ErrCatalogProviderUnconfirmed: a provider reference could not be confirmed
-// (no answer by the deadline, or its account is not usable yet). Nothing was
-// committed; the same application can be retried.
-var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference unconfirmed")
-
-// ApplyDeclaredCatalog applies a declared merchant's catalog on start. It never
-// forces: conflicting objects are skipped, reported and retried on the next
-// start. Provider reference reads end at deadline (zero: none); one that
-// fails without a provider refusal is ErrCatalogProviderUnconfirmed. So is a
-// reference to one of declaredPSPs (the PSP keys the merchant's declaration
-// names) that has no account yet, its signer awaiting Vault. A PSP declared
-// nowhere is refused.
-func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire.Application, deadline time.Time, declaredPSPs []string) (*billing.CatalogApplicationReceipt, error) {
-	verify := func(ctx context.Context, provider, rail, account, product string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
-		if !deadline.IsZero() {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithDeadline(ctx, deadline)
-			defer cancel()
-		}
-		out, err := s.verifyCatalogProviderReference(ctx, provider, rail, account, product, req, link)
-		var refusal *apperr.Error
-		if err != nil && !(errors.As(err, &refusal) && refusal.Status < http.StatusInternalServerError) {
-			return nil, fmt.Errorf("%w: %w", ErrCatalogProviderUnconfirmed, err)
-		}
-		return out, err
-	}
-	declared := map[string]bool{}
-	for _, key := range declaredPSPs {
-		declared[strings.ToLower(strings.TrimSpace(key))] = true
-	}
-	return s.applyCatalog(ctx, document, false, verify, declared, "startup_catalog")
-}
-
-// applyCatalog applies params. A reference to a PSP in declaredPSPs with no
-// account yet is ErrCatalogProviderUnconfirmed, unless the document is
-// refused for another reason.
-func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier, declaredPSPs map[string]bool, origin string) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, origin string) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -93,7 +54,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		return nil, err
 	}
 	for attempt := 1; ; attempt++ {
-		prepared, err := s.prepareCatalogApplication(ctx, params, digest, verify, declaredPSPs)
+		prepared, err := s.prepareCatalogApplication(ctx, params, digest)
 		if err != nil {
 			return nil, err
 		}

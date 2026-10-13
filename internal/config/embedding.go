@@ -47,8 +47,7 @@ type RouteGroups struct {
 	// Catalog is the catalog: products, prices, meters and their rates,
 	// archiving a product, applying a catalog document, moving subscribers
 	// between prices. It needs billing.MerchantCatalogManage or
-	// RootCatalogManage. A declared merchant's Catalog skips what an edit
-	// changed.
+	// RootCatalogManage.
 	Catalog bool
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
 	// billing import and export, the dashboard layout. It needs

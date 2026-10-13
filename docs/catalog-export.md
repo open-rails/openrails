@@ -93,7 +93,7 @@ The existing declaration workflow remains available:
 
 ```sh
 openrails dump-merchant-catalog --slug my-app > catalog.yaml
-openrails apply-catalog --merchant my-app --file catalog.yaml
+openrails catalog apply catalog.yaml --merchant my-app
 ```
 
 This export includes unarchived products and their unarchived prices, all meters,

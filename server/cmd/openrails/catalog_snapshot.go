@@ -12,8 +12,8 @@ import (
 )
 
 func newCatalogCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "catalog", Short: "Export and restore complete catalog history with original identities"}
-	cmd.AddCommand(newCatalogExportCmd(), newCatalogImportCmd())
+	cmd := &cobra.Command{Use: "catalog", Short: "Apply catalog documents; export and restore complete catalog history"}
+	cmd.AddCommand(newCatalogApplyCmd(), newCatalogExportCmd(), newCatalogImportCmd())
 	return cmd
 }
 func newCatalogExportCmd() *cobra.Command {

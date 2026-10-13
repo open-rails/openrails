@@ -266,6 +266,7 @@ func startStack(t *testing.T) *stack {
 	ak, bill, r, err := newApp(ctx, db, s, testMediaKey)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ak.Close(context.Background()) })
+	require.NoError(t, applyCatalog(ctx, bill, "catalog.yaml", io.Discard))
 	listener, err := net.Listen("tcp", appURL.Host)
 	require.NoError(t, err)
 	app := &httptest.Server{Listener: listener, Config: &http.Server{Handler: r}}

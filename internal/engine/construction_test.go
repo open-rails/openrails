@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -47,9 +46,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"stripe seam on live":           {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
 		"nmi seam on live":              {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
 		"clock seam on live":            {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
-		"invalid catalog": {with(sandbox, func(c *config.Config) {
-			c.Merchants = map[string]config.MerchantDeclaration{"m": {Catalog: &catalog.Application{}}}
-		}), config.Deps{}, `Config.Merchants["m"].Catalog: `},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, err := New(context.Background(), tc.cfg, tc.deps)
@@ -97,17 +93,4 @@ func TestDeclaredMerchant(t *testing.T) {
 	}
 	_, ok := (&Engine{}).DeclaredMerchant("shop")
 	require.False(t, ok, "an engine declaring no merchant")
-}
-
-// Startup catalogs are ordinary partial batches, with a private copy retained
-// for any background retry. They need no caller-managed identity or revision.
-func TestStartupCatalogNeedsOnlyItsContent(t *testing.T) {
-	m := config.MerchantDeclaration{Slug: "merchant", Catalog: &catalog.Application{SchemaVersion: 1,
-		Products: map[string]catalog.ApplyProduct{"premium": {DisplayName: catalog.Value("Premium")}},
-	}}
-	copied, err := declaredCatalog(m)
-	require.NoError(t, err)
-	require.Equal(t, m.Catalog, copied)
-	m.Catalog.Products["premium"] = catalog.ApplyProduct{DisplayName: catalog.Value("Changed after construction")}
-	require.Equal(t, "Premium", copied.Products["premium"].DisplayName.Value)
 }

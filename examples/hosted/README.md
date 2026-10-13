@@ -7,7 +7,8 @@ app code they share is [Sell Your Content](../../README.md#sell-your-content).
 
 | File | What it is |
 |---|---|
-| `main.go` | the app's AuthKit (users verify their email; it mints the browser's tokens for the platform and pushes users to it over SCIM with the service token) and the billing client, `NewRemoteMerchant` with the service token, which applies `catalog.yaml` at boot |
+| `main.go` | the app's AuthKit (users verify their email; it mints the browser's tokens for the platform and pushes users to it over SCIM with the service token) and the billing client, `NewRemoteMerchant` with the service token |
+| `catalog.go` | the app's catalog command, `go run . catalog apply catalog.yaml`: `Client.ApplyCatalog` with the service token; starting the app never applies it |
 | `content.go`, `web/src/pages.tsx`, `catalog.yaml`, `media/` | the embedded example's, unchanged |
 | `web/src/clients.ts` | the browser's clients: AuthKit's, which trades the session for a DPoP-bound token to the platform, and billing-ui's, which calls the platform directly with it |
 
@@ -23,7 +24,8 @@ registration, and the platform's directory for its users. Then
 DATABASE_URL=postgres://… EMAIL_SMTP_HOST=… \
 OPENRAILS_URL=https://openrails.dev OPENRAILS_RESOURCE=https://openrails.dev \
 OPENRAILS_SERVICE_TOKEN=openrails_st_… OPENRAILS_DIRECTORY=https://openrails.dev/directory/scim/v2 \
-PUBLIC_URL=https://courses.example go run .
+PUBLIC_URL=https://courses.example go run . catalog apply catalog.yaml   # once, and whenever it changes
+… go run .
 ```
 
 AuthKit keeps its signing key in `AUTH_KEYS_PATH` (default `.dev/auth`): the

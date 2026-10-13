@@ -32,7 +32,6 @@ import (
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/fxfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
@@ -249,12 +248,10 @@ func startApp(t *testing.T) *app {
 	t.Cleanup(gateway.Close)
 	merchant, err := openrails.ReadMerchantFile("merchant.example.yaml")
 	require.NoError(t, err)
-	products, err := catalog.ReadFile("catalog.yaml")
-	require.NoError(t, err)
 	// Exchange rates from a fake exchange-api: no test reaches the real one.
 	fx := fxfake.New()
 	t.Cleanup(fx.Close)
-	merchant.Catalog, merchant.Issuer = products, issuer
+	merchant.Issuer = issuer
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
 		TestMode:          openrails.Sandbox,
@@ -266,6 +263,12 @@ func startApp(t *testing.T) *app {
 	t.Cleanup(func() { bill.Close(context.Background()) })
 	shop, err := bill.MerchantBySlug(merchant.Slug)
 	require.NoError(t, err)
+	var receipt strings.Builder
+	require.NoError(t, applyCatalog(ctx, shop, "catalog.yaml", &receipt))
+	require.Contains(t, receipt.String(), "changed product course-101")
+	receipt.Reset()
+	require.NoError(t, applyCatalog(ctx, shop, "catalog.yaml", &receipt))
+	require.Contains(t, receipt.String(), "already applied; nothing changed")
 	require.NoError(t, ak.Start(ctx))
 	require.NoError(t, bill.Start(ctx))
 

@@ -146,13 +146,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 		return nil, nil, err
 	}
 
-	// Your products + prices as a catalog. This can be safely applied on every server startup
-	products, err := catalog.ReadFile("catalog.yaml")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	merchant.Catalog = products
 	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
@@ -178,6 +171,31 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 	return bill, shop, nil
 }
 ```
+
+#### Apply your catalog
+
+Starting the server never changes what you sell. Give your app a catalog
+command (here `myapp catalog apply catalog.yaml`) and run it once to load
+`catalog.yaml`, then again whenever the file changes, like a deploy:
+
+```go
+// applyCatalog applies a catalog file and prints what changed. Applying the
+// same file again changes nothing.
+func applyCatalog(ctx context.Context, shop *openrails.Client, path string) error {
+	products, err := catalog.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	receipt, err := shop.ApplyCatalog(ctx, products, billing.ApplyCatalogParams{})
+	if err != nil {
+		return err
+	}
+	return openrails.WriteCatalogReceipt(os.Stdout, receipt)
+}
+```
+
+A field someone changed in the console since is not overwritten: the receipt
+lists it ([Catalog files and edits together](docs/catalog-ownership.md)).
 
 #### Guard its routes with your auth
 
@@ -322,7 +340,7 @@ Each route needs `merchant:customer:read` or `merchant:customer:manage` (or its 
 | `POST /v1/admin/credit-grants` | grant credits | manage |
 | `POST /v1/admin/credit-grants/{id}/revoke` | revoke a grant | manage |
 
-**Catalog management** (with `RouteGroups.Catalog`; used to update the catalog. Off in this example, where `catalog.yaml` sets it)
+**Catalog management** (with `RouteGroups.Catalog`; used to update the catalog. Off in this example, where the catalog command applies `catalog.yaml`)
 
 Catalog reads need `merchant:catalog:read`; changes need `merchant:catalog:manage` (or their `root:` twins). These routes also accept backend application credentials with the corresponding permission. They do not require a recent sign-in. They work alongside a catalog file: see [Catalog files and edits together](docs/catalog-ownership.md).
 
@@ -661,8 +679,11 @@ func (k mediaKey) sign(path, expires string) string {
 pnpm add @openrails/billing-ui @openrails/auth-ui
 ```
 
-Wrap your app once in `<BillingProvider client={billing} appearance={{ theme: "auto" }}>`;
-this example also uses auth-ui's `<AuthProvider client={auth}>` and `<AuthUiProvider>`.
+Wrap your app once in `<BillingProvider client={billing} appearance={{ theme: "auto" }}>`.
+`BillingProvider` reads `GET /v1/config` once; a page your server renders can
+carry that document instead (`config={page.billingConfig}`, from
+`bill.PublicConfig(routes)` with the `Routes` you mounted), and billing-ui then
+makes no request for it. This example also uses auth-ui's `<AuthProvider client={auth}>` and `<AuthUiProvider>`.
 billing-ui doesn't depend on auth-ui: the billing client's only link to your auth is
 the `fetch` you give it (here `auth.authFetch`, which attaches the AuthKit token; with
 other auth, any `fetch` that sends your credentials), and `<BuyButton>`/`<ProductList>`
@@ -1052,9 +1073,8 @@ See [Running several instances](docs/operations.md#running-several-instances).
 
 The following files form a catalog migration: update products in place, create
 new price revisions, retire prices, and restore an earlier revision. All changes
-are YAML applications. Apply each file through the same
-`catalog.ReadFile` → `MerchantDeclaration.Catalog` startup path shown above, through
-`client.ApplyCatalog`, or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
+are YAML applications. Apply each file with your app's catalog command shown
+above (`client.ApplyCatalog`), or with `openrails catalog apply FILE.yaml --merchant onlydemo`.
 There are no caller-managed application IDs or version numbers. These examples
 build on the initial `catalog.yaml` above.
 
@@ -1236,7 +1256,7 @@ lighter dump/apply workflow instead:
 
 ```sh
 openrails dump-merchant-catalog --slug onlydemo > catalog.yaml
-openrails apply-catalog --merchant onlydemo --file catalog.yaml
+openrails catalog apply catalog.yaml --merchant onlydemo
 ```
 
 That document can recreate equivalent prices, using the destination's product and
@@ -1249,8 +1269,7 @@ hash replay, so this workflow does not roll back later edits.
 
 ### Prepaid API-balance catalog
 
-An API service can apply this separate catalog through the same
-`catalog.ReadFile` and `MerchantDeclaration.Catalog` flow. These products top
+An API service can apply this separate catalog with the same catalog command. These products top
 up a currency balance that metered API usage consumes; they are independent of
 the creator-site catalog above.
 
@@ -1466,10 +1485,10 @@ The public routes find their merchant by the request's Host, so every merchant n
 
 #### Apply the catalog
 
-Your `catalog.yaml` is the one from [How to Install](#how-to-install-embedded). Apply it once the server is up; an unchanged document is a no-op:
+Your `catalog.yaml` is the one from [How to Install](#how-to-install-embedded). Apply it once the server is up, and again whenever it changes; an unchanged document is a no-op. The command prints what changed and exits non-zero when it is refused or skips an object an edit changed:
 
 ```sh
-openrails apply-catalog --config config.yaml --merchant-manifest merchant.yaml --merchant onlydemo --file catalog.yaml
+openrails catalog apply catalog.yaml --config config.yaml --merchant-manifest merchant.yaml --merchant onlydemo
 ```
 
 #### Trust your app's AuthKit

@@ -136,6 +136,13 @@ loads to take a card. `@openrails/billing-ui` reads each document once and share
 it (`useConfig()`, `useCustomerConfig()`): `OrderPayment`, `AccountBilling` and
 `PaymentMethodsPanel` take their PSPs from the second.
 
+A host renders billing-ui from its own page data: put `GET /v1/config`'s
+document in the page response your server already sends and pass it to
+`BillingProvider` as `config`; billing-ui then never requests it. An embedded
+host builds it in process with `engine.PublicConfig(routes)`, the `Routes` it
+mounts (the document that mount serves); a host of a standalone or hosted
+server reads it with the remote client's `GetPublicConfig`.
+
 `payment` looks like this:
 
 ```json

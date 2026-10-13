@@ -249,7 +249,7 @@ type stack struct {
 // OPENRAILS_E2E_DSN's server, with OPENRAILS_E2E_REDIS's Redis when it names
 // one (else without Redis): the openrails binary
 // with openrails/config.yaml and merchant.example.yaml (only its ports
-// changed), the catalog applied with apply-catalog, NMI played by nmimock,
+// changed), the catalog applied with catalog apply, NMI played by nmimock,
 // one SMTP server for both, and this app. OPENRAILS_BIN names the binary;
 // without it the server module is built.
 func startStack(t *testing.T) *stack {
@@ -319,10 +319,23 @@ func startStack(t *testing.T) *stack {
 		_ = res.Body.Close()
 		return res.StatusCode == http.StatusOK
 	}, 60*time.Second, 200*time.Millisecond, "the server is ready")
-	apply := exec.Command(bin, "apply-catalog", "--config", "config.yaml", "--merchant-manifest", "merchant.yaml", "--merchant", "onlydemo", "--file", catalogFile)
-	apply.Dir, apply.Env = dir, env
-	out, err := apply.CombinedOutput()
-	require.NoError(t, err, "apply-catalog: %s", tail(out, 20))
+	applyCatalog := func(file string) (string, error) {
+		apply := exec.Command(bin, "catalog", "apply", file, "--config", "config.yaml", "--merchant-manifest", "merchant.yaml", "--merchant", "onlydemo")
+		apply.Dir, apply.Env = dir, env
+		out, err := apply.CombinedOutput()
+		return string(out), err
+	}
+	out, err := applyCatalog(catalogFile)
+	require.NoError(t, err, "catalog apply: %s", tail([]byte(out), 20))
+	require.Contains(t, out, "changed product course-101", "it prints what changed")
+	out, err = applyCatalog(catalogFile)
+	require.NoError(t, err, "catalog apply: %s", tail([]byte(out), 20))
+	require.Contains(t, out, "already applied; nothing changed")
+	refused := filepath.Join(dir, "refused.yaml")
+	require.NoError(t, os.WriteFile(refused, []byte("schema_version: 1\nproducts:\n  stray:\n    display_name: Stray\n    prices:\n      once:\n        currency: usd\n        unit_amount: 1000000\n        psps: [nowhere]\n"), 0o600))
+	out, err = applyCatalog(refused)
+	require.Error(t, err, "a refused document exits non-zero: %s", out)
+	require.Contains(t, out, "nowhere")
 
 	// The app.
 	s := settings{

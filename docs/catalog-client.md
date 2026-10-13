@@ -136,9 +136,10 @@ payment and access; a browser's return is navigation only.
 
 ## What a host declares
 
-Declare the merchant in `Config.Merchants`, and a host whose `catalog.yaml` is the
-truth in `MerchantDeclaration.Catalog` (`catalog.ParseApplicationYAML`). Everything else is
-a Client method. See [embedding](embedded-integration.md) and the
+Declare the merchant in `Config.Merchants`. A host whose `catalog.yaml` is the
+truth applies it from its own operator command with `ApplyCatalog`
+(`catalog.ReadFile`); starting never applies it. Everything else is a Client
+method. See [embedding](embedded-integration.md) and the
 [merchant guide](merchant-guide.md).
 
 Price IDs name immutable financial versions: product `premium`, price key

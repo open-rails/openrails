@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The one-off tools (apply-catalog, nmi decline-report, reconcile) take the
+// The one-off tools (catalog apply, nmi decline-report, reconcile) take the
 // manifest run-server boots with, the server's own keys included.
 func TestToolsReadTheServerManifest(t *testing.T) {
 	path := writeTemp(t, "merchant.yaml", `version: 1

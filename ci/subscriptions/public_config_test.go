@@ -3,11 +3,17 @@
 package subscriptions_test
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
 // One PSP whose credentials cannot be checked never takes purchase down: the
@@ -35,4 +41,32 @@ func TestPublicConfigDegradesOnePSP(t *testing.T) {
 		require.Positive(t, ccbill.RetryAfter, tp)
 		require.Empty(t, ccbill.Config, "%s: no values to drive an unavailable PSP", tp)
 	}
+}
+
+// A host renders billing-ui from its own page response: Engine.PublicConfig
+// is the document the mount it names serves at GET /v1/config.
+func TestEnginePublicConfigIsTheMountsDocument(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	served := func(routes openrails.Routes) string {
+		mux := http.NewServeMux()
+		require.NoError(t, openrailshttp.Mount(mux, w.rt, routes))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, routes.Prefix+"/v1/config", nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return rec.Body.String()
+	}
+	staff := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, RouteGroups: routeGroups}
+	public := openrails.Routes{Auth: authtest.Deny{}}
+	docs := map[string]*billing.PublicConfig{}
+	for name, routes := range map[string]openrails.Routes{"staff": staff, "public": public} {
+		doc, err := w.rt.PublicConfig(routes)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(doc)
+		require.NoError(t, err)
+		require.JSONEq(t, served(routes), string(encoded), name)
+		docs[name] = doc
+	}
+	require.True(t, docs["staff"].Capabilities.RouteGroups["admin"])
+	require.False(t, docs["public"].Capabilities.RouteGroups["admin"], "the mount it names, not the engine's")
 }

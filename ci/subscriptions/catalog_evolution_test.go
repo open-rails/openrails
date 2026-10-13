@@ -163,7 +163,7 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 	require.Equal(t, 1, live)
 }
 
-func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
+func TestCatalogDocumentPartialArchiveAndRestoreVersions(t *testing.T) {
 	w := newWorld(t)
 	file := func(amount int64) *catalog.Application {
 		price := catalog.ApplyPrice{Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), BillingIntervalHours: catalog.Null[int](), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
@@ -172,21 +172,20 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 			"other-video": {DisplayName: catalog.Value("Other video"), Archived: catalog.Value(false), Prices: map[string]catalog.ApplyPrice{"purchase": price}},
 		}}
 	}
-	boot := func(app *catalog.Application) {
+	apply := func(app *catalog.Application) {
 		t.Helper()
-		bill, _, err := w.bootDeclared(t.Context(), app)
+		_, err := w.client[embedded].ApplyCatalog(t.Context(), app, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
-		require.NoError(t, bill.Close(t.Context()))
 	}
-	boot(file(1_000_000))
+	apply(file(1_000_000))
 	c := w.client[remote]
 	first, err := priceByKey(t.Context(), c, "video", "purchase")
 	require.NoError(t, err)
-	boot(file(2_000_000))
+	apply(file(2_000_000))
 	second, err := priceByKey(t.Context(), c, "video", "purchase")
 	require.NoError(t, err)
 	require.EqualValues(t, 2, second.Version)
-	boot(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"video": {DisplayName: catalog.Value("Updated display")}}})
+	apply(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"video": {DisplayName: catalog.Value("Updated display")}}})
 	for _, key := range []string{"video", "other-video"} {
 		product, err := productByKey(t.Context(), c, key)
 		require.NoError(t, err)
@@ -195,7 +194,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 2_000_000, current.UnitAmount, "omitted prices retain their financial terms")
 	}
-	boot(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
+	apply(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 		"video":       {Archived: catalog.Value(true), Prices: map[string]catalog.ApplyPrice{"purchase": {Archived: catalog.Value(true)}}},
 		"other-video": {Archived: catalog.Value(true), Prices: map[string]catalog.ApplyPrice{"purchase": {Archived: catalog.Value(true)}}},
 	}})
@@ -212,7 +211,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	video.DisplayName = catalog.Value("Video renamed")
 	video.Entitlements = catalog.Value([]string{"video:two"})
 	restore.Products["video"] = video
-	boot(restore)
+	apply(restore)
 	restored, err := priceByKey(t.Context(), c, "video", "purchase")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, restored.ID)
@@ -223,19 +222,19 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	require.Equal(t, "Video renamed", product.DisplayName)
 	require.Equal(t, []string{"video:two"}, product.Entitlements)
 	revision := w.catalogRevision()
-	boot(restore)
+	apply(restore)
 	require.Equal(t, revision, w.catalogRevision(), "the same content does not write again")
 	_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("API edit")})
 	require.NoError(t, err)
-	boot(restore)
+	apply(restore)
 	product, err = productByKey(t.Context(), c, "video")
 	require.NoError(t, err)
-	require.Equal(t, "API edit", product.DisplayName, "an already applied startup batch cannot overwrite a later API edit")
-	boot(file(2_000_000))
+	require.Equal(t, "API edit", product.DisplayName, "an already applied document cannot overwrite a later API edit")
+	apply(file(2_000_000))
 	still, err := priceByKey(t.Context(), c, "video", "purchase")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, still.ID, "a previously applied batch cannot reactivate its former price")
-	boot(&catalog.Application{SchemaVersion: 1, Prune: true})
+	apply(&catalog.Application{SchemaVersion: 1, Prune: true})
 	product, err = productByKey(t.Context(), c, "video")
 	require.NoError(t, err)
 	require.False(t, product.Archived, "prune keeps a product an edit touched")
@@ -371,12 +370,11 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			"portable": {DisplayName: catalog.Value("Portable"), Prices: map[string]catalog.ApplyPrice{"purchase": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}},
 		}}
 	}
-	for _, amount := range []int64{4_000_000, 7_000_000} {
-		bill, _, err := w.bootDeclared(t.Context(), declaration(amount))
-		require.NoError(t, err)
-		require.NoError(t, bill.Close(t.Context()))
-	}
 	c := w.client[embedded]
+	for _, amount := range []int64{4_000_000, 7_000_000} {
+		_, err := c.ApplyCatalog(t.Context(), declaration(amount), billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+	}
 	product, err := productByKey(t.Context(), c, "portable")
 	require.NoError(t, err)
 	product, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("API edited")})
@@ -431,11 +429,13 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
 		t.Helper()
 		bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps, Catalog: app}},
+			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}},
 		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = bill.Close(context.Background()) })
 		shop, err := bill.MerchantBySlug(w.slug)
+		require.NoError(t, err)
+		_, err = shop.ApplyCatalog(t.Context(), app, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		return bill, shop
 	}

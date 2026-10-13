@@ -25,6 +25,7 @@ pkg openrails, func ReadMerchantFile(string) (MerchantDeclaration, error)
 pkg openrails, func WithIdempotencyKey(string) RequestOption
 pkg openrails, func WithInvoker(context.Context, Invoker) context.Context
 pkg openrails, func WithRiverClient(*river.Client[pgx.Tx]) StartOption
+pkg openrails, func WriteCatalogReceipt(io.Writer, *billing.CatalogApplicationReceipt) error
 pkg openrails, method (*BoundMerchantError) Error() string
 pkg openrails, method (*Client) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
@@ -140,6 +141,7 @@ pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
 pkg openrails, method (*Engine) NotificationEvents(string) (*NotificationConsumer, error)
 pkg openrails, method (*Engine) PaymentPage(string, fs.FS) (string, http.Handler, error)
 pkg openrails, method (*Engine) Probes() []Probe
+pkg openrails, method (*Engine) PublicConfig(Routes) (*billing.PublicConfig, error)
 pkg openrails, method (*Engine) Ready(context.Context) error
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
@@ -408,7 +410,6 @@ pkg openrails, type LoggerConfig struct, Level string `yaml:"level" json:"level"
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, AlertWebhooks []config.AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
-pkg openrails, type MerchantDeclaration struct, Catalog *catalog.Application `yaml:"-"`
 pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty"`
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
 pkg openrails, type MerchantDeclaration struct, Issuer string `yaml:"-"`

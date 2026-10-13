@@ -79,7 +79,7 @@ func (a *Admissions) AdmitAutonomous(ctx context.Context, c Command, source stri
 		return Action{}, errors.New("verified command cannot become autonomous")
 	}
 	switch source {
-	case "startup_catalog", "startup_configuration", "operator_catalog", "reconciliation":
+	case "startup_configuration", "operator_catalog", "reconciliation":
 	default:
 		return Action{}, errors.New("unknown autonomous destructive source")
 	}

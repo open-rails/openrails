@@ -46,6 +46,20 @@ func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err erro
 	return append([]routebundle.Route(nil), routes...), nil
 }
 
+// PublicConfig is the document GET /v1/config serves on the mount sel
+// selects, read without a request.
+func (e *Engine) PublicConfig(sel config.Routes) (billing.PublicConfig, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return billing.PublicConfig{}, fmt.Errorf("openrails: engine is closed")
+	}
+	if e.App.Standalone {
+		return billing.PublicConfig{}, fmt.Errorf("openrails: this engine is a standalone server's; read the server's GET /v1/config")
+	}
+	return embedhttp.ConfiguredPublicConfig(e.App, sel)
+}
+
 func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err error) {
 	defer func() {
 		if v := recover(); v != nil {

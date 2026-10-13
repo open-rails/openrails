@@ -60,12 +60,10 @@ type Engine struct {
 // already migrated is left as it is. It starts no workers: Start does, and
 // jobs queued before it wait in Config.Database.RiverSchema. ctx bounds the
 // wait for the database; nothing else does. It provisions each merchant
-// Config.Merchants declares and applies its Catalog before returning, failing
-// with the reason if one is refused; only provider references it cannot
-// confirm within seconds, and those to a declared PSP whose account waits on
-// Vault (a Transit signer before the first login), finish in the background,
-// and Ready fails until they do. Vault login, PSP posture checks and Redis recover
-// in the background and fail only the features that need them (see Probes).
+// Config.Merchants declares and never changes a catalog: a catalog document
+// is an operator's ApplyCatalog. Vault login, PSP posture checks and Redis
+// recover in the background and fail only the features that need them (see
+// Probes).
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
 	if _, err := readPoliciesFor(inProcess, cfg.ReadCache); err != nil {
 		return nil, err
@@ -169,9 +167,8 @@ func (e *Engine) Close(ctx context.Context) error {
 }
 
 // Ready reports whether the engine can serve: Postgres, the merchant
-// directory, the declared catalogs (applied) and River (the host's fleet bound to
-// RiverJobs, or OpenRails' own running since Start); optional providers never
-// fail it (see Probes).
+// directory and River (the host's fleet bound to RiverJobs, or OpenRails' own
+// running since Start); optional providers never fail it (see Probes).
 func (e *Engine) Ready(ctx context.Context) error { return e.engine.Ready(ctx) }
 
 // Probe checks one optional dependency.
@@ -222,6 +219,20 @@ func (e *Engine) Routes(selection Routes) ([]Route, error) {
 		out[i] = Route{Method: r.Method, Path: r.Path, Handler: r.Handler}
 	}
 	return out, nil
+}
+
+// PublicConfig is the document GET /v1/config serves on the mount of
+// selection (the Routes the host mounts), read in process without a request.
+// A host puts it in its own page response and passes it to billing-ui's
+// BillingProvider as config, so the page makes no /v1/config request of its
+// own. A standalone server's engine refuses: read the server's with
+// Client.GetPublicConfig.
+func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error) {
+	doc, err := e.engine.PublicConfig(selection)
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
 }
 
 // RiverJobs is OpenRails' contribution to the host's River fleet (workers,

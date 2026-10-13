@@ -108,7 +108,6 @@ file into it. Construction refuses to boot unless posture is explicit:
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
 | `Database` | default `billing` | `Schema`: the Postgres schema of OpenRails' tables. `RiverSchema` (default `Schema` + `_river`): where OpenRails' River jobs live; `Start` runs them there, on its own client or the host's fleet (section 4). `New` creates or upgrades both. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
-| `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
 | `Vault` | no | The Vault connection (or `Deps.Vault`). Its `KVMount` makes Vault the home of the merchant's configuration; without one, `Merchant` is. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `SMTP` | no | The built-in email sender: any SMTP server (`Host`, `Port`: 465 implicit TLS, else STARTTLS, 0 is 587; `Username`, `Password`; the deployment's `From`). SendGrid is `smtp.sendgrid.net` with username `apikey` and an API key as the password. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
@@ -150,14 +149,11 @@ client, err := bill.MerchantBySlug(cfg.Merchant.Slug) // your merchant's handle:
 if err != nil { return err }
 ```
 
-Only Postgres (including the migrations `New` applies first) and a refused
-`MerchantDeclaration.Catalog` can fail `New`; it starts no workers. A catalog
-naming a declared PSP whose account waits on Vault (a Transit signer before the
-first login) is applied in the background once Vault answers; `Ready` fails,
-naming it, until then. Vault login, PSP posture checks and Redis reconnect in the background
-(capped full-jitter backoff, forever); until then only their features answer
-503. `Ready` is the readiness check (Postgres, the merchant directory, the
-declared catalog, River). Register `Probes` with the host's
+Only Postgres (including the migrations `New` applies first) can fail `New`;
+it starts no workers and never changes the catalog. Vault login, PSP posture
+checks and Redis reconnect in the background (capped full-jitter backoff,
+forever); until then only their features answer 503. `Ready` is the readiness
+check (Postgres, the merchant directory, River). Register `Probes` with the host's
 `github.com/open-rails/helpers/deps` supervisor:
 
 ```go
@@ -272,8 +268,8 @@ The merchant's configuration lives in `Config.Merchants` or in Vault, never in
 the database ([merchant configuration](merchant-configuration.md)). Declared in
 `Config.Merchants`, it is read at `New` and is read-only: change the declaration
 and construct a new engine. With `Config.Vault.KVMount` named, Vault holds it:
-the declaration names the merchant, its `Issuer` and `Catalog` (declaring
-configuration is refused),
+the declaration names the merchant and its `Issuer` (declaring configuration
+is refused),
 and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
 and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
@@ -282,13 +278,16 @@ Vault. Imported billing facts attributed to a PSP without credentials need its
 identity first through `LocalClient.DeclarePSP(ctx, billing.PSPDeclaration{...})`
 during setup. Obtain that local extension from `engine.LocalMerchant(merchantID)`.
 
-**Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
-and set it as `MerchantDeclaration.Catalog`; `New` applies it on every start, like calling
-`client.ApplyCatalog(ctx, document, billing.ApplyCatalogParams{})`. Documents
+**Applying a catalog** is an operator action, never a side effect of
+starting. Give your app a command (say `myapp catalog apply catalog.yaml`) that
+reads the document with `catalog.ReadFile`, calls
+`client.ApplyCatalog(ctx, document, billing.ApplyCatalogParams{})` and prints
+the receipt with `openrails.WriteCatalogReceipt`; run it once to load the
+catalog and again whenever the file changes, reviewed like a deploy. Documents
 and individual edits (the console, the catalog routes, the client's edit
 methods) share the merchant's catalog: a document skips a product, price or
 meter whose field an edit set differently, reports it, and applies the rest
-([catalog ownership](catalog-ownership.md)). A conflict never fails `New`.
+([catalog ownership](catalog-ownership.md)).
 
 The server computes a canonical content hash and commits it with a batch that
 applied whole. That document replays forever, even after intervening API edits
@@ -303,8 +302,8 @@ to retire an entry and `archived: false` to restore it. `prune: true` explicitly
 opts into removing omitted products/prices that only documents set: deleted
 when nothing ever referred to them, archived otherwise.
 The apply makes no provider writes. It may read a provider to verify an explicit
-reference. `MerchantDeclaration.Catalog` can finish a temporarily unavailable provider check in
-the background, with `Ready` failing until that startup batch succeeds.
+reference; a provider that cannot answer fails the apply, and running it again
+retries.
 
 **Catalog authoring**: storage is always the database.
 An engine's handle is the process owner and writes its catalog directly

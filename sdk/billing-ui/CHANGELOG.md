@@ -1,5 +1,12 @@
 # Changelog
 
+## The host supplies the configuration
+
+- `BillingProvider` takes `config`, the deployment's `GET /config` document
+  from the host's own page response (Go: `Engine.PublicConfig` or
+  `Client.GetPublicConfig`). Supplied, billing-ui never requests `GET /config`;
+  `useConfig()` and `useCurrencyScales()` read it.
+
 ## Fallback PSPs
 
 - `OrderPayment` offers a payment option marked `fallback` (CCBill once the

@@ -68,8 +68,8 @@ const (
 type Config struct {
 	// Engine is the engine's configuration, as any host passes to
 	// openrails.New. The server's merchants are provisioned at run time, each
-	// with its AuthKit group, and manage their catalogs through the API: a
-	// declared merchant's Issuer and Catalog are refused.
+	// with its AuthKit group, and manage their catalogs through the API or
+	// openrails catalog apply: a declared merchant's Issuer is refused.
 	Engine openrails.Config
 
 	// Auth is the server's AuthKit, as AuthKit documents its configuration:
@@ -185,9 +185,6 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		ctx = context.Background()
 	}
 	for slug, m := range cfg.Engine.Merchants {
-		if m.Catalog != nil {
-			return nil, fmt.Errorf("server: Engine.Merchants[%q].Catalog declares an embedded merchant's catalog; a standalone server's merchants manage theirs through the API", slug)
-		}
 		if m.Issuer != "" {
 			return nil, fmt.Errorf("server: Engine.Merchants[%q].Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", slug)
 		}

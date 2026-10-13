@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 
-import { toBillingError, type BillingError } from "../client/errors"
-import type {
-  CurrencyScales,
-  CustomerConfig,
-  PublicConfig,
+import { localError, toBillingError, type BillingError } from "../client/errors"
+import {
+  publicConfigSchema,
+  type CurrencyScales,
+  type CustomerConfig,
+  type PublicConfig,
 } from "../client/types"
 import { useBillingContext } from "./context"
 
@@ -73,6 +74,30 @@ export function createConfigStore<T>(read: () => Promise<T>): ConfigStore<T> {
   }
 }
 
+/**
+ * A configuration the host supplied, as `GET /config` answers it: never
+ * fetched, and refetch keeps it.
+ */
+export function suppliedConfigStore(config: unknown): ConfigStore {
+  const parsed = publicConfigSchema.safeParse(config)
+  const snapshot: Snapshot<PublicConfig> = parsed.success
+    ? { config: parsed.data, loading: false, error: null }
+    : {
+        config: null,
+        loading: false,
+        error: localError(
+          "invalid_config",
+          `config: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`
+        ),
+      }
+  return {
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    ensure() {},
+    refetch() {},
+  }
+}
+
 function useStore<T>(store: ConfigStore<T>): ConfigState<T> {
   const snapshot = useSyncExternalStore(
     store.subscribe,
@@ -85,7 +110,8 @@ function useStore<T>(store: ConfigStore<T>): ConfigState<T> {
 
 /**
  * The deployment's configuration (`GET /config`), fetched once per
- * `BillingProvider` and shared by every component that reads it.
+ * `BillingProvider`, or the one its `config` supplied, and shared by every
+ * component that reads it.
  */
 export function useConfig(): ConfigState {
   return useStore(useBillingContext().config)

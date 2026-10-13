@@ -53,7 +53,8 @@ milestone order, each verifiable before the next:
    (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
    the sandbox probe passes.
 3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
-   push at boot. Verify: catalog list routes return the products.
+   apply it with a host command calling `client.ApplyCatalog`, run once and on
+   each change, never at boot. Verify: catalog list routes return the products.
 4. **Mount routes.** Pass the host's auth as `Auth` in an `openrails.Routes`
    (AuthKit's `ak.Authenticator()`, or the README's `Authenticate` adapter over
    the host's sessions), with the route groups you want, and grant the host's
@@ -75,7 +76,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 1. **Deploy.** Compose stack (or real infra per [operator-guide.md](operator-guide.md)).
    Verify: `GET /health/ready` (note: there is no `/health`).
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
-   `push-merchant-config --insert` → `apply-catalog --merchant NAME --file PATH`.
+   `push-merchant-config --insert` → `catalog apply PATH --merchant NAME`.
    Register your backend as a client at the merchant's trusted issuer. Verify: its
    client-credentials token works via `client.GetMerchantConfiguration(ctx)` (Go) or an
    authenticated `GET /v1/merchant/configuration` call.
