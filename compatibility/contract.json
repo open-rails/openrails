@@ -3482,11 +3482,14 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/payment/routing.go": {
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strings": "strings",

@@ -31,7 +31,7 @@ charges through that PSP, provided it still reaches the custodian.
 | `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
-| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | schema and configuration only |
+| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | new-card, one-time orders; live vendor qualification pending |
 | JusPay / Spreedly | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
 | — no row — | `solana` | an on-chain delegation, not a stored instrument | yes |

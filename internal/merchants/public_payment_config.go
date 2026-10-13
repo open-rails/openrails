@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	log "github.com/sirupsen/logrus"
@@ -266,7 +267,11 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 			}
 		}
 		if armed != nil {
-			ok, err := armed(ctx, scope)
+			armCtx := ctx
+			if platform != nil && scope.Rail == string(models.RailNMI) {
+				armCtx = db.WithCustodianID(ctx, platform.ID)
+			}
+			ok, err := armed(armCtx, scope)
 			if err != nil && storeFailure(err) {
 				return nil, fmt.Errorf("resolve %s account %s: %w", scope.Rail, scope.AccountID, err)
 			}

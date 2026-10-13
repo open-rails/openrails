@@ -9,17 +9,30 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPlatformNewCardPurchase(t *testing.T) {
-	for _, scenario := range []string{"approved replay", "declined", "foreign application", "foreign tenant", "conversion retry", "conversion response lost", "concurrent"} {
+	for _, scenario := range []string{"approved replay", "unavailable merchant custodian", "declined", "foreign application", "foreign tenant", "conversion retry", "conversion response lost", "concurrent"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			w := newVaultWorld(t, withPlatformVault)
+			w := prepareWorld(t, 12, withPlatformVault)
+			w.vault = vaulttest.New(t)
+			if scenario == "unavailable merchant custodian" {
+				w.custodians = map[string]openrails.CustodianConfig{"bt": {
+					Kind: "basis_theory", AccountID: "merchant-tenant",
+					Settings: map[string]any{"public_api_key": "merchant-public-test"},
+				}}
+				w.declare = func(psps map[string]openrails.PSPConfig) {
+					psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", Custodian: "bt"}.PSPConfig()
+				}
+			}
+			w.start()
 			client := w.client[remote]
 			_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 			require.NoError(t, err)
@@ -57,6 +70,10 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 			require.NotContains(t, string(raw), "platform-private-test")
 			const number = "4111111111111111"
 			o := order{price: w.permanent("platform:purchase").ID, rail: "nmi", token: bt.collect(number)}
+			preview, err := client.PreviewPSPRouting(t.Context(), billing.PreviewPSPRoutingParams{PriceID: o.price, PSP: "nmi"})
+			require.NoError(t, err)
+			require.NotNil(t, preview.PSP)
+			require.Equal(t, "nmi", *preview.PSP)
 			s, err := c.sell(remote, o)
 			require.NoError(t, err)
 			if scenario == "concurrent" {
@@ -130,6 +147,21 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 			bt.mu.Unlock()
 		})
 	}
+}
+
+func TestPlatformVaultUnavailableKeepsExistingPSPCard(t *testing.T) {
+	t.Parallel()
+	w := newVaultWorld(t, withPlatformVault)
+	c := w.newCustomer()
+	method := c.saveCard("nmi", visa)
+	client := w.client[remote]
+	_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
+	require.NoError(t, err)
+	_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+	require.NoError(t, err)
+	// No platform credential document: only the customer's existing gateway
+	// card can pay. Choosing custody for new cards must not disable it.
+	c.mustPurchase(remote, order{price: w.permanent("platform:existing").ID, method: method})
 }
 
 // Both merchants share the platform tenant and private vault key. An intent
