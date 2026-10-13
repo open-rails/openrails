@@ -70,6 +70,12 @@ DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
+  AND NOT (pm.custodian = 'platform' AND EXISTS (
+    SELECT 1 FROM billing.provider_intents d
+    WHERE d.merchant_id = pm.merchant_id
+      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
+  ))
 ORDER BY pm.created_at DESC, pm.id DESC;
 
 -- name: ListPaymentMethodsByCustomerPage :many
@@ -80,6 +86,12 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
   AND (sqlc.narg(after_at)::timestamptz IS NULL
        OR (pm.created_at, pm.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+  AND NOT (pm.custodian = 'platform' AND EXISTS (
+    SELECT 1 FROM billing.provider_intents d
+    WHERE d.merchant_id = pm.merchant_id
+      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
+  ))
 ORDER BY pm.created_at DESC, pm.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -139,6 +151,12 @@ ORDER BY created_at DESC, id DESC;
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = $1
   AND pm.rail = ANY(sqlc.arg(rails)::text[])
+  AND NOT (pm.custodian = 'platform' AND EXISTS (
+    SELECT 1 FROM billing.provider_intents d
+    WHERE d.merchant_id = pm.merchant_id
+      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
+  ))
 ORDER BY pm.created_at DESC;
 
 -- name: CountPaymentMethodForUser :one

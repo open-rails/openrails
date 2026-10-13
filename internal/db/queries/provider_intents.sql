@@ -202,7 +202,7 @@ SET status = 'succeeded',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','platform_method_delete','subscription_collection');
 
 -- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
@@ -249,7 +249,7 @@ SET status = 'failed_terminal',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','platform_method_delete','subscription_collection');
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason

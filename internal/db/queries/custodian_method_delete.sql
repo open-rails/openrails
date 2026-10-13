@@ -11,14 +11,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail_method_ref = sqlc.arg(method_ref)::text;
 
 -- name: CustodianMethodDeletionState :one
--- The vendor never reuses a physically erased permanent method ID. Its
--- retained decision blocks a stale pre-delete capture read even after commit.
+-- Retain the decision so a delayed save cannot restore an erased handle.
 SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
        COALESCE(bool_or(status='succeeded' AND payload->>'detach_only' IS DISTINCT FROM 'true'),false)::boolean AS erased
 FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND custodian_id=sqlc.arg(custodian_id)::uuid
-  AND intent_type='hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','platform_method_delete')
   AND payload->'instrument'->>'rail_method_ref'=sqlc.arg(method_ref)::text;
 
 -- name: FencePaymentMethodDeletion :execrows
@@ -41,7 +40,7 @@ FOR SHARE;
 -- name: LockCustodianMethodDelete :one
 SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND intent_type = 'hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','platform_method_delete')
 FOR UPDATE;
 
 -- name: CompleteCustodianMethodDelete :execrows
@@ -50,7 +49,7 @@ SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
     lease_expires_at = NULL, executed_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
+  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete','platform_method_delete')
   AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: ListMethodDeletesForArchive :many
@@ -82,3 +81,13 @@ SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
   AND custodian='psp' AND rail_customer_ref=sqlc.arg(customer_ref)::text
   AND id<>sqlc.arg(exclude_id)::uuid;
+
+-- name: RemoveFencedPlatformPaymentMethod :execrows
+-- Keep the row and its versions as evidence for orders and payments. Terminal
+-- issuer lifecycle states remain final even when the stored token is erased.
+UPDATE billing.payment_methods
+SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND custodian = 'platform' AND status IN ('active','closed','replaced','removed')
+  AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;

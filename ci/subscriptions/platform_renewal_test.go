@@ -28,6 +28,7 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 	w.vault = vaulttest.New(t)
 	w.booted = func(e *openrails.Engine) {
 		rt := engine.Graph(e).Runtime
+		rt.RailPaymentMethodService.BTBaseURLOverride = endpoint
 		custody := rt.PurchaseService.CustodianSaleService
 		custody.BTBaseURLOverride, custody.GatewayDirectPostURLOverride = endpoint, endpoint+"/nmi"
 		resolver := rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder)

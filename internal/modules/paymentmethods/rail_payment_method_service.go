@@ -39,11 +39,13 @@ type RailPaymentMethodService struct {
 	MerchantSecrets      merchants.MerchantSecretReader
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
-	NMIClients      *railresolve.NMIFactory
-	ProviderSecrets merchants.PSPSecretResolver
-	ProviderScopes  merchants.PSPScopeResolver
-	Config          *config.Config
-	DB              *db.DB
+	NMIClients *railresolve.NMIFactory
+	// BTBaseURLOverride redirects platform card removal to a test server.
+	BTBaseURLOverride string
+	ProviderSecrets   merchants.PSPSecretResolver
+	ProviderScopes    merchants.PSPScopeResolver
+	Config            *config.Config
+	DB                *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents PaymentMethodDeleteExecutor
@@ -656,7 +658,7 @@ type PaymentMethodDeleteExecutor interface {
 // is accepted can never lose the delete (the verifier resolves "vault gone at
 // provider ⇒ done" and finalizes the local removal).
 func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *models.PaymentMethod) error {
-	if pm == nil || pm.Custodian != models.CustodianHyperSwitch {
+	if pm == nil || (pm.Custodian != models.CustodianHyperSwitch && pm.Custodian != models.CustodianPlatform) {
 		if _, _, err := s.deletePaymentMethodGuards(ctx, pm); err != nil {
 			return err
 		}

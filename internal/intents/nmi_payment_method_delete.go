@@ -387,6 +387,22 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if err != nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
+	if pm.Custodian == models.CustodianPlatform {
+		h, ok := t.Runner.Registry.Lookup(TypePlatformMethodDelete).(*PlatformMethodDeleteHandler)
+		store, stored := t.Runner.Store.(*Store)
+		if !ok || !stored {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("platform delete admission is not wired")
+		}
+		row, err := h.admit(ctx, store, pm)
+		if err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+		row, err = t.Runner.ExecuteByID(ctx, row.ID)
+		if err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+		return paymentmethods.PaymentMethodDeleteOutcome{Done: row.Status == StatusSucceeded}, nil
+	}
 	if pm != nil && pm.Custodian == models.CustodianHyperSwitch {
 		h, ok := t.Runner.Registry.Lookup(TypeHyperSwitchMethodDelete).(*HyperSwitchMethodDeleteHandler)
 		store, stored := t.Runner.Store.(*Store)
@@ -460,6 +476,8 @@ func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm 
 	key := NMIPaymentMethodDeleteIdempotencyKey(pm.ID)
 	if pm.Custodian == models.CustodianHyperSwitch {
 		key = TypeHyperSwitchMethodDelete + ":" + pm.ID.String()
+	} else if pm.Custodian == models.CustodianPlatform {
+		key = TypePlatformMethodDelete + ":" + pm.ID.String()
 	}
 	// The canonical admission below validates the old row's frozen ownership.
 	// Retrying an existing deletion resumes that command without spending again.

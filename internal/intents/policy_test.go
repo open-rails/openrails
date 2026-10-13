@@ -79,7 +79,7 @@ func TestGateExecutionFailsClosed(t *testing.T) {
 func TestDestructiveClassificationAndBudget(t *testing.T) {
 	assert.Equal(t, []string{
 		TypeCCBillCancelSubscription, TypeHyperSwitchMethodDelete, TypeNMIDeleteSubscription,
-		TypeNMIPaymentMethodDelete,
+		TypeNMIPaymentMethodDelete, TypePlatformMethodDelete,
 	}, DestructiveIntentTypes(), "sorted, complete breaker-gated set")
 	for _, typ := range []string{subscriptions.TypeManualRebill, TypeNMIPaymentSourceUpdate, TypeNMIRefund, TypeStripeRefund, TypeStripeCancelSubscription} {
 		assert.False(t, IsDestructiveIntentType(typ), typ)

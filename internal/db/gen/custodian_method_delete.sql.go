@@ -18,7 +18,7 @@ SET status = 'succeeded', result_evidence = $1::jsonb,
     lease_expires_at = NULL, executed_at = $2::timestamptz,
     updated_at = $2::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
+  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete','platform_method_delete')
   AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
@@ -109,7 +109,7 @@ SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded
 FROM billing.provider_intents
 WHERE merchant_id=$1::uuid
   AND custodian_id=$2::uuid
-  AND intent_type='hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','platform_method_delete')
   AND payload->'instrument'->>'rail_method_ref'=$3::text
 `
 
@@ -124,8 +124,7 @@ type CustodianMethodDeletionStateRow struct {
 	Erased  bool
 }
 
-// The vendor never reuses a physically erased permanent method ID. Its
-// retained decision blocks a stale pre-delete capture read even after commit.
+// Retain the decision so a delayed save cannot restore an erased handle.
 func (q *Queries) CustodianMethodDeletionState(ctx context.Context, arg CustodianMethodDeletionStateParams) (CustodianMethodDeletionStateRow, error) {
 	row := q.db.QueryRow(ctx, custodianMethodDeletionState, arg.MerchantID, arg.CustodianID, arg.MethodRef)
 	var i CustodianMethodDeletionStateRow
@@ -275,7 +274,7 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 const lockCustodianMethodDelete = `-- name: LockCustodianMethodDelete :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
-  AND intent_type = 'hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','platform_method_delete')
 FOR UPDATE
 `
 
@@ -411,4 +410,35 @@ func (q *Queries) NativeVaultDeletionState(ctx context.Context, arg NativeVaultD
 	var i NativeVaultDeletionStateRow
 	err := row.Scan(&i.Pending, &i.Erased)
 	return i, err
+}
+
+const removeFencedPlatformPaymentMethod = `-- name: RemoveFencedPlatformPaymentMethod :execrows
+UPDATE billing.payment_methods
+SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND custodian = 'platform' AND status IN ('active','closed','replaced','removed')
+  AND park_reason = 'delete:' || $4::uuid::text
+`
+
+type RemoveFencedPlatformPaymentMethodParams struct {
+	Now         time.Time
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+	OperationID uuid.UUID
+}
+
+// Keep the row and its versions as evidence for orders and payments. Terminal
+// issuer lifecycle states remain final even when the stored token is erased.
+func (q *Queries) RemoveFencedPlatformPaymentMethod(ctx context.Context, arg RemoveFencedPlatformPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeFencedPlatformPaymentMethod,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.OperationID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
