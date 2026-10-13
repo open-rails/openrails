@@ -29,7 +29,8 @@ its live lease cannot strand the operation on the former recovery delay.
 A financial finding about a provider schedule that is not this merchant's
 obligation (another environment's on a shared gateway) settles only when an
 operator closes it as `foreign` (see Proposals in
-[operations](operations.md)); a dismissed one still holds.
+[operations](operations.md)); a dismissed one still holds until it is closed
+as `foreign` too.
 
 A cancel the customer or the merchant asks for is never held, by recovery or
 by readonly mode. It is recorded at once: an engine-owned subscription renews

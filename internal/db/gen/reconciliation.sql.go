@@ -3131,7 +3131,8 @@ SET status = CASE WHEN $1::text IN ('dismissed', 'foreign') THEN 'ignored' ELSE 
     updated_at = $6::timestamptz
 WHERE merchant_id = $7::uuid AND id = $8::uuid
   AND finding_type LIKE 'pull.%'
-  AND status IN ('reconcile_required', 'requires_review')
+  AND (status IN ('reconcile_required', 'requires_review')
+       OR ($9::boolean AND status = 'ignored' AND resolution = 'dismissed'))
 `
 
 type ResolveProposalParams struct {
@@ -3143,11 +3144,13 @@ type ResolveProposalParams struct {
 	Now                time.Time
 	MerchantID         uuid.UUID
 	ID                 uuid.UUID
+	FromDismissed      bool
 }
 
 // approved and superseded close as fixed, dismissed and foreign as ignored (a
 // dismissed proposal is raised again only on other evidence). The execution or
-// the reason is recorded under evidence.resolution.
+// the reason is recorded under evidence.resolution. from_dismissed also admits
+// a dismissed finding (only foreign resolves one).
 func (q *Queries) ResolveProposal(ctx context.Context, arg ResolveProposalParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resolveProposal,
 		arg.Resolution,
@@ -3158,6 +3161,7 @@ func (q *Queries) ResolveProposal(ctx context.Context, arg ResolveProposalParams
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
+		arg.FromDismissed,
 	)
 	if err != nil {
 		return 0, err

@@ -561,8 +561,10 @@ openrails proposals runs    --merchant=<slug>
   merchant's obligation, such as another environment's on a shared gateway.
   It is refused while a subscription of the PSP has the schedule's id, a
   payment method or PSP customer of the PSP has its customer reference, or
-  the read matched it to a customer by email. A foreign schedule no longer
-  holds provider recovery.
+  the read matched it to a customer by email. It applies to an open finding
+  and to a dismissed one, which still holds recovery; the dismissal is kept
+  in the finding's evidence. A foreign schedule no longer holds provider
+  recovery, and a second `foreign` answers `already_resolved`.
 
 `ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
 

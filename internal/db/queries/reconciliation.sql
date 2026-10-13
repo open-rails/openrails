@@ -345,7 +345,8 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = sqlc.arg(id)::uuid 
 -- name: ResolveProposal :execrows
 -- approved and superseded close as fixed, dismissed and foreign as ignored (a
 -- dismissed proposal is raised again only on other evidence). The execution or
--- the reason is recorded under evidence.resolution.
+-- the reason is recorded under evidence.resolution. from_dismissed also admits
+-- a dismissed finding (only foreign resolves one).
 UPDATE billing.reconciliation_findings
 SET status = CASE WHEN sqlc.arg(resolution)::text IN ('dismissed', 'foreign') THEN 'ignored' ELSE 'fixed' END,
     resolution = sqlc.arg(resolution)::text,
@@ -361,7 +362,8 @@ SET status = CASE WHEN sqlc.arg(resolution)::text IN ('dismissed', 'foreign') TH
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND finding_type LIKE 'pull.%'
-  AND status IN ('reconcile_required', 'requires_review');
+  AND (status IN ('reconcile_required', 'requires_review')
+       OR (sqlc.arg(from_dismissed)::boolean AND status = 'ignored' AND resolution = 'dismissed'));
 
 -- name: ListProposals :many
 -- Open pull.* findings unless a status is named, most severe first, then

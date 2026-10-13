@@ -114,7 +114,7 @@ func (e *Executor) Dismiss(ctx context.Context, req Request) (billing.ProposalRe
 	return out, nil
 }
 
-// Foreign closes each listed open proposal as a provider record that is not
+// Foreign closes each listed open (or dismissed) proposal as a provider record that is not
 // this merchant's obligation, such as another environment's schedule on a
 // shared gateway; notes are required. Unlike a dismissed one it no longer
 // holds provider recovery. Only a provider schedule nothing local names
@@ -136,7 +136,8 @@ func (e *Executor) Foreign(ctx context.Context, req Request) (billing.ProposalRe
 			if err != nil {
 				return err
 			}
-			if !open(row.Status) {
+			dismissed := row.Status == string(reconcile.FindingStatusIgnored) && deref(row.Resolution) == "dismissed"
+			if !open(row.Status) && !dismissed {
 				result.Outcome = billing.ProposalAlreadyResolved
 				return nil
 			}
@@ -147,7 +148,13 @@ func (e *Executor) Foreign(ctx context.Context, req Request) (billing.ProposalRe
 				}
 				return err
 			}
-			if err := resolve(ctx, q, mid, id.UUID(), "foreign", notes, req.Actor, nil, nil, e.now()); err != nil {
+			var evidence map[string]any
+			if dismissed {
+				evidence = map[string]any{"previous": map[string]any{
+					"resolution": "dismissed", "notes": deref(row.OperatorNotes), "resolved_by": deref(row.ResolvedBy), "resolved_at": row.ResolvedAt,
+				}}
+			}
+			if err := resolveFrom(ctx, q, mid, id.UUID(), "foreign", notes, req.Actor, nil, evidence, e.now(), dismissed); err != nil {
 				return err
 			}
 			result.Outcome = billing.ProposalForeign
@@ -324,6 +331,13 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 	return mid.UUID(), nil
 }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func open(status string) bool {
 	return status == string(reconcile.FindingStatusReconcileRequired) || status == string(reconcile.FindingStatusRequiresReview)
 }
@@ -331,6 +345,10 @@ func open(status string) bool {
 // resolve closes an open proposal: approved and superseded as fixed,
 // dismissed as ignored.
 func resolve(ctx context.Context, q *gen.Queries, mid, id uuid.UUID, resolution, notes, actor string, run *uuid.UUID, evidence map[string]any, now time.Time) error {
+	return resolveFrom(ctx, q, mid, id, resolution, notes, actor, run, evidence, now, false)
+}
+
+func resolveFrom(ctx context.Context, q *gen.Queries, mid, id uuid.UUID, resolution, notes, actor string, run *uuid.UUID, evidence map[string]any, now time.Time, fromDismissed bool) error {
 	var notesPtr, actorPtr *string
 	if notes != "" {
 		notesPtr = &notes
@@ -340,7 +358,7 @@ func resolve(ctx context.Context, q *gen.Queries, mid, id uuid.UUID, resolution,
 	}
 	n, err := q.ResolveProposal(ctx, gen.ResolveProposalParams{
 		MerchantID: mid, ID: id, Resolution: resolution, OperatorNotes: notesPtr, ResolvedBy: actorPtr,
-		ApprovalRunID: run, ResolutionEvidence: marshal(evidence), Now: now,
+		ApprovalRunID: run, ResolutionEvidence: marshal(evidence), Now: now, FromDismissed: fromDismissed,
 	})
 	if err != nil {
 		return err
