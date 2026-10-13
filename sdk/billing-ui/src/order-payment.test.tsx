@@ -127,6 +127,32 @@ describe("OrderPayment", () => {
     }
   )
 
+  it("pays from the host's documents without reading them", async () => {
+    const fetch = vi.fn(async (input: string) => {
+      if (input.includes("/me/payment-methods"))
+        return Response.json({ data: [], next_cursor: null })
+      if (input.endsWith("/me/orders/ord_1")) return Response.json(order({}))
+      return Response.json({}, { status: 404 })
+    })
+    render(
+      <BillingProvider
+        client={createBillingClient({ fetch })}
+        config={
+          { ...deployment, rails: [], captcha: null, network: null } as never
+        }
+        customerConfig={config as never}
+      >
+        <OrderPayment orderId="ord_1" />
+      </BillingProvider>
+    )
+    expect(
+      await screen.findByRole("button", { name: "Pay $15.00" })
+    ).toBeTruthy()
+    expect(fetch.mock.calls.filter(([path]) => /\/config$/.test(path))).toEqual(
+      []
+    )
+  })
+
   it("has the customer authenticate a renewal their bank challenged", async () => {
     const renewal = (payment: Record<string, unknown>, status = "open") => ({
       ...order(payment, status),

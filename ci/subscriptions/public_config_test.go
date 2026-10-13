@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,4 +70,36 @@ func TestEnginePublicConfigIsTheMountsDocument(t *testing.T) {
 	}
 	require.True(t, docs["staff"].Capabilities.RouteGroups["admin"])
 	require.False(t, docs["public"].Capabilities.RouteGroups["admin"], "the mount it names, not the engine's")
+}
+
+// Engine.CustomerConfig is the document the mount serves at GET /v1/me/config
+// to the customer the host's own request is signed in as, refusals included.
+func TestEngineCustomerConfigIsTheMountsDocument(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, RouteGroups: routeGroups}
+	buyer := w.newCustomer()
+	mux := http.NewServeMux()
+	require.NoError(t, openrailshttp.Mount(mux, w.rt, routes))
+	served := httptest.NewRequest(http.MethodGet, mountPrefix+"/v1/me/config", nil)
+	served.Header.Set("Authorization", "Bearer "+buyer.token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, served)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// The host's own page request, carrying the same session.
+	page := httptest.NewRequest(http.MethodPost, "/api/subscribe", strings.NewReader(`{"plan":"monthly"}`))
+	page.Header.Set("Authorization", "Bearer "+buyer.token)
+	page.Header.Set("Content-Type", "application/json")
+	doc, err := w.rt.CustomerConfig(routes, page)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.JSONEq(t, rec.Body.String(), string(encoded))
+	require.NotEmpty(t, doc.Payment.PSPs)
+
+	_, err = w.rt.CustomerConfig(routes, httptest.NewRequest(http.MethodGet, "/api/subscribe", nil))
+	var refused *billing.StatusError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusUnauthorized, refused.Status, "signed out: the mount's refusal")
 }

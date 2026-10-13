@@ -185,14 +185,19 @@ deployment's (`GET /config`), whose currency registry amounts use over the
 pinned copy. `useCustomerConfig()`, `useConfig()` and `useCurrencyScales()`
 read the same copies for host components.
 
-A page your server renders can carry the deployment's document in its own
-response, so the page loads from that one response: pass it as `config`, in
-`GET /config`'s shape (Go: `engine.PublicConfig(routes)` with the `Routes` you
-mount, or a remote client's `GetPublicConfig`). billing-ui then never requests
-`GET /config`:
+A page your server renders can carry both documents in its own response, so
+the page loads from that one response: `config` in `GET /config`'s shape (Go:
+`engine.PublicConfig(routes)` with the `Routes` you mount, or a remote client's
+`GetPublicConfig`) and `customerConfig` in `GET /me/config`'s (Go:
+`engine.CustomerConfig(routes, r)`, `r` your own signed-in request). billing-ui
+then does not request them to load; a retry still reads the server's copy:
 
 ```tsx
-<BillingProvider client={billing} config={page.billingConfig}>
+<BillingProvider
+  client={billing}
+  config={page.billingConfig}
+  customerConfig={page.customerBillingConfig}
+>
 ```
 
 ## Staff administration

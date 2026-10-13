@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react"
+import type { z } from "zod"
 
 import { localError, toBillingError, type BillingError } from "../client/errors"
-import {
-  publicConfigSchema,
-  type CurrencyScales,
-  type CustomerConfig,
-  type PublicConfig,
+import type {
+  CurrencyScales,
+  CustomerConfig,
+  PublicConfig,
 } from "../client/types"
 import { useBillingContext } from "./context"
 
@@ -31,9 +31,20 @@ export interface ConfigStore<T = PublicConfig> {
   refetch(): void
 }
 
-export function createConfigStore<T>(read: () => Promise<T>): ConfigStore<T> {
-  let snapshot: Snapshot<T> = { config: null, loading: true, error: null }
-  let started = false
+/**
+ * The store of `read`'s document. `supplied` is the host's copy: the store
+ * starts with it and never reads to load; a refetch (a retry) still reads.
+ */
+export function createConfigStore<T>(
+  read: () => Promise<T>,
+  supplied?: Snapshot<T>
+): ConfigStore<T> {
+  let snapshot: Snapshot<T> = supplied ?? {
+    config: null,
+    loading: true,
+    error: null,
+  }
+  let started = supplied !== undefined
   let latest = 0
   const listeners = new Set<() => void>()
   const set = (next: Snapshot<T>) => {
@@ -67,6 +78,7 @@ export function createConfigStore<T>(read: () => Promise<T>): ConfigStore<T> {
     // A read that failed with nothing loaded is tried again by the next
     // component: the customer may have signed in since.
     ensure() {
+      if (supplied) return
       if (!started || (snapshot.error && !snapshot.config && !snapshot.loading))
         load()
     },
@@ -74,27 +86,23 @@ export function createConfigStore<T>(read: () => Promise<T>): ConfigStore<T> {
   }
 }
 
-/**
- * A configuration the host supplied, as `GET /config` answers it: never
- * fetched, and refetch keeps it.
- */
-export function suppliedConfigStore(config: unknown): ConfigStore {
-  const parsed = publicConfigSchema.safeParse(config)
-  const snapshot: Snapshot<PublicConfig> = parsed.success
-    ? { config: parsed.data, loading: false, error: null }
-    : {
-        config: null,
-        loading: false,
-        error: localError(
-          "invalid_config",
-          `config: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`
-        ),
-      }
+/** The host's copy of a document, read as `schema` reads the server's. */
+export function suppliedConfig<T>(
+  schema: z.ZodType<T>,
+  name: string,
+  value: unknown
+): Snapshot<T> {
+  const parsed = schema.safeParse(value)
+  if (parsed.success)
+    return { config: parsed.data, loading: false, error: null }
+  const issue = parsed.error.issues[0]
   return {
-    subscribe: () => () => {},
-    snapshot: () => snapshot,
-    ensure() {},
-    refetch() {},
+    config: null,
+    loading: false,
+    error: localError(
+      "invalid_config",
+      `${name}: ${issue?.path.join(".")} ${issue?.message}`
+    ),
   }
 }
 
@@ -110,7 +118,7 @@ function useStore<T>(store: ConfigStore<T>): ConfigState<T> {
 
 /**
  * The deployment's configuration (`GET /config`), fetched once per
- * `BillingProvider`, or the one its `config` supplied, and shared by every
+ * `BillingProvider` unless its `config` supplied it, and shared by every
  * component that reads it.
  */
 export function useConfig(): ConfigState {
@@ -120,7 +128,8 @@ export function useConfig(): ConfigState {
 /**
  * The customer's merchant (`GET /me/config`): its payment setup and how it
  * presents itself, fetched once per `BillingProvider` for the signed-in
- * customer and shared by every component that reads it.
+ * customer unless its `customerConfig` supplied it, and shared by every
+ * component that reads it.
  */
 export function useCustomerConfig(): ConfigState<CustomerConfig> {
   return useStore(useBillingContext().customerConfig)

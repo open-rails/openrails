@@ -134,6 +134,7 @@ pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.MerchantID, billing.DestructiveHoldID, billing.DestructiveOperator, string) (*billing.DestructiveHold, error)
 pkg openrails, method (*Engine) Close(context.Context) error
+pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
 pkg openrails, method (*Engine) ListOpenDestructiveHolds(context.Context, int, billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)
 pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient, error)
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)

@@ -68,6 +68,16 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return w.response(req), nil
 }
 
+// Record serves req with handler in memory: the status and body it answers.
+func Record(handler http.Handler, req *http.Request) (int, []byte) {
+	w := &bufferedResponse{header: make(http.Header)}
+	handler.ServeHTTP(w, req)
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+	}
+	return w.status, w.buf.Bytes()
+}
+
 // bufferedResponse is a minimal in-memory http.ResponseWriter for the
 // in-process round trip (no httptest import on the production path).
 type bufferedResponse struct {

@@ -136,12 +136,17 @@ loads to take a card. `@openrails/billing-ui` reads each document once and share
 it (`useConfig()`, `useCustomerConfig()`): `OrderPayment`, `AccountBilling` and
 `PaymentMethodsPanel` take their PSPs from the second.
 
-A host renders billing-ui from its own page data: put `GET /v1/config`'s
-document in the page response your server already sends and pass it to
-`BillingProvider` as `config`; billing-ui then never requests it. An embedded
-host builds it in process with `engine.PublicConfig(routes)`, the `Routes` it
-mounts (the document that mount serves); a host of a standalone or hosted
-server reads it with the remote client's `GetPublicConfig`.
+A host renders billing-ui from its own page data: put both documents in the
+page response your server already sends and pass them to `BillingProvider` as
+`config` and `customerConfig`; billing-ui then does not request them to load
+(a retry still reads the server's copy). An embedded host builds them in
+process for the `Routes` it mounts: `engine.PublicConfig(routes)` and
+`engine.CustomerConfig(routes, r)`, where `r` is its own request carrying the
+customer's credential, which the mount's `Auth` verifies as it would the
+browser's (a refusal is the mount's `*billing.StatusError`). A host of a
+standalone or hosted server reads `GET /v1/config` with the remote client's
+`GetPublicConfig`; the server answers `GET /v1/me/config` only to the
+customer's own credential, so its browser reads that one.
 
 `payment` looks like this:
 

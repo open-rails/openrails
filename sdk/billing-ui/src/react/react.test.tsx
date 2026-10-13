@@ -63,7 +63,8 @@ describe("useConfig", () => {
 })
 
 describe("BillingProvider config", () => {
-  // The host's page response carries GET /config's document.
+  // The host's page response carries GET /config's and GET /me/config's
+  // documents.
   const page = () =>
     JSON.parse(
       JSON.stringify({
@@ -74,27 +75,70 @@ describe("BillingProvider config", () => {
           captcha: null,
           network: null,
         },
+        customer_config: {
+          payment: {
+            psps: [
+              {
+                psp_id: "psp_host",
+                key: "nmi",
+                rail: "nmi",
+                custodian: "psp",
+                display_name: "Card",
+                flow: "tokenize",
+              },
+            ],
+            solana: null,
+          },
+          merchant: {
+            display_name: "Host Shop",
+            logo_url: null,
+            support_url: null,
+            embed_origins: [],
+          },
+        },
       })
     )
 
-  it("reads the host's config and never requests it", async () => {
+  it("reads the host's documents and requests neither", async () => {
     const server = fakeBilling()
     const { result } = setup(
-      () => ({ a: useConfig(), b: useConfig(), scales: useCurrencyScales() }),
+      () => ({
+        a: useConfig(),
+        b: useConfig(),
+        scales: useCurrencyScales(),
+        customer: useCustomerConfig(),
+      }),
       server,
-      { config: page().billing_config }
+      {
+        config: page().billing_config,
+        customerConfig: page().customer_config,
+      }
     )
     expect(result.current.a).toMatchObject({ loading: false, error: null })
     expect(result.current.b.config).toBe(result.current.a.config)
     expect(result.current.a.config?.capabilities.route_groups.admin).toBe(false)
     expect(result.current.scales.XTS).toBe(3)
-    act(() => result.current.a.refetch())
+    expect(result.current.customer.config).toMatchObject({
+      payment: { psps: [{ psp_id: "psp_host" }] },
+      merchant: { display_name: "Host Shop" },
+    })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(result.current.a.loading).toBe(false)
     expect(server.calls).toEqual([])
   })
 
-  it("names a malformed config instead of fetching", () => {
+  it("reads the server's copy again on a retry", async () => {
+    const server = fakeBilling()
+    const { result } = setup(() => useCustomerConfig(), server, {
+      customerConfig: page().customer_config,
+    })
+    act(() => result.current.refetch())
+    await waitFor(() =>
+      expect(result.current.config?.merchant.display_name).toBe("Test Shop")
+    )
+    expect(server.calls).toEqual(["GET /me/config"])
+  })
+
+  it("names a malformed document instead of fetching", () => {
     const server = fakeBilling()
     const { result } = setup(() => useConfig(), server, {
       config: { capabilities: null } as never,

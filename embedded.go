@@ -2,6 +2,7 @@ package openrails
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -230,6 +231,29 @@ func (e *Engine) Routes(selection Routes) ([]Route, error) {
 func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error) {
 	doc, err := e.engine.PublicConfig(selection)
 	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+// CustomerConfig is the document GET /v1/me/config serves on the mount of
+// selection to the customer r is signed in as: r is the host's own request,
+// whose credential selection.Auth verifies as that mount does. A host puts it
+// in its own page response and passes it to billing-ui's BillingProvider as
+// customerConfig. A refusal is the mount's, a *billing.StatusError.
+func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.CustomerConfig, error) {
+	if r == nil {
+		return nil, invalidErr("the host's request is required")
+	}
+	status, body, err := e.engine.CustomerConfig(selection, r)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, statusErrorFromBody(status, body)
+	}
+	var doc billing.CustomerConfig
+	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, err
 	}
 	return &doc, nil

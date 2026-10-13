@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/http/inprocess"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	log "github.com/sirupsen/logrus"
 
@@ -58,6 +59,34 @@ func (e *Engine) PublicConfig(sel config.Routes) (billing.PublicConfig, error) {
 		return billing.PublicConfig{}, fmt.Errorf("openrails: this engine is a standalone server's; read the server's GET /v1/config")
 	}
 	return embedhttp.ConfiguredPublicConfig(e.App, sel)
+}
+
+// CustomerConfig serves GET /v1/me/config on the mount sel selects to the
+// customer r, the host's own request, is signed in as: its status and body.
+func (e *Engine) CustomerConfig(sel config.Routes, r *http.Request) (int, []byte, error) {
+	routes, err := e.Routes(sel)
+	if err != nil {
+		return 0, nil, err
+	}
+	path := sel.Prefix + "/v1/me/config"
+	for _, route := range routes {
+		if route.Method != http.MethodGet || route.Path != path {
+			continue
+		}
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, path, nil)
+		if err != nil {
+			return 0, nil, err
+		}
+		// The host's credentials and peer, without its body.
+		req.Header = r.Header.Clone()
+		for _, h := range []string{"Content-Length", "Content-Type", "Transfer-Encoding"} {
+			req.Header.Del(h)
+		}
+		req.Host, req.RemoteAddr, req.TLS = r.Host, r.RemoteAddr, r.TLS
+		status, body := inprocess.Record(route.Handler, req)
+		return status, body, nil
+	}
+	return 0, nil, fmt.Errorf("openrails: the mount serves no GET %s", path)
 }
 
 func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err error) {

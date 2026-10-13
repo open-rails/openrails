@@ -680,10 +680,11 @@ pnpm add @openrails/billing-ui @openrails/auth-ui
 ```
 
 Wrap your app once in `<BillingProvider client={billing} appearance={{ theme: "auto" }}>`.
-`BillingProvider` reads `GET /v1/config` once; a page your server renders can
-carry that document instead (`config={page.billingConfig}`, from
-`bill.PublicConfig(routes)` with the `Routes` you mounted), and billing-ui then
-makes no request for it. This example also uses auth-ui's `<AuthProvider client={auth}>` and `<AuthUiProvider>`.
+`BillingProvider` reads `GET /v1/config` and `GET /v1/me/config` once; a page
+your server renders can carry both instead (`config`, from
+`bill.PublicConfig(routes)` with the `Routes` you mounted, and `customerConfig`,
+from `bill.CustomerConfig(routes, r)` with your own signed-in request), and
+billing-ui then makes no request for them to load. This example also uses auth-ui's `<AuthProvider client={auth}>` and `<AuthUiProvider>`.
 billing-ui doesn't depend on auth-ui: the billing client's only link to your auth is
 the `fetch` you give it (here `auth.authFetch`, which attaches the AuthKit token; with
 other auth, any `fetch` that sends your credentials), and `<BuyButton>`/`<ProductList>`

@@ -2,10 +2,12 @@
 
 ## The host supplies the configuration
 
-- `BillingProvider` takes `config`, the deployment's `GET /config` document
-  from the host's own page response (Go: `Engine.PublicConfig` or
-  `Client.GetPublicConfig`). Supplied, billing-ui never requests `GET /config`;
-  `useConfig()` and `useCurrencyScales()` read it.
+- `BillingProvider` takes `config` (`GET /config`'s document; Go:
+  `Engine.PublicConfig` or `Client.GetPublicConfig`) and `customerConfig`
+  (`GET /me/config`'s; Go: `Engine.CustomerConfig`) from the host's own page
+  response. Supplied, billing-ui does not request them to load; a retry still
+  reads the server's copy. `useConfig()`, `useCurrencyScales()` and
+  `useCustomerConfig()` read them.
 
 ## Fallback PSPs
 
