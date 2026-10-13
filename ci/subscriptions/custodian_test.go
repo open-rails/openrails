@@ -35,8 +35,11 @@ type btFake struct {
 	tenant, application    string
 	containers             map[string][]string
 	decline                bool
+	saleResponse           string
 	failConversion         bool
 	loseConversionResponse bool
+	loseSaleResponse       bool
+	beforeTokenRead        func()
 	// gateway charges the detokenized card and answers its transaction id.
 	gateway func(form url.Values, number string) string
 }
@@ -46,6 +49,7 @@ type btSale struct {
 	InitiatedBy, Indicator, InitialTxnID string
 	// SecurityKey names the gateway account the proxy posted to.
 	SecurityKey string
+	CVV, Source string
 }
 
 func newBTFake(t *testing.T) (*btFake, string) {
@@ -104,6 +108,20 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		card := btCard(id, number)
 		card["tenant_id"], card["created_by"] = f.tenant, f.applications[id]
+		reply(http.StatusOK, card)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/tokens/"):
+		id := strings.TrimPrefix(r.URL.Path, "/tokens/")
+		number, ok := f.tokens[id]
+		if !ok {
+			reply(http.StatusNotFound, map[string]any{"title": "not found"})
+			return
+		}
+		if f.beforeTokenRead != nil {
+			f.beforeTokenRead()
+			f.beforeTokenRead = nil
+		}
+		card := btCard(id, number)
+		card["tenant_id"], card["containers"] = f.tenant, f.containers[id]
 		reply(http.StatusOK, card)
 	case r.Method == http.MethodPost && r.URL.Path == "/tokens":
 		var req struct {
@@ -169,6 +187,12 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(http.StatusBadRequest, map[string]any{"proxy_error": map[string]any{"title": "detokenization failed"}})
 			return
 		}
+		if f.saleResponse != "" {
+			f.sales = append(f.sales, btSale{Number: number})
+			w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
+			_, _ = w.Write([]byte(f.saleResponse))
+			return
+		}
 		if f.decline {
 			f.sales = append(f.sales, btSale{Number: number})
 			w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
@@ -176,8 +200,13 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sale := btSale{TransactionID: f.gateway(r.PostForm, number), Number: number, InitiatedBy: r.PostForm.Get("initiated_by"),
-			Indicator: r.PostForm.Get("stored_credential_indicator"), InitialTxnID: r.PostForm.Get("initial_transaction_id"), SecurityKey: r.PostForm.Get("security_key")}
+			Indicator: r.PostForm.Get("stored_credential_indicator"), InitialTxnID: r.PostForm.Get("initial_transaction_id"), SecurityKey: r.PostForm.Get("security_key"), CVV: r.PostForm.Get("cvv"), Source: m[1]}
 		f.sales = append(f.sales, sale)
+		if f.loseSaleResponse {
+			f.loseSaleResponse = false
+			reply(http.StatusBadGateway, map[string]any{"title": "response lost after forwarding"})
+			return
+		}
 		w.Header().Set("BT-PROXY-DESTINATION-STATUS", "200")
 		_, _ = w.Write([]byte(url.Values{"response": {"1"}, "responsetext": {"SUCCESS"}, "authcode": {"123456"}, "transactionid": {sale.TransactionID},
 			"avsresponse": {""}, "cvvresponse": {""}, "orderid": {r.PostForm.Get("orderid")}, "type": {"sale"}, "response_code": {"100"}}.Encode()))

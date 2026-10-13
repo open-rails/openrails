@@ -18623,6 +18623,12 @@
       "OrderPaymentOption": {
         "type": "object",
         "properties": {
+          "saved_payment_method_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "psp_id": {
             "type": "string"
           },

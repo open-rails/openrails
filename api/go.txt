@@ -2549,6 +2549,7 @@ pkg openrails/billing, type OrderPaymentOption struct, Accepts []string `json:"a
 pkg openrails/billing, type OrderPaymentOption struct, FailedAttempts int `json:"failed_attempts"`
 pkg openrails/billing, type OrderPaymentOption struct, PSPID PSPID `json:"psp_id"`
 pkg openrails/billing, type OrderPaymentOption struct, Rail string `json:"rail"`
+pkg openrails/billing, type OrderPaymentOption struct, SavedPaymentMethodIDs []PaymentMethodID `json:"saved_payment_method_ids,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct
 pkg openrails/billing, type OrderPaymentParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, PSPID *PSPID `json:"psp_id,omitempty"`

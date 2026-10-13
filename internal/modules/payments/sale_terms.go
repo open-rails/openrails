@@ -200,7 +200,12 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 		hs := p.HyperSwitch
 		custody = hs != nil && hs.Validate() == nil && in.Rail == "nmi" && p.Recurring && !p.NewCard
 	case models.CustodianBasisTheory, models.CustodianPlatform:
-		custody = p.HyperSwitch == nil && in.Rail == "nmi" && !p.Recurring && p.Token != "" && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
+		source := p.Token != ""
+		if p.Instrument.Custodian == models.CustodianPlatform && !p.NewCard && p.Token == "" {
+			consent := p.Instrument.Mandate
+			source = consent != nil && consent.Kind == charge.AgreementCardOnFile && consent.InitialTransactionID != ""
+		}
+		custody = p.HyperSwitch == nil && in.Rail == "nmi" && !p.Recurring && source && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
 	}
 	if !custody {
 		return errors.New("order sale custody contradicts its order")

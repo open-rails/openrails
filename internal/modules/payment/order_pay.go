@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,11 +74,12 @@ func (s *OrderAttemptService) saleService() *NMISaleService {
 // the third party holding the cards the PSP charges, CustodianID its
 // account; "" when the PSP holds its own.
 type OrderOption struct {
-	PSPID       uuid.UUID
-	Rail        string
-	Hosted      bool
-	Custodian   string
-	CustodianID *uuid.UUID
+	PSPID                 uuid.UUID
+	Rail                  string
+	Hosted                bool
+	Custodian             string
+	CustodianID           *uuid.UUID
+	SavedPaymentMethodIDs []uuid.UUID
 }
 
 // Solana reports a Solana Pay option.
@@ -93,6 +95,9 @@ func (o OrderOption) Accepts() []string {
 	case models.Rail(o.Rail) == models.RailCCBill:
 		return []string{"redirect"}
 	case o.Custodian == models.CustodianBasisTheory || o.Custodian == models.CustodianPlatform:
+		if len(o.SavedPaymentMethodIDs) > 0 {
+			return []string{"new_card", "saved_card"}
+		}
 		return []string{"new_card"}
 	case o.Hosted:
 		return []string{"saved_card", "new_card", "redirect"}
@@ -161,6 +166,56 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		}
 		if (o.Custodian != models.CustodianBasisTheory && o.Custodian != models.CustodianPlatform) || oneTime {
 			options = append(options, o)
+		}
+	}
+	return options, nil
+}
+
+// CustomerOrderOptions adds saved platform cards with active reuse consent on
+// an offered NMI account. Changing custody for new cards does not move these cards.
+func (s *OrderAttemptService) CustomerOrderOptions(ctx context.Context, customer uuid.UUID, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
+	options, err := s.OrderOptions(ctx, prices, products)
+	if err != nil || customer == uuid.Nil {
+		return options, err
+	}
+	for _, price := range prices {
+		if price.IsRecurring() {
+			return options, nil
+		}
+	}
+	if !slices.ContainsFunc(options, func(o OrderOption) bool { return o.Rail == string(models.RailNMI) }) {
+		return options, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := s.db.Gen(ctx)
+	methods, err := q.ListPaymentMethodsByCustomer(ctx, gen.ListPaymentMethodsByCustomerParams{MerchantID: mid.UUID(), CustomerID: customer})
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for _, method := range methods {
+		if method.Custodian == models.CustodianPlatform && method.Rail == string(models.RailNMI) && paymentmethods.Chargeable(method) && method.CustodianID != nil && method.RailMethodRef != nil && *method.RailMethodRef != "" {
+			ids = append(ids, method.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return options, nil
+	}
+	agreements, err := q.ListLiveMandatesOfPaymentMethods(ctx, gen.ListLiveMandatesOfPaymentMethodsParams{MerchantID: mid.UUID(), CustomerID: customer, PaymentMethodIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	for _, agreement := range agreements {
+		if agreement.Kind != string(charge.AgreementCardOnFile) || agreement.Status != mandates.StatusActive || agreement.InitialTransactionID == nil || *agreement.InitialTransactionID == "" {
+			continue
+		}
+		for i := range options {
+			if options[i].Rail == string(models.RailNMI) && options[i].PSPID == agreement.PspID {
+				options[i].SavedPaymentMethodIDs = append(options[i].SavedPaymentMethodIDs, *agreement.PaymentMethodID)
+			}
 		}
 	}
 	return options, nil
@@ -399,7 +454,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		return OrderCharge{}, err
 	}
 
-	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
+	options, err := s.CustomerOrderOptions(ctx, order.CustomerID, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}
@@ -433,13 +488,14 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		}
 		// A HyperSwitch-held card pays an order that opens a subscription
 		// (its proxy takes no one-time card-on-file charge); a Basis Theory
-		// card pays one-time lines as its Elements collected it again.
+		// card pays one-time lines after collection, or by saved platform consent.
 		heldElsewhere := method.Custodian != models.CustodianPSP
 		switch {
 		case !heldElsewhere:
 		case method.CustodianID == nil:
 			return OrderCharge{}, orders.ErrOptionMissing
 		case method.Custodian == models.CustodianHyperSwitch && order.HasRecurring() && collected == "":
+		case method.Custodian == models.CustodianPlatform && !order.HasRecurring() && collected == "":
 		case (method.Custodian == models.CustodianBasisTheory || method.Custodian == models.CustodianPlatform) && !order.HasRecurring() && collected != "":
 		default:
 			return OrderCharge{}, orders.ErrOptionMissing
@@ -447,6 +503,13 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		if collected == "" {
 			chosen = nil
 			for i, o := range options {
+				if method.Custodian == models.CustodianPlatform {
+					if slices.Contains(o.SavedPaymentMethodIDs, methodID) {
+						chosen = &options[i]
+						break
+					}
+					continue
+				}
 				// A held card is charged through the PSP its custodian serves.
 				if !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
 					continue
@@ -519,7 +582,16 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			if order.HasRecurring() {
 				agreement = charge.AgreementRecurring
 			}
-			if !(order.HasRecurring() && row.Rail == string(models.RailStripe)) {
+			if row.Custodian == models.CustodianPlatform && collected == "" {
+				consent, err := q.GetCitableMandateForShare(ctx, gen.GetCitableMandateForShareParams{MerchantID: mid.UUID(), CustomerID: order.CustomerID, PaymentMethodID: methodID, PspID: chosen.PSPID, Kinds: []string{string(charge.AgreementCardOnFile)}})
+				if errors.Is(err, pgx.ErrNoRows) {
+					return orders.ErrOptionMissing
+				}
+				if err != nil {
+					return err
+				}
+				instrument.Mandate = mandates.Lineage(consent)
+			} else if !(order.HasRecurring() && row.Rail == string(models.RailStripe)) {
 				if instrument.Mandate, err = mandates.Citable(ctx, q, mid.UUID(), order.CustomerID, methodID, chosen.PSPID, row.Rail, agreement); err != nil {
 					return err
 				}

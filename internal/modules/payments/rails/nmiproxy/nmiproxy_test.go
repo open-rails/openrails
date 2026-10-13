@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -234,4 +235,42 @@ func TestNetworkTokenFallsBackToPAN(t *testing.T) {
 // cites is a mandate's lineage as a charge cites it.
 func cites(kind charge.Agreement, ref string) *charge.Mandate {
 	return &charge.Mandate{ID: uuid.New(), Kind: kind, InitialTransactionID: ref}
+}
+
+func TestSavedCardSale(t *testing.T) {
+	t.Parallel()
+	for _, declined := range []bool{false, true} {
+		name := "approved"
+		if declined {
+			name = "declined"
+		}
+		t.Run(name, func(t *testing.T) {
+			p := &fakeProxy{serve: func(w http.ResponseWriter, r *http.Request) {
+				assert.NoError(t, r.ParseForm())
+				assert.Contains(t, r.PostForm.Get("ccnumber"), "{{ token: "+tokenID)
+				assert.False(t, r.PostForm.Has("cvv"))
+				assert.Equal(t, "used", r.PostForm.Get("stored_credential_indicator"))
+				assert.Equal(t, "prior-payment", r.PostForm.Get("initial_transaction_id"))
+				body := "response=1&transactionid=next-payment&response_code=100"
+				if declined {
+					body = "response=2&transactionid=declined-payment&response_code=202&avsresponse=N&cvvresponse=N"
+				}
+				gatewayReply(body)(w, r)
+			}}
+			req := saleRequest(charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, "prior-payment")))
+			result, refusal, err := newProxyCharger(t, p).WithSource(Source{TokenID: tokenID}).Sale(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, 1, p.calls)
+			if declined {
+				require.NotNil(t, refusal)
+				require.Equal(t, "declined-payment", refusal.TransactionID)
+				require.Equal(t, 202, refusal.ResponseCode)
+				require.Equal(t, "N", refusal.AVSResponse)
+			} else {
+				require.Nil(t, refusal)
+				require.Equal(t, "next-payment", result.TransactionID)
+				require.Empty(t, result.CapturedRef)
+			}
+		})
+	}
 }

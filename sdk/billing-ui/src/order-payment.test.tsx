@@ -24,6 +24,18 @@ vi.mock("#orck/lib/stripe", () => ({
   loadStripeFor: async () => fakeStripe,
 }))
 
+vi.mock("./components/stripe-wallets", () => ({
+  StripeWallets: ({
+    onPaymentMethod,
+  }: {
+    onPaymentMethod: (id: string) => Promise<boolean>
+  }) => (
+    <button onClick={() => void onPaymentMethod("pm_wallet")}>
+      Pay with wallet
+    </button>
+  ),
+}))
+
 const order = (payment: Record<string, unknown>, status = "open") => ({
   id: "ord_1",
   customer_id: "c1",
@@ -890,3 +902,225 @@ it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])("p
   expect(container.querySelector('input[autocomplete="cc-number"]')).toBeNull()
   expect(container.querySelector('input[autocomplete="cc-csc"]')).toBeNull()
 })
+
+it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])(
+  "saved platform card %s keeps the correct attempt",
+  async (outcome) => {
+    const requests: RequestInit[] = []
+    const uncertain = ["unconfirmed", "server error", "in flight"].includes(
+      outcome
+    )
+    const hosted =
+      outcome === "in flight" ? "Pay with Hosted" : "Pay $15.00 with Hosted"
+    const platformOrder = (payment = {}, status = "open") => ({
+      ...order(payment, status),
+      payment_options: [
+        {
+          psp_id: "psp_nmi",
+          rail: "nmi",
+          accepts: ["saved_card"],
+          saved_payment_method_ids: ["pm_platform"],
+        },
+        { psp_id: "psp_hosted", rail: "stripe", accepts: ["redirect"] },
+        { psp_id: "psp_wallet", rail: "stripe", accepts: ["new_card"] },
+        { psp_id: "psp_sol", rail: "solana", accepts: ["solana_pay"] },
+      ],
+    })
+    const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/me/config"))
+        return Response.json({
+          ...config,
+          payment: {
+            psps: [
+              {
+                psp_id: "psp_nmi",
+                key: "nmi",
+                rail: "nmi",
+                custodian: "platform",
+                display_name: "Card",
+                flow: "tokenize",
+                config: { public_api_key: "public-platform-key" },
+              },
+              {
+                psp_id: "psp_hosted",
+                key: "hosted",
+                rail: "stripe",
+                custodian: "psp",
+                display_name: "Hosted",
+                flow: "redirect",
+                config: {},
+              },
+              {
+                psp_id: "psp_wallet",
+                key: "wallet",
+                rail: "stripe",
+                custodian: "psp",
+                display_name: "Wallet",
+                flow: "elements",
+                config: { publishable_key: "pk_test_wallet" },
+              },
+              {
+                psp_id: "psp_sol",
+                key: "solana",
+                rail: "solana",
+                custodian: "psp",
+                display_name: "Solana",
+                flow: "wallet",
+                config: {},
+              },
+            ],
+            solana: {
+              tokens: [{ symbol: "USDC", decimals: 6, mint: "mint" }],
+              network: "devnet",
+              chain: "solana:devnet",
+            },
+          },
+        })
+      if (input.endsWith("/config"))
+        return Response.json({
+          ...deployment,
+          currencies: [{ code: "USD", decimals: 6, minor_decimals: 2 }],
+        })
+      if (input.includes("/me/payment-methods"))
+        return Response.json({
+          data: [
+            {
+              id: "pm_platform",
+              rail: "nmi",
+              psp_id: null,
+              reusable: true,
+              card: { brand: "visa", last4: "1111" },
+            },
+            {
+              id: "pm_other",
+              rail: "nmi",
+              psp_id: null,
+              reusable: true,
+              card: { brand: "visa", last4: "9999" },
+            },
+          ],
+          next_cursor: null,
+        })
+      if (input.endsWith("/me/orders/ord_1"))
+        return Response.json(platformOrder())
+      if (input.endsWith("/pay") && init) {
+        requests.push(init)
+        if (requests.length === 1) {
+          if (outcome === "unconfirmed") throw new TypeError("connection lost")
+          if (outcome === "server error")
+            return Response.json(
+              {
+                error: {
+                  type: "api_error",
+                  code: "service_unavailable",
+                  message: "Try again",
+                },
+              },
+              { status: 503 }
+            )
+          if (outcome === "in flight")
+            return Response.json(
+              {
+                error: {
+                  type: "invalid_request_error",
+                  code: "idempotency_key_in_use",
+                  message: "Still processing",
+                },
+              },
+              { status: 409 }
+            )
+          if (outcome === "rejected")
+            return Response.json(
+              {
+                error: {
+                  type: "invalid_request_error",
+                  code: "invalid_param",
+                  message: "Card unavailable",
+                },
+              },
+              { status: 400 }
+            )
+          return Response.json(
+            {
+              error: {
+                type: "card_error",
+                code: "card_declined",
+                message: "Card declined",
+                order: platformOrder({
+                  last_payment_error: {
+                    reason: "generic_decline",
+                    message: "Card declined",
+                  },
+                }),
+              },
+            },
+            { status: 402 }
+          )
+        }
+        return Response.json(platformOrder({ status: "succeeded" }, "complete"))
+      }
+      return Response.json({}, { status: 404 })
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderPayment
+          orderId="ord_1"
+          serverCardEntry={false}
+          wallets
+          fallbacks={
+            outcome === "in flight"
+              ? { hosted: { for: ["nmi"], afterFailures: 0 } }
+              : undefined
+          }
+        />
+      </BillingProvider>
+    )
+    fireEvent.click(await screen.findByRole("radio", { name: /1111/ }))
+    expect(screen.queryByText(/9999/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: hosted })).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Pay with USDC on Solana" })
+    ).toBeEnabled()
+    expect(
+      await screen.findByRole("button", { name: "Pay with wallet" })
+    ).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    const next = await screen.findByRole("button", {
+      name: uncertain ? "Retry payment" : "Pay $15.00",
+    })
+    await waitFor(() => expect(next).toBeEnabled())
+    if (uncertain) {
+      expect(screen.getByRole("radio", { name: /1111/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+      expect(screen.getByRole("button", { name: hosted })).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Pay with USDC on Solana" })
+      ).toBeDisabled()
+      expect(
+        screen.queryByRole("button", { name: "Pay with wallet" })
+      ).not.toBeInTheDocument()
+    } else {
+      expect(screen.getByRole("button", { name: hosted })).toBeEnabled()
+      expect(
+        screen.getByRole("button", { name: "Pay with USDC on Solana" })
+      ).toBeEnabled()
+      expect(
+        screen.getByRole("button", { name: "Pay with wallet" })
+      ).toBeEnabled()
+    }
+    fireEvent.click(next)
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(JSON.parse(requests[0].body as string).payment).toEqual({
+      payment_method_id: "pm_platform",
+    })
+    expect(requests[1].body).toEqual(requests[0].body)
+    const keys = requests.map((request) =>
+      new Headers(request.headers).get("Idempotency-Key")
+    )
+    if (uncertain) expect(keys[1]).toBe(keys[0])
+    else expect(keys[1]).not.toBe(keys[0])
+  }
+)

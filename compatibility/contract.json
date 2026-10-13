@@ -815,7 +815,7 @@
       "type OrderOrigin string",
       "type OrderPayURLParams struct {\n\tEmbedded   bool   `json:\"embedded,omitempty\"`\n\tSuccessURL string `json:\"success_url\"`\n\n\tCancelURL *string `json:\"cancel_url,omitempty\"`\n\n\tExpiresAt *time.Time `json:\"expires_at,omitempty\"`\n\n\tSavedPaymentMethods bool `json:\"saved_payment_methods,omitempty\"`\n}",
       "type OrderPayment struct {\n\tStatus OrderPaymentStatus `json:\"status\"`\n\n\tNextAction *NextAction `json:\"next_action\"`\n\n\tLastPaymentError *PaymentFailure `json:\"last_payment_error\"`\n\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\n\tPaymentID *PaymentID `json:\"payment_id\"`\n}",
-      "type OrderPaymentOption struct {\n\tPSPID          PSPID    `json:\"psp_id\"`\n\tRail           string   `json:\"rail\"`\n\tAccepts        []string `json:\"accepts\"`\n\tFailedAttempts int      `json:\"failed_attempts\"`\n}",
+      "type OrderPaymentOption struct {\n\tSavedPaymentMethodIDs []PaymentMethodID `json:\"saved_payment_method_ids,omitempty\"`\n\tPSPID                 PSPID             `json:\"psp_id\"`\n\tRail                  string            `json:\"rail\"`\n\tAccepts               []string          `json:\"accepts\"`\n\tFailedAttempts        int               `json:\"failed_attempts\"`\n}",
       "type OrderPaymentParams struct {\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\n\tToken string `json:\"token,omitempty\"`\n\n\tPSPID          *PSPID          `json:\"psp_id,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n\n\tTokenSymbol string `json:\"token_symbol,omitempty\"`\n\n\tReturnURL string `json:\"return_url,omitempty\"`\n}",
       "type OrderPaymentStatus string",
       "type OrderPreview struct {\n\tCurrency       string               `json:\"currency\"`\n\tTotal          int64                `json:\"total,string\"`\n\tLines          []OrderPreviewLine   `json:\"lines\"`\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n}",
@@ -4494,6 +4494,7 @@
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "paymentpage": "github.com/open-rails/openrails/internal/paymentpage",
       "sha256": "crypto/sha256",
+      "slices": "slices",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"

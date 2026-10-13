@@ -1468,6 +1468,7 @@ export type OrderPayment = {
 }
 
 export type OrderPaymentOption = {
+  saved_payment_method_ids?: string[]
   psp_id: string
   rail: string
   accepts: string[]

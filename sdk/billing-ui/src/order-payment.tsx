@@ -107,6 +107,7 @@ export function OrderPayment({
   const [pspID, setPspID] = React.useState<string>()
   const [error, setError] = React.useState<string>()
   const [busy, setBusy] = React.useState(false)
+  const [pendingSaved, setPendingSaved] = React.useState<string>()
   const [walletShown, setWalletShown] = React.useState(false)
   // One key per pay attempt, minted at render: a retry of the same request
   // answers what the first did. A failed answer mints the next.
@@ -192,7 +193,12 @@ export function OrderPayment({
         (method.status ?? "active") === "active" &&
         method.reusable !== false &&
         method.health?.active !== false &&
-        usable.some((psp) => psp.psp_id === method.psp_id)
+        usable.some((psp) =>
+          psp.psp_id === method.psp_id || options.some((option) =>
+            option.psp_id === psp.psp_id &&
+            option.saved_payment_method_ids?.includes(method.id)
+          )
+        )
     )
     .map((method) => ({
       id: method.id,
@@ -295,7 +301,12 @@ export function OrderPayment({
     payment: () => Promise<OrderPaymentInput>,
     preserveUnconfirmed = false
   ): Promise<boolean> => {
-    if (busy || order.collection_owner !== "engine") return false
+    if (
+      busy ||
+      order.collection_owner !== "engine" ||
+      (pendingSaved && !preserveUnconfirmed)
+    )
+      return false
     setBusy(true)
     setError(undefined)
     try {
@@ -463,7 +474,7 @@ export function OrderPayment({
         </form>
       ) : (
         <div className="grid gap-4">
-          {walletPsp && walletAmount ? (
+          {!pendingSaved && walletPsp && walletAmount ? (
             <StripeWallets
               publishableKey={walletPsp.config!.publishable_key!}
               amount={walletAmount}
@@ -474,7 +485,7 @@ export function OrderPayment({
               }
             />
           ) : null}
-          {walletShown && walletPsp && walletAmount ? (
+          {!pendingSaved && walletShown && walletPsp && walletAmount ? (
             <p className="text-center text-[13px] text-muted-foreground">
               or pay another way
             </p>
@@ -484,7 +495,7 @@ export function OrderPayment({
               methods={saved}
               value={choice}
               onChange={setChoice}
-              disabled={busy || !open}
+              disabled={busy || !open || !!pendingSaved}
               idPrefix={`orck-order-${order.id}`}
             />
           ) : null}
@@ -493,10 +504,20 @@ export function OrderPayment({
               className="grid gap-4"
               onSubmit={(event) => {
                 event.preventDefault()
-                void pay(async () => ({ payment_method_id: choice }))
+                const method = pendingSaved ?? choice
+                const platform = options.some((option) =>
+                  option.saved_payment_method_ids?.includes(method)
+                )
+                void pay(async () => ({ payment_method_id: method }), platform)
+                  .then(() => setPendingSaved(undefined))
+                  .catch(() => setPendingSaved(method))
               }}
             >
-              <PayButton label={payLabel} processing={busy} disabled={!open} />
+              <PayButton
+                label={pendingSaved ? "Retry payment" : payLabel}
+                processing={busy}
+                disabled={!open}
+              />
             </form>
           ) : psp ? (
             <>
@@ -592,7 +613,7 @@ export function OrderPayment({
               <PayButton
                 label={`${payLabel} with ${item.display_name}`}
                 processing={busy}
-                disabled={!open}
+                disabled={!open || !!pendingSaved}
               />
             </form>
           ))}
@@ -606,7 +627,7 @@ export function OrderPayment({
                   key={item.psp_id}
                   type="button"
                   className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open}
+                  disabled={busy || !open || !!pendingSaved}
                   onClick={() =>
                     void pay(async () => ({
                       return_url: returnUrl ?? window.location.href,
@@ -626,7 +647,7 @@ export function OrderPayment({
                   key={token.symbol}
                   type="button"
                   className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open}
+                  disabled={busy || !open || !!pendingSaved}
                   onClick={() =>
                     void pay(async () => ({
                       token_symbol: token.symbol,

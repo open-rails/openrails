@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -97,7 +98,7 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, actor.Customer.UUID(), quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +678,7 @@ func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]
 	default:
 		var quote frozenLines
 		if quote, err = s.frozenQuote(ctx, order); err == nil {
-			options, err = s.orderOptions(ctx, quote.prices, quote.products)
+			options, err = s.orderOptions(ctx, order.CustomerID, quote.prices, quote.products)
 		}
 	}
 	if err != nil || len(options) == 0 {
@@ -719,14 +720,21 @@ func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenL
 }
 
 // orderOptions are the PSPs that sell the lines.
-func (s *Service) orderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, prices, products)
+func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
+	if page, ok := paymentpage.FromContext(ctx); ok && !page.SavedPaymentMethods {
+		customer = uuid.Nil
+	}
+	options, err := s.rt.OrderAttemptService.CustomerOrderOptions(ctx, customer, prices, products)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]billing.OrderPaymentOption, 0, len(options))
 	for _, o := range options {
-		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts()})
+		var saved []billing.PaymentMethodID
+		for _, id := range o.SavedPaymentMethodIDs {
+			saved = append(saved, billing.PaymentMethodID(id))
+		}
+		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), SavedPaymentMethodIDs: saved})
 	}
 	return out, nil
 }
@@ -737,7 +745,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	if i := quote.Refused(); i >= 0 {
 		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
 	}
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
+	options, err := s.rt.OrderAttemptService.CustomerOrderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
 	if err != nil {
 		return err
 	}
@@ -764,6 +772,12 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return fmt.Errorf("%w: the card is %s", payment.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
+		if pm.Custodian == models.CustodianPlatform {
+			if slices.Contains(o.SavedPaymentMethodIDs, pay.method) {
+				return nil
+			}
+			continue
+		}
 		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
 			return nil
 		}
