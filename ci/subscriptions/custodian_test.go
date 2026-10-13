@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -35,6 +36,7 @@ type btFake struct {
 	verifications          []btSale
 	tenant, application    string
 	containers             map[string][]string
+	metadata               map[string]map[string]string
 	decline                bool
 	saleResponse           string
 	failConversion         bool
@@ -54,7 +56,7 @@ type btSale struct {
 }
 
 func newBTFake(t *testing.T) (*btFake, string) {
-	f := &btFake{intents: map[string]string{}, tokens: map[string]string{}, byKey: map[string]string{}, containers: map[string][]string{}, applications: map[string]string{}}
+	f := &btFake{metadata: map[string]map[string]string{}, intents: map[string]string{}, tokens: map[string]string{}, byKey: map[string]string{}, containers: map[string][]string{}, applications: map[string]string{}}
 	server := httptest.NewServer(f)
 	t.Cleanup(server.Close)
 	return f, server.URL
@@ -65,7 +67,7 @@ func (f *btFake) collect(number string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seq++
-	id := fmt.Sprintf("ti_%d", f.seq)
+	id := uuid.NewString()
 	f.intents[id] = number
 	f.applications[id] = f.application
 	return id
@@ -122,13 +124,15 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.beforeTokenRead = nil
 		}
 		card := btCard(id, number)
-		card["tenant_id"], card["containers"] = f.tenant, f.containers[id]
+		card["tenant_id"], card["containers"], card["metadata"] = f.tenant, f.containers[id], f.metadata[id]
 		reply(http.StatusOK, card)
 	case r.Method == http.MethodPost && r.URL.Path == "/tokens":
 		var req struct {
-			IntentID    string   `json:"token_intent_id"`
-			Deduplicate bool     `json:"deduplicate_token"`
-			Containers  []string `json:"containers"`
+			ID          string            `json:"id"`
+			Metadata    map[string]string `json:"metadata"`
+			IntentID    string            `json:"token_intent_id"`
+			Deduplicate bool              `json:"deduplicate_token"`
+			Containers  []string          `json:"containers"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			reply(http.StatusBadRequest, map[string]any{"title": err.Error()})
@@ -145,7 +149,7 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		card := func(id string) map[string]any {
 			c := btCard(id, number)
-			c["tenant_id"], c["containers"] = f.tenant, f.containers[id]
+			c["tenant_id"], c["containers"], c["metadata"] = f.tenant, f.containers[id], f.metadata[id]
 			return c
 		}
 		key := r.Header.Get("BT-IDEMPOTENCY-KEY")
@@ -162,7 +166,15 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.seq++
-		id := fmt.Sprintf("tok_%d", f.seq)
+		id := req.ID
+		if id == "" {
+			id = fmt.Sprintf("tok_%d", f.seq)
+		}
+		if _, exists := f.tokens[id]; exists {
+			reply(http.StatusConflict, map[string]any{"title": "token already exists"})
+			return
+		}
+		f.metadata[id] = req.Metadata
 		f.tokens[id], f.byKey[key], f.containers[id] = number, id, req.Containers
 		if f.loseConversionResponse {
 			f.loseConversionResponse = false

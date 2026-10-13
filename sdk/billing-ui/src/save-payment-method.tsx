@@ -7,6 +7,7 @@ import {
 } from "./appearance"
 import { isBillingError } from "./client/errors"
 import { CardBillingFields } from "./components/billing-fields"
+import { PlatformCardForm } from "./components/platform-card-form"
 import { NativeCardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
 import {
@@ -64,7 +65,9 @@ export function SavePaymentMethod(props: SavePaymentMethodProps) {
       <p className="text-sm text-muted-foreground">
         {t("paymentMethods.saveNotice")}
       </p>
-      {driver === "collect_js" ? (
+      {driver === "platform" ? (
+        <PlatformSetup {...props} />
+      ) : driver === "collect_js" ? (
         <TokenizedSetup {...props} />
       ) : driver === "card" ? (
         <NativeCardSetup {...props} />
@@ -268,5 +271,57 @@ function ElementsSetup({
       />
       <TrustLine />
     </form>
+  )
+}
+
+function PlatformSetup({
+  psp,
+  onSaved,
+  submitLabel,
+  defaultCountry,
+}: SavePaymentMethodProps) {
+  const m = useMessages()
+  const { client, notify } = useBillingContext()
+  const [error, setError] = React.useState<string>()
+  const save = async (card: TokenizedCardData) => {
+    setError(undefined)
+    let method
+    try {
+      method = await client.addPaymentMethod({
+        psp_id: psp.psp_id,
+        token: card.payment_token,
+        billing_details: billingDetailsOf(card),
+      })
+    } catch (cause) {
+      setError(describe(m, cause))
+      // A definite refusal can collect a corrected card. A lost response
+      // keeps the original collection so Retry recovers the same save.
+      if (
+        isBillingError(cause) &&
+        (cause.status === 400 || cause.status === 402)
+      )
+        return false
+      throw cause
+    }
+    notify({ type: "payment_method.added", paymentMethodId: method.id })
+    onSaved(method.id)
+    return true
+  }
+  return (
+    <>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <PlatformCardForm
+        publicKey={psp.config!.public_api_key!}
+        purpose="setup"
+        defaultCountry={defaultCountry}
+        submitLabel={submitLabel ?? m.t("paymentMethods.save")}
+        disabled={false}
+        onTokenized={save}
+      />
+    </>
   )
 }

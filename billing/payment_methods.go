@@ -142,7 +142,9 @@ type CardDetails struct {
 // /v1/me/payment-methods/{id}/confirm finishes it. For HyperSwitch custody,
 // omit Token and Card and supply Idempotency-Key: the pending method returns
 // a capture next_action for vendor-owned fields. Confirm with the vendor
-// session token; saving the method never charges it.
+// session token; saving the method never charges it. For platform custody,
+// Token is a Basis Theory token intent from this merchant's card fields. NMI
+// verifies it without collecting money; retries recover the same saved card.
 type CreatePaymentMethodParams struct {
 	PSPID          PSPID           `json:"psp_id"`
 	Token          string          `json:"token,omitempty"`
