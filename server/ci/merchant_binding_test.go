@@ -244,7 +244,7 @@ func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	// A payment page: the order's answer carries the URL, its secret in
 	// the fragment, and is not stored.
 	created := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{
-		"customer_id": uuid.NewString(), "lines": []map[string]any{{"price_id": s.price()}}, "purchase": map[string]any{"success_url": "https://shop.e2e.test/thanks"},
+		"customer_id": uuid.NewString(), "lines": []map[string]any{{"price_id": s.price()}}, "pay_url": map[string]any{"success_url": "https://shop.e2e.test/thanks"},
 	})
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	require.Equal(t, "no-store", created.Header().Get("Cache-Control"))
