@@ -56,11 +56,7 @@ func (s *Service) payUsage(ctx context.Context, actor OrderActor, order *orders.
 	if err != nil {
 		return payment.OrderCharge{}, false, usageRefusal(err)
 	}
-	out := collectionCharge(result.Operation)
-	if out.Declined && !result.Replayed {
-		out.CardDecline = result.Operation.ID
-	}
-	return out, result.Replayed, nil
+	return collectionCharge(result.Operation), result.Replayed, nil
 }
 
 // collectionCharge is how an order collection ended: failed, and whether

@@ -381,6 +381,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // write posture; a nil Config reads as readonly and parks everything.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
+		CardAbuseGuard:    r.CardAbuseGuard,
+		CardFailureLedger: r.CardFailureLedger,
 		// Destructive user/admin enqueues pass the rate ceiling before the
 		// write-ahead intent is created.
 		Store:    intents.NewStoreGated(r.DB, r.RateCeiling()),

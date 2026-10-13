@@ -72,11 +72,10 @@ type orderKeyResult struct {
 // payment_failed; payment.last_payment_error says why). Replayed: the
 // Idempotency-Key's first request gave this answer.
 type OrderAnswer struct {
-	Order       *billing.Order
-	Status      int
-	Code        string
-	Replayed    bool
-	CardDecline uuid.UUID
+	Order    *billing.Order
+	Status   int
+	Code     string
+	Replayed bool
 }
 
 // PreviewOrder prices lines for the customer without writing.
@@ -313,7 +312,7 @@ func (s *Service) orderAnswer(ctx context.Context, rt *orderRuntime, actor Order
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	out := OrderAnswer{Order: view, Status: status, Replayed: replayed, CardDecline: charged.CardDecline}
+	out := OrderAnswer{Order: view, Status: status, Replayed: replayed}
 	if charged.Failed && view.Payment.Status == billing.OrderPaymentRequiresPaymentMethod {
 		out.Status, out.Code = http.StatusPaymentRequired, billing.CodePaymentFailed
 		if charged.Declined {

@@ -245,11 +245,7 @@ type OrderCard struct {
 
 // OrderCharge is what paying did: Failed when its attempt ended without
 // moving money, Declined when the issuer declined it.
-type OrderCharge struct {
-	Failed, Declined bool
-	// CardDecline is the newly observed refusal, never an old terminal result.
-	CardDecline uuid.UUID
-}
+type OrderCharge struct{ Failed, Declined bool }
 
 // ErrOrderPSPRequired: more than one PSP takes new cards for the order.
 var ErrOrderPSPRequired = apperr.Invalidf("more than one PSP takes this payment for the order: name payment.psp_id").WithParam("payment.psp_id")
@@ -373,11 +369,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		if err != nil {
 			return OrderCharge{}, err
 		}
-		out, err := s.afterOrderCharge(ctx, order, attemptID, intent)
-		if out.Declined && prior.Status != intents.StatusFailedTerminal {
-			out.CardDecline = intent.ID
-		}
-		return out, err
+		return s.afterOrderCharge(ctx, order, attemptID, intent)
 	case !db.IsNotFound(err):
 		return OrderCharge{}, err
 	}
@@ -476,7 +468,8 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			return err
 		}
 		payload := payments.NMISalePayload{
-			OrderAttemptID: attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,
+			OrderCaptchaSubjects: intents.OrderCaptchaSubjects(ctx),
+			OrderAttemptID:       attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,
 			Amount: current.Total, ListAmount: current.Total, Currency: current.Currency, Description: "Order " + billing.OrderID(order.ID).String(),
 			UserID: order.CustomerID.String(), PaymentID: uuidutil.NewV7(), AcceptedAt: now, Eligibility: string(EligibilityAllowed), OrderID: order.ID, Recurring: order.HasRecurring(),
 		}
@@ -552,11 +545,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 	if err != nil {
 		return OrderCharge{}, err
 	}
-	out, err := s.afterOrderCharge(ctx, order, attemptID, intent)
-	if out.Declined {
-		out.CardDecline = intent.ID
-	}
-	return out, err
+	return s.afterOrderCharge(ctx, order, attemptID, intent)
 }
 
 // NewCardOption is the PSP a new card's token belongs to: the one named, or
@@ -853,11 +842,7 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 	if err != nil {
 		return OrderCharge{}, err
 	}
-	out, err := s.afterOrderCharge(ctx, order, *order.AttemptID, current)
-	if out.Declined && operation.Status != intents.StatusFailedTerminal {
-		out.CardDecline = current.ID
-	}
-	return out, err
+	return s.afterOrderCharge(ctx, order, *order.AttemptID, current)
 }
 
 // orderClosedKey marks the sale of an order canceled or expired while its

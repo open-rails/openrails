@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -20,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
@@ -115,8 +115,12 @@ func orderID(r *httprequest.Request) (billing.OrderID, bool) {
 // otherwise), or, when its payment failed, 402 card_error carrying the order,
 // as Stripe's carries its PaymentIntent. A replay says so.
 func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
-	if answer.CardDecline != uuid.Nil {
-		recordOrderCardDecline(r, answer.CardDecline)
+	// The blocking ledger updates after inline execution. Refresh its merchant
+	// attack challenge here without counting the payment's decline again.
+	if answer.Code == billing.CodeCardDeclined && !answer.Replayed {
+		ctx := r.Request.Context()
+		mid, _ := merchant.FromContext(ctx)
+		r.State.CardAbuseGuard.RecordChargeFailure(ctx, mid.UUID(), nil, r.State.CardFailureLedger.AttackMode(ctx, mid.UUID()))
 	}
 	r.SetHeader("Cache-Control", "no-store")
 	if answer.Replayed {
@@ -133,23 +137,6 @@ func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
 	}
 	out.Order = answer.Order
 	r.APIError(out)
-}
-
-// Only add the captcha failure here, using the HTTP limiter's subjects.
-// The payment path owns the separate blocking count.
-func recordOrderCardDecline(r *httprequest.Request, decline uuid.UUID) {
-	if r.State.CardAbuseGuard == nil {
-		return
-	}
-	ctx := r.Request.Context()
-	id, _ := merchant.FromContext(ctx)
-	// Two confirmations can observe the same refusal. Count it once.
-	count, _ := r.State.AbuseState.Count(ctx, "order_card_decline:"+id.String()+":"+decline.String(), 1, 24*time.Hour)
-	if count != 1 {
-		return
-	}
-	attack := r.State.CardFailureLedger != nil && r.State.CardFailureLedger.AttackMode(ctx, id.UUID())
-	r.State.CardAbuseGuard.RecordChargeFailure(ctx, id.UUID(), middleware.SubjectKeysFromContext(ctx), attack)
 }
 
 // writeOrder writes an order read or changed without a payment.
@@ -206,7 +193,8 @@ func CreateMyOrder(r *httprequest.Request) {
 	if svc == nil {
 		return
 	}
-	answer, err := svc.CreateOrder(r.Request.Context(), *actor, body, key)
+	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	answer, err := svc.CreateOrder(ctx, *actor, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return
@@ -236,7 +224,8 @@ func PayMyOrder(r *httprequest.Request) {
 	if key == "" || svc == nil {
 		return
 	}
-	answer, err := svc.PayOrder(r.Request.Context(), *actor, id, body, key)
+	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	answer, err := svc.PayOrder(ctx, *actor, id, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return

@@ -199,7 +199,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if err != nil {
 			return err
 		}
-		payload := subscriptions.SubscriptionCollectionPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: instrument, HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.ObligationOrderReference(sub.ID, sub.CurrentPeriodEndsAt.UTC()), OrderID: order.ID}
+		payload := subscriptions.SubscriptionCollectionPayload{OrderCaptchaSubjects: intents.OrderCaptchaSubjects(ctx), Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: instrument, HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.ObligationOrderReference(sub.ID, sub.CurrentPeriodEndsAt.UTC()), OrderID: order.ID}
 		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal", Inline: payer != uuid.Nil})
 		if err != nil {
 			return err

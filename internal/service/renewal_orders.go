@@ -93,11 +93,7 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 		Declined bool `json:"declined"`
 	}
 	_ = json.Unmarshal(result.ResultEvidence, &evidence)
-	out := payment.OrderCharge{Failed: true, Declined: evidence.Declined}
-	if out.Declined && accepted.Status != intents.StatusFailedTerminal {
-		out.CardDecline = result.ID
-	}
-	return out, replayed, nil
+	return payment.OrderCharge{Failed: true, Declined: evidence.Declined}, replayed, nil
 }
 
 // orderPayKey is the collection key of one /pay request on a renewal or

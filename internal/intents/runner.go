@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -79,6 +80,9 @@ type Runner struct {
 	// OnSuccessorCommitted is an internal worker handoff, not handler context.
 	// Only a top-level transition+wakeup commit can acknowledge this operation.
 	OnSuccessorCommitted successorCommitHook
+
+	CardAbuseGuard    *abuse.CardAbuseGuard
+	CardFailureLedger *abuse.FailureLedger
 
 	Store    ledger
 	Logger   MutationLogger
@@ -571,6 +575,9 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		stats.Unknown++
 		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
 	case OutcomeTerminal:
+		if outcome.Evidence["declined"] == true {
+			r.recordOrderCardDecline(ctx, intent)
+		}
 		stats.Terminal++
 		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
 		if pruneTerminalPayloadFor(handler) {

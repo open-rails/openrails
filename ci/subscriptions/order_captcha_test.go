@@ -4,7 +4,9 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +23,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 func orderCaptchaConfig(cfg *config.Config) {
@@ -136,60 +141,134 @@ func TestPaymentPageDeclinesRequireCaptcha(t *testing.T) {
 }
 
 func TestOrderConfirmationDeclineRequiresCaptcha(t *testing.T) {
-	w := newWorld(t, orderCaptchaConfig)
-	price := w.lifetime("captcha:confirm", 6_000_000)
-	c := w.newCustomer()
-	c.ip = "198.51.100.55"
-	rt := engine.Graph(w.rt).Runtime
-	for i := range 3 {
-		out := c.order(http.MethodPost, "/orders", uuid.NewString(), map[string]any{
-			"lines": []any{line(price, 0)}, "expected_total": micros(6_000_000), "payment": map[string]any{
-				"token": w.newCardToken("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"}), "psp_id": w.psp["stripe"],
-			},
-		})
-		require.Equal(t, http.StatusCreated, out.status, "%v", out.body)
-		require.Equal(t, "requires_action", paymentOf(out)["status"])
-		count, _ := rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
-		require.EqualValues(t, i, count, "an authentication challenge is not a card decline")
-		pi := paymentOf(out)["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
-		// The issuer refuses the card after its challenge. Serve that exact
-		// PaymentIntent's final refusal when confirmation reads it.
-		w.stripe.Intercept(func(r *http.Request) bool {
-			return r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents/"+pi
-		}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
-			res := serve()
-			defer res.Body.Close()
-			var body map[string]any
-			if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-				return nil, err
+	for _, finish := range []string{"request", "worker"} {
+		t.Run(finish, func(t *testing.T) {
+			w := newWorld(t, orderCaptchaConfig)
+			require.NoError(t, w.jobs.Stop(t.Context()))
+			price := w.lifetime("captcha:confirm", 6_000_000)
+			c := w.newCustomer()
+			c.ip = "198.51.100.55"
+			rt := engine.Graph(w.rt).Runtime
+			for i := range 3 {
+				out := c.order(http.MethodPost, "/orders", uuid.NewString(), map[string]any{
+					"lines": []any{line(price, 0)}, "expected_total": micros(6_000_000), "payment": map[string]any{
+						"token": w.newCardToken("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"}), "psp_id": w.psp["stripe"],
+					},
+				})
+				require.Equal(t, http.StatusCreated, out.status, "%v", out.body)
+				require.Equal(t, "requires_action", paymentOf(out)["status"])
+				count, _ := rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+				require.EqualValues(t, i, count, "an authentication challenge is not a card decline")
+				pi := paymentOf(out)["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
+				// The issuer refuses the card after its challenge. Serve that exact
+				// PaymentIntent's final refusal when confirmation reads it.
+				w.stripe.Intercept(func(r *http.Request) bool {
+					return r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents/"+pi
+				}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+					res := serve()
+					defer res.Body.Close()
+					var body map[string]any
+					if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					body["status"] = "canceled"
+					body["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
+					raw, err := json.Marshal(body)
+					if err != nil {
+						return nil, err
+					}
+					res.Body = io.NopCloser(bytes.NewReader(raw))
+					res.ContentLength = int64(len(raw))
+					return res, nil
+				})
+				id := out.body["id"].(string)
+				wantStatus := http.StatusPaymentRequired
+				if finish == "worker" {
+					orderID, err := billing.ParseOrderID(id)
+					require.NoError(t, err)
+					var operationID uuid.UUID
+					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.provider_intents WHERE intent_type='nmi_sale' AND payload->>'order_id'=$1`), orderID.UUID().String()).Scan(&operationID))
+					ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+					resolved, err := rt.IntentRunner().VerifyByID(ctx, operationID)
+					require.NoError(t, err)
+					require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+					count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+					require.EqualValues(t, i+1, count, "count the customer's decline before any browser confirmation")
+					if i == 2 {
+						blocked := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
+						require.Equal(t, "captcha_required", orderError(blocked))
+						rt.CaptchaStore.ClearChallenged(t.Context(), "ip:"+c.ip)
+					}
+					wantStatus = http.StatusOK
+				}
+				originalIP := c.ip
+				c.ip = "198.51.100.155"
+				confirmed := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
+				require.Equal(t, wantStatus, confirmed.status, "%v", confirmed.body)
+				otherCount, _ := rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+				require.Zero(t, otherCount, "confirmation must not move the failure to a different address")
+				c.ip = originalIP
+				count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+				require.EqualValues(t, i+1, count)
+				if i == 2 && finish == "request" {
+					blocked := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
+					require.Equal(t, "captcha_required", orderError(blocked))
+					rt.CaptchaStore.ClearChallenged(t.Context(), "ip:"+c.ip)
+				}
+				old := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
+				require.Equal(t, http.StatusOK, old.status, "%v", old.body)
+				count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+				require.EqualValues(t, i+1, count)
+				canceled := c.order(http.MethodPost, "/orders/"+id+"/cancel", "", nil)
+				require.Equal(t, http.StatusOK, canceled.status, "%v", canceled.body)
 			}
-			body["status"] = "canceled"
-			body["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
-			raw, err := json.Marshal(body)
-			if err != nil {
-				return nil, err
-			}
-			res.Body = io.NopCloser(bytes.NewReader(raw))
-			res.ContentLength = int64(len(raw))
-			return res, nil
 		})
-		id := out.body["id"].(string)
-		confirmed := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
-		require.Equal(t, http.StatusPaymentRequired, confirmed.status, "%v", confirmed.body)
-		count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
-		require.EqualValues(t, i+1, count)
-		if i == 2 {
-			blocked := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
-			require.Equal(t, "captcha_required", orderError(blocked))
-			rt.CaptchaStore.ClearChallenged(t.Context(), "ip:"+c.ip)
-		}
-		old := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
-		require.Equal(t, http.StatusOK, old.status, "%v", old.body)
-		count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
-		require.EqualValues(t, i+1, count)
-		canceled := c.order(http.MethodPost, "/orders/"+id+"/cancel", "", nil)
-		require.Equal(t, http.StatusOK, canceled.status, "%v", canceled.body)
 	}
+}
+
+// A request can die after accepting its payment. The worker still counts the
+// eventual decline even though no payment response reaches the customer.
+func TestOrderWorkerExecutionDeclineRequiresCaptcha(t *testing.T) {
+	w := newWorld(t, orderCaptchaConfig)
+	require.NoError(t, w.jobs.Stop(t.Context()))
+	price := w.lifetime("captcha:worker", 6_000_000)
+	c := w.newCustomer()
+	c.ip = "198.51.100.57"
+	accepted := make(chan uuid.UUID, 1)
+	remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+		if site.Point != failpoint.BeforeInline || site.Kind != "nmi_sale" {
+			return nil
+		}
+		accepted <- site.Operation
+		return errors.New("request ended before payment execution")
+	})
+	defer remove()
+	out := c.order(http.MethodPost, "/orders", uuid.NewString(), map[string]any{
+		"lines": []any{line(price, 0)}, "expected_total": micros(6_000_000),
+		"payment": map[string]any{"token": w.newCardToken("nmi", card{Brand: "visa", Last4: "0341", Decline: "202"}), "psp_id": w.psp["nmi"]},
+	})
+	require.Equal(t, http.StatusInternalServerError, out.status, "%v", out.body)
+	var operationID uuid.UUID
+	select {
+	case operationID = <-accepted:
+	default:
+		t.Fatal("payment was not accepted before the request failed")
+	}
+	remove()
+	rt := engine.Graph(w.rt).Runtime
+	count, _ := rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+	require.Zero(t, count, "accepting an unsent payment is not a decline")
+	w.advance(intents.DefaultLease + time.Second)
+	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+	result, err := rt.IntentRunner().ExecuteByID(ctx, operationID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusFailedTerminal, result.Status)
+	count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+	require.EqualValues(t, 1, count)
+	_, err = rt.IntentRunner().ExecuteByID(ctx, operationID)
+	require.NoError(t, err)
+	count, _ = rt.AbuseState.Count(t.Context(), "card_fail:ip:"+c.ip+":fail", 0, 15*time.Minute)
+	require.EqualValues(t, 1, count, "replaying terminal work adds no failure")
 }
 
 func TestOrderCollectionDeclineCountsOnlyCustomerAttempt(t *testing.T) {

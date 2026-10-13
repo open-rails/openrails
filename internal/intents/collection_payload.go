@@ -31,6 +31,9 @@ const legacyCollectionKind = "invoice_collection"
 // payment_method_id also pins the method against custody remap while the
 // operation is unresolved.
 type OrderCollectionPayload struct {
+	// OrderCaptchaSubjects preserves the initiating HTTP address for worker completion.
+	OrderCaptchaSubjects []string `json:"order_captcha_subjects,omitempty"`
+
 	Initiator           charge.Initiator           `json:"initiator"`
 	OrderID             uuid.UUID                  `json:"order_id"`
 	CustomerID          uuid.UUID                  `json:"customer_id"`
