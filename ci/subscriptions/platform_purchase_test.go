@@ -358,7 +358,7 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 			}
 			paid, err := sale.buy(c, next)
 			switch scenario {
-			case "consent revoked", "closed", "foreign customer", "original account unavailable", "recurring order":
+			case "consent revoked", "closed", "foreign customer", "original account unavailable":
 				require.Error(t, err)
 				for _, option := range sale.read(c).Order.PaymentOptions {
 					require.Empty(t, option.SavedPaymentMethodIDs)
@@ -396,8 +396,14 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 			require.Equal(t, "token", sales[1].Source)
 			require.Empty(t, sales[1].CVV)
 			require.Equal(t, "customer", sales[1].InitiatedBy)
-			require.Equal(t, "used", sales[1].Indicator)
-			require.Equal(t, sales[0].TransactionID, sales[1].InitialTxnID)
+			if scenario == "recurring order" {
+				require.NotNil(t, paid.SubscriptionID)
+				require.Equal(t, "stored", sales[1].Indicator)
+				require.Empty(t, sales[1].InitialTxnID)
+			} else {
+				require.Equal(t, "used", sales[1].Indicator)
+				require.Equal(t, sales[0].TransactionID, sales[1].InitialTxnID)
+			}
 			require.Equal(t, sales[0].SecurityKey, sales[1].SecurityKey)
 			require.Len(t, c.paymentMethods(), 1, "reuse does not create another card")
 		})

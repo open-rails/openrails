@@ -428,6 +428,29 @@ func (q *Queries) GetMandateForShare(ctx context.Context, arg GetMandateForShare
 	return i, err
 }
 
+const hasSubscriptionMandate = `-- name: HasSubscriptionMandate :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.mandates
+  WHERE merchant_id = $1::uuid
+    AND customer_id = $2::uuid
+    AND subscription_id = $3::uuid AND kind = 'recurring'
+)
+`
+
+type HasSubscriptionMandateParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Storage recovery must never replace a subsequently selected or revoked card.
+func (q *Queries) HasSubscriptionMandate(ctx context.Context, arg HasSubscriptionMandateParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasSubscriptionMandate, arg.MerchantID, arg.CustomerID, arg.SubscriptionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const insertMandate = `-- name: InsertMandate :one
 
 INSERT INTO billing.mandates (

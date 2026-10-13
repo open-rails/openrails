@@ -65,6 +65,9 @@ type NMISalePayload struct {
 	// Recurring: the order has a recurring line, so the charge stores the
 	// card for a recurring agreement.
 	Recurring bool `json:"recurring,omitempty"`
+	// ReuseConsent permits presenting a saved platform card to open a new
+	// recurring agreement. Its one-time reference does not authorize renewals.
+	ReuseConsent *charge.Mandate `json:"reuse_consent,omitempty"`
 	// NewCard: the sale saved its card from the buyer's token, so a decline
 	// removes it. On an order it is a card just entered: the charge saves it
 	// and is its storing transaction (Token on NMI, Instrument's pm_ on
@@ -190,7 +193,7 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 	}
 	nmiToken := in.Rail != "stripe" && p.NewCard
 	// A HyperSwitch-held card pays an order that opens a subscription, as its
-	// recurring storing charge. A Basis Theory card pays one-time lines as
+	// recurring storing charge. A merchant Basis Theory card pays one-time lines as
 	// its token intent presents it: a new card, or one the customer holds.
 	custody := true
 	switch p.Instrument.Custodian {
@@ -203,9 +206,15 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 		source := p.Token != ""
 		if p.Instrument.Custodian == models.CustodianPlatform && !p.NewCard && p.Token == "" {
 			consent := p.Instrument.Mandate
+			if p.Recurring {
+				consent = p.ReuseConsent
+			}
 			source = consent != nil && consent.Kind == charge.AgreementCardOnFile && consent.InitialTransactionID != ""
 		}
-		custody = p.HyperSwitch == nil && in.Rail == "nmi" && !p.Recurring && source && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
+		custody = p.HyperSwitch == nil && in.Rail == "nmi" && (!p.Recurring || p.Instrument.Custodian == models.CustodianPlatform) && source && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
+	}
+	if p.ReuseConsent != nil && (!p.Recurring || p.NewCard || p.Token != "" || p.Instrument.Custodian != models.CustodianPlatform || p.Instrument.Mandate != nil) {
+		return errors.New("reuse consent is only for a saved platform card opening a recurring agreement")
 	}
 	if !custody {
 		return errors.New("order sale custody contradicts its order")

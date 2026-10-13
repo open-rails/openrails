@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -26,7 +27,7 @@ import (
 // RecurringVerifier runs a customer-present $0 verification declaring a
 // recurring agreement on an NMI card through psp, returning NMI's
 // transaction id.
-type RecurringVerifier func(ctx context.Context, psp uuid.UUID, vault, billing, order string) (string, error)
+type RecurringVerifier func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, order string) (string, error)
 
 // ErrCardUnusable: the saved card can no longer be charged.
 var ErrCardUnusable = apperr.New(http.StatusPaymentRequired, billing.CodePaymentMethodStale, "the card can no longer be charged; add it again")
@@ -39,7 +40,7 @@ var ErrRecurringAgreementRequired = apperr.Conflictf("the card requires a qualif
 // nil clears it so the subscription follows its customer's default for its
 // currency. Its recurring mandate moves to the card it then charges, citing
 // the card's recurring lineage on the subscription's account, or a recurring
-// verification run now when the card has none (NMI cards the PSP holds).
+// verification run now when the card has none (NMI cards held by the PSP or platform).
 // It never changes schedule ownership or issues a provider schedule mutation.
 // Accepted uncertain payments keep their frozen instrument until resolved.
 func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Context, subscriptionID, customer uuid.UUID, methodID *uuid.UUID, verify RecurringVerifier) error {
@@ -193,7 +194,7 @@ type verification struct {
 
 // recurringLineage is the lineage moving sub's recurring agreement onto
 // method cites: the card's own recurring lineage on sub's account, else
-// verified. Without either, an NMI card the PSP holds needs a verification.
+// verified. Without either, an NMI card held by the PSP or platform needs a verification.
 func recurringLineage(ctx context.Context, q *gen.Queries, sub *models.Subscription, method gen.BillingPaymentMethod, verified *charge.Mandate) (*charge.Mandate, *verification, error) {
 	lineage, err := mandates.Citable(ctx, q, sub.MerchantID, sub.CustomerID, method.ID, sub.PspID, method.Rail, charge.AgreementRecurring)
 	if err != nil || lineage != nil {
@@ -202,7 +203,7 @@ func recurringLineage(ctx context.Context, q *gen.Queries, sub *models.Subscript
 	if verified != nil {
 		return verified, nil, nil
 	}
-	if method.Rail == string(models.RailNMI) && method.Custodian == models.CustodianPSP {
+	if method.Rail == string(models.RailNMI) && (method.Custodian == models.CustodianPSP || method.Custodian == models.CustodianPlatform) {
 		return nil, &verification{method: method, psp: sub.PspID}, nil
 	}
 	return nil, nil, ErrRecurringAgreementRequired
@@ -215,13 +216,17 @@ func (s *SubscriptionLifecycleService) verifyRecurring(ctx context.Context, veri
 	if verify == nil {
 		return nil, ErrRecurringAgreementRequired
 	}
-	ref, err := verify(ctx, v.psp, models.DerefStr(v.method.RailCustomerRef), models.DerefStr(v.method.RailMethodRef), "pmr-"+uuidutil.NewV7().String())
+	ref, err := verify(ctx, v.psp, v.method, "pmr-"+uuidutil.NewV7().String())
 	if err != nil {
 		return nil, err
 	}
+	tokenType := charge.TokenTypePSPToken
+	if v.method.Custodian == models.CustodianPlatform {
+		tokenType = charge.TokenTypePANViaProxy
+	}
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return attempts.Record(ctx, s.DB.NewWithPgxTx(tx).Gen(ctx), attempts.Attempt{MerchantID: v.method.MerchantID, CustomerID: v.method.CustomerID, PSPID: v.psp, Rail: v.method.Rail,
-			Kind: attempts.Verify, Approved: true, TransactionID: ref, PaymentMethodID: &v.method.ID, Step: "verify", At: s.now(), TokenType: charge.TokenTypePSPToken})
+			Kind: attempts.Verify, Approved: true, TransactionID: ref, PaymentMethodID: &v.method.ID, Step: "verify", At: s.now(), TokenType: tokenType})
 	})
 	if err != nil {
 		return nil, err
@@ -234,11 +239,32 @@ func (s *SubscriptionLifecycleService) verifyRecurring(ctx context.Context, veri
 // the default). Customer-authorized selection can resume dunning; staff
 // selection preserves its existing state and retry schedule.
 func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.DB, sub *models.Subscription, methodID uuid.UUID, lineage *charge.Mandate, now time.Time, resumeDunning bool) error {
+	paidEnrollment := false
+	if resumeDunning && sub.Status == models.StatusAwaitingMethod && sub.CurrentPeriodEndsAt.After(now) {
+		history, err := d.Gen(ctx).HasSubscriptionMandate(ctx, gen.HasSubscriptionMandateParams{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, SubscriptionID: sub.ID})
+		if err != nil {
+			return err
+		}
+		paidEnrollment = !history
+	}
 	if _, err := mandates.Replace(ctx, d.Gen(ctx), mandates.Agreement{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PaymentMethodID: methodID, PSPID: sub.PspID, Rail: string(sub.Rail),
 		Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: lineage, AcceptedAt: now}, now); err != nil {
 		return err
 	}
-	if resumeDunning && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) {
+	if paidEnrollment {
+		// The order paid, but card storage failed before its first agreement.
+		// Choosing a card completes enrollment; there is no debt to retry.
+		if _, err := Transition(sub, lifecycle.Reinstate{PeriodStart: *sub.CurrentPeriodStartsAt, PeriodEnd: *sub.CurrentPeriodEndsAt}, now); err != nil {
+			return err
+		}
+		sub.ClearRetrySchedule()
+		if err := s.newLifecycleEntitlementService(d).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.AccessRevokeDunning, models.AccessSourceGrace); err != nil {
+			return err
+		}
+		if err := s.EnsureRenewalGrace(ctx, d, sub); err != nil {
+			return err
+		}
+	} else if resumeDunning && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) {
 		if err := ReplaceMethod(sub, now); err != nil {
 			return err
 		}

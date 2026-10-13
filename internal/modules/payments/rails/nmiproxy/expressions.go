@@ -85,10 +85,14 @@ func networkTokenExpExpr(ntID string) string {
 // error, never a default. cryptogram is required for network-token CITs (nil
 // otherwise).
 func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basistheory.Cryptogram) (url.Values, error) {
+	return paymentForm(req, src, gw, cryptogram, "sale")
+}
+
+func paymentForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basistheory.Cryptogram, kind string) (url.Values, error) {
 	if strings.TrimSpace(gw.SecurityKey) == "" {
 		return nil, errors.New("nmiproxy: gateway security_key is required")
 	}
-	if req.AmountMinor <= 0 {
+	if kind == "sale" && req.AmountMinor <= 0 || kind == "validate" && req.AmountMinor != 0 {
 		return nil, errors.New("nmiproxy: charge amount must be positive")
 	}
 	currency := strings.TrimSpace(req.Currency)
@@ -108,7 +112,7 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 		return nil, err
 	}
 	values := url.Values{
-		"type":         {"sale"},
+		"type":         {kind},
 		"security_key": {gw.SecurityKey},
 		"amount":       {amount},
 		"currency":     {currency},

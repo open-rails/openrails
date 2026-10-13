@@ -1,0 +1,61 @@
+package money
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+)
+
+// ResolvePlatformNMICharge arms one saved platform card on its accepted account.
+// The caller owns the recurring agreement and durable submission fence.
+func (b *MerchantCollectionAdapterBuilder) ResolvePlatformNMICharge(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (*nmiproxy.Charger, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if mid.UUID() != method.MerchantID || method.Custodian != models.CustodianPlatform {
+		return nil, charge.ErrInstrumentChanged
+	}
+	if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, psp), nil); err != nil {
+		return nil, err
+	}
+	svc := b.merchants()
+	if svc == nil || b.Config == nil || config.IsProviderReadOnly(b.Config) {
+		return nil, errors.New("platform collection is unavailable")
+	}
+	scope, ok, err := b.resolveScope(ctx, svc, mid, method.Rail, &psp)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || !scope.Declared || scope.Archived {
+		return nil, errors.New("platform collection account is unavailable")
+	}
+	custody, err := svc.PlatformCustodianConfig(ctx, mid, *method.CustodianID)
+	if err != nil {
+		return nil, err
+	}
+	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: b.Endpoints.BTBaseURL})
+	if err != nil {
+		return nil, err
+	}
+	token, err := bt.GetToken(ctx, *method.RailMethodRef)
+	if err != nil {
+		return nil, err
+	}
+	if token.ID != *method.RailMethodRef || token.Type != "card" || token.TenantID != custody.AccountID || len(token.Containers) != 1 || token.Containers[0] != custody.Container {
+		return nil, errors.New("platform card is outside the merchant's vault container")
+	}
+	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
+	if err != nil {
+		return nil, err
+	}
+	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}).WithSource(nmiproxy.Source{TokenID: token.ID}), nil
+}

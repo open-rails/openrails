@@ -31,7 +31,7 @@ charges through that PSP, provided it still reaches the custodian.
 | `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
-| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | new and saved cards on one-time orders; saved reuse stays on an account with active card-on-file consent; live vendor qualification pending |
+| `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | one-time and subscription orders; engine renewals on the original account; live vendor qualification pending |
 | JusPay / Spreedly | any | provider token | not built |
 | — no row — | `ccbill` | CCBill owns the subscription; no instrument reaches us | yes |
 | — no row — | `solana` | an on-chain delegation, not a stored instrument | yes |
@@ -101,9 +101,9 @@ It needs `vault.kv_mount`: its keys are at
 their `custodian_id`, so the custodian checks hold for them as for any
 custodian. The key `platform` is reserved: no merchant custodian takes it.
 
-### Platform NMI one-time purchases
+### Platform NMI purchases and subscriptions
 
-Platform collection currently supports a new card on a one-time NMI order.
+Platform collection supports new and saved cards on NMI orders, including subscriptions.
 `OrderPayment` collects it with Basis Theory Web Elements, sends only the token
 intent and billing details to OpenRails, and charges through the existing NMI
 sale operation. A saved platform card can pay another one-time order through
@@ -112,9 +112,21 @@ transaction reference. Order payment options include the eligible
 `saved_payment_method_ids`; the pay request sends only `payment_method_id`.
 Before submitting, the operation verifies the stored token's tenant and merchant
 container and rechecks the card and its consent. Changing custody for new cards
-does not move the saved card. Recurring purchases, routing reuse to a new NMI
-account, migration, network tokens, and Stripe platform collection are not enabled
-by this path.
+does not move the saved card. Subscription purchases establish a separate
+recurring agreement; card reuse consent alone does not authorize renewals.
+The existing renewal worker charges the saved token without CVV and cites that
+agreement's original NMI transaction. An uncertain result stays with its
+accepted attempt until resolved.
+
+Customers can replace a subscription's card with another saved platform card.
+When needed, a customer initiated zero amount verification establishes its
+recurring reference. Cancellation and resume use the existing subscription
+lifecycle. Adding a new platform card outside checkout remains separate work.
+
+Collection stays on the original NMI account until cross-account transaction
+references are qualified. An unavailable account holds collection for the
+operator; it does not invalidate the customer's card. Account switching,
+migration, network tokens and Stripe platform collection remain unsupported.
 Existing merchant custody remains the default.
 
 The operator-managed KV document at the path above has this shape:
@@ -153,6 +165,13 @@ idempotency key, including when paying with a saved card. An accepted sale's
 durable submission fence prevents another charge; the existing verifier completes conversion from the retained receipt.
 An expired token intent can leave a confirmed payment with no saved method,
 following the existing Basis Theory recovery policy.
+
+For a subscription order, a storage failure does not withhold the payment or
+paid access. The subscription waits for a usable card while the existing sale
+operation retries storage. Recovery cannot override a cancellation or a card
+agreement selected or revoked since the purchase. If the token intent expires,
+the paid subscription remains awaiting a payment method, under the existing
+bounded dunning policy.
 
 The hosted payment page permits `https://*.basistheory.com` in `script-src`,
 `frame-src`, and `connect-src`. Embedded hosts must permit those sources too.
