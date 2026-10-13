@@ -51,6 +51,7 @@ func (s *Service) restoreOrderCard(ctx context.Context, d *db.DB, order *Order, 
 			// This order already paid for the current period. Keeping its card
 			// completes enrollment; it is not an overdue renewal.
 			_, err = subscriptions.Transition(sub, lifecycle.Reinstate{PeriodStart: *sub.CurrentPeriodStartsAt, PeriodEnd: *sub.CurrentPeriodEndsAt}, now)
+			sub.ClearRetrySchedule()
 		} else {
 			err = subscriptions.ReplaceMethod(sub, now)
 		}

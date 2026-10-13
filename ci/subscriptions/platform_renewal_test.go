@@ -119,12 +119,12 @@ func TestPlatformSubscriptionLifecycle(t *testing.T) {
 }
 
 func TestPlatformSubscriptionCardRecovery(t *testing.T) {
-	for _, scenario := range []string{"recovered", "bounded grace", "expired intent", "canceled", "replaced"} {
+	for _, scenario := range []string{"recovered", "bounded grace", "expired intent", "canceled", "replaced", "replaced overdue"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			w, bt := platformSubscriptionWorld(t)
 			c := w.newCustomer()
-			if scenario == "bounded grace" {
+			if scenario == "bounded grace" || scenario == "replaced" {
 				require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessWhileRenewalHeld: billing.DunningAccessSuspend}}))
 			}
 			// Have another saved card available before the original storage fails.
@@ -151,7 +151,10 @@ func TestPlatformSubscriptionCardRecovery(t *testing.T) {
 			if scenario == "canceled" {
 				c.must(http.MethodPost, "/subscriptions/"+subID.String()+"/cancel", "", map[string]any{"reason": "done"})
 			}
-			if scenario == "replaced" {
+			if scenario == "replaced overdue" {
+				w.advanceHealthyTo(*sub.CurrentPeriodEndsAt)
+			}
+			if scenario == "replaced" || scenario == "replaced overdue" {
 				c.must(http.MethodPut, "/subscriptions/"+subID.String()+"/payment-method", "", map[string]any{"payment_method_id": other.Order.Payment.PaymentMethodID.String()})
 			}
 			bt.mu.Lock()
@@ -188,6 +191,18 @@ func TestPlatformSubscriptionCardRecovery(t *testing.T) {
 			case "replaced":
 				mandate := w.subscriptionMandate(remote, c.cid(), subID)
 				require.Equal(t, other.Order.Payment.PaymentMethodID, mandate.PaymentMethodID)
+				require.Equal(t, billing.SubscriptionActive, sub.Status, "a replacement card completes a paid enrollment")
+				require.True(t, c.entitled("platform:recovery"))
+				w.runRenewals()
+				require.Len(t, completed(w.payments(remote, c.id)), 2, "the paid period is not charged again")
+				w.advance(sub.CurrentPeriodEndsAt.Add(graceFor(monthHours) + time.Second).Sub(w.clock.Now()))
+				require.False(t, c.entitled("platform:recovery"), "replacement restores the bounded renewal grace policy")
+			case "replaced overdue":
+				require.Equal(t, billing.SubscriptionPastDue, sub.Status)
+				w.runRenewals()
+				w.until(func() bool { return w.subscription(remote, subID).CurrentPeriodEndsAt.After(*sub.CurrentPeriodEndsAt) }, "the replacement card pays the due renewal")
+				require.Len(t, completed(w.payments(remote, c.id)), 3)
+				require.Len(t, bt.salesOf(number), 1, "the recovered original card stays unused")
 			case "expired intent":
 				require.Equal(t, billing.SubscriptionAwaitingMethod, sub.Status)
 				w.advanceHealthyTo(*sub.CurrentPeriodEndsAt)

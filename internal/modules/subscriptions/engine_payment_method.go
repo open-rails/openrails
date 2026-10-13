@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -238,11 +239,32 @@ func (s *SubscriptionLifecycleService) verifyRecurring(ctx context.Context, veri
 // the default). Customer-authorized selection can resume dunning; staff
 // selection preserves its existing state and retry schedule.
 func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.DB, sub *models.Subscription, methodID uuid.UUID, lineage *charge.Mandate, now time.Time, resumeDunning bool) error {
+	paidEnrollment := false
+	if resumeDunning && sub.Status == models.StatusAwaitingMethod && sub.CurrentPeriodEndsAt.After(now) {
+		history, err := d.Gen(ctx).HasSubscriptionMandate(ctx, gen.HasSubscriptionMandateParams{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, SubscriptionID: sub.ID})
+		if err != nil {
+			return err
+		}
+		paidEnrollment = !history
+	}
 	if _, err := mandates.Replace(ctx, d.Gen(ctx), mandates.Agreement{MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PaymentMethodID: methodID, PSPID: sub.PspID, Rail: string(sub.Rail),
 		Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: lineage, AcceptedAt: now}, now); err != nil {
 		return err
 	}
-	if resumeDunning && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) {
+	if paidEnrollment {
+		// The order paid, but card storage failed before its first agreement.
+		// Choosing a card completes enrollment; there is no debt to retry.
+		if _, err := Transition(sub, lifecycle.Reinstate{PeriodStart: *sub.CurrentPeriodStartsAt, PeriodEnd: *sub.CurrentPeriodEndsAt}, now); err != nil {
+			return err
+		}
+		sub.ClearRetrySchedule()
+		if err := s.newLifecycleEntitlementService(d).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.AccessRevokeDunning, models.AccessSourceGrace); err != nil {
+			return err
+		}
+		if err := s.EnsureRenewalGrace(ctx, d, sub); err != nil {
+			return err
+		}
+	} else if resumeDunning && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) {
 		if err := ReplaceMethod(sub, now); err != nil {
 			return err
 		}
