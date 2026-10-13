@@ -10,8 +10,8 @@ adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own
 name such as `mobius`). CCBill owns the card vault and the rebill schedule:
 OpenRails never sees card data. It sells a subscription on the price's
-FlexForm through an order, usually as a card PSP's fallback, and follows
-every CCBill subscription through its webhooks.
+FlexForm through an order, and follows every CCBill subscription through its
+webhooks. A checkout can keep it as a card PSP's fallback (below).
 
 ### Account structure
 
@@ -47,10 +47,6 @@ psps:
     rail: ccbill
     # clientAccnum-clientSubacc, dash-joined:
     account_id: "999999-0000"
-    settings:
-      # Offered only when mobius can't take the order (see below).
-      fallback_for: [mobius]
-      fallback_after_failures: 2   # optional; 2 by default
     secrets:
       salt: replace-with-ccbill-flexform-salt
       # Optional pair — declare both or neither:
@@ -63,14 +59,24 @@ no webhook HMAC — see below), and no per-merchant IP allowlist.
 
 ### Fallback
 
-`fallback_for` makes CCBill (or any PSP) a fallback for the PSPs it names.
-An order lists it in `payment_options` (with `fallback: true`) only while
-none of them can take the order (unarmed, disarmed by posture, archived, or
-not selling its lines), or once the order has `fallback_after_failures`
-failed attempts through them. Paying through it otherwise is refused with
-`409 payment_option_withheld`. A PSP without `fallback_for`, Solana
-included, is a peer and is always offered. billing-ui's `OrderPayment` shows
-a fallback under "Card payment isn't working?".
+An order offers CCBill whenever its price links a FlexForm, and it can be paid
+through at any time. Each of the order's `payment_options` reports
+`failed_attempts`, the order's failed payments through that PSP.
+
+Keeping CCBill back until the card fails is the checkout's choice, made in
+billing-ui. `fallbacks` hides a PSP until none of its `for` PSPs is offered, or
+they have failed `afterFailures` times on the order combined. It then shows
+under "Card payment isn't working?". To offer CCBill after Mobius declines
+twice:
+
+```tsx
+const fallbacks = { ccbill: { for: ["mobius"], afterFailures: 2 } }
+
+<ProductList products={products} fallbacks={fallbacks} onPaid={…} onSignInRequired={…} />
+```
+
+`BuyButton`, `Cart`, `OrderPayment` and `EmbeddedPayment` take the same prop.
+`EmbeddedPayment` hands it to the framed pay page in the URL fragment.
 
 ### Catalog: linking prices to FlexForms
 

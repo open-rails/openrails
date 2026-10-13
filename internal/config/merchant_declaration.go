@@ -255,9 +255,6 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	if err := ValidateDeploymentEnvironments(DeclaredEnvironments([]MerchantDeclaration{m})); err != nil {
 		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 	}
-	if err := ValidatePSPFallbacks(m.PSPs); err != nil {
-		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
-	}
 	return m, nil
 }
 
@@ -332,9 +329,6 @@ func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
 			if err := ValidatePSPDeclaration(psp, m.PSPs[psp]); err != nil {
 				return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 			}
-		}
-		if err := ValidatePSPFallbacks(m.PSPs); err != nil {
-			return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 		}
 		out = append(out, m)
 	}

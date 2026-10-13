@@ -250,7 +250,6 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
-          "payment_option_withheld",
           "payment_provider_rejected",
           "quantity_not_allowed",
           "resource_conflict",
@@ -487,7 +486,6 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
-          "payment_option_withheld",
           "payment_provider_rejected",
           "resource_conflict",
           "resource_not_found",
@@ -11566,7 +11564,6 @@
           "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
-          "payment_option_withheld",
           "payment_provider_rejected",
           "resource_conflict",
           "resource_not_found",
@@ -18623,15 +18620,15 @@
               "type": "string"
             }
           },
-          "fallback": {
-            "type": "boolean"
+          "failed_attempts": {
+            "type": "integer"
           }
         },
         "required": [
           "psp_id",
           "rail",
           "accepts",
-          "fallback"
+          "failed_attempts"
         ]
       },
       "OrderPaymentParams": {
@@ -23921,11 +23918,6 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "No PSP that can take the order's lines accepts this payment."
-    },
-    "payment_option_withheld": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The PSP is a fallback: it takes the order only once its primary PSPs are unavailable or have failed on it often enough."
     },
     "payment_provider_rejected": {
       "status": 502,

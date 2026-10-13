@@ -79,7 +79,7 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	if !ok {
 		return OrderCharge{}, errors.New("hosted order payment is unavailable")
 	}
-	options, err := s.OrderOptions(ctx, order, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}

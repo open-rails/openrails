@@ -53,7 +53,6 @@ const (
 	CodeOrderNotCancelable       = "order_not_cancelable"
 	CodeOrderActionNotAllowed    = "order_action_not_allowed"
 	CodePaymentOptionUnavailable = "payment_option_unavailable"
-	CodePaymentOptionWithheld    = "payment_option_withheld"
 	// Payments recorded outside OpenRails.
 	CodePaymentExceedsDue     = "payment_exceeds_due"
 	CodeOrderHasRecurringLine = "order_has_recurring_line"
@@ -250,7 +249,6 @@ var errorCodes = []ErrorCode{
 	{CodeOrderNotCancelable, 409, invalid, "Only an open order, or one awaiting the customer's action, can be canceled."},
 	{CodeOrderActionNotAllowed, 409, invalid, "The order's origin or status does not allow this action."},
 	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the order's lines accepts this payment."},
-	{CodePaymentOptionWithheld, 409, invalid, "The PSP is a fallback: it takes the order only once its primary PSPs are unavailable or have failed on it often enough."},
 	{CodeOrderHasRecurringLine, 409, invalid, "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
 	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the usage order has due, or is not the order's total."},
 

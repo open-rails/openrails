@@ -58,7 +58,7 @@ func (s *OrderAttemptService) payOrderSolana(ctx context.Context, in OrderPayInp
 	case !db.IsNotFound(err):
 		return OrderCharge{}, err
 	}
-	options, err := s.OrderOptions(ctx, in.Order, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}

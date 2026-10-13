@@ -294,8 +294,6 @@ pkg openrails, type CCBillPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type CCBillPSP struct, DatalinkPassword string `psp:"secrets.datalink_password"`
 pkg openrails, type CCBillPSP struct, DatalinkUsername string `psp:"secrets.datalink_username"`
 pkg openrails, type CCBillPSP struct, Environment string `psp:"environment"`
-pkg openrails, type CCBillPSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
-pkg openrails, type CCBillPSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type CCBillPSP struct, Salt string `psp:"secrets.salt,required"`
 pkg openrails, type CaptchaConfig = config.CaptchaConfig
 pkg openrails, type CaptchaConfig struct
@@ -426,8 +424,6 @@ pkg openrails, type NMIPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type NMIPSP struct, CardEntry string `psp:"settings.card_entry"`
 pkg openrails, type NMIPSP struct, Custodian string `psp:"custodian"`
 pkg openrails, type NMIPSP struct, Environment string `psp:"environment"`
-pkg openrails, type NMIPSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
-pkg openrails, type NMIPSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type NMIPSP struct, SecurityKey string `psp:"secrets.security_key,required"`
 pkg openrails, type NMIPSP struct, TokenizationKey string `psp:"settings.tokenization_key"`
 pkg openrails, type NMIPSP struct, TokenizationURL string `psp:"settings.tokenization_url"`
@@ -539,8 +535,6 @@ pkg openrails, type StripePSP struct
 pkg openrails, type StripePSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type StripePSP struct, Archived bool `psp:"archived"`
 pkg openrails, type StripePSP struct, Environment string `psp:"environment"`
-pkg openrails, type StripePSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
-pkg openrails, type StripePSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type StripePSP struct, PublishableKey string `psp:"settings.publishable_key"`
 pkg openrails, type StripePSP struct, SecretKey string `psp:"secrets.secret_key,required"`
 pkg openrails, type StripePSP struct, WebhookOverlapExpiresAt time.Time `psp:"settings.webhook_overlap_expires_at"`
@@ -685,7 +679,6 @@ pkg openrails/billing, const CodePaymentMethodRequired untyped string = "payment
 pkg openrails/billing, const CodePaymentMethodSameVault untyped string = "payment_method_same_vault"
 pkg openrails/billing, const CodePaymentMethodStale untyped string = "payment_method_stale"
 pkg openrails/billing, const CodePaymentOptionUnavailable untyped string = "payment_option_unavailable"
-pkg openrails/billing, const CodePaymentOptionWithheld untyped string = "payment_option_withheld"
 pkg openrails/billing, const CodePaymentProviderRejected untyped string = "payment_provider_rejected"
 pkg openrails/billing, const CodePermissionRequired untyped string = "permission_required"
 pkg openrails/billing, const CodePriceChangeCurrencyMismatch untyped string = "price_change_currency_mismatch"
@@ -2550,7 +2543,7 @@ pkg openrails/billing, type OrderPayment struct, PaymentMethodID *PaymentMethodI
 pkg openrails/billing, type OrderPayment struct, Status OrderPaymentStatus `json:"status"`
 pkg openrails/billing, type OrderPaymentOption struct
 pkg openrails/billing, type OrderPaymentOption struct, Accepts []string `json:"accepts"`
-pkg openrails/billing, type OrderPaymentOption struct, Fallback bool `json:"fallback"`
+pkg openrails/billing, type OrderPaymentOption struct, FailedAttempts int `json:"failed_attempts"`
 pkg openrails/billing, type OrderPaymentOption struct, PSPID PSPID `json:"psp_id"`
 pkg openrails/billing, type OrderPaymentOption struct, Rail string `json:"rail"`
 pkg openrails/billing, type OrderPaymentParams struct

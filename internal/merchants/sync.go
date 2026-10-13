@@ -265,12 +265,6 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 			}
 		}
 	}
-	if err := config.ValidatePSPFallback(key, p.Settings, func(primary string) bool {
-		_, ok := set.PSPs[primary]
-		return ok
-	}); err != nil {
-		return err
-	}
 	if custodian != "" {
 		held, ok := set.Custodians[custodian]
 		if !ok || held.Value.Environment != config.EnvironmentClass(p.Environment) {

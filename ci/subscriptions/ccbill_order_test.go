@@ -20,12 +20,12 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// CCBill sells a membership on its FlexForm through an order attempt, as the
-// card PSP's fallback: the order offers it once its card PSP is unavailable
-// or has declined twice on the order; Solana is a peer, always offered.
-// CCBill's NewSaleSuccess for the attempt completes the order with the
-// subscription CCBill bills, once; a sale the order no longer takes is never
-// granted.
+// CCBill sells a membership on its FlexForm through an order attempt, offered
+// beside the card and Solana whenever its price links a FlexForm; each option
+// reports the order's failed attempts through it (billing-ui's checkout hides
+// a fallback by them). CCBill's NewSaleSuccess for the attempt completes the
+// order with the subscription CCBill bills, once; a sale the order no longer
+// takes is never granted.
 
 type ccbillShop struct {
 	w         *world
@@ -35,9 +35,8 @@ type ccbillShop struct {
 }
 
 // openCCBillShop is the merchant selling premium as the doujins catalog
-// does: card (nmi), CCBill declared nmi's fallback, and a Solana plan. nmi,
-// when given, replaces the card PSP's declaration.
-func openCCBillShop(t *testing.T, nmi *openrails.PSPConfig) *ccbillShop {
+// does: card (nmi), CCBill and a Solana plan.
+func openCCBillShop(t *testing.T) *ccbillShop {
 	t.Helper()
 	directory := &openrailstest.UserInfo{}
 	w := prepareWorld(t, 12)
@@ -46,10 +45,7 @@ func openCCBillShop(t *testing.T, nmi *openrails.PSPConfig) *ccbillShop {
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		solana(psps)
 		delete(psps, "stripe")
-		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt", FallbackFor: []string{"nmi"}}.PSPConfig()
-		if nmi != nil {
-			psps["nmi"] = *nmi
-		}
+		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig()
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
@@ -167,42 +163,47 @@ func (s *ccbillShop) memberships(c *customer) []billing.Subscription {
 	return s.w.memberships(c)
 }
 
-func TestCCBillFallbackOrder(t *testing.T) {
-	t.Run("CCBill stands in after two card declines and its sale completes the order once", func(t *testing.T) {
-		s := openCCBillShop(t, nil)
+// failures is each offered rail's failed attempts on the order.
+func failures(order map[string]any) map[string]any {
+	out := map[string]any{}
+	for rail, option := range offered(order) {
+		out[rail] = option["failed_attempts"]
+	}
+	return out
+}
+
+func TestCCBillOrder(t *testing.T) {
+	t.Run("CCBill pays at any time, options count failed attempts, and its sale completes the order once", func(t *testing.T) {
+		s := openCCBillShop(t)
 		w := s.w
 		c, name := s.buyer()
 		id := s.openOrder(c)
 
 		options := offered(s.read(c, id))
-		require.Contains(t, options, "nmi")
-		require.Contains(t, options, "solana", "Solana is a peer, always offered")
-		require.NotContains(t, options, "ccbill", "CCBill waits while the card PSP takes the order")
-		refused := s.payCCBill(c, id)
-		require.Equal(t, http.StatusConflict, refused.status, "%v", refused.body)
-		require.Equal(t, "payment_option_withheld", orderError(refused))
+		require.Equal(t, []any{"redirect"}, options["ccbill"]["accepts"], "%v", options)
+		require.Equal(t, map[string]any{"nmi": 0.0, "ccbill": 0.0, "solana": 0.0}, failures(s.read(c, id)))
+
+		// CCBill takes an order before any card failed on it, paid or bought
+		// in one call.
+		first, _ := s.buyer()
+		paying := s.payCCBill(first, s.openOrder(first))
+		require.Equal(t, http.StatusOK, paying.status, "%v", paying.body)
+		flexForm(t, paying.body)
 		stranger, _ := s.buyer()
 		created := stranger.order(http.MethodPost, "/orders", "direct-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": s.price}}, "expected_total": "23000000",
 			"payment": map[string]any{"return_url": "https://e2e.test/return", "psp_id": w.psp["ccbill"]}})
-		require.Equal(t, "payment_option_withheld", orderError(created), "%v", created.body)
+		require.Equal(t, http.StatusCreated, created.status, "%v", created.body)
+		flexForm(t, created.body)
 
 		declined := s.payCard(c, id, "202")
 		require.Equal(t, http.StatusPaymentRequired, declined.status, "%v", declined.body)
-		options = offered(orderOf(declined))
-		require.NotContains(t, options, "ccbill", "one decline is not the threshold")
-		require.Contains(t, options, "solana")
-
+		require.Equal(t, map[string]any{"nmi": 1.0, "ccbill": 0.0, "solana": 0.0}, failures(orderOf(declined)), "the declined answer counts it")
 		declined = s.payCard(c, id, "202")
 		require.Equal(t, http.StatusPaymentRequired, declined.status, "%v", declined.body)
-		options = offered(s.read(c, id))
-		require.Contains(t, options, "ccbill", "a second card decline unlocks the fallback: %v", options)
-		require.Equal(t, true, options["ccbill"]["fallback"])
-		require.Equal(t, []any{"redirect"}, options["ccbill"]["accepts"])
-		require.Contains(t, options, "nmi", "the card stays offered")
-		require.Contains(t, options, "solana")
+		require.Equal(t, map[string]any{"nmi": 2.0, "ccbill": 0.0, "solana": 0.0}, failures(s.read(c, id)))
 
 		// The FlexForm link carries the attempt, the customer and the price.
-		paying := s.payCCBill(c, id)
+		paying = s.payCCBill(c, id)
 		require.Equal(t, http.StatusOK, paying.status, "%v", paying.body)
 		link := flexForm(t, paying.body)
 		require.Equal(t, "https://sandbox-api.ccbill.com/wap-frontflex/flexforms/"+ccbillFlexID, link.Scheme+"://"+link.Host+link.Path)
@@ -234,7 +235,7 @@ func TestCCBillFallbackOrder(t *testing.T) {
 		require.NotNil(t, read["payment"].(map[string]any)["last_payment_error"])
 		require.Equal(t, "failed", s.attemptStatus(q.Get("reservationId")))
 		require.True(t, c.hasNotification("payment_method_failed"))
-		require.Contains(t, offered(read), "ccbill", "CCBill's own decline does not withhold it")
+		require.Equal(t, map[string]any{"nmi": 2.0, "ccbill": 1.0, "solana": 0.0}, failures(read))
 
 		// The next page is a new attempt; its sale completes the order.
 		paying = s.payCCBill(c, id)
@@ -279,13 +280,10 @@ func TestCCBillFallbackOrder(t *testing.T) {
 	})
 
 	t.Run("a sale for an order paid on the card meanwhile is never granted", func(t *testing.T) {
-		s := openCCBillShop(t, nil)
+		s := openCCBillShop(t)
 		w := s.w
 		c, _ := s.buyer()
 		id := s.openOrder(c)
-		for range 2 {
-			require.Equal(t, http.StatusPaymentRequired, s.payCard(c, id, "202").status)
-		}
 		paying := s.payCCBill(c, id)
 		require.Equal(t, http.StatusOK, paying.status, "%v", paying.body)
 		link := flexForm(t, paying.body)
@@ -308,20 +306,5 @@ func TestCCBillFallbackOrder(t *testing.T) {
 		require.Equal(t, "nmi", subs[0].Rail)
 		require.Len(t, completed(w.payments(embedded, c.id)), 1, "the late sale is not booked as the order's")
 		require.Contains(t, w.openFindings("consistency.ledger.unbooked"), "ccbill_sale_unhonored:"+txn, "the merchant refunds and cancels it at CCBill")
-	})
-
-	t.Run("CCBill is offered at once while the card PSP is unavailable", func(t *testing.T) {
-		unarmed := openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: nmiAcct}.PSPConfig()
-		s := openCCBillShop(t, &unarmed)
-		c, _ := s.buyer()
-		id := s.openOrder(c)
-		options := offered(s.read(c, id))
-		require.NotContains(t, options, "nmi")
-		require.Contains(t, options, "ccbill", "%v", options)
-		require.Equal(t, true, options["ccbill"]["fallback"])
-		require.Contains(t, options, "solana")
-		paying := s.payCCBill(c, id)
-		require.Equal(t, http.StatusOK, paying.status, "%v", paying.body)
-		flexForm(t, paying.body)
 	})
 }

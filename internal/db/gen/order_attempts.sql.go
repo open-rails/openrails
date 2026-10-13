@@ -75,26 +75,42 @@ func (q *Queries) ClaimSolanaOrderSignature(ctx context.Context, arg ClaimSolana
 	return result.RowsAffected(), nil
 }
 
-const countOrderFailedAttempts = `-- name: CountOrderFailedAttempts :one
-SELECT count(*)::int FROM billing.order_attempts
+const countOrderFailedAttemptsByPSP = `-- name: CountOrderFailedAttemptsByPSP :many
+SELECT psp_id, count(*)::int AS failed FROM billing.order_attempts
 WHERE merchant_id = $1::uuid AND order_id = $2::uuid
-  AND psp_id = ANY($3::uuid[]) AND status = 'failed'
-  AND deleted_at IS NULL
+  AND status = 'failed' AND deleted_at IS NULL
+GROUP BY psp_id
 `
 
-type CountOrderFailedAttemptsParams struct {
+type CountOrderFailedAttemptsByPSPParams struct {
 	MerchantID uuid.UUID
 	OrderID    uuid.UUID
-	PspIds     []uuid.UUID
 }
 
-// Failed attempts on an order through the PSPs named: what unlocks a PSP
-// declared their fallback.
-func (q *Queries) CountOrderFailedAttempts(ctx context.Context, arg CountOrderFailedAttemptsParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countOrderFailedAttempts, arg.MerchantID, arg.OrderID, arg.PspIds)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
+type CountOrderFailedAttemptsByPSPRow struct {
+	PspID  uuid.UUID
+	Failed int32
+}
+
+// An order's failed attempts, by the PSP each went through.
+func (q *Queries) CountOrderFailedAttemptsByPSP(ctx context.Context, arg CountOrderFailedAttemptsByPSPParams) ([]CountOrderFailedAttemptsByPSPRow, error) {
+	rows, err := q.db.Query(ctx, countOrderFailedAttemptsByPSP, arg.MerchantID, arg.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountOrderFailedAttemptsByPSPRow
+	for rows.Next() {
+		var i CountOrderFailedAttemptsByPSPRow
+		if err := rows.Scan(&i.PspID, &i.Failed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const expireOrderAttemptByID = `-- name: ExpireOrderAttemptByID :execrows

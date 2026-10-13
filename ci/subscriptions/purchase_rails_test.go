@@ -154,8 +154,8 @@ func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// A CCBill PSP that is no fallback is a peer: it sells a subscription whose
-// price links a FlexForm, on that form, and nothing one-time.
+// A CCBill PSP sells a subscription whose price links a FlexForm, on that
+// form, and nothing one-time.
 func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
 	w := newWorld(t)
 	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
@@ -179,7 +179,7 @@ func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
 	require.NoError(t, err, "armed engine rails sell the one-time price on local terms")
 	options := w.options(pid(priceID(t, w, key, key+"-monthly")))
 	require.Equal(t, []string{"redirect"}, options["ccbill"].Accepts, "%+v", options)
-	require.False(t, options["ccbill"].Fallback)
+	require.Zero(t, options["ccbill"].FailedAttempts)
 	require.Contains(t, options, "nmi")
 	require.NotContains(t, w.options(pid(priceID(t, w, key, key+"-once"))), "ccbill", "a FlexForm sells subscriptions only")
 }

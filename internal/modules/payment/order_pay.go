@@ -70,16 +70,13 @@ func (s *OrderAttemptService) saleService() *NMISaleService {
 // order can be paid on the PSP's own page (Stripe Checkout for one-time
 // lines, a CCBill FlexForm for one subscription). Custodian is the kind of
 // the third party holding the cards the PSP charges, CustodianID its
-// account; "" when the PSP holds its own. Fallback: the PSP stands in for
-// its primaries; Withheld: they still take the order, so it is not offered.
+// account; "" when the PSP holds its own.
 type OrderOption struct {
 	PSPID       uuid.UUID
 	Rail        string
 	Hosted      bool
 	Custodian   string
 	CustodianID *uuid.UUID
-	Fallback    bool
-	Withheld    bool
 }
 
 // Solana reports a Solana Pay option.
@@ -106,9 +103,8 @@ func (o OrderOption) Accepts() []string {
 // every recurring line an engine-owned subscription; a Solana wallet, for
 // one-time lines or the one line of a price with a Solana plan; or a CCBill
 // FlexForm, for the one line of a recurring price. A Basis Theory
-// custodian's PSP sells one-time lines. order is the order paid, nil for one
-// not yet created: its failed attempts unlock fallback PSPs.
-func (s *OrderAttemptService) OrderOptions(ctx context.Context, order *orders.Order, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
+// custodian's PSP sells one-time lines.
+func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
 	}
@@ -166,7 +162,24 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, order *orders.Or
 			options = append(options, o)
 		}
 	}
-	return s.withFallbacks(ctx, order, options)
+	return options, nil
+}
+
+// FailedAttempts counts an order's failed attempts by PSP.
+func (s *OrderAttemptService) FailedAttempts(ctx context.Context, order uuid.UUID) (map[uuid.UUID]int, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).CountOrderFailedAttemptsByPSP(ctx, gen.CountOrderFailedAttemptsByPSPParams{MerchantID: mid.UUID(), OrderID: order})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]int, len(rows))
+	for _, row := range rows {
+		out[row.PspID] = int(row.Failed)
+	}
+	return out, nil
 }
 
 // custodyOf is who holds the cards an NMI option's PSP charges.
@@ -361,7 +374,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		return OrderCharge{}, err
 	}
 
-	options, err := s.OrderOptions(ctx, in.Order, in.Prices, in.Products)
+	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
 	if err != nil {
 		return OrderCharge{}, err
 	}
@@ -410,7 +423,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			chosen = nil
 			for i, o := range options {
 				// A held card is charged through the PSP its custodian serves.
-				if o.Withheld || !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
+				if !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
 					continue
 				}
 				chosen = &options[i]
@@ -551,20 +564,13 @@ func pickOption(options []OrderOption, psp uuid.UUID, solana bool) (*OrderOption
 }
 
 // pick is the option of kind that takes the order: the one named, or the
-// only one. A named fallback its primaries still cover is refused.
+// only one.
 func pick(options []OrderOption, psp uuid.UUID, kind func(OrderOption) bool) (*OrderOption, error) {
 	var found []*OrderOption
 	for i := range options {
-		if !kind(options[i]) || psp != uuid.Nil && options[i].PSPID != psp {
-			continue
+		if kind(options[i]) && (psp == uuid.Nil || options[i].PSPID == psp) {
+			found = append(found, &options[i])
 		}
-		if options[i].Withheld {
-			if psp != uuid.Nil {
-				return nil, ErrFallbackWithheld
-			}
-			continue
-		}
-		found = append(found, &options[i])
 	}
 	switch len(found) {
 	case 0:

@@ -41,11 +41,6 @@ type NMIPSP struct {
 	// CardEntry is browser (the default) or server, where the payment page
 	// posts the card to OpenRails, which vaults it.
 	CardEntry string `psp:"settings.card_entry"`
-
-	// FallbackFor makes the PSP a fallback for the PSPs it names; see
-	// CCBillPSP.FallbackFor.
-	FallbackFor           []string `psp:"settings.fallback_for"`
-	FallbackAfterFailures int      `psp:"settings.fallback_after_failures"`
 }
 
 // PSPConfig returns the declaration.
@@ -62,8 +57,6 @@ func (p NMIPSP) PSPConfig() PSPConfig {
 			"tokenization_key":           p.TokenizationKey,
 			"tokenization_url":           p.TokenizationURL,
 			"card_entry":                 p.CardEntry,
-			"fallback_for":               keyList(p.FallbackFor),
-			"fallback_after_failures":    count(p.FallbackAfterFailures),
 		}),
 	}
 }
@@ -88,11 +81,6 @@ type StripePSP struct {
 	// PublishableKey (pk_…) enables embedded Elements; without it purchase
 	// redirects to Stripe Checkout.
 	PublishableKey string `psp:"settings.publishable_key"`
-
-	// FallbackFor makes the PSP a fallback for the PSPs it names; see
-	// CCBillPSP.FallbackFor.
-	FallbackFor           []string `psp:"settings.fallback_for"`
-	FallbackAfterFailures int      `psp:"settings.fallback_after_failures"`
 }
 
 // PSPConfig returns the declaration.
@@ -108,8 +96,6 @@ func (p StripePSP) PSPConfig() PSPConfig {
 		Settings: settingSlots(map[string]any{
 			"webhook_overlap_expires_at": instant(p.WebhookOverlapExpiresAt),
 			"publishable_key":            p.PublishableKey,
-			"fallback_for":               keyList(p.FallbackFor),
-			"fallback_after_failures":    count(p.FallbackAfterFailures),
 		}),
 	}
 }
@@ -126,13 +112,6 @@ type CCBillPSP struct {
 	Salt             string `psp:"secrets.salt,required"`
 	DatalinkUsername string `psp:"secrets.datalink_username"`
 	DatalinkPassword string `psp:"secrets.datalink_password"`
-
-	// FallbackFor makes the PSP a fallback for the PSPs it names (ccbill for
-	// mobius): an order offers it only while none of them can take the
-	// order, or once the order has FallbackAfterFailures failed attempts
-	// through them (0: 2).
-	FallbackFor           []string `psp:"settings.fallback_for"`
-	FallbackAfterFailures int      `psp:"settings.fallback_after_failures"`
 }
 
 // PSPConfig returns the declaration.
@@ -143,10 +122,6 @@ func (p CCBillPSP) PSPConfig() PSPConfig {
 			"salt":              p.Salt,
 			"datalink_username": p.DatalinkUsername,
 			"datalink_password": p.DatalinkPassword,
-		}),
-		Settings: settingSlots(map[string]any{
-			"fallback_for":            keyList(p.FallbackFor),
-			"fallback_after_failures": count(p.FallbackAfterFailures),
 		}),
 	}
 }
@@ -236,29 +211,9 @@ func secretSlots(slots map[string]string) map[string]string {
 	return slots
 }
 
-// keyList is a list setting as YAML parses it; nil when empty.
-func keyList(keys []string) any {
-	if len(keys) == 0 {
-		return nil
-	}
-	out := make([]any, len(keys))
-	for i, key := range keys {
-		out[i] = key
-	}
-	return out
-}
-
-// count is a whole-number setting; nil when zero.
-func count(n int) any {
-	if n == 0 {
-		return nil
-	}
-	return n
-}
-
 func settingSlots(slots map[string]any) map[string]any {
 	for key, value := range slots {
-		if m, isMap := value.(map[string]any); value == nil || value == "" || isMap && m == nil {
+		if m, isMap := value.(map[string]any); value == "" || isMap && m == nil {
 			delete(slots, key)
 		}
 	}

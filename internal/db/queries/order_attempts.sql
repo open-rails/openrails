@@ -97,10 +97,9 @@ JOIN billing.custodians c ON c.merchant_id=p.merchant_id AND c.id=sqlc.arg(custo
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
 FOR SHARE OF p,c;
 
--- name: CountOrderFailedAttempts :one
--- Failed attempts on an order through the PSPs named: what unlocks a PSP
--- declared their fallback.
-SELECT count(*)::int FROM billing.order_attempts
+-- name: CountOrderFailedAttemptsByPSP :many
+-- An order's failed attempts, by the PSP each went through.
+SELECT psp_id, count(*)::int AS failed FROM billing.order_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
-  AND psp_id = ANY(sqlc.arg(psp_ids)::uuid[]) AND status = 'failed'
-  AND deleted_at IS NULL;
+  AND status = 'failed' AND deleted_at IS NULL
+GROUP BY psp_id;

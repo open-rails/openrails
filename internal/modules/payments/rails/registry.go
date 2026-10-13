@@ -189,7 +189,7 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous verifies only until
 		// webhook_overlap_expires_at.
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"tokenization_key", "tokenization_url", "card_entry", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
+		[]string{"tokenization_key", "tokenization_url", "card_entry", "webhook_overlap_expires_at"},
 		true,                                // OneOffSale (direct gateway sale)
 		NewSubscriptionEngine,               // saved vault card charged by OpenRails
 		true,                                // ServerCardEntry (Direct Post customer_vault=add_customer)
@@ -209,7 +209,7 @@ var descriptors = []Descriptor{
 		cancelDestructive, // DataLink SMS cancel: no resume API, access rides the paid runway
 		"",                // CancelPortalURL (cancels happen on our site)
 		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
-		[]string{"fallback_for", "fallback_after_failures"},
+		nil,
 		false,                       // OneOffSale
 		NewSubscriptionHostedForm,   // an order's FlexForm sale; CCBill bills it
 		false,                       // ServerCardEntry (CCBill's own page takes the card)
@@ -231,7 +231,7 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous keeps events queued on the rotated-out
 		// endpoint verifying, never past webhook_overlap_expires_at.
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"publishable_key", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
+		[]string{"publishable_key", "webhook_overlap_expires_at"},
 		true,                     // OneOffSale
 		NewSubscriptionEngine,    // saved PaymentMethod charged by OpenRails
 		false,                    // ServerCardEntry (Stripe's own fields take the card)

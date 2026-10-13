@@ -97,7 +97,7 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, nil, quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}
@@ -660,23 +660,37 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 	return &view, s.markDelinquent(ctx, &view)
 }
 
-// openOrderOptions are what can pay an open order; none for any other.
+// openOrderOptions are what can pay an open order, each with the order's
+// failed attempts through it; none for any other order.
 func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
+	var options []billing.OrderPaymentOption
+	var err error
 	switch {
 	case order.CollectionOwner != string(billing.OrderCollectionEngine):
 		return nil, nil
 	case order.Status != string(billing.OrderOpen):
 		return nil, nil
 	case order.Origin == string(billing.OrderOriginSubscription):
-		return s.renewalOptions(ctx, order)
+		options, err = s.renewalOptions(ctx, order)
 	case order.Origin == string(billing.OrderOriginUsage):
-		return s.usageOptions(ctx, order)
+		options, err = s.usageOptions(ctx, order)
+	default:
+		var quote frozenLines
+		if quote, err = s.frozenQuote(ctx, order); err == nil {
+			options, err = s.orderOptions(ctx, quote.prices, quote.products)
+		}
 	}
-	quote, err := s.frozenQuote(ctx, order)
+	if err != nil || len(options) == 0 {
+		return options, err
+	}
+	failed, err := s.rt.OrderAttemptService.FailedAttempts(ctx, order.ID)
 	if err != nil {
 		return nil, err
 	}
-	return s.orderOptions(ctx, order, quote.prices, quote.products)
+	for i := range options {
+		options[i].FailedAttempts = failed[options[i].PSPID.UUID()]
+	}
+	return options, nil
 }
 
 type frozenLines struct {
@@ -704,18 +718,15 @@ func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenL
 	return out, nil
 }
 
-// orderOptions are the PSPs offered for order's lines (nil: an order not
-// yet created); a withheld fallback is not offered.
-func (s *Service) orderOptions(ctx context.Context, order *orders.Order, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, order, prices, products)
+// orderOptions are the PSPs that sell the lines.
+func (s *Service) orderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, prices, products)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]billing.OrderPaymentOption, 0, len(options))
 	for _, o := range options {
-		if !o.Withheld {
-			out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), Fallback: o.Fallback})
-		}
+		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts()})
 	}
 	return out, nil
 }
@@ -726,7 +737,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	if i := quote.Refused(); i >= 0 {
 		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
 	}
-	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, nil, quote.Prices(), quote.Products())
+	options, err := s.rt.OrderAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
 	if err != nil {
 		return err
 	}
@@ -753,7 +764,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return fmt.Errorf("%w: the card is %s", payment.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
-		if !o.Withheld && strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
+		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {
 			return nil
 		}
 	}

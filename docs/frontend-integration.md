@@ -225,14 +225,13 @@ sale, per the rail registry:
 | CCBill | no | a price with a FlexForm, alone on its order, on CCBill's page |
 
 Each payment option carries `psp_id`, `rail`, `accepts` (`saved_card`,
-`new_card`, `redirect`, `solana_pay`) and `fallback`; the PSP's browser
-configuration is `payment` above. A PSP the merchant declares a fallback
-(`settings.fallback_for`, e.g. CCBill for the card PSP) is listed only while
-its primaries cannot take the order or have failed on it often enough, with
-`fallback: true`; paying through it otherwise is refused
-(`payment_option_withheld`). `@openrails/billing-ui` renders them as they
-are, a fallback under "Card payment isn't working?"; hosts add no rail
-logic. Catalog application refuses an active price that declares PSPs when
+`new_card`, `redirect`, `solana_pay`) and `failed_attempts`, the order's
+failed payments through it; the PSP's browser configuration is `payment`
+above. `@openrails/billing-ui` renders them as they are; hosts add no rail
+logic. Its `fallbacks` prop keeps a PSP back until the PSPs it stands in for
+fail (CCBill after Mobius declines twice:
+`fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }}`), then offers
+it under "Card payment isn't working?". Catalog application refuses an active price that declares PSPs when
 none of them, nor any armed rail selling on local terms, can sell it
 (`price_not_sellable`).
 

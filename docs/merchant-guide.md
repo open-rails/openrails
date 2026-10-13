@@ -205,6 +205,10 @@ A link-only price pushed without its ids is still created in OpenRails and recor
 `pending_manual_link`, with a `pending_manual_actions` entry telling you what to PATCH
 in later.
 
+Every PSP that can sell a price is offered on its orders. Keeping one back as a
+fallback (CCBill until Mobius declines twice) is a checkout option, billing-ui's
+`fallbacks` prop, not merchant configuration: see [CCBill](rails/ccbill.md#fallback).
+
 ### Entitlements
 
 Each entitlement is a **timeline per user** — the host app asks "does user X have

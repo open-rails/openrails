@@ -78,7 +78,7 @@ func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 func TestNewRefusesUnknownPSPKeys(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	for want, psp := range map[string]openrails.PSPConfig{
-		`openrails: Config.Merchants["host-one"].psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
+		`openrails: Config.Merchants["host-one"].psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
 			Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"},
 		},
 		`openrails: Config.Merchants["host-one"].psps.p.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`: {
