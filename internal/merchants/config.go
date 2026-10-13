@@ -38,9 +38,9 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 	if err != nil {
 		return joined{}, err
 	}
-	if !booktag.Registered(id.UUID()) {
-		booktag.Register(id.UUID(), booktag.NewSource(s.database.GenDirectory()))
-	}
+	// Read once here, with the connection the load already holds, so a provider
+	// write never waits on the pool for the book id.
+	booktag.Ensure(id.UUID(), s.database.GenDirectory()).Tag(ctx)
 	var pspRows []gen.BillingPsp
 	var custodianRows []gen.BillingCustodian
 	if err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
