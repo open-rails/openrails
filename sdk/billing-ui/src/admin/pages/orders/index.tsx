@@ -24,7 +24,7 @@ const columns: ColumnDef<Order, unknown>[] = [
     header: "Order",
     cell: ({ row }) => (
       <Link className="underline" to={`/orders/${row.original.id}`}>
-        {row.original.number ?? shortId(row.original.id)}
+        {row.original.number != null ? `#${row.original.number}` : shortId(row.original.id)}
       </Link>
     ),
   },

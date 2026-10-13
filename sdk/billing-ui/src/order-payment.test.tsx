@@ -31,7 +31,7 @@ const order = (payment: Record<string, unknown>, status = "open") => ({
   collection_owner: "engine",
   collection_psp_id: null,
   status,
-  number: status === "complete" ? "000001" : null,
+  number: status === "complete" ? 1001 : null,
   currency: "USD",
   total: "15000000",
   lines: [

@@ -95,7 +95,7 @@ type OrderHostEvent struct {
 	PaymentStatus OrderPaymentStatus `json:"payment_status"`
 	Total         int64              `json:"total,string"`
 	Currency      string             `json:"currency"`
-	Number        *string            `json:"number"`
+	Number        *int64             `json:"number"`
 	PaymentID     *PaymentID         `json:"payment_id"`
 }
 

@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
-	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
@@ -153,7 +152,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 			return OutcomeRefunded, intents.RefundLateOrderPayment(ctx, d, payment, s.Clock)
 		}
 	}
-	number, err := q.NextDocumentNumber(ctx, gen.NextDocumentNumberParams{MerchantID: order.MerchantID, Now: now})
+	number, err := q.NextOrderNumber(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +160,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if payment != nil {
 		paymentID = &payment.ID
 	}
-	if n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: order.MerchantID, ID: order.ID, Number: FormatNumber(number), PaymentID: paymentID, Now: now}); err != nil || n != 1 {
+	if n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: order.MerchantID, ID: order.ID, Number: number, PaymentID: paymentID, Now: now}); err != nil || n != 1 {
 		if err == nil {
 			err = fmt.Errorf("order %s did not complete", order.ID)
 		}
@@ -187,19 +186,16 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	}
 	if charge != nil && order.HasOneOff() {
 		if err := subscriptions.QueuePurchaseReceipt(ctx, d, subscriptions.PurchaseReceipt{PaymentID: charge.PaymentID, CustomerID: order.CustomerID, Items: order.Items(),
-			Amount: charge.Amount, Currency: order.Currency, Rail: charge.Rail, OrderID: order.ID, OrderNumber: FormatNumber(number), PaidAt: now}); err != nil {
+			Amount: charge.Amount, Currency: order.Currency, Rail: charge.Rail, OrderID: order.ID, OrderNumber: number, PaidAt: now}); err != nil {
 			return "", err
 		}
 	}
-	extra := map[string]any{"number": FormatNumber(number)}
+	extra := map[string]any{"number": number}
 	if paymentID != nil {
 		extra["payment_id"] = paymentID.String()
 	}
 	return OutcomeComplete, s.event(ctx, q, &order.BillingOrder, "order.completed", now, extra)
 }
-
-// FormatNumber spells a document number.
-func FormatNumber(n int64) string { return orderevent.Number(n) }
 
 // reclaim takes a closed order's claims again: it reports false when what a
 // unique line buys is held meanwhile.

@@ -2417,7 +2417,7 @@ pkg openrails/billing, type NotificationData struct, NewProduct string `json:"ne
 pkg openrails/billing, type NotificationData struct, NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, OldAmount *int64 `json:"old_amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, OrderID OrderID `json:"order_id,omitzero"`
-pkg openrails/billing, type NotificationData struct, OrderNumber string `json:"order_number,omitempty"`
+pkg openrails/billing, type NotificationData struct, OrderNumber int64 `json:"order_number,omitempty"`
 pkg openrails/billing, type NotificationData struct, OverdueAmount *int64 `json:"overdue_amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, OverdueOrders int `json:"overdue_orders,omitempty"`
 pkg openrails/billing, type NotificationData struct, OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
@@ -2470,7 +2470,7 @@ pkg openrails/billing, type Order struct, ExpiredAt *time.Time `json:"expired_at
 pkg openrails/billing, type Order struct, ExpiresAt *time.Time `json:"expires_at"`
 pkg openrails/billing, type Order struct, ID OrderID `json:"id"`
 pkg openrails/billing, type Order struct, Lines []OrderLine `json:"lines"`
-pkg openrails/billing, type Order struct, Number *string `json:"number"`
+pkg openrails/billing, type Order struct, Number *int64 `json:"number"`
 pkg openrails/billing, type Order struct, Origin OrderOrigin `json:"origin"`
 pkg openrails/billing, type Order struct, PayURL *string `json:"pay_url"`
 pkg openrails/billing, type Order struct, PayURLExpiresAt *time.Time `json:"pay_url_expires_at"`
@@ -2490,7 +2490,7 @@ pkg openrails/billing, type OrderCollectionOwner string
 pkg openrails/billing, type OrderHostEvent struct
 pkg openrails/billing, type OrderHostEvent struct, Currency string `json:"currency"`
 pkg openrails/billing, type OrderHostEvent struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type OrderHostEvent struct, Number *string `json:"number"`
+pkg openrails/billing, type OrderHostEvent struct, Number *int64 `json:"number"`
 pkg openrails/billing, type OrderHostEvent struct, OrderID OrderID `json:"order_id"`
 pkg openrails/billing, type OrderHostEvent struct, PaymentID *PaymentID `json:"payment_id"`
 pkg openrails/billing, type OrderHostEvent struct, PaymentStatus OrderPaymentStatus `json:"payment_status"`

@@ -334,7 +334,7 @@ var jsonRules = map[string]jsonRule{
 	"order_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.
-		"status": textValue, "payment_status": textValue, "number": textValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
+		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
 		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),

@@ -172,7 +172,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: SetOrderComplete :execrows
 UPDATE billing.orders
-SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::text, payment_id = sqlc.narg(payment_id)::uuid,
+SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::bigint, payment_id = sqlc.narg(payment_id)::uuid,
     completed_at = sqlc.arg(now)::timestamptz, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status <> 'complete';
 
@@ -253,11 +253,8 @@ DELETE FROM billing.ownership_claims
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND order_id = sqlc.arg(order_id)::uuid AND holder_type = 'order';
 
--- name: NextDocumentNumber :one
-INSERT INTO billing.document_sequences (merchant_id, last_number, created_at, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, 1, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
-ON CONFLICT (merchant_id) DO UPDATE SET last_number = billing.document_sequences.last_number + 1, updated_at = EXCLUDED.updated_at
-RETURNING last_number;
+-- name: NextOrderNumber :one
+SELECT nextval('billing.order_number_seq'::regclass)::bigint AS number;
 
 -- name: ListLiveOwnership :many
 -- What a customer holds of the given products or tier groups: live

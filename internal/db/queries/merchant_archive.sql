@@ -31,3 +31,11 @@ SELECT EXISTS (
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND applied_revision > sqlc.arg(revision)::bigint
 );
 
+
+-- Raises the order-number sequence past the merchant's restored numbers; it
+-- never lowers it.
+-- name: RaiseOrderNumberSequence :exec
+SELECT setval('billing.order_number_seq'::regclass, m.top)
+FROM (SELECT max(number) AS top FROM billing.orders
+      WHERE merchant_id = sqlc.arg(merchant_id)::uuid) m
+WHERE m.top > (SELECT last_value FROM billing.order_number_seq);

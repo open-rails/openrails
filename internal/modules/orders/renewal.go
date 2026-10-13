@@ -153,15 +153,15 @@ func RenewalPaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attem
 	if payment == nil {
 		return fmt.Errorf("renewal order %s was paid without a payment", orderID)
 	}
-	number, err := q.NextDocumentNumber(ctx, gen.NextDocumentNumberParams{MerchantID: merchantID, Now: now})
+	number, err := q.NextOrderNumber(ctx)
 	if err != nil {
 		return err
 	}
-	if n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: merchantID, ID: orderID, Number: FormatNumber(number), PaymentID: payment, Now: now}); err != nil || n != 1 {
+	if n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: merchantID, ID: orderID, Number: number, PaymentID: payment, Now: now}); err != nil || n != 1 {
 		return errors.Join(err, fmt.Errorf("renewal order %s did not complete", orderID))
 	}
 	order.Status, order.PaymentStatus = string(billing.OrderComplete), string(billing.OrderPaymentSucceeded)
-	return orderEvent(ctx, q, &order, "order.completed", now, map[string]any{"number": FormatNumber(number), "payment_id": payment.String()})
+	return orderEvent(ctx, q, &order, "order.completed", now, map[string]any{"number": number, "payment_id": payment.String()})
 }
 
 // RenewalUnpaid ends a collection attempt that moved no money: the renewal

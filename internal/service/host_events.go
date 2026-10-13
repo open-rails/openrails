@@ -144,7 +144,7 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 				CustomerID    uuid.UUID `json:"customer_id"`
 				Status        string    `json:"status"`
 				PaymentStatus string    `json:"payment_status"`
-				Number        *string   `json:"number"`
+				Number        *int64    `json:"number"`
 				PaymentID     *string   `json:"payment_id"`
 			}
 			if err := json.Unmarshal(row.Data, &payload); err != nil {

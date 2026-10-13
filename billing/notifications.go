@@ -143,5 +143,5 @@ type NotificationData struct {
 	PaymentMethod string    `json:"payment_method,omitempty"`
 	PaymentID     PaymentID `json:"payment_id,omitzero"`
 	OrderID       OrderID   `json:"order_id,omitzero"`
-	OrderNumber   string    `json:"order_number,omitempty"`
+	OrderNumber   int64     `json:"order_number,omitempty"`
 }

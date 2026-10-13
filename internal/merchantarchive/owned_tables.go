@@ -31,7 +31,6 @@ var ownedTables = []string{
 	"destructive_actions",
 	"destructive_holds",
 	"destructive_run_before_images",
-	"document_sequences",
 	"failed_usage_windows",
 	"grants",
 	"host_outbox",

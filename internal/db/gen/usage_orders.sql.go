@@ -74,7 +74,7 @@ func (q *Queries) CompleteUsageMonthlyCollectionPeriod(ctx context.Context, arg 
 
 const completeUsageOrder = `-- name: CompleteUsageOrder :execrows
 UPDATE billing.orders
-SET status = 'complete', payment_status = 'succeeded', number = $1::text,
+SET status = 'complete', payment_status = 'succeeded', number = $1::bigint,
     payment_id = COALESCE($2::uuid, payment_id), completed_at = $3::timestamptz,
     uncollectible_at = NULL, updated_at = $3::timestamptz
 WHERE merchant_id = $4::uuid AND id = $5::uuid AND origin = 'usage'
@@ -82,7 +82,7 @@ WHERE merchant_id = $4::uuid AND id = $5::uuid AND origin = 'usage'
 `
 
 type CompleteUsageOrderParams struct {
-	Number     string
+	Number     int64
 	PaymentID  *uuid.UUID
 	Now        time.Time
 	MerchantID uuid.UUID
@@ -130,11 +130,11 @@ INSERT INTO billing.orders (
     collection_failure_count, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, 'usage',
-    CASE WHEN $4::text IS NULL THEN 'open' ELSE 'complete' END,
-    CASE WHEN $4::text IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END,
-    $5::text, $6::bigint, $7::bigint, $4::text,
+    CASE WHEN $4::bigint IS NULL THEN 'open' ELSE 'complete' END,
+    CASE WHEN $4::bigint IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END,
+    $5::text, $6::bigint, $7::bigint, $4::bigint,
     $8::timestamptz, $9::timestamptz, $10::timestamptz,
-    CASE WHEN $4::text IS NULL THEN NULL ELSE $11::timestamptz END,
+    CASE WHEN $4::bigint IS NULL THEN NULL ELSE $11::timestamptz END,
     $12::text, $13::text, $14::text, $15::jsonb, $16::jsonb,
     0, $11::timestamptz, $11::timestamptz
 )
@@ -144,7 +144,7 @@ type CreateUsageOrderParams struct {
 	MerchantID       uuid.UUID
 	ID               uuid.UUID
 	CustomerID       uuid.UUID
-	Number           *string
+	Number           *int64
 	Currency         string
 	Total            int64
 	AmountPaid       int64

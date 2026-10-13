@@ -182,11 +182,11 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	if paymentID == nil {
 		paymentID = result.Order.PaymentID
 	}
-	number, err := q.NextDocumentNumber(ctx, gen.NextDocumentNumberParams{MerchantID: mid.UUID(), Now: now})
+	number, err := q.NextOrderNumber(ctx)
 	if err != nil {
 		return result, err
 	}
-	n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: mid.UUID(), ID: result.Order.ID, Number: orderevent.Number(number), PaymentID: paymentID, Now: now})
+	n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: mid.UUID(), ID: result.Order.ID, Number: number, PaymentID: paymentID, Now: now})
 	if err != nil {
 		return result, err
 	}
@@ -194,7 +194,7 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	if result.Completed {
 		result.Order.Status, result.Order.PaymentStatus = "complete", "succeeded"
 		result.Order.PaymentID = paymentID
-		if err := orderevent.Enqueue(ctx, q, &result.Order, "order.completed", now, map[string]any{"number": orderevent.Number(number), "settlement_source": bill.SettlementSource}); err != nil {
+		if err := orderevent.Enqueue(ctx, q, &result.Order, "order.completed", now, map[string]any{"number": number, "settlement_source": bill.SettlementSource}); err != nil {
 			return result, err
 		}
 	}

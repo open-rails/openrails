@@ -330,7 +330,7 @@ export const orderSchema = z.object({
     settled_at: time.nullish(),
   })).nullish().transform((bills) => bills ?? []),
   status: z.string(),
-  number: z.string().nullish(),
+  number: z.number().int().nullish(),
   currency: z.string(),
   total: amount,
   lines: z.array(orderLineSchema),

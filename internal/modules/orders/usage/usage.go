@@ -75,13 +75,13 @@ func Create(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, u Order, 
 			contacts = []byte("[]")
 		}
 	}
-	var number *string
+	var number *int64
 	if u.Paid == total {
-		n, err := q.NextDocumentNumber(ctx, gen.NextDocumentNumberParams{MerchantID: merchantID, Now: now})
+		n, err := q.NextOrderNumber(ctx)
 		if err != nil {
 			return gen.BillingOrder{}, err
 		}
-		number = new(orderevent.Number(n))
+		number = &n
 	}
 	id := uuidutil.NewV7()
 	if err := q.CreateUsageOrder(ctx, gen.CreateUsageOrderParams{MerchantID: merchantID, ID: id, CustomerID: u.CustomerID, Currency: u.Currency,
@@ -135,11 +135,11 @@ func Pay(ctx context.Context, q *gen.Queries, merchantID, orderID uuid.UUID, amo
 	if order.AmountPaid == nil || *order.AmountPaid != order.Total {
 		return order, nil
 	}
-	n, err := q.NextDocumentNumber(ctx, gen.NextDocumentNumberParams{MerchantID: merchantID, Now: now})
+	n, err := q.NextOrderNumber(ctx)
 	if err != nil {
 		return order, err
 	}
-	number := orderevent.Number(n)
+	number := n
 	if c, err := q.CompleteUsageOrder(ctx, gen.CompleteUsageOrderParams{MerchantID: merchantID, ID: orderID, Number: number, PaymentID: payment, Now: now}); err != nil || c != 1 {
 		return order, errors.Join(err, fmt.Errorf("usage order %s did not complete", orderID))
 	}

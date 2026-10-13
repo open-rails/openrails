@@ -131,7 +131,8 @@ func TestOrderEmitsReceiptFact(t *testing.T) {
 	body := map[string]any{"payment": map[string]any{"payment_method_id": good}, "expected_total": micros(25_000_000)}
 	paid := c.order(http.MethodPost, "/orders/"+id+"/pay", key, body)
 	require.Equal(t, "complete", paid.body["status"], "%v", paid.body)
-	number := paid.body["number"].(string)
+	number := paid.body["number"]
+	require.NotNil(t, number)
 
 	require.Empty(t, srv.Messages(), "the producer sends no customer email")
 	require.True(t, c.order(http.MethodPost, "/orders/"+id+"/pay", key, body).replayed)

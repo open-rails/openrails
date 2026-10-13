@@ -18084,7 +18084,7 @@
           "number": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -18322,7 +18322,7 @@
           "number": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"

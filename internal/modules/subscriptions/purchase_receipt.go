@@ -22,7 +22,7 @@ type PurchaseReceipt struct {
 	Currency    string
 	Rail        string
 	OrderID     uuid.UUID
-	OrderNumber string
+	OrderNumber int64
 	PaidAt      time.Time
 }
 

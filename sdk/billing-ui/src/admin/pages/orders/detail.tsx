@@ -107,7 +107,7 @@ export function OrderDetail({ order }: { order: Order }) {
         <AdminMessage id={"← Orders"} />
       </Link>
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">{order.number ?? order.id}</h1>
+        <h1 className="text-xl font-semibold">{order.number != null ? `#${order.number}` : order.id}</h1>
         <StatusBadge status={order.status} />
         {order.usage?.delinquent && <StatusBadge status="delinquent" />}
       </div>

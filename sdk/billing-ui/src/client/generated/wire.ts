@@ -1387,7 +1387,7 @@ export type Order = {
   collection_owner: "engine" | "nmi_schedule" | "provider"
   collection_psp_id: string | null
   provider_bills: OrderProviderBill[]
-  number: string | null
+  number: number | null
   currency: string
   total: string
   lines: OrderLine[]
@@ -1417,7 +1417,7 @@ export type OrderHostEvent = {
   payment_status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
   total: string
   currency: string
-  number: string | null
+  number: number | null
   payment_id: string | null
 }
 

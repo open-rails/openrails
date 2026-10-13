@@ -40,11 +40,11 @@ INSERT INTO billing.orders (
     collection_failure_count, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, 'usage',
-    CASE WHEN sqlc.narg(number)::text IS NULL THEN 'open' ELSE 'complete' END,
-    CASE WHEN sqlc.narg(number)::text IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END,
-    sqlc.arg(currency)::text, sqlc.arg(total)::bigint, sqlc.arg(amount_paid)::bigint, sqlc.narg(number)::text,
+    CASE WHEN sqlc.narg(number)::bigint IS NULL THEN 'open' ELSE 'complete' END,
+    CASE WHEN sqlc.narg(number)::bigint IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END,
+    sqlc.arg(currency)::text, sqlc.arg(total)::bigint, sqlc.arg(amount_paid)::bigint, sqlc.narg(number)::bigint,
     sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(due_at)::timestamptz,
-    CASE WHEN sqlc.narg(number)::text IS NULL THEN NULL ELSE sqlc.arg(now)::timestamptz END,
+    CASE WHEN sqlc.narg(number)::bigint IS NULL THEN NULL ELSE sqlc.arg(now)::timestamptz END,
     sqlc.arg(collection_method)::text, sqlc.narg(po_number)::text, sqlc.narg(memo)::text, sqlc.arg(tax)::jsonb, sqlc.arg(billing_contacts)::jsonb,
     0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );
@@ -272,7 +272,7 @@ RETURNING *;
 -- A usage order paid in full: numbered and complete. payment_id is the
 -- payment that completed it, NULL when a funded balance did.
 UPDATE billing.orders
-SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::text,
+SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::bigint,
     payment_id = COALESCE(sqlc.narg(payment_id)::uuid, payment_id), completed_at = sqlc.arg(now)::timestamptz,
     uncollectible_at = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND origin = 'usage'

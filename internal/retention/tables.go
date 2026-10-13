@@ -125,5 +125,4 @@ var Tables = map[string]Table{
 	"nmi_history_reads":                 {Class: State},
 	"reconciliation_state":              {Class: State},
 	"ownership_claims":                  {Class: State},
-	"document_sequences":                {Class: State},
 }

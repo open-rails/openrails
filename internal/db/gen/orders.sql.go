@@ -1363,23 +1363,15 @@ func (q *Queries) LockOrder(ctx context.Context, arg LockOrderParams) (BillingOr
 	return i, err
 }
 
-const nextDocumentNumber = `-- name: NextDocumentNumber :one
-INSERT INTO billing.document_sequences (merchant_id, last_number, created_at, updated_at)
-VALUES ($1::uuid, 1, $2::timestamptz, $2::timestamptz)
-ON CONFLICT (merchant_id) DO UPDATE SET last_number = billing.document_sequences.last_number + 1, updated_at = EXCLUDED.updated_at
-RETURNING last_number
+const nextOrderNumber = `-- name: NextOrderNumber :one
+SELECT nextval('billing.order_number_seq'::regclass)::bigint AS number
 `
 
-type NextDocumentNumberParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
-}
-
-func (q *Queries) NextDocumentNumber(ctx context.Context, arg NextDocumentNumberParams) (int64, error) {
-	row := q.db.QueryRow(ctx, nextDocumentNumber, arg.MerchantID, arg.Now)
-	var last_number int64
-	err := row.Scan(&last_number)
-	return last_number, err
+func (q *Queries) NextOrderNumber(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, nextOrderNumber)
+	var number int64
+	err := row.Scan(&number)
+	return number, err
 }
 
 const releaseOrderClaims = `-- name: ReleaseOrderClaims :execrows
@@ -1442,13 +1434,13 @@ func (q *Queries) SetOrderAttemptStatus(ctx context.Context, arg SetOrderAttempt
 
 const setOrderComplete = `-- name: SetOrderComplete :execrows
 UPDATE billing.orders
-SET status = 'complete', payment_status = 'succeeded', number = $1::text, payment_id = $2::uuid,
+SET status = 'complete', payment_status = 'succeeded', number = $1::bigint, payment_id = $2::uuid,
     completed_at = $3::timestamptz, last_payment_error = NULL, updated_at = $3::timestamptz
 WHERE merchant_id = $4::uuid AND id = $5::uuid AND status <> 'complete'
 `
 
 type SetOrderCompleteParams struct {
-	Number     string
+	Number     int64
 	PaymentID  *uuid.UUID
 	Now        time.Time
 	MerchantID uuid.UUID

@@ -106,6 +106,20 @@ func (q *Queries) LiveMerchantExists(ctx context.Context, id uuid.UUID) (bool, e
 	return exists, err
 }
 
+const raiseOrderNumberSequence = `-- name: RaiseOrderNumberSequence :exec
+SELECT setval('billing.order_number_seq'::regclass, m.top)
+FROM (SELECT max(number) AS top FROM billing.orders
+      WHERE merchant_id = $1::uuid) m
+WHERE m.top > (SELECT last_value FROM billing.order_number_seq)
+`
+
+// Raises the order-number sequence past the merchant's restored numbers; it
+// never lowers it.
+func (q *Queries) RaiseOrderNumberSequence(ctx context.Context, merchantID *uuid.UUID) error {
+	_, err := q.db.Exec(ctx, raiseOrderNumberSequence, merchantID)
+	return err
+}
+
 const setCatalogRevision = `-- name: SetCatalogRevision :exec
 UPDATE billing.merchants SET catalog_revision = $1::bigint WHERE id = $2::uuid
 `

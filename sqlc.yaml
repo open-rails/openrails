@@ -90,6 +90,7 @@ sql:
       - "internal/migrate/postgres/0095_foreign_findings.up.sql"
       - "internal/migrate/postgres/0096_psp_declared_environment.up.sql"
       - "internal/migrate/postgres/0097_periodic_leases.up.sql"
+      - "internal/migrate/postgres/0098_order_number_sequence.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

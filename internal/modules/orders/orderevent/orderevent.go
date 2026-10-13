@@ -5,7 +5,6 @@ package orderevent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -30,6 +29,3 @@ func Enqueue(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, kind 
 		Amount: order.Total, Currency: order.Currency, OccurredAt: at, Data: raw, DedupeKey: dedupe})
 	return err
 }
-
-// Number formats a document number from the merchant's sequence.
-func Number(n int64) string { return fmt.Sprintf("%06d", n) }

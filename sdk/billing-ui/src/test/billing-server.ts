@@ -476,7 +476,7 @@ export function fakeBilling(
             status: state.orderStatus,
             ...(paid
               ? {
-                  number: "000001",
+                  number: 1001,
                   payment: { ...(order().payment as Row), status: "succeeded" },
                   completed_at: "2036-09-01T00:00:00Z",
                 }

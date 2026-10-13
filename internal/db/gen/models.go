@@ -435,14 +435,6 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
-// The merchant's gapless document number: the last one issued. A number is taken in the transaction that pays an order, so an abandoned order consumes none.
-type BillingDocumentSequence struct {
-	MerchantID uuid.UUID
-	LastNumber int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 // Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
 type BillingFailedUsageWindow struct {
 	MerchantID uuid.UUID
@@ -789,7 +781,7 @@ type BillingNotificationEventAck struct {
 	AcknowledgedAt time.Time
 }
 
-// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -797,10 +789,11 @@ type BillingOrder struct {
 	// customer (the customer's own purchase), merchant (an unpaid order the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
 	Origin string
 	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage order the merchant voided), uncollectible (a usage order the merchant wrote off; collecting it reopens it).
-	Status         string
-	Currency       string
-	Total          int64
-	Number         *string
+	Status   string
+	Currency string
+	Total    int64
+	// The order number, taken from order_number_seq when the order completes; unique per merchant, not consecutive.
+	Number         *int64
 	IdempotencyKey *string
 	RequestDigest  []byte
 	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.

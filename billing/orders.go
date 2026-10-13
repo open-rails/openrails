@@ -184,8 +184,8 @@ type Order struct {
 	// ProviderBills are verified provider document references and settlement
 	// facts. They never authorize local collection.
 	ProviderBills []OrderProviderBill `json:"provider_bills"`
-	// Number is the document number, given when the order completes.
-	Number   *string      `json:"number"`
+	// Number is the order number: taken when the order completes, unique per merchant, not consecutive.
+	Number   *int64       `json:"number"`
 	Currency string       `json:"currency"`
 	Total    int64        `json:"total,string"`
 	Lines    []OrderLine  `json:"lines"`
