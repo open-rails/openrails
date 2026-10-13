@@ -20,8 +20,11 @@ type PSP struct {
 	ID PSPID `json:"id"`
 	// Key is the merchant's name for the PSP: the key a price's psps and
 	// purchase's payment.rail name it by. A key names one PSP for good.
-	Key         string `json:"key"`
-	Rail        Rail   `json:"rail"`
+	Key  string `json:"key"`
+	Rail Rail   `json:"rail"`
+	// Environment is whether the PSP moves real money: live, test (the
+	// provider's own system, no money moves) or sandbox (the provider's
+	// separate sandbox system). It is part of the PSP's identity.
 	Environment string `json:"environment"`
 	// AccountID is the operator-declared account on the rail; it never
 	// changes.
@@ -61,12 +64,15 @@ type PSPListParams struct {
 	PageRequest
 }
 
-// CreatePSPParams arms a new PSP. Credentials are write-only and are checked
-// with the provider before anything is stored. Repeating a create that took
-// effect returns the PSP it made.
+// CreatePSPParams arms a new PSP. Environment is required: live, test or
+// sandbox, as the rail has them, and a deployment's PSPs are all live or all
+// non-live. Credentials are write-only and are checked with the provider,
+// against the environment, before anything is stored. Repeating a create that
+// took effect returns the PSP it made.
 type CreatePSPParams struct {
 	Key         string            `json:"key"`
 	Rail        Rail              `json:"rail"`
+	Environment string            `json:"environment"`
 	AccountID   string            `json:"account_id"`
 	Settings    map[string]any    `json:"settings"`
 	Credentials map[string]string `json:"credentials"`
@@ -95,9 +101,11 @@ type UpdatePSPParams struct {
 // billing facts. An account already declared keeps its id, key, archive state,
 // custody and credentials.
 type PSPDeclaration struct {
-	Key       string
-	Rail      Rail
-	AccountID string
+	Key  string
+	Rail Rail
+	// Environment is required: live, test or sandbox, as the rail has them.
+	Environment string
+	AccountID   string
 }
 
 // RailDefinition is a rail a merchant can arm a PSP on, with the credential
@@ -107,6 +115,8 @@ type RailDefinition struct {
 	DisplayName    string   `json:"display_name"`
 	CredentialKeys []string `json:"credential_keys"`
 	SettingKeys    []string `json:"setting_keys"`
+	// Environments are the environments a PSP on the rail may declare.
+	Environments []string `json:"environments"`
 }
 
 // PreviewPSPRoutingParams asks which PSP a purchase for a price would use.

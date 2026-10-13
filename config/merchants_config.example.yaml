@@ -2,9 +2,15 @@ version: 1
 
 # Store real secrets in Hashicorp Vault and overlay them into this manifest.
 #
-# A PSP does NOT declare an environment (#882). test_mode alone decides: sandbox
-# => test, live => live, for every PSP in the deployment. The `-sandbox` keys
-# below are just a second account on the same rail, not a second environment.
+# Every PSP declares its `environment`, and OpenRails verifies it with the
+# provider before using the PSP:
+#   live    real money
+#   test    the provider's own system, no money moves (an NMI gateway account
+#           in test mode, Stripe sk_test_ keys)
+#   sandbox the provider's separate sandbox system (a sandbox.nmi.com account,
+#           CCBill's sandbox, Solana devnet)
+# A deployment is all live or all non-live. This example is a development
+# deployment; production declares every PSP live.
 #
 # Solana runtime knobs (#711) live in the solana account's `settings` block
 # below. Solana provider account identity is derived from the signer public key.
@@ -67,26 +73,29 @@ merchants:
     psps:
       mobius:
         rail: nmi
+        environment: test
         account_id: "1234567"
         settings:
           tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-          tokenization_key: replace-with-live-nmi-tokenization-key
+          tokenization_key: replace-with-test-mode-nmi-tokenization-key
         secrets:
-          security_key: replace-with-live-nmi-security-key
-          webhook_signing_secret: replace-with-live-nmi-webhook-secret
+          security_key: replace-with-test-mode-nmi-security-key
+          webhook_signing_secret: replace-with-test-mode-nmi-webhook-secret
 
       mobius-sandbox:
         rail: nmi
+        environment: sandbox
         account_id: "7654321"
         settings:
           tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-          tokenization_key: replace-with-test-nmi-tokenization-key
+          tokenization_key: replace-with-sandbox-nmi-tokenization-key
         secrets:
-          security_key: replace-with-test-nmi-security-key
-          webhook_signing_secret: replace-with-test-nmi-webhook-secret
+          security_key: replace-with-sandbox-nmi-security-key
+          webhook_signing_secret: replace-with-sandbox-nmi-webhook-secret
 
       paykings:
         rail: nmi
+        environment: test
         account_id: "5551234"
         archived: true
         settings:
@@ -110,6 +119,7 @@ merchants:
       # replaces it.
       mobius-bt:
         rail: nmi
+        environment: test
         account_id: "7654322"
         custodian: bt
         secrets:
@@ -118,6 +128,7 @@ merchants:
 
       mobius-bt-backup:
         rail: nmi
+        environment: test
         account_id: "7654323"
         custodian: bt
         secrets:
@@ -126,6 +137,7 @@ merchants:
 
       ccbill:
         rail: ccbill
+        environment: sandbox
         # CCBill composite identity is dash-joined: clientAccnum-clientSubacc (#697).
         account_id: "999999-0000"
         # Webhook source IPs are CCBill's documented provider-wide ranges,
@@ -137,13 +149,15 @@ merchants:
 
       stripe:
         rail: stripe
+        environment: test
         account_id: acct_1AbCdEfGhIjKlMnOp
         secrets:
-          secret_key: replace-with-live-stripe-secret-key
-          webhook_signing_secret: replace-with-live-stripe-webhook-secret
+          secret_key: replace-with-test-stripe-secret-key
+          webhook_signing_secret: replace-with-test-stripe-webhook-secret
 
       stripe-sandbox:
         rail: stripe
+        environment: test
         account_id: acct_1ZyXwVuTsRqPoNmL
         secrets:
           secret_key: replace-with-test-stripe-secret-key
@@ -151,6 +165,7 @@ merchants:
 
       solana:
         rail: solana
+        environment: sandbox
         archived: false
         signer: { mode: local_keypair }
         settings:
@@ -162,8 +177,7 @@ merchants:
           rpc_api_key: replace-with-helius-api-key
           # `tokens` is OPTIONAL and it is the ACCEPTED SET (or#881): what you
           # declare is what buyers can pay in, nothing more. Omit it and you
-          # accept USDC only — the one token on every network that also
-          # rebills. The built-in registry (SOL, USDC, USDT, PYUSD, USD1, USDG
+          # accept SOL and USDC at their current price; only USDC rebills. The built-in registry (SOL, USDC, USDT, PYUSD, USD1, USDG
           # on mainnet; SOL, USDC, PYUSD on devnet) is a mint lookup table,
           # not an acceptance list.
           #   - built-in symbol: SELECT it (`USDC: {}`) — its mint comes from
@@ -175,9 +189,10 @@ merchants:
           #     token's identity, so it is genuinely yours to declare.
           #   - `decimals` is not accepted (or#817): read from the SPL mint
           #     on-chain, never from config.
-          # Under test_mode the registry's devnet column applies; a built-in
-          # symbol with no devnet mint (USDT/USD1/USDG) is declared there like
-          # any other ad-hoc devnet token, with an explicit mint.
+          # A sandbox PSP pays on devnet, where the registry's devnet column
+          # applies; a built-in symbol with no devnet mint (USDT/USD1/USDG) is
+          # declared there like any other ad-hoc devnet token, with an
+          # explicit mint.
           #
           # tokens:
           #   USDC: {}                    # built-in: mint from the registry
@@ -189,6 +204,7 @@ merchants:
       # Alternative Solana signer using Hashicorp Vault Transit.
       solana-vault:
         rail: solana
+        environment: sandbox
         archived: false
         signer: { mode: vault_transit, key: openrails-solana-local-stack }
 

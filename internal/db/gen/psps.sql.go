@@ -501,6 +501,42 @@ func (q *Queries) PSPExistsOnRail(ctx context.Context, arg PSPExistsOnRailParams
 	return exists, err
 }
 
+const pSPOutsideEnvironments = `-- name: PSPOutsideEnvironments :one
+SELECT p.id, m.slug, p.key, p.rail, p.environment, p.account_id
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.superseded_at IS NULL
+  AND m.deleted_at IS NULL
+  AND NOT (p.environment = ANY($1::text[]))
+ORDER BY p.created_at, p.id
+LIMIT 1
+`
+
+type PSPOutsideEnvironmentsRow struct {
+	ID          uuid.UUID
+	Slug        string
+	Key         string
+	Rail        string
+	Environment string
+	AccountID   string
+}
+
+// CROSS-MERCHANT: the oldest current PSP identity in none of environments,
+// for the rule that a deployment's PSPs are all live or all non-live.
+func (q *Queries) PSPOutsideEnvironments(ctx context.Context, environments []string) (PSPOutsideEnvironmentsRow, error) {
+	row := q.db.QueryRow(ctx, pSPOutsideEnvironments, environments)
+	var i PSPOutsideEnvironmentsRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Key,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+	)
+	return i, err
+}
+
 const registerPSP = `-- name: RegisterPSP :one
 
 INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)

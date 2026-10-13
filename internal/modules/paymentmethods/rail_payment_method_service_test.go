@@ -18,7 +18,7 @@ import (
 
 type pspResolver map[billing.MerchantID]string // merchant -> armed NMI account id
 
-func (r pspResolver) ActivePSPSecretName(_ context.Context, id billing.MerchantID, _, _, key string) (string, bool, error) {
+func (r pspResolver) ActivePSPSecretName(_ context.Context, id billing.MerchantID, _, key string) (string, bool, error) {
 	if r[id] == "" {
 		return "", false, nil
 	}
@@ -26,7 +26,7 @@ func (r pspResolver) ActivePSPSecretName(_ context.Context, id billing.MerchantI
 	return name, err == nil, err
 }
 
-func (r pspResolver) ActivePSPScope(_ context.Context, id billing.MerchantID, _, _ string) (merchants.PSPScope, bool, error) {
+func (r pspResolver) ActivePSPScope(_ context.Context, id billing.MerchantID, _ string) (merchants.PSPScope, bool, error) {
 	if r[id] == "" {
 		return merchants.PSPScope{}, false, nil
 	}
@@ -41,7 +41,7 @@ func (unavailableSecrets) Get(context.Context, billing.MerchantID, string) (merc
 }
 
 func testConfig() *config.Config {
-	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}
+	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
 // merchantSecrets reads each merchant's own credentials.

@@ -106,6 +106,7 @@ display_name: OnlyDemo
 psps:
   paykings: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
+    environment: sandbox # live (real money), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
     account_id: "000000" # the NMI dashboard's "Gateway ID"
     settings:
       tokenization_key: your-public-tokenization-key # the browser's card fields use it
@@ -149,7 +150,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,                           // Supplied PSP credentials MUST be to a sandbox / testmode account, or else that PSP is disarmed
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
 		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
 	}
@@ -979,7 +979,6 @@ Merchant config (your name, settings, PSPs and their credentials) lives in one o
 ```go
 cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"},
-	TestMode:          openrails.Sandbox,
 	ProviderWriteMode: openrails.ProviderWritesFull,
 	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // no PSPs here: staff manage them in Vault
 	Vault: &openrails.VaultConfig{
@@ -1412,7 +1411,6 @@ DB_URL=postgres://… EMAIL_SMTP_HOST=… AUTH_KEYS_PATH=… ./openrails run-ser
 
 ```yaml
 provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
-test_mode: sandbox        # sandbox | live: sandbox refuses live credentials at boot
 
 host: 0.0.0.0
 port: 3053
@@ -1787,10 +1785,12 @@ build yourself, badly, under deadline:
   drained by an executor that resolves ambiguous outcomes by *reading* the provider
   before any retry. A charge is never blind-retried; a credential swap can never fire a
   stale queue against the wrong account.
-- **Sandbox that can't lie.** `test_mode=sandbox` doesn't trust configuration — it
-  proves it: live Stripe keys refuse to boot, and every NMI account is probed with a
-  card only a simulator would approve. No real money can move in a sandbox boot, in any
-  environment.
+- **Environments that can't lie.** Every PSP declares whether it moves real money
+  (`environment: live | test | sandbox`), and OpenRails proves it with the provider
+  before the PSP is used: a Stripe key's prefix must agree, every NMI account is asked
+  whether it is in test mode (a sandbox.nmi.com account is probed with a card only a
+  simulator approves), and a Solana PSP pays on the network its environment names. A
+  deployment is all live or all non-live; mixing is refused at boot.
 - **Your users never pay for our malfunction.** Access is closed by *evidence* — a
   confirmed cancellation, a terminal decline, exhausted dunning — never by the clock
   alone. A lost webhook, a dead pipe, or stale data parks the subscription for
@@ -1944,9 +1944,9 @@ Before writing any code, confirm with me:
 3. What we sell — subscriptions, one-time purchases, metered usage/credits.
 
 Then follow the guide's milestone plan in order, verifying each step before
-the next. All development runs against sandbox rails (test_mode=sandbox);
-prove the full purchase → webhook → entitlement flow end-to-end before ever
-touching live credentials.
+the next. All development runs on non-live PSPs (each PSP's `environment:
+test` or `sandbox`); prove the full purchase → webhook → entitlement flow
+end-to-end before ever touching live credentials.
 ```
 
 The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-integration.md).
@@ -1982,7 +1982,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [CCBill](docs/rails/ccbill.md)
 - [Solana](docs/rails/solana.md) (USDC, self-custody, on-chain recurring subscriptions)
 - [Payment-method custody](docs/payment-method-custody.md) — who *holds* a stored card vs who *charges* it
-- [Sandbox posture](docs/sandbox-posture.md) — how a sandbox deployment proves its credentials are test credentials
+- [PSP environments](docs/psp-environments.md) — how each PSP declares whether it moves real money, and how OpenRails proves it
 
 **Run your business** — for the merchant defining plans and managing customers:
 

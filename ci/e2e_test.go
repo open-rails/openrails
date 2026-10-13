@@ -64,7 +64,6 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) config() openrails.Config {
 	return openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: f.schema, RiverSchema: f.schema},
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		ReturnOrigins:     []string{"https://e2e.test"},
 	}
@@ -145,7 +144,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 	if transport != nil {
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		deps.StripeTransport = transport
-		m.PSPs = map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
+		m.PSPs = map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
 			AccountID: "acct_e2e",
 			Secrets: map[string]string{
 				"secret_key":             "sk_test_e2e",

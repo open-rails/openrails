@@ -303,8 +303,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			signer = opts.WrapTransit(slug, signer)
 		default:
 			// One-off tools fail closed on a changed Transit key too.
-			signer = &signeridentity.Transit{TransitClient: signer, DB: database, Directory: directory, Slug: slug,
-				Environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}
+			signer = &signeridentity.Transit{TransitClient: signer, DB: database, Directory: directory, Slug: slug}
 		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
 			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,

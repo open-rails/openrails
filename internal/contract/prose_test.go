@@ -115,8 +115,8 @@ func TestDocsNameWhatExists(t *testing.T) {
 				t.Errorf("%s: %s cites a tracker issue", at, m[1])
 			}
 			for _, name := range proseTest.FindAllString(line, -1) {
-				// TestMode is the Config field; TestReplicas* names a family.
-				if name != "TestMode" && !slices.ContainsFunc(tests, func(test string) bool { return strings.HasPrefix(test, name) }) {
+				// TestReplicas* names a family.
+				if !slices.ContainsFunc(tests, func(test string) bool { return strings.HasPrefix(test, name) }) {
 					t.Errorf("%s: no test is named %s", at, name)
 				}
 			}

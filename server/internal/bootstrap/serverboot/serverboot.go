@@ -90,7 +90,7 @@ func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *a
 	if rt.Vault == nil || rt.Vault.SolanaTransit == nil || rt.Merchants == nil {
 		return fmt.Errorf("no Vault Transit signer is configured")
 	}
-	if _, err := signeridentity.Approve(ctx, rt.DB, rt.Merchants, rt.Vault.SolanaTransit, mid, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)), key); err != nil {
+	if _, err := signeridentity.Approve(ctx, rt.DB, rt.Merchants, rt.Vault.SolanaTransit, mid, key); err != nil {
 		return err
 	}
 	if _, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false); err != nil {
@@ -137,10 +137,9 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	var signers []*signeridentity.Transit
 	if rt.Vault != nil && rt.Vault.SolanaTransit != nil {
 		opts.SolanaTransit = rt.Vault.SolanaTransit
-		environment := config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
 		opts.WrapTransit = func(slug string, transit solanaint.TransitClient) solanaint.TransitClient {
 			signer := &signeridentity.Transit{TransitClient: transit, DB: rt.DB, Directory: rt.Merchants, Slug: slug,
-				Environment: environment, Tolerate: tolerateVault, OnChange: rt.ReportSignerKeyChange}
+				Tolerate: tolerateVault, OnChange: rt.ReportSignerKeyChange}
 			signers = append(signers, signer)
 			return signer
 		}

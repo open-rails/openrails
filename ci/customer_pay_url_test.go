@@ -322,7 +322,7 @@ func TestCustomerPayURLRedirectReturnsToItsPage(t *testing.T) {
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"redirect-" + uuid.NewString()[:8]: {
 		DisplayName: "Redirect shop",
 		Settings:    billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
-		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_e2e",
+		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_e2e",
 			Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}},
 	}}
 	bill, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
@@ -425,5 +425,5 @@ func TestCustomerPayURLNeedsItsHostAndOrigins(t *testing.T) {
 }
 
 func nmiPSP() openrails.PSPConfig {
-	return openrails.NMIPSP{AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
+	return openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
 }

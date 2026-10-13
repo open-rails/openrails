@@ -62,7 +62,7 @@ func newCharger(t *testing.T, g *fakeGateway) *Charger {
 		fmt.Fprint(w, g.sale)
 	}))
 	t.Cleanup(server.Close)
-	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "account-key"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "account-key"})
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.DirectPostURL, client.V5BaseURL, client.QueryURL = server.URL+"/sale", server.URL, server.URL+"/query"

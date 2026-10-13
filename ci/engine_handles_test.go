@@ -102,7 +102,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	require.Equal(t, billing.CodeMerchantUnresolved, refusal.Code)
 	_, err = unknown.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1, Source: "support", SourceID: "unknown"}})
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved, "a write is refused as a read is")
-	_, err = unknown.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, AccountID: "000000"})
+	_, err = unknown.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, Environment: "sandbox", AccountID: "000000"})
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved)
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	// The local extension binds the same merchant as the common handle.
 	local, err := bill.LocalMerchant(elsewhere.MerchantID())
 	require.NoError(t, err)
-	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, AccountID: "000000"})
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "imported", Rail: billing.RailNMI, Environment: "sandbox", AccountID: "000000"})
 	require.NoError(t, err)
 	listed, err := elsewhere.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)

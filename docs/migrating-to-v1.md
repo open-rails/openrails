@@ -130,7 +130,8 @@ to match after the mapped price ID is supplied.
 | `MerchantDeclaration.APIHost` (`api_host` in a merchant file or manifest); `Deps.DNSResolver` | Removed: a merchant has no API host, and a request names its merchant by its credential. A file or manifest that still sets `api_host` refuses boot |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
-| Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
+| Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields |
+| `Config.TestMode` and its `Sandbox`/`Live` constants (`CredentialPosture`); NMI `settings.endpoint_deployment` | Removed: every PSP declares `environment: live \| test \| sandbox` (`openrails.EnvironmentLive`, …), and a deployment is all live or all non-live. An NMI `sandbox` PSP is a sandbox.nmi.com account |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | The fields are removed: they are the standalone server's own settings. `Config` and its sections carry `yaml` and `json` keys instead |
 | `AuthConfig.Naming merchant.NamingConfig` | `server.NamingConfig`, `server.FormerNamesConfig`, `server.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` takes no options; a credential is an `openrails.RemoteCredential` given to `openrails.NewRemote` |

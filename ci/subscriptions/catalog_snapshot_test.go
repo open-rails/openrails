@@ -209,7 +209,7 @@ products:
 	_, _, err = directory.RegisterForRestore(t.Context(), mid, "catalog-provisioned")
 	require.NoError(t, err)
 	bill, err := openrails.New(t.Context(), openrails.Config{
-		Database: openrails.DatabaseConfig{Schema: provisionedSchema, RiverSchema: provisionedSchema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		Database: openrails.DatabaseConfig{Schema: provisionedSchema, RiverSchema: provisionedSchema}, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchants: map[string]openrails.MerchantDeclaration{"catalog-provisioned": {DisplayName: "Catalog destination", PSPs: w.psps}},
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)

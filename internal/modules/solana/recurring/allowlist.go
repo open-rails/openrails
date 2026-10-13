@@ -4,6 +4,7 @@
 package recurring
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -81,9 +82,28 @@ func normalizeRecurringTokens(tokens map[string]config.TokenConfig) map[string]c
 	return normalized
 }
 
-func firstTokenMap(tokens []map[string]config.TokenConfig) map[string]config.TokenConfig {
-	if len(tokens) == 0 {
+// Tokens is the network the ctx merchant's Solana PSP pays on and that
+// network's mint lookup table.
+type Tokens func(ctx context.Context) (network string, tokens map[string]config.TokenConfig)
+
+// NetworkTokens is one fixed network's table.
+func NetworkTokens(network string, tokens map[string]config.TokenConfig) Tokens {
+	normalized := normalizeRecurringTokens(tokens)
+	return func(context.Context) (string, map[string]config.TokenConfig) { return network, normalized }
+}
+
+func (t Tokens) of(ctx context.Context) map[string]config.TokenConfig {
+	if t == nil {
 		return nil
 	}
-	return tokens[0]
+	_, tokens := t(ctx)
+	return normalizeRecurringTokens(tokens)
+}
+
+func (t Tokens) network(ctx context.Context) string {
+	if t == nil {
+		return ""
+	}
+	network, _ := t(ctx)
+	return network
 }

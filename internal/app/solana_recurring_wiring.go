@@ -1,12 +1,10 @@
 package app
 
 import (
-	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 // ArmSolanaRecurringServices assembles the recurring Solana runtime from the
@@ -20,23 +18,14 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		return
 	}
 
-	solanaSigner := recurring.NewSignerFromPSPs(
-		secretStore,
-		solanaTransit,
-		r.DB,
-		0,
-		config.ExpectedProviderEnvironment(config.IsTestMode(r.Config)),
-	)
+	solanaSigner := recurring.NewSignerFromPSPs(secretStore, solanaTransit, r.DB, 0)
 	submitter := recurring.NewSignerSubmitterWithResolver(solanaSigner, r.SolanaRPCResolver.Resolve)
-	network := "mainnet"
-	if config.IsTestMode(r.Config) {
-		network = "devnet"
-	}
 	// or#881: a mint LOOKUP table for the recurring plan services, NOT an
-	// acceptance list. What a merchant accepts is per-merchant and resolved by
-	// tokens.ResolveDeclared; plan publishing is separately gated by the
-	// recurring allowlist (recurring.RecurringStablecoins).
-	tokens := solanatokens.ForNetwork(network)
+	// acceptance list: the built-in mints of the network the merchant's
+	// Solana PSP pays on. What a merchant accepts is resolved by
+	// tokens.ResolveDeclared; plan publishing is gated by the recurring
+	// allowlist (recurring.RecurringStablecoins).
+	tokens := recurring.Tokens(r.SolanaRPCResolver.RecurringTokens)
 	r.SetSolanaCranker(recurring.NewCrankService(submitter))
 
 	if r.SubscriptionLifecycleService == nil {
@@ -44,8 +33,8 @@ func (r *Runtime) ArmSolanaRecurringServices(
 	}
 	chainReader := r.SolanaRPCResolver.ChainReader()
 	subscriptions := solanasubs.NewSolanaSubscriptionRepo(r.DB)
-	plan := recurring.NewPlanServiceWithReader(submitter, chainReader, network, tokens)
-	enroll := recurring.NewEnrollService(chainReader, submitter, network, tokens)
+	plan := recurring.NewPlanServiceWithReader(submitter, chainReader, tokens)
+	enroll := recurring.NewEnrollService(chainReader, submitter, tokens)
 	r.SetSolanaPlanService(plan)
 	r.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
 		subscriptions,
@@ -54,7 +43,6 @@ func (r *Runtime) ArmSolanaRecurringServices(
 	r.SetSolanaPrepareTierChangeService(recurring.NewPrepareTierChangeService(
 		solanaSigner,
 		chainReader,
-		network,
 		tokens,
 	))
 
@@ -65,7 +53,6 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		submitter,
 		solanaSigner,
 		chainReader,
-		network,
 		tokens,
 	)
 	r.OrderAttemptService.SetSolanaRecurring(prepare, enroll)

@@ -41,20 +41,19 @@ func (s *Service) PlatformVaultAvailable() bool { return s != nil && s.platformV
 // CardCustodyRefusal is why the deployment cannot serve settings' card
 // custody beside psps; nil when it can.
 func (s *Service) CardCustodyRefusal(settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
-	return CardCustodyRefusal(s.platformVault, s.providerEnvironment, settings, psps)
+	return CardCustodyRefusal(s.platformVault, settings, psps)
 }
 
-// CardCustodyRefusal is why a deployment with vault (nil: none) in
-// environment cannot serve settings' card custody beside psps; nil when it
-// can.
-func CardCustodyRefusal(vault *config.PlatformVaultConfig, environment string, settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
+// CardCustodyRefusal is why a deployment with vault (nil: none) cannot serve
+// settings' card custody beside psps; nil when it can.
+func CardCustodyRefusal(vault *config.PlatformVaultConfig, settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
 	if merchantconfig.CardCustody(settings) != billing.CardCustodyPlatform {
 		return nil
 	}
 	if vault == nil {
 		return ErrPlatformVaultUnavailable
 	}
-	if keys := platformUnreachable(vault, environment, psps); len(keys) > 0 {
+	if keys := platformUnreachable(vault, psps); len(keys) > 0 {
 		return fmt.Errorf("psps %s: %w", strings.Join(keys, ", "), ErrPlatformVaultUnreachable)
 	}
 	return nil
@@ -67,7 +66,7 @@ func (s *Service) CheckCardCustody(ctx context.Context, id billing.MerchantID, s
 		return err
 	}
 	return s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id)
+		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id, pspsClass(psps))
 	})
 }
 
@@ -77,7 +76,7 @@ func (s *Service) refusePSPForCardCustody(settings billing.MerchantSettings, key
 	if merchantconfig.CardCustody(settings) != billing.CardCustodyPlatform {
 		return nil
 	}
-	if keys := platformUnreachable(s.platformVault, s.providerEnvironment, map[string]merchantdocs.Doc[merchantdocs.PSP]{key: {Value: doc}}); len(keys) > 0 {
+	if keys := platformUnreachable(s.platformVault, map[string]merchantdocs.Doc[merchantdocs.PSP]{key: {Value: doc}}); len(keys) > 0 {
 		return fmt.Errorf("psp %s: %w", key, ErrPlatformVaultUnreachable)
 	}
 	return nil
@@ -86,7 +85,7 @@ func (s *Service) refusePSPForCardCustody(settings billing.MerchantSettings, key
 // platformUnreachable are the live card PSPs, in key order, whose cards the
 // platform vault cannot reach: its proxy cannot present a card to their rail,
 // or their own server takes the card.
-func platformUnreachable(vault *config.PlatformVaultConfig, environment string, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) []string {
+func platformUnreachable(vault *config.PlatformVaultConfig, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) []string {
 	var proxy custodians.Descriptor
 	if vault != nil {
 		proxy, _ = custodians.Get(vault.Kind)
@@ -95,7 +94,7 @@ func platformUnreachable(vault *config.PlatformVaultConfig, environment string, 
 	for key, doc := range psps {
 		p := doc.Value
 		d, ok := rails.Lookup(models.Rail(p.Rail))
-		if p.Archived || p.Environment != environment || !ok || !d.SupportsChargeSavedMethod {
+		if p.Archived || !ok || !d.SupportsChargeSavedMethod {
 			continue
 		}
 		entry, err := config.CardEntry(p.Rail, p.Settings, false)
@@ -107,9 +106,18 @@ func platformUnreachable(vault *config.PlatformVaultConfig, environment string, 
 	return out
 }
 
+// pspsClass is the money class of PSP documents: live when they are.
+func pspsClass(psps map[string]merchantdocs.Doc[merchantdocs.PSP]) string {
+	environments := make([]string, 0, len(psps))
+	for _, doc := range psps {
+		environments = append(environments, doc.Value.Environment)
+	}
+	return merchantEnvironmentClass(environments...)
+}
+
 // platformIdentityRefusal refuses when the merchant's platform key names an
-// identity other than this deployment's vault partition.
-func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, id billing.MerchantID) error {
+// identity other than this deployment's vault partition in class.
+func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, id billing.MerchantID, class string) error {
 	row, err := q.GetCustodianByKey(ctx, gen.GetCustodianByKeyParams{MerchantID: id.UUID(), Key: config.PlatformCustodianKey})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -117,7 +125,7 @@ func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, i
 	if err != nil {
 		return err
 	}
-	if row.Kind != models.CustodianPlatform || row.Environment != s.providerEnvironment || row.AccountID != config.PlatformCustodianAccountID(s.platformVault, id.UUID()) {
+	if row.Kind != models.CustodianPlatform || row.Environment != class || row.AccountID != config.PlatformCustodianAccountID(s.platformVault, id.UUID()) {
 		return fmt.Errorf("the merchant's platform identity is %s; its cards move by custody migration: %w", row.AccountID, ErrPlatformVaultUnavailable)
 	}
 	return nil
@@ -141,11 +149,12 @@ func (s *Service) syncCardCustody(ctx context.Context, q *gen.Queries, id billin
 			reject(merchantdocs.MerchantDoc, err.Error())
 			return nil
 		}
-		for _, key := range platformUnreachable(s.platformVault, s.providerEnvironment, set.PSPs) {
+		for _, key := range platformUnreachable(s.platformVault, set.PSPs) {
 			reject(merchantdocs.PSPDoc(key), fmt.Sprintf("psp %s: %s", key, ErrPlatformVaultUnreachable.Message))
 		}
 	}
-	if err := s.platformIdentityRefusal(ctx, q, id); errors.Is(err, ErrPlatformVaultUnavailable) {
+	class := pspsClass(set.PSPs)
+	if err := s.platformIdentityRefusal(ctx, q, id, class); errors.Is(err, ErrPlatformVaultUnavailable) {
 		if changed {
 			reject(merchantdocs.MerchantDoc, err.Error())
 		}
@@ -155,7 +164,7 @@ func (s *Service) syncCardCustody(ctx context.Context, q *gen.Queries, id billin
 	}
 	_, err := q.RegisterCustodian(ctx, gen.RegisterCustodianParams{
 		MerchantID: id.UUID(), Key: config.PlatformCustodianKey, Kind: models.CustodianPlatform,
-		Environment: s.providerEnvironment, AccountID: config.PlatformCustodianAccountID(s.platformVault, id.UUID()),
+		Environment: class, AccountID: config.PlatformCustodianAccountID(s.platformVault, id.UUID()),
 	})
 	return err
 }

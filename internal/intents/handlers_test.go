@@ -34,7 +34,7 @@ func (f fakeNMIResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID
 
 func testNMIClient(t *testing.T, url string, readOnly bool) *nmi.NMIClient {
 	t.Helper()
-	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "test_security_key", WebhookSecret: "test_secret"})
 	require.NoError(t, err)
 	client.LoopbackFixture, client.ReadOnly = true, readOnly
 	if url != "" {

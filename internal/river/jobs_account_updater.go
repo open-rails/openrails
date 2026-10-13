@@ -191,10 +191,14 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	}
 	cursor := cursorRow.CursorMerchantID
 	batch := w.merchantBatch()
+	environment, err := w.environment(ctx)
+	if err != nil {
+		return result, fmt.Errorf("account updater: %w", err)
+	}
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListAccountUpdaterWorkMerchants(ctx, gen.ListAccountUpdaterWorkMerchantsParams{
 			Custodian:        models.CustodianBasisTheory,
-			Environment:      w.environment(),
+			Environment:      environment,
 			Now:              now,
 			MinLookaheadDays: 1,
 			MaxLookaheadDays: int32(custodians.MaxAccountUpdaterLookaheadDays),
@@ -274,8 +278,17 @@ func (w AccountUpdaterBatchWorker) instrumentBatch() int {
 	return accountUpdaterInstrumentBatch
 }
 
-func (w AccountUpdaterBatchWorker) environment() string {
-	return config.ExpectedProviderEnvironment(w.Config != nil && config.IsTestMode(w.Config))
+// environment is the money class of this deployment's custodians: live
+// when any PSP is.
+func (w AccountUpdaterBatchWorker) environment(ctx context.Context) (string, error) {
+	presence, err := merchants.Of(w.DB).ProbeLivePSPs(ctx)
+	switch {
+	case err != nil:
+		return "", err
+	case presence == merchants.LiveRailPresent:
+		return config.EnvironmentLive, nil
+	}
+	return config.EnvironmentTest, nil
 }
 
 // ingestMerchant polls this merchant's open batches and folds whatever the
@@ -394,11 +407,10 @@ func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.
 	if err != nil {
 		return fmt.Errorf("list custodians: %w", err)
 	}
-	env := w.environment()
 	logger := log.WithContext(ctx).WithFields(log.Fields{"worker": KindAccountUpdaterBatch, "merchant_id": mid})
 	var errs error
 	for _, row := range rows {
-		if row.Kind != models.CustodianBasisTheory || row.Archived || row.Environment != env {
+		if row.Kind != models.CustodianBasisTheory || row.Archived {
 			continue
 		}
 		cc, err := w.Rails.CustodianConfig(ctx, row.Kind, row.AccountID)

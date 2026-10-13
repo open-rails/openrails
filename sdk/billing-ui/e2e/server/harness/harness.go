@@ -85,7 +85,6 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	}()
 	cfg := openrails.Config{
 		Database:             openrails.DatabaseConfig{Schema: BillingSchema},
-		TestMode:             openrails.Sandbox,
 		ProviderWriteMode:    openrails.ProviderWritesFull,
 		PublicBillingBaseURL: baseURL + "/billing",
 		ReturnOrigins:        []string{baseURL},
@@ -93,12 +92,12 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		// AuthKit's issuer is baseURL: its users are this merchant's customers.
 		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: map[string]openrails.PSPConfig{
 			// An armed Solana PSP on devnet: purchase offers it.
-			SolanaPSPKey: openrails.SolanaPSP{
+			SolanaPSPKey: openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox,
 				PrivateKey:  signer.String(),
 				RPCProvider: "public",
 				Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
 			}.PSPConfig(),
-			CardPSPKey: openrails.NMIPSP{
+			CardPSPKey: openrails.NMIPSP{Environment: openrails.EnvironmentSandbox,
 				AccountID:            "billing-ui-e2e-cards",
 				SecurityKey:          "e2e-security-key",
 				WebhookSigningSecret: "e2e-webhook-secret",
@@ -126,7 +125,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, err
 	}
-	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
+	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, Environment: openrails.EnvironmentSandbox, AccountID: PSPAccountID}); err != nil {
 		return nil, err
 	}
 	if workers {

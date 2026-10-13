@@ -46,6 +46,7 @@ func TestParseGatewayTestModeStrict(t *testing.T) {
 type fakeGateway struct {
 	*httptest.Server
 	testMode              atomic.Value
+	probeDeclines         atomic.Bool
 	queries, mutations    atomic.Int64
 	probeAuths, probeVoid atomic.Int64
 }
@@ -67,6 +68,10 @@ func newFakeGateway(t *testing.T, testMode string) *fakeGateway {
 			_, _ = w.Write([]byte(`<nm_response><test_mode_enabled>` + mode + `</test_mode_enabled></nm_response>`))
 		case r.URL.Path == "/payments/auth":
 			g.probeAuths.Add(1)
+			if g.probeDeclines.Load() {
+				_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-txn","response":"2","response_text":"DECLINE","response_code":"200"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-txn","response":"1","response_text":"PROBE","response_code":"100"}`))
 		case r.URL.Path == "/payments/probe-txn/void":
 			g.probeVoid.Add(1)
@@ -80,8 +85,8 @@ func newFakeGateway(t *testing.T, testMode string) *fakeGateway {
 	return g
 }
 
-func gatewayClient(t *testing.T, g *fakeGateway, key, deployment string) *NMIClient {
-	client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: key, EndpointDeployment: deployment}, true)
+func gatewayClient(t *testing.T, g *fakeGateway, key, environment string) *NMIClient {
+	client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: key, Environment: environment})
 	require.NoError(t, err)
 	client.QueryURL = g.URL + "/query"
 	client.V5BaseURL = g.URL
@@ -91,7 +96,7 @@ func gatewayClient(t *testing.T, g *fakeGateway, key, deployment string) *NMICli
 
 func TestGatewayPostureVerifiedOnceAcrossMutationsWithoutFinancialProbe(t *testing.T) {
 	g := newFakeGateway(t, "true")
-	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
+	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentTest)
 	require.True(t, client.VerifyPosture(context.Background()).Armed())
 	for i := 0; i < 3; i++ {
 		require.NoError(t, client.Void(context.Background(), "txn"))
@@ -106,7 +111,7 @@ func TestGatewayPostureVerifiedOnceAcrossMutationsWithoutFinancialProbe(t *testi
 
 func TestGatewayPostureUnseenCredentialVerifiesOnFirstMutationOnly(t *testing.T) {
 	g := newFakeGateway(t, "true")
-	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
+	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentTest)
 	require.NoError(t, client.Void(context.Background(), "txn"))
 	require.NoError(t, client.Void(context.Background(), "txn"))
 	require.EqualValues(t, 1, g.queries.Load())
@@ -117,7 +122,7 @@ func TestGatewayPostureLiveOrUnavailableDisarmsMutationsButNotReads(t *testing.T
 	for _, mode := range []string{"false", "unavailable", "maybe"} {
 		t.Run(mode, func(t *testing.T) {
 			g := newFakeGateway(t, mode)
-			client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
+			client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentTest)
 			require.False(t, client.VerifyPosture(context.Background()).Armed(), "verified when loaded")
 			err := client.Void(context.Background(), "txn")
 			require.ErrorIs(t, err, providerposture.ErrDisarmed)
@@ -133,7 +138,7 @@ func TestGatewayPostureLiveOrUnavailableDisarmsMutationsButNotReads(t *testing.T
 
 func TestGatewayPostureReverifiesWhenCredentialsReloadOrRotate(t *testing.T) {
 	g := newFakeGateway(t, "unavailable")
-	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
+	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentTest)
 	require.False(t, client.VerifyPosture(context.Background()).Armed())
 	require.ErrorIs(t, client.Void(context.Background(), "txn"), providerposture.ErrDisarmed)
 
@@ -141,7 +146,7 @@ func TestGatewayPostureReverifiesWhenCredentialsReloadOrRotate(t *testing.T) {
 	require.True(t, client.VerifyPosture(context.Background()).Armed(), "a reload re-verifies")
 	require.NoError(t, client.Void(context.Background(), "txn"))
 
-	rotated := gatewayClient(t, g, "rotated-"+uuid.NewString(), config.NMIEndpointGateway)
+	rotated := gatewayClient(t, g, "rotated-"+uuid.NewString(), config.EnvironmentTest)
 	rotated.accountMerchantID, rotated.accountPSPID = client.AccountIdentity()
 	g.testMode.Store("false")
 	require.ErrorIs(t, rotated.Void(context.Background(), "txn"), providerposture.ErrDisarmed, "a rotated key never inherits a verdict")
@@ -149,9 +154,9 @@ func TestGatewayPostureReverifiesWhenCredentialsReloadOrRotate(t *testing.T) {
 	require.EqualValues(t, 3, g.queries.Load())
 }
 
-func TestSandboxDeploymentUsesQualificationProbeOnce(t *testing.T) {
+func TestSandboxEnvironmentUsesQualificationProbeOnce(t *testing.T) {
 	g := newFakeGateway(t, "true")
-	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointSandbox)
+	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentSandbox)
 	for i := 0; i < 3; i++ {
 		require.NoError(t, client.Void(context.Background(), "txn"))
 	}
@@ -166,7 +171,7 @@ func TestSandboxDeploymentUsesQualificationProbeOnce(t *testing.T) {
 // is not re-queried per mutation.
 func TestLivePostureUnseenCredentialVerifiesInlineBeforeFirstMutation(t *testing.T) {
 	live := func(g *fakeGateway) *NMIClient {
-		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointGateway}, false)
+		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), Environment: config.EnvironmentLive})
 		require.NoError(t, err)
 		client.QueryURL = g.URL + "/query"
 		client.V5BaseURL = g.URL
@@ -190,7 +195,7 @@ func TestLivePostureUnseenCredentialVerifiesInlineBeforeFirstMutation(t *testing
 
 func TestLoopbackFixtureMarkerIsExplicitAndLoopbackOnly(t *testing.T) {
 	g := newFakeGateway(t, "unavailable")
-	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
+	client := gatewayClient(t, g, "key-"+uuid.NewString(), config.EnvironmentTest)
 	require.ErrorIs(t, client.Void(context.Background(), "txn"), providerposture.ErrDisarmed)
 	client.LoopbackFixture = true
 	require.NoError(t, client.Void(context.Background(), "txn"))
@@ -200,30 +205,29 @@ func TestLoopbackFixtureMarkerIsExplicitAndLoopbackOnly(t *testing.T) {
 
 func TestProxyPostureBindsCredentialAndDestination(t *testing.T) {
 	merchantID, pspID := uuid.New(), uuid.New()
-	posture, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", EndpointDeployment: config.NMIEndpointGateway}, "", true)
+	posture, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", Environment: config.EnvironmentTest}, "")
 	require.NoError(t, err)
-	require.Equal(t, config.NMIEndpointGateway, posture.endpointDeployment)
-	require.Equal(t, DefaultDirectPostURL, posture.DirectPostURL, "the declared deployment selects the destination")
+	require.Equal(t, config.EnvironmentTest, posture.Environment)
+	require.Equal(t, DefaultDirectPostURL, posture.DirectPostURL, "the declared environment selects the destination")
 	owner, psp := posture.AccountIdentity()
 	require.Equal(t, merchantID, owner)
 	require.Equal(t, pspID, psp)
 	require.ErrorIs(t, posture.RequireArmedFor(context.Background(), SandboxDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 	require.ErrorIs(t, posture.RequireArmedFor(context.Background(), DefaultDirectPostURL, "other-key"), providerposture.ErrDisarmed)
-	sandbox, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", EndpointDeployment: config.NMIEndpointSandbox}, "", true)
+	sandbox, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", Environment: config.EnvironmentSandbox}, "")
 	require.NoError(t, err)
 	require.Equal(t, SandboxDirectPostURL, sandbox.DirectPostURL)
-	_, err = ProxyPostureClient(uuid.Nil, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key"}, "", true)
+	_, err = ProxyPostureClient(uuid.Nil, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", Environment: config.EnvironmentSandbox}, "")
 	require.Error(t, err, "a proxy credential without its PSP identity is refused")
 	var none *NMIClient
 	require.ErrorIs(t, none.RequireArmedFor(context.Background(), DefaultDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 }
 
-// Under live posture an NMI account must prove it is live. An account left in
-// test mode approves without moving money, so every mutation is refused before
-// it is sent; the sandbox endpoint is refused outright.
+// A live NMI PSP must prove it is live. An account left in test mode approves
+// without moving money, so every mutation is refused before it is sent.
 func TestLivePostureRefusesTestModeAccount(t *testing.T) {
-	live := func(g *fakeGateway, deployment string) *NMIClient {
-		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: deployment}, false)
+	live := func(g *fakeGateway) *NMIClient {
+		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), Environment: config.EnvironmentLive})
 		require.NoError(t, err)
 		client.QueryURL = g.URL + "/query"
 		client.V5BaseURL = g.URL
@@ -233,7 +237,7 @@ func TestLivePostureRefusesTestModeAccount(t *testing.T) {
 	for _, mode := range []string{"true", "unavailable", "maybe"} {
 		t.Run(mode, func(t *testing.T) {
 			g := newFakeGateway(t, mode)
-			client := live(g, config.NMIEndpointGateway)
+			client := live(g)
 			require.False(t, client.VerifyPosture(context.Background()).Armed(), "verified when loaded")
 			err := client.Void(context.Background(), "txn")
 			require.ErrorIs(t, err, providerposture.ErrDisarmed)
@@ -243,14 +247,38 @@ func TestLivePostureRefusesTestModeAccount(t *testing.T) {
 	}
 	t.Run("live", func(t *testing.T) {
 		g := newFakeGateway(t, "false")
-		client := live(g, "")
+		client := live(g)
 		require.True(t, client.VerifyPosture(context.Background()).Armed())
 		require.NoError(t, client.Void(context.Background(), "txn"))
 		require.EqualValues(t, 1, g.queries.Load())
 		require.EqualValues(t, 0, g.probeAuths.Load(), "live verification never sends a financial probe")
 	})
-	t.Run("sandbox_endpoint", func(t *testing.T) {
-		_, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointSandbox}, false)
-		require.Error(t, err, "the sandbox endpoint is refused under live posture")
-	})
+}
+
+// Each declared environment is checked against NMI's own answer, and a
+// disagreeing account is refused before its first mutation: a test PSP whose
+// gateway account moves real money, and a sandbox PSP whose account declines
+// the non-issued test card.
+func TestDeclaredEnvironmentDisagreeingWithNMIIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name, environment, testMode string
+		probeDeclines               bool
+	}{
+		{"test account moving money", config.EnvironmentTest, "false", false},
+		{"sandbox account declining the test card", config.EnvironmentSandbox, "true", true},
+		{"live account in test mode", config.EnvironmentLive, "true", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newFakeGateway(t, tc.testMode)
+			g.probeDeclines.Store(tc.probeDeclines)
+			client := gatewayClient(t, g, "key-"+uuid.NewString(), tc.environment)
+			status := client.VerifyPosture(context.Background())
+			require.False(t, status.Armed())
+			require.ErrorIs(t, status.Err, ErrEnvironmentMismatch)
+			err := CheckEnvironmentArm(context.Background(), client)
+			require.ErrorIs(t, err, ErrEnvironmentMismatch)
+			require.ErrorIs(t, client.Void(context.Background(), "txn"), providerposture.ErrDisarmed)
+			require.EqualValues(t, 0, g.mutations.Load())
+		})
+	}
 }

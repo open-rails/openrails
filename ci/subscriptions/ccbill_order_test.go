@@ -46,7 +46,7 @@ func openCCBillShop(t *testing.T, nmi *openrails.PSPConfig) *ccbillShop {
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		solana(psps)
 		delete(psps, "stripe")
-		psps["ccbill"] = openrails.CCBillPSP{AccountID: ccbillAcct, Salt: "e2e-ccbill-salt", FallbackFor: []string{"nmi"}}.PSPConfig()
+		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt", FallbackFor: []string{"nmi"}}.PSPConfig()
 		if nmi != nil {
 			psps["nmi"] = *nmi
 		}
@@ -311,7 +311,7 @@ func TestCCBillFallbackOrder(t *testing.T) {
 	})
 
 	t.Run("CCBill is offered at once while the card PSP is unavailable", func(t *testing.T) {
-		unarmed := openrails.NMIPSP{AccountID: nmiAcct}.PSPConfig()
+		unarmed := openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: nmiAcct}.PSPConfig()
 		s := openCCBillShop(t, &unarmed)
 		c, _ := s.buyer()
 		id := s.openOrder(c)

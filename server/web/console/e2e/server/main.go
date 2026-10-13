@@ -55,7 +55,7 @@ func run(ctx context.Context, addr, base, assets string) error {
 	defer fx.Close()
 	outbox := &authtest.Outbox{}
 	srv, err := server.New(ctx, server.Config{
-		Engine:      openrails.Config{Database: openrails.DatabaseConfig{Schema: "console", RiverSchema: "console"}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly, PublicBillingBaseURL: base, ReturnOrigins: []string{base}},
+		Engine:      openrails.Config{Database: openrails.DatabaseConfig{Schema: "console", RiverSchema: "console"}, ProviderWriteMode: openrails.ProviderWritesReadOnly, PublicBillingBaseURL: base, ReturnOrigins: []string{base}},
 		LocalSignIn: true,
 		Auth: authkit.Config{
 			Registration: authkit.RegistrationConfig{PasswordlessLogin: true},

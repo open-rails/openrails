@@ -12,11 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// Declared is the configuration a file declares for merchant id in
-// environment. accounts gives the account id of each PSP whose file
-// declaration derives it (a Solana signer's public key); loaded is when the
-// file was read.
-func Declared(id billing.MerchantID, m config.MerchantDeclaration, environment string, accounts map[string]string, loaded time.Time) Set {
+// Declared is the configuration a file declares for merchant id. Each PSP is
+// in its declared environment; custodians take their PSPs' money class.
+// accounts gives the account id of each PSP whose file declaration derives it
+// (a Solana signer's public key); loaded is when the file was read.
+func Declared(id billing.MerchantID, m config.MerchantDeclaration, accounts map[string]string, loaded time.Time) Set {
 	set := Set{}.Clone()
 	merchant := Merchant{
 		DisplayName: strings.TrimSpace(m.DisplayName),
@@ -43,7 +43,7 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, environment s
 			account = derived
 		}
 		doc := PSP{
-			Rail: strings.ToLower(strings.TrimSpace(string(p.Rail))), Environment: environment, AccountID: account,
+			Rail: strings.ToLower(strings.TrimSpace(string(p.Rail))), Environment: strings.TrimSpace(p.Environment), AccountID: account,
 			Archived: p.Archived, Custodian: strings.ToLower(strings.TrimSpace(p.Custodian)),
 			Settings: maps.Clone(p.Settings), Secrets: normalizedSecrets(p.Secrets),
 		}
@@ -52,6 +52,7 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, environment s
 		}
 		set.PSPs[key] = Doc[PSP]{Value: doc, UpdatedAt: loaded}
 	}
+	environment := DeclaredCustodianEnvironment(m)
 	for key, c := range m.Custodians {
 		key = strings.ToLower(strings.TrimSpace(key))
 		set.Custodians[key] = Doc[Custodian]{Value: Custodian{
@@ -60,6 +61,17 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, environment s
 		}, UpdatedAt: loaded}
 	}
 	return set
+}
+
+// DeclaredCustodianEnvironment is the money class of m's custodians: live
+// when its PSPs are, test otherwise.
+func DeclaredCustodianEnvironment(m config.MerchantDeclaration) string {
+	for _, p := range m.PSPs {
+		if config.LiveEnvironment(strings.TrimSpace(p.Environment)) {
+			return config.EnvironmentLive
+		}
+	}
+	return config.EnvironmentTest
 }
 
 func normalizedSecrets(in map[string]string) map[string]string {

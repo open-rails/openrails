@@ -18,11 +18,11 @@ import (
 // ccbillScope is a one-account PSP catalog for credential resolution.
 type ccbillScope struct{ scope merchants.PSPScope }
 
-func (c ccbillScope) ActivePSPSecretName(_ context.Context, _ billing.MerchantID, rail, env, key string) (string, bool, error) {
-	name, err := merchants.PSPSecretName(rail, env, c.scope.AccountID, key)
+func (c ccbillScope) ActivePSPSecretName(_ context.Context, _ billing.MerchantID, rail, key string) (string, bool, error) {
+	name, err := merchants.PSPSecretName(rail, c.scope.Environment, c.scope.AccountID, key)
 	return name, err == nil, err
 }
-func (c ccbillScope) ActivePSPScope(_ context.Context, _ billing.MerchantID, rail, _ string) (merchants.PSPScope, bool, error) {
+func (c ccbillScope) ActivePSPScope(_ context.Context, _ billing.MerchantID, rail string) (merchants.PSPScope, bool, error) {
 	return c.scope, rail == c.scope.Rail, nil
 }
 func (c ccbillScope) PSPScopeByID(_ context.Context, _ billing.MerchantID, id uuid.UUID) (merchants.PSPScope, bool, error) {

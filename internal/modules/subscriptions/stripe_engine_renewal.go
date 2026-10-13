@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strconv"
 	"time"
-
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // ReadEngineRenewal reconciles the persistent provider objects for a new
@@ -48,7 +46,7 @@ func (s *StripeService) ReadEngineRenewal(ctx context.Context, p StripeEnginePay
 		if pi.Metadata["openrails_renewal_obligation"] != p.Renewal.Obligation {
 			return nil
 		}
-		if pi.Object != "payment_intent" || !stripeEngineID(pi.ID, "pi_") || pi.LiveMode == nil || *pi.LiveMode == config.IsTestMode(scoped.Config) || pi.Metadata["openrails_initial"] != "false" || pi.Metadata["openrails_one_time"] != "" {
+		if pi.Object != "payment_intent" || !stripeEngineID(pi.ID, "pi_") || pi.LiveMode == nil || *pi.LiveMode != scoped.keyLive() || pi.Metadata["openrails_initial"] != "false" || pi.Metadata["openrails_one_time"] != "" {
 			return errors.New("Stripe renewal history has invalid provider scope")
 		}
 		attempt, err := strconv.Atoi(pi.Metadata["openrails_renewal_attempt"])

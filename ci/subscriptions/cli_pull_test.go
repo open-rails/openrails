@@ -40,7 +40,6 @@ func (w *world) cliPull(provider string, overwrite bool) {
 func (w *world) cliPullAs(writeMode, provider string, insert, overwrite bool) error {
 	w.t.Helper()
 	cfg := &config.Config{
-		TestMode:          config.CredentialPostureSandbox,
 		ProviderWriteMode: writeMode,
 		DB:                &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema},
 	}

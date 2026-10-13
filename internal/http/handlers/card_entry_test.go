@@ -15,16 +15,26 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/internal/webhookauth"
 )
 
 const cardBody = `"card":{"number":"4111 1111 1111 1111","exp_month":10,"exp_year":2027,"cvc":"999"}`
 
 // The typed card field is refused beside a token, with a card number in any
-// other field, and in live posture over plain HTTP.
+// other field, and over plain HTTP unless no live PSP exists.
 func TestCardFieldRequestRules(t *testing.T) {
-	live := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive}, TrustedProxies: iputil.ParseTrustedProxies([]string{"10.0.0.0/8"})}
-	sandbox := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}}
+	live := &app.Runtime{Config: &config.Config{}, TrustedProxies: iputil.ParseTrustedProxies([]string{"10.0.0.0/8"})}
+	sandbox := &app.Runtime{Config: &config.Config{}}
+	orig := livePSPProbe
+	livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
+		if r.State == sandbox {
+			return ccbillProbe(merchants.LiveRailAbsent, nil)
+		}
+		return ccbillProbe(merchants.LiveRailPresent, nil)
+	}
+	t.Cleanup(func() { livePSPProbe = orig })
 	for name, tc := range map[string]struct {
 		rt       *app.Runtime
 		wire     func(*http.Request)
@@ -38,7 +48,7 @@ func TestCardFieldRequestRules(t *testing.T) {
 		"live over plain http":                {rt: live, code: "card_requires_https"},
 		"live, header from an untrusted peer": {rt: live, wire: func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }, code: "card_requires_https"},
 		"live behind a trusted http proxy":    {rt: live, wire: func(r *http.Request) { r.RemoteAddr = "10.0.0.5:1234"; r.Header.Set("X-Forwarded-Proto", "http") }, code: "card_requires_https"},
-		"no posture is live":                  {rt: &app.Runtime{}, code: "card_requires_https"},
+		"unproven deployment is live":         {rt: &app.Runtime{}, code: "card_requires_https"},
 		"beside a token":                      {rt: sandbox, hasToken: true, code: "not both"},
 		"a number in another field":           {rt: sandbox, others: []string{"Card Holder", "4111-1111-1111-1111"}, code: "only in the card field"},
 	} {

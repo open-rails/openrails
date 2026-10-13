@@ -8,40 +8,22 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
-// ErrLiveCredentialsUnderTestMode refuses to arm production credentials in a
-// sandbox deployment.
-var ErrLiveCredentialsUnderTestMode = errors.New("PRODUCTION NMI credentials detected while test_mode is enabled; refusing to arm: use sandbox account credentials or select live mode")
+// ErrEnvironmentMismatch refuses to arm an NMI account whose own answer
+// disagrees with its PSP's declared environment: a live PSP whose account is
+// in test mode or on the sandbox, or a test or sandbox PSP that moves real
+// money.
+var ErrEnvironmentMismatch = errors.New("the NMI account is not in the PSP's declared environment; refusing to arm")
 
-// ErrTestModeUnderLivePosture refuses to arm an NMI account left in test mode
-// in a live deployment: its approvals move no money.
-var ErrTestModeUnderLivePosture = errors.New("NMI account is in TEST MODE while the deployment is live; refusing to arm: disable test mode in the NMI gateway")
-
-// ErrSandboxEndpointUnderLive refuses NMI's sandbox deployment under live posture.
-var ErrSandboxEndpointUnderLive = errors.New("NMI sandbox endpoint selected while the deployment is live; refusing to arm")
-
-// CheckTestModeArm verifies the credential now (recording the verdict for
-// every client that loads it) and refuses anything but a simulated account.
-func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
-	status := providerposture.Process().Verify(ctx, client.PostureKey(), client.CheckPosture)
-	switch status.Verdict {
-	case providerposture.Simulated:
-		return nil
-	case providerposture.Live:
-		return ErrLiveCredentialsUnderTestMode
-	default:
-		return fmt.Errorf("NMI sandbox qualification failed; refusing to arm: %w", status.Err)
-	}
-}
-
-// CheckLiveArm verifies a live deployment's credential now and refuses an
-// account that is not proven live.
-func CheckLiveArm(ctx context.Context, client *NMIClient) error {
-	status := providerposture.Process().Verify(ctx, client.PostureKey(), client.CheckLivePosture)
+// CheckEnvironmentArm verifies the credential now (recording the verdict for
+// every client that loads it) and refuses an account NMI does not prove to be
+// in the declared environment.
+func CheckEnvironmentArm(ctx context.Context, client *NMIClient) error {
+	status := providerposture.Process().Verify(ctx, client.PostureKey(), client.PostureCheck())
 	if status.Armed() {
 		return nil
 	}
-	if status.Verdict == providerposture.Simulated {
+	if status.Verdict == providerposture.Live || status.Verdict == providerposture.Simulated {
 		return status.Err
 	}
-	return fmt.Errorf("NMI live qualification failed; refusing to arm: %w", status.Err)
+	return fmt.Errorf("NMI %s qualification failed; refusing to arm: %w", client.Environment, status.Err)
 }

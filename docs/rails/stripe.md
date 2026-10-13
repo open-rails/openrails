@@ -13,11 +13,13 @@ fulfillment is driven by webhooks.
 
 OpenRails needs one server-side key per Stripe account: either a standard secret key
 (`sk_live_…` / `sk_test_…`) or a restricted key (`rk_live_…` / `rk_test_…`). Both are
-accepted; the live/test prefix is enforced against your deployment posture:
+accepted; the live/test prefix must agree with the PSP's declared `environment`
+(`live` or `test`):
 
-- `test_mode: sandbox` + a live key (`sk_live_`/`rk_live_`) → **refuses to boot**.
-- `test_mode: live` + a test key (`sk_test_`/`rk_test_`) → **refuses to boot** in
-  every environment rather than silently disabling the rail.
+- `environment: test` + a live key (`sk_live_`/`rk_live_`) → **refused**.
+- `environment: live` + a test key (`sk_test_`/`rk_test_`) → **refused** rather
+  than silently disabling the rail.
+- A publishable key's `pk_live_`/`pk_test_` prefix is held to the same rule.
 
 Key health is validated with a read-only `GET /v1/balance` — no charge is made.
 
@@ -231,17 +233,16 @@ abandoned intent raises `life.provider_intent.abandoned`.
 
 ### Sandbox testing
 
-Set `test_mode: sandbox` and declare the PSP with a test key (`sk_test_…` /
-`rk_test_…`); the PSP's environment follows `test_mode` and is not declarable.
-The live-key-under-sandbox boot refusal guarantees a sandbox deployment
-can never hold a credential that moves real money. Use Stripe's standard test
-cards. A production-style deployment can legitimately run sandbox rails.
+Declare the PSP `environment: test` with a test key (`sk_test_…` / `rk_test_…`).
+A test PSP can never hold a credential that moves real money, and a
+deployment with a test PSP holds no live one. Use Stripe's standard test
+cards.
 
 Your own end-to-end tests need no Stripe account: package
 `openrailstest/stripemock` is a fake Stripe on loopback. Set
-`Config.ProviderSandbox.StripeAPIURL` to its `URL()` under
-`TestMode: openrails.Sandbox` (or pass `Transport()` as `Deps.StripeTransport`),
-declare a Stripe PSP with any `sk_test_` key, and point `SendWebhooksTo` at
+`Config.ProviderSandbox.StripeAPIURL` to its `URL()` (or pass `Transport()` as
+`Deps.StripeTransport`), declare a Stripe PSP with
+`Environment: openrails.EnvironmentTest` and any `sk_test_` key, and point `SendWebhooksTo` at
 your mounted `/v1/webhooks/stripe/{account_id}` with the PSP's signing secret.
 Without a publishable key a customer pays on hosted Checkout:
 `CompleteCheckoutSession(ctx, id)` is the customer paying there, and Stripe's

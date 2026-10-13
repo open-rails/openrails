@@ -484,6 +484,12 @@ export const billingAdminMessages = {
   "Pick a product": "Pick a product",
   "Pick a product…": "Pick a product…",
   "Pick a rail…": "Pick a rail…",
+  "Pick an environment…": "Pick an environment…",
+  "Live: real money": "Live: real money",
+  "Test: the provider's own system, no money moves":
+    "Test: the provider's own system, no money moves",
+  "Sandbox: the provider's separate sandbox":
+    "Sandbox: the provider's separate sandbox",
   "Pick a stored payment method": "Pick a stored payment method",
   "Pinned to an archived (prior) version":
     "Pinned to an archived (prior) version",

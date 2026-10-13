@@ -320,9 +320,9 @@ func TestWebhookAccountResolutionFailsClosed(t *testing.T) {
 
 func stubCCBillProbe(t *testing.T, probe webhookauth.LiveRailProbe) {
 	t.Helper()
-	orig := ccbillLivePSPProbe
-	ccbillLivePSPProbe = func(*httprequest.Request) webhookauth.LiveRailProbe { return probe }
-	t.Cleanup(func() { ccbillLivePSPProbe = orig })
+	orig := livePSPProbe
+	livePSPProbe = func(*httprequest.Request) webhookauth.LiveRailProbe { return probe }
+	t.Cleanup(func() { livePSPProbe = orig })
 }
 
 func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.LiveRailProbe {
@@ -330,42 +330,36 @@ func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.Liv
 }
 
 // CCBill has no HMAC, so its source address is its only authentication. A
-// declared dev source is honoured only in sandbox posture, only when a probe
-// proves no live CCBill PSP exists, and only if declared.
+// declared dev source is honoured only when a probe proves no live PSP exists
+// in the deployment, and only if declared.
 func TestCCBillSourceAllowlist(t *testing.T) {
 	declared := []string{"203.0.113.0/24"}
 	const ccbillIP, devIP, strangerIP = "64.38.212.5", "203.0.113.5", "198.51.100.7"
-	allowed := func(sandbox bool, allowlist []string, probe webhookauth.LiveRailProbe, ip string) bool {
+	allowed := func(allowlist []string, probe webhookauth.LiveRailProbe, ip string) bool {
 		stubCCBillProbe(t, probe)
-		posture := config.CredentialPostureLive
-		if sandbox {
-			posture = config.CredentialPostureSandbox
-		}
-		r, _ := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{Config: &config.Config{TestMode: posture, CCBillWebhookIPAllowlist: allowlist}})
+		r, _ := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{Config: &config.Config{CCBillWebhookIPAllowlist: allowlist}})
 		return ccbillWebhookIPAllowed(r, ip)
 	}
 	present, absent := ccbillProbe(merchants.LiveRailPresent, nil), ccbillProbe(merchants.LiveRailAbsent, nil)
 	for _, tc := range []struct {
 		name      string
-		sandbox   bool
 		allowlist []string
 		probe     webhookauth.LiveRailProbe
 		ip        string
 		want      bool
 	}{
-		{"CCBill range, live", false, nil, present, ccbillIP, true},
-		{"CCBill range, sandbox", true, nil, present, ccbillIP, true},
-		{"declared, live posture", false, declared, absent, devIP, false},
-		{"declared, live PSP exists", true, declared, present, devIP, false},
-		{"undeclared", true, nil, absent, devIP, false},
-		{"outside declared range", true, declared, absent, strangerIP, false},
-		{"probe proves nothing", true, declared, ccbillProbe(merchants.LiveRailUnknown, nil), devIP, false},
-		{"probe errors", true, declared, ccbillProbe(merchants.LiveRailUnknown, errors.New("catalog unavailable")), devIP, false},
-		{"probe errors but claims absent", true, declared, ccbillProbe(merchants.LiveRailAbsent, errors.New("catalog unavailable")), devIP, false},
-		{"no merchants service", true, declared, nil, devIP, false},
-		{"all three conditions", true, declared, absent, devIP, true},
+		{"CCBill range, live", nil, present, ccbillIP, true},
+		{"CCBill range, not live", nil, absent, ccbillIP, true},
+		{"declared, live PSP exists", declared, present, devIP, false},
+		{"undeclared", nil, absent, devIP, false},
+		{"outside declared range", declared, absent, strangerIP, false},
+		{"probe proves nothing", declared, ccbillProbe(merchants.LiveRailUnknown, nil), devIP, false},
+		{"probe errors", declared, ccbillProbe(merchants.LiveRailUnknown, errors.New("catalog unavailable")), devIP, false},
+		{"probe errors but claims absent", declared, ccbillProbe(merchants.LiveRailAbsent, errors.New("catalog unavailable")), devIP, false},
+		{"no merchants service", declared, nil, devIP, false},
+		{"declared, no live PSP", declared, absent, devIP, true},
 	} {
-		require.Equal(t, tc.want, allowed(tc.sandbox, tc.allowlist, tc.probe, tc.ip), tc.name)
+		require.Equal(t, tc.want, allowed(tc.allowlist, tc.probe, tc.ip), tc.name)
 	}
 	r, _ := newTestRequest(http.MethodPost, "/", nil, nil)
 	require.False(t, ccbillWebhookIPAllowed(r, devIP), "no runtime never bypasses")
@@ -392,7 +386,7 @@ func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 		req.Header.Set("X-Forwarded-For", tc.xff)
 		req.SetPathValue("rail", "ccbill")
 		req.SetPathValue("account_id", "900000-0000")
-		rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: tc.trusted}, TrustedProxies: iputil.ParseTrustedProxies(tc.trusted)}
+		rt := &app.Runtime{Config: &config.Config{TrustedProxies: tc.trusted}, TrustedProxies: iputil.ParseTrustedProxies(tc.trusted)}
 		rec := httptest.NewRecorder()
 		Webhook(httprequest.NewHTTP(rec, req, rt))
 		require.Equal(t, tc.want, rec.Code, "%s: %s", tc.name, rec.Body.String())

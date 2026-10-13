@@ -421,7 +421,6 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 	if !ok {
 		return config.RefuseDeclarationBesideVault(req.Config, mt.Slug, mt)
 	}
-	environment := ManifestProviderEnvironment(req.Config)
 	mt.PSPs = maps.Clone(mt.PSPs)
 	if signer, ok := req.SolanaTransit.(*signeridentity.Transit); ok {
 		signer.Declare(mt.PSPs)
@@ -442,7 +441,7 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 		}
 		accounts[strings.ToLower(entry.key)] = account
 	}
-	source.Put(id, merchantdocs.Declared(id, mt, environment, accounts, time.Now().UTC()))
+	source.Put(id, merchantdocs.Declared(id, mt, accounts, time.Now().UTC()))
 	set, err := cache.Reload(ctx, id)
 	if err != nil {
 		return err
@@ -552,21 +551,6 @@ func SolanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 	return solanago.PublicKeyFromBytes(raw).String(), nil
 }
 
-// ManifestProviderEnvironment derives a PSP's environment from deployment
-// posture: test under test_mode, live otherwise. It is never declared.
-func ManifestProviderEnvironment(cfg *config.Config) string {
-	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg))
-}
-
-// ManifestSolanaNetwork maps a PSP environment onto the Solana network the same
-// way railresolve does at arm time (#349: network derives from test_mode alone).
-func ManifestSolanaNetwork(environment string) string {
-	if environment == config.ProviderEnvironmentTest {
-		return "devnet"
-	}
-	return "mainnet"
-}
-
 func NormalizeManifestRail(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
 }
@@ -585,13 +569,12 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.Settings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
-	environment := ManifestProviderEnvironment(cfg)
-	declared := merchantdocs.Declared(billing.MerchantID{}, mt, environment, nil, time.Time{})
+	declared := merchantdocs.Declared(billing.MerchantID{}, mt, nil, time.Time{})
 	var vault *config.PlatformVaultConfig
 	if cfg != nil {
 		vault = cfg.PlatformVault
 	}
-	if err := merchants.CardCustodyRefusal(vault, environment, mt.Settings, declared.PSPs); err != nil {
+	if err := merchants.CardCustodyRefusal(vault, mt.Settings, declared.PSPs); err != nil {
 		return err
 	}
 	for key, account := range mt.PSPs {
@@ -605,7 +588,7 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 		}
 		if raw, ok := account.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
-			if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
+			if err := config.ValidateStripePublishableKeyEnvironment(account.Environment, value); err != nil {
 				return fmt.Errorf("psps.%s.settings.publishable_key: %w", key, err)
 			}
 		}

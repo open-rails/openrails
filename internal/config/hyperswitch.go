@@ -11,7 +11,7 @@ import (
 // vendor-owned browser assets. Merchant settings cannot change either target.
 // The SDK is a separate server in the vendor product, hence its explicit URL.
 type HyperSwitchConfig struct {
-	// AllowLoopbackHTTP admits an http loopback fixture with TestMode sandbox.
+	// AllowLoopbackHTTP admits an http loopback fixture; refused beside a live PSP.
 	AllowLoopbackHTTP bool   `yaml:"allow_loopback_http" json:"allow_loopback_http"`
 	APIBaseURL        string `yaml:"api_base_url" json:"api_base_url"`
 	SDKURL            string `yaml:"sdk_url" json:"sdk_url"`
@@ -28,7 +28,7 @@ func validateHyperSwitch(cfg *Config) error {
 		}
 		if u.Scheme == "http" {
 			ip := net.ParseIP(u.Hostname())
-			if !cfg.HyperSwitch.AllowLoopbackHTTP || cfg.TestMode != CredentialPostureSandbox || ip == nil || !ip.IsLoopback() {
+			if !cfg.HyperSwitch.AllowLoopbackHTTP || ip == nil || !ip.IsLoopback() {
 				return fmt.Errorf("hyperswitch.%s requires HTTPS outside a development sandbox literal loopback fixture", key)
 			}
 		}

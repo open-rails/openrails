@@ -28,8 +28,8 @@ func TestMerchantFileRoundTrip(t *testing.T) {
 	want := MerchantDeclaration{
 		Slug: "onlydemo", DisplayName: "OnlyDemo",
 		PSPs: map[string]PSPConfig{
-			"mobius": NMIPSP{AccountID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
-			"wallet": SolanaPSP{TransitKey: "transit", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m", Name: "Xyz"}}}.PSPConfig(),
+			"mobius": NMIPSP{Environment: EnvironmentSandbox, AccountID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
+			"wallet": SolanaPSP{Environment: EnvironmentSandbox, TransitKey: "transit", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m", Name: "Xyz"}}}.PSPConfig(),
 		},
 		Settings: billing.MerchantSettings{BillingPeriodBoundary: "calendar_month"},
 	}
@@ -49,7 +49,6 @@ func TestMerchantFileRoundTrip(t *testing.T) {
 func TestConfigLoadsFromYAML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "billing.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
-test_mode: sandbox
 provider_write_mode: full
 database: {schema: host_billing}
 db: {url: "postgres://app@db/app", sslmode: verify-full}
@@ -71,7 +70,6 @@ read_cache:
 	require.NoError(t, err)
 	var cfg Config
 	require.NoError(t, yaml.UnmarshalWithOptions(raw, &cfg, yaml.DisallowUnknownField()))
-	require.Equal(t, Sandbox, cfg.TestMode)
 	require.Equal(t, "full", cfg.ProviderWriteMode)
 	require.Equal(t, DatabaseConfig{Schema: "host_billing"}, cfg.Database)
 	require.Equal(t, &DBConfig{URL: "postgres://app@db/app", SSLMode: "verify-full"}, cfg.DB)

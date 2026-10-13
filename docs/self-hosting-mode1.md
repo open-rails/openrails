@@ -12,7 +12,7 @@ instead, put the configuration in Vault ([vault.md](vault.md)).
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `vault`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `vault`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, display name, settings, alert webhooks, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchants` |
 | catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | an operator, never a boot: `openrails catalog apply PATH --merchant NAME` (standalone) / the host's own command calling `Client.ApplyCatalog` (embedded hosts) |
 
@@ -63,8 +63,9 @@ commands accept `--merchant-manifest`.
 3. Each document validates as the configuration API validates it; one that
    does not refuses boot.
 4. A declared secret that resolves to an empty value (no YAML value, no
-   mounted file, no env var) is a boot **error**. Under `test_mode`, NMI
-   accounts are probed before arming: production credentials refuse to arm.
+   mounted file, no env var) is a boot **error**. Each PSP's declared
+   `environment` is verified with its provider before arming: an NMI account
+   whose answer disagrees refuses to arm.
 
 ## Capabilities
 

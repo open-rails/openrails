@@ -142,7 +142,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
-| `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials. |
+| `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |
+| `psp_environment_mixed` | 409 | `invalid_request_error` | A deployment's PSPs are all live or all non-live; this PSP is the other. |
 | `psp_exists` | 409 | `invalid_request_error` | The account is already a PSP, of this merchant or another; update it instead. |
 | `psp_key_taken` | 409 | `invalid_request_error` | Another live PSP holds the key. |
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |

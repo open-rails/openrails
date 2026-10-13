@@ -1443,7 +1443,7 @@ type BillingPsp struct {
 	// The merchant's name for the PSP (e.g. mobius): the key of its document. One current PSP holds a key.
 	Key  string
 	Rail string
-	// Provider environment: live or test, derived from the deployment's posture.
+	// The PSP's declared environment: live (real money), test (the provider's own system, no money moves) or sandbox (the provider's separate sandbox system). Part of its identity; a deployment's current PSPs are all live or all non-live.
 	Environment string
 	// Operator-declared account identity on the rail (Stripe acct_, NMI gateway id, CCBill account-subaccount, Solana signer address).
 	AccountID string

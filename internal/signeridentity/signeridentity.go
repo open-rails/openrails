@@ -31,11 +31,10 @@ import (
 // Vault cannot serve right now is answered from the stored identity.
 type Transit struct {
 	solanaint.TransitClient
-	DB          *db.DB
-	Directory   *merchants.Service
-	Slug        string
-	Environment string
-	Tolerate    bool
+	DB        *db.DB
+	Directory *merchants.Service
+	Slug      string
+	Tolerate  bool
 	// OnChange hears a detected change (the host-facing probe).
 	OnChange    func(error)
 	unavailable atomic.Bool
@@ -76,7 +75,7 @@ func (t *Transit) PublicKey(ctx context.Context, key string) ([]byte, error) {
 	if !declared && t.declared != nil {
 		pspKeys = []string{}
 	}
-	mid, rows, lookupErr := Stored(ctx, t.DB, t.Directory, t.Slug, t.Environment, key, pspKeys)
+	mid, rows, lookupErr := Stored(ctx, t.DB, t.Directory, t.Slug, key, pspKeys)
 	if lookupErr != nil {
 		// Without the stored identity nothing can be compared: fail closed.
 		return nil, fmt.Errorf("solana signer %q: read stored identity: %w: %w", key, vault.ErrUnavailable, lookupErr)
@@ -130,7 +129,7 @@ type StoredSigner struct {
 // declaration being applied), whose identities Postgres holds; nil reads the
 // loaded configuration's signers. A merchant not provisioned yet has none;
 // any other failure is returned, never read as "none".
-func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string, pspKeys []string) (billing.MerchantID, []StoredSigner, error) {
+func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, key string, pspKeys []string) (billing.MerchantID, []StoredSigner, error) {
 	m, err := directory.GetBySlug(ctx, billing.NormalizeMerchantSlug(slug))
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
 		return billing.MerchantID{}, nil, nil
@@ -140,7 +139,7 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 	}
 	var psps []merchants.PSPScope
 	if pspKeys != nil {
-		identities, err := directory.PSPIdentities(ctx, m.ID, "solana", environment)
+		identities, err := directory.PSPIdentities(ctx, m.ID, "solana")
 		if err != nil {
 			return billing.MerchantID{}, nil, err
 		}
@@ -150,7 +149,7 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 			}
 		}
 	} else {
-		live, err := directory.ActivePSPScopesForRail(ctx, m.ID, "solana", environment)
+		live, err := directory.ActivePSPScopesForRail(ctx, m.ID, "solana")
 		if err != nil {
 			return billing.MerchantID{}, nil, err
 		}
@@ -174,7 +173,7 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 // document names the approved one. With a file, the caller re-applies the
 // declaration, which registers it.
 // It refuses when nothing is pending for that key.
-func Approve(ctx context.Context, database *db.DB, directory *merchants.Service, transit solanaint.TransitClient, mid billing.MerchantID, environment, key string) (string, error) {
+func Approve(ctx context.Context, database *db.DB, directory *merchants.Service, transit solanaint.TransitClient, mid billing.MerchantID, key string) (string, error) {
 	if transit == nil {
 		return "", fmt.Errorf("no Vault Transit signer is configured")
 	}
@@ -183,7 +182,7 @@ func Approve(ctx context.Context, database *db.DB, directory *merchants.Service,
 		return "", fmt.Errorf("read the Transit key: %w", err)
 	}
 	approved := solanago.PublicKeyFromBytes(pub).String()
-	identities, err := directory.PSPIdentities(ctx, mid, "solana", environment)
+	identities, err := directory.PSPIdentities(ctx, mid, "solana")
 	if err != nil {
 		return "", fmt.Errorf("read stored identity: %w", err)
 	}

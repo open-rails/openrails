@@ -496,9 +496,9 @@ func auExpiry(month, year string) string {
 }
 
 // BasisTheoryWebhookKeyURL selects BT's CDN webhook public key for the
-// deployment posture.
-func BasisTheoryWebhookKeyURL(cfg *config.Config) string {
-	if cfg != nil && config.IsTestMode(cfg) {
+// custodian's money class.
+func BasisTheoryWebhookKeyURL(environment string) string {
+	if !config.LiveEnvironment(environment) {
 		return basistheory.TestWebhookKeyURL
 	}
 	return basistheory.ProdWebhookKeyURL

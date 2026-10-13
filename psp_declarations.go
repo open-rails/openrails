@@ -9,7 +9,8 @@ import (
 // The typed PSP declarations: one struct per rail whose fields are the rail's
 // slots, so a misspelled secret or setting fails to compile. Each field's psp
 // tag names the declaration key it fills. PSPConfig returns the same value the
-// YAML parses to; an empty field is an omitted key.
+// YAML parses to; an empty field is an omitted key. Environment is required:
+// EnvironmentLive, EnvironmentTest or EnvironmentSandbox, as the rail has them.
 //
 // A slot tagged required is not checked here: as in YAML, a PSP declared
 // without one exists but is not armed until the credential is supplied.
@@ -18,7 +19,10 @@ import (
 type NMIPSP struct {
 	// AccountID is the NMI dashboard's "Gateway ID".
 	AccountID string `psp:"account_id"`
-	Archived  bool   `psp:"archived"`
+	// Environment is live, test (a gateway account in test mode) or sandbox
+	// (a sandbox.nmi.com account).
+	Environment string `psp:"environment"`
+	Archived    bool   `psp:"archived"`
 	// Custodian is the key of a declared custodian holding this PSP's cards;
 	// "" means NMI's customer vault holds them.
 	Custodian string `psp:"custodian"`
@@ -34,8 +38,6 @@ type NMIPSP struct {
 	TokenizationKey string `psp:"settings.tokenization_key"`
 	// TokenizationURL overrides the Collect.js script URL.
 	TokenizationURL string `psp:"settings.tokenization_url"`
-	// EndpointDeployment is gateway or sandbox; "" follows Config.TestMode.
-	EndpointDeployment string `psp:"settings.endpoint_deployment"`
 	// CardEntry is browser (the default) or server, where the payment page
 	// posts the card to OpenRails, which vaults it.
 	CardEntry string `psp:"settings.card_entry"`
@@ -49,7 +51,7 @@ type NMIPSP struct {
 // PSPConfig returns the declaration.
 func (p NMIPSP) PSPConfig() PSPConfig {
 	return PSPConfig{
-		Rail: billing.RailNMI, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian,
+		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian,
 		Secrets: secretSlots(map[string]string{
 			"security_key":                    p.SecurityKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -59,7 +61,6 @@ func (p NMIPSP) PSPConfig() PSPConfig {
 			"webhook_overlap_expires_at": instant(p.WebhookOverlapExpiresAt),
 			"tokenization_key":           p.TokenizationKey,
 			"tokenization_url":           p.TokenizationURL,
-			"endpoint_deployment":        p.EndpointDeployment,
 			"card_entry":                 p.CardEntry,
 			"fallback_for":               keyList(p.FallbackFor),
 			"fallback_after_failures":    count(p.FallbackAfterFailures),
@@ -71,7 +72,9 @@ func (p NMIPSP) PSPConfig() PSPConfig {
 type StripePSP struct {
 	// AccountID is the Stripe account, acct_….
 	AccountID string `psp:"account_id"`
-	Archived  bool   `psp:"archived"`
+	// Environment is live or test, as the secret key's prefix says.
+	Environment string `psp:"environment"`
+	Archived    bool   `psp:"archived"`
 
 	SecretKey            string `psp:"secrets.secret_key,required"`
 	WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
@@ -95,7 +98,7 @@ type StripePSP struct {
 // PSPConfig returns the declaration.
 func (p StripePSP) PSPConfig() PSPConfig {
 	return PSPConfig{
-		Rail: billing.RailStripe, AccountID: p.AccountID, Archived: p.Archived,
+		Rail: billing.RailStripe, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{
 			"secret_key":                      p.SecretKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -115,7 +118,9 @@ func (p StripePSP) PSPConfig() PSPConfig {
 type CCBillPSP struct {
 	// AccountID is clientAccnum-clientSubacc, dash-joined like 999999-0000.
 	AccountID string `psp:"account_id"`
-	Archived  bool   `psp:"archived"`
+	// Environment is live or sandbox (CCBill's sandbox).
+	Environment string `psp:"environment"`
+	Archived    bool   `psp:"archived"`
 
 	// Salt signs FlexForm links and verifies their callbacks.
 	Salt             string `psp:"secrets.salt,required"`
@@ -133,7 +138,7 @@ type CCBillPSP struct {
 // PSPConfig returns the declaration.
 func (p CCBillPSP) PSPConfig() PSPConfig {
 	return PSPConfig{
-		Rail: billing.RailCCBill, AccountID: p.AccountID, Archived: p.Archived,
+		Rail: billing.RailCCBill, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{
 			"salt":              p.Salt,
 			"datalink_username": p.DatalinkUsername,
@@ -149,7 +154,9 @@ func (p CCBillPSP) PSPConfig() PSPConfig {
 // SolanaPSP declares the Solana wallet PSP. Its account id is the signer's
 // public key, so it declares none.
 type SolanaPSP struct {
-	Archived bool `psp:"archived"`
+	// Environment is live (mainnet) or sandbox (devnet).
+	Environment string `psp:"environment"`
+	Archived    bool   `psp:"archived"`
 
 	// PrivateKey is the base58 key of a local keypair signer.
 	PrivateKey string `psp:"secrets.private_key"`
@@ -177,7 +184,7 @@ type SolanaToken struct {
 // PSPConfig returns the declaration.
 func (p SolanaPSP) PSPConfig() PSPConfig {
 	out := PSPConfig{
-		Rail: billing.RailSolana, Archived: p.Archived,
+		Rail: billing.RailSolana, Environment: p.Environment, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{"private_key": p.PrivateKey}),
 		Settings: settingSlots(map[string]any{
 			"rpc_provider":     p.RPCProvider,

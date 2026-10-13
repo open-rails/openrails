@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/authkit/keys"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/service"
 )
@@ -25,6 +26,7 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 	if m.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
+	environments := map[string]string{}
 	for _, rawSlug := range sortedMerchantKeys(m.Merchants) {
 		t := m.Merchants[rawSlug]
 		slug := strings.ToLower(strings.TrimSpace(rawSlug))
@@ -45,9 +47,10 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 			if err := validateManifestPSP(slug, key, account); err != nil {
 				return err
 			}
+			environments[slug+"/"+key] = account.Environment
 		}
 	}
-	return nil
+	return config.ValidateDeploymentEnvironments(environments)
 }
 
 // validateManifestRemoteApplication checks the per-merchant host-app

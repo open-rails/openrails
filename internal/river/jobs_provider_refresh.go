@@ -393,9 +393,6 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		}
 		var res providerRefreshMerchantResult
 		for _, account := range accounts {
-			if account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)) {
-				continue
-			}
 			provider := reconcile.Provider(account.Rail)
 			accountBuilder := builder
 			accountBuilder.AccountIDs = map[reconcile.Provider]string{provider: account.AccountID}

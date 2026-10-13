@@ -47,7 +47,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDecl
 	var fallback *signeridentity.Transit
 	if a.Runtime.Vault != nil && a.Runtime.Vault.SolanaTransit != nil {
 		fallback = &signeridentity.Transit{TransitClient: a.Runtime.Vault.SolanaTransit, DB: database, Directory: directory, Slug: m.Slug,
-			Environment: config.ExpectedProviderEnvironment(config.IsTestMode(conf)), Tolerate: tolerateVault, OnChange: a.Runtime.ReportSignerKeyChange}
+			Tolerate: tolerateVault, OnChange: a.Runtime.ReportSignerKeyChange}
 		req.SolanaTransit = fallback
 		req.DeferPSP = fallback.Defers
 	}
@@ -68,8 +68,7 @@ func approveSolanaSigner(ctx context.Context, a *app.App, declaration config.Mer
 	if a.Runtime.Vault == nil || a.Runtime.Vault.SolanaTransit == nil || a.Runtime.Merchants == nil {
 		return fmt.Errorf("openrails: no Vault Transit signer is configured")
 	}
-	environment := config.ExpectedProviderEnvironment(config.IsTestMode(a.Config))
-	if _, err := signeridentity.Approve(ctx, a.Runtime.DB, a.Runtime.Merchants, a.Runtime.Vault.SolanaTransit, mid, environment, key); err != nil {
+	if _, err := signeridentity.Approve(ctx, a.Runtime.DB, a.Runtime.Merchants, a.Runtime.Vault.SolanaTransit, mid, key); err != nil {
 		return fmt.Errorf("openrails: %w", err)
 	}
 	if _, _, err := upsertMerchantConfig(ctx, a, declaration, false); err != nil {

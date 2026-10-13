@@ -465,7 +465,6 @@ func (w *world) start() {
 	}
 	cfg := &openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		DB:                &openrails.DBConfig{URL: dbURL},
 		// The test server's loopback peer is the site's reverse proxy.
@@ -476,9 +475,9 @@ func (w *world) start() {
 		w.cfg(cfg)
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": openrails.StripePSP{AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe, PublishableKey: "pk_test_e2e"}.PSPConfig(),
-		"nmi":    openrails.NMIPSP{AccountID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
-		"ccbill": openrails.CCBillPSP{AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig(),
+		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe, PublishableKey: "pk_test_e2e"}.PSPConfig(),
+		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+		"ccbill": openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig(),
 	}
 	if w.declare != nil {
 		w.declare(psps)

@@ -103,8 +103,7 @@ func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) bi
 // loadPaymentConfig projects the merchant's armed PSPs and Solana acceptance
 // onto the browser-safe payment setup.
 func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.PaymentConfig, bool) {
-	env := config.ExpectedProviderEnvironment(r.State.Config != nil && config.IsTestMode(r.State.Config))
-	psps, err := r.State.Merchants.PublicPSPs(r.Request.Context(), mid, env, pspArmed(r.State.RailConfigs))
+	psps, err := r.State.Merchants.PublicPSPs(r.Request.Context(), mid, pspArmed(r.State.RailConfigs))
 	if err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("payment config: PSPs could not be loaded")
 		r.ErrorCode(billing.CodeInternalError, "failed to load payment configuration")

@@ -65,7 +65,7 @@ func TestPSPReloadRejectsAccountReplacement(t *testing.T) {
 				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT superseded_at IS NOT NULL FROM billing.psps WHERE id = $1`), w.psp["nmi"].UUID()).Scan(&retired))
 				require.False(t, retired)
 				if !other.IsZero() {
-					owner, found, err := rt.Merchants.ResolvePSPByIdentity(ctx, "nmi", "test", "replacement-account")
+					owner, found, err := rt.Merchants.ResolvePSPByIdentity(ctx, "nmi", "sandbox", "replacement-account")
 					require.NoError(t, err)
 					require.True(t, found)
 					require.Equal(t, other, owner.MerchantID)
@@ -92,7 +92,7 @@ func TestPSPSeparateAccountKeepsExistingBilling(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{
-		Key: "nmi", Rail: "nmi", AccountID: "replacement-account",
+		Key: "nmi", Rail: "nmi", Environment: "sandbox", AccountID: "replacement-account",
 		Credentials: map[string]string{"security_key": "separate-account-key"},
 	})
 	require.Equal(t, "psp_key_taken", codeOf(err), "the API already refuses to replace an account")
@@ -106,7 +106,7 @@ func TestPSPSeparateAccountKeepsExistingBilling(t *testing.T) {
 	require.Equal(t, original.AccountID, rotated.AccountID)
 
 	added, err := client.CreatePSP(ctx, billing.CreatePSPParams{
-		Key: "separate", Rail: "nmi", AccountID: "replacement-account",
+		Key: "separate", Rail: "nmi", Environment: "sandbox", AccountID: "replacement-account",
 		Credentials: map[string]string{"security_key": "separate-account-key", "webhook_signing_secret": "separate-webhook"},
 	})
 	require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestPSPSeparateAccountKeepsExistingBilling(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, "rotated-original-key", scope.Secret("security_key"))
-	active, err := rt.Merchants.ActivePSPScopesForRail(ctx, client.MerchantID(), "nmi", "test")
+	active, err := rt.Merchants.ActivePSPScopesForRail(ctx, client.MerchantID(), "nmi")
 	require.NoError(t, err)
 	require.Len(t, active, 1)
 	require.Equal(t, added.ID.UUID(), active[0].ID)

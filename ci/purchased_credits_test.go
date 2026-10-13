@@ -73,7 +73,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	slug := "credit-purchase-" + uuid.NewString()[:8]
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
 	ctx := t.Context()
 	declareDynamicMeter(t, client, "api", "units")

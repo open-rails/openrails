@@ -100,10 +100,10 @@ func TestProbeTestModeAndSandboxArming(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, ProbeIndeterminate, got)
 
-	for response, want := range map[string]error{"1": nil, "2": ErrLiveCredentialsUnderTestMode, "3": nil} {
+	for response, want := range map[string]error{"1": nil, "2": ErrEnvironmentMismatch, "3": nil} {
 		f := probe(t, response)
 		c := f.client(t)
-		err := CheckTestModeArm(t.Context(), c)
+		err := CheckEnvironmentArm(t.Context(), c)
 		switch {
 		case response == "1":
 			require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestProbeTestModeAndSandboxArming(t *testing.T) {
 			require.ErrorContains(t, err, "refusing to arm")
 		}
 		f.Close()
-		require.ErrorContains(t, CheckTestModeArm(t.Context(), c), "refusing to arm", "a previous verdict never arms without a fresh probe")
+		require.ErrorContains(t, CheckEnvironmentArm(t.Context(), c), "refusing to arm", "a previous verdict never arms without a fresh probe")
 	}
 }
 
@@ -368,7 +368,7 @@ func TestRecurringSaleEvidenceBindsAccountOrderTransactionAndSoleBilling(t *test
 	}
 
 	f := newNMIFake(t, reply(""))
-	unbound, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
+	unbound, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	unbound.QueryURL, unbound.V5BaseURL = f.URL+"/query", f.URL
 	_, _, err = unbound.ReadRecurringSaleEvidence(t.Context(), "order", "txn", "v1", "b1")

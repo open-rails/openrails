@@ -102,18 +102,8 @@ func (b MerchantFetcherBuilder) Build(ctx context.Context, mid billing.MerchantI
 	return out
 }
 
-func (b MerchantFetcherBuilder) testMode() bool {
-	return b.Config != nil && config.IsTestMode(b.Config)
-}
-
 func (b MerchantFetcherBuilder) readOnly() bool {
 	return b.Config != nil && config.IsProviderReadOnly(b.Config)
-}
-
-// environment is the deployment's PSP environment, the test_mode credential
-// filter: test under test_mode, live otherwise.
-func (b MerchantFetcherBuilder) environment() string {
-	return config.ExpectedProviderEnvironment(b.testMode())
 }
 
 // resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
@@ -130,7 +120,7 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid bi
 	}
 	declared := 1
 	if b.Merchants != nil {
-		if n, err := b.Merchants.CountActivePSPsForRail(ctx, mid, string(provider), b.environment()); err != nil {
+		if n, err := b.Merchants.CountActivePSPsForRail(ctx, mid, string(provider)); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": string(provider),
 			}).Warn("provider pull: active-PSP count failed; treating the rail as partially covered (absence proves nothing)")
@@ -166,7 +156,7 @@ func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid billi
 		}
 		return scope, ok, err
 	}
-	return b.Merchants.PullPSPScope(ctx, mid, rail, b.environment())
+	return b.Merchants.PullPSPScope(ctx, mid, rail)
 }
 
 // markUnavailable records a rail left unarmed because the merchant's
@@ -277,7 +267,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 			ClientSubAcc:     strings.TrimSpace(sub),
 			DataLinkUsername: username,
 			DataLinkPassword: password,
-			TestMode:         b.testMode(),
+			Sandbox:          scope.Environment == config.EnvironmentSandbox,
 		})
 		dl.ReadOnly = b.readOnly()
 		if b.Endpoints.CCBillDataLinkBaseURL != "" {
@@ -311,8 +301,8 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.Mer
 // buildSolana: Solana pulls read public chain state, so the rail needs no pull
 // credential (private_key is the operator-only signing key). A declared solana
 // account arms the fetcher; its settings carry the merchant's RPC knobs
-// (rpc_provider / rpc_api_key), defaulting to the public RPC for the test_mode
-// network.
+// (rpc_provider / rpc_api_key), defaulting to the public RPC for the PSP
+// environment's network.
 func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if b.DB == nil {
 		return
@@ -323,10 +313,6 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 			b.warnScopeError(ctx, mid, ProviderSolana, err)
 			return
 		}
-		network := "mainnet"
-		if b.testMode() {
-			network = "devnet"
-		}
 		// A sandbox run's loopback RPC replaces the public one here as it does
 		// for the runtime's own Solana clients (hermetic CI never reaches devnet).
 		endpoint := config.SandboxSolanaRPCURL(b.Config)
@@ -335,7 +321,7 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 			LoopbackFixture: endpoint != "",
 			RPCProvider:     settings.RPCProvider,
 			RPCAPIKey:       settings.RPCAPIKey,
-			Network:         network,
+			Network:         config.SolanaNetwork(scope.Environment),
 			ReadOnly:        true,
 		})
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))

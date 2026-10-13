@@ -60,7 +60,7 @@ func ValidateManifestPSP(slug string, key string, cfg config.PSPConfig) error {
 			return fmt.Errorf("merchant %q psps.%s.settings.allowed_cidrs was removed (#710): CCBill webhook source IPs are the built-in documented ranges — delete the key", slug, key)
 		}
 	}
-	if err := config.ValidatePSPKeys(key, cfg); err != nil {
+	if err := config.ValidatePSPDeclaration(key, cfg); err != nil {
 		return fmt.Errorf("merchant %q %w", slug, err)
 	}
 	if rail == "solana" {

@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
@@ -85,11 +84,11 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.En
 		t.Cleanup(func() { _ = rdb.Close() })
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_e2e", WebhookSigningSecret: "whsec_e2e"}.PSPConfig(),
-		"solana": openrails.SolanaPSP{TransitKey: transitKey}.PSPConfig(),
+		"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_e2e", WebhookSigningSecret: "whsec_e2e"}.PSPConfig(),
+		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox, TransitKey: transitKey}.PSPConfig(),
 	}
 	if b.nmi != nil {
-		psps["nmi"] = openrails.NMIPSP{AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
+		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "whsec_nmi", TokenizationKey: "e2e-tokenization"}.PSPConfig()
 	}
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
@@ -97,7 +96,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.En
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
 	if b.chain != nil {
 		cfg.ProviderSandbox.SolanaRPCURL = b.chain.URL()
-		psps["solana"] = openrails.SolanaPSP{TransitKey: transitKey, RPCProvider: "public", Tokens: map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}}}.PSPConfig()
+		psps["solana"] = openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox, TransitKey: transitKey, RPCProvider: "public", Tokens: map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}}}.PSPConfig()
 	}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {DisplayName: b.slug, PSPs: psps}}
 	cfg = ownIssuer(cfg)
@@ -349,7 +348,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, second, monthly), "a recurring Solana subscribe is refused")
 	signer := func(rt *openrails.Engine) solanaint.Signer {
 		r := engine.Graph(rt).Runtime
-		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.Vault.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))
+		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.Vault.SolanaTransit, r.DB, 0)
 	}
 	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
 	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
@@ -374,10 +373,10 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.NoError(t, err)
 	graph := engine.Graph(second).Runtime
 	check := &signeridentity.Transit{TransitClient: graph.Vault.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
-		Slug: slug, Environment: config.ExpectedProviderEnvironment(true)}
+		Slug: slug}
 	_, err = check.PublicKey(t.Context(), transitKey)
 	require.ErrorIs(t, err, vault.ErrUnavailable, "an unreadable stored identity never accepts Vault's key")
-	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.Vault.SolanaTransit, mid, config.ExpectedProviderEnvironment(true), transitKey)
+	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.Vault.SolanaTransit, mid, transitKey)
 	require.Error(t, err)
 	active, _ = solanaRows(rotated)
 	require.Zero(t, active)

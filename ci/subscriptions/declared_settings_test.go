@@ -33,7 +33,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	ctx := t.Context()
 	boot := func(slug string, settings billing.MerchantSettings, vault *vaulttest.Vault) (*openrails.Engine, *openrails.Client, error) {
 		cfg := openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Declared", Settings: settings}},
 		}
 		if vault != nil {
@@ -119,7 +119,7 @@ func TestVaultMerchantSettings(t *testing.T) {
 	ctx := t.Context()
 	boot := func(declared openrails.MerchantDeclaration) (*openrails.Engine, *openrails.Client, error) {
 		bill, err := openrails.New(ctx, openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchants: map[string]openrails.MerchantDeclaration{declared.Slug: declared}, Vault: vault.Config(),
 		}, openrails.Deps{Postgres: w.pool, Clock: w.clock})
 		if err != nil {

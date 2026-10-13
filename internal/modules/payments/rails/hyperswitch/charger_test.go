@@ -215,7 +215,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			defer server.Close()
 			client, err := provider.New(provider.Config{BaseURL: server.URL, MerchantID: "merchant_A", ProfileID: "profile_A", APIKey: "synthetic-custodian-key", ReadOnly: tc.mode == "readonly"})
 			require.NoError(t, err)
-			posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{SecurityKey: gatewayKey}, destination, false)
+			posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{Environment: config.EnvironmentLive, SecurityKey: gatewayKey}, destination)
 			require.NoError(t, err)
 			charger := &Charger{Client: client, Destination: destination, SecurityKey: gatewayKey, Posture: posture}
 			require.NotContains(t, fmt.Sprintf("%+v %#v", charger, charger), gatewayKey)

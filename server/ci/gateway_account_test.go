@@ -42,7 +42,7 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		slug := "seller-" + uuid.NewString()[:8]
 		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
-		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: account,
+		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", AccountID: account,
 			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
 			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 		require.NoError(t, err)

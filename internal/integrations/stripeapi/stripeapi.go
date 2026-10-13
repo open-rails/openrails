@@ -38,9 +38,8 @@ const APIVersion = "2026-06-24.dahlia"
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
-	// sandbox (test_mode=sandbox) requires every mutation's key to hold a
-	// verified test-mode posture; fixture marks an injected fake transport.
-	sandbox, fixture bool
+	// fixture marks an injected fake transport.
+	fixture bool
 }
 
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -48,12 +47,15 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.readOnly && mutating {
 		return nil, ErrProviderReadOnly
 	}
-	if t.sandbox && mutating {
-		// An injected transport is not a posture exemption for a live key.
-		if t.fixture && liveSecretKey(requestSecret(req)) {
-			return nil, fmt.Errorf("%w: stripe live key under sandbox posture", providerposture.ErrDisarmed)
-		}
-		if !t.fixture {
+	if mutating {
+		live := liveSecretKey(requestSecret(req))
+		switch {
+		case live && (t.fixture || loopbackDestination(req)):
+			// A live key never reaches a fake provider.
+			return nil, fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
+		case !live && !t.fixture:
+			// A test key's mutation holds a verified test-mode posture; a
+			// live key's PSP was checked live when it loaded.
 			if err := requirePosture(req, t.transport()); err != nil {
 				return nil, err
 			}
@@ -115,11 +117,11 @@ type Factory struct{ base http.RoundTripper }
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), cfg != nil && config.IsTestMode(cfg), timeout)
+	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {
-	return f.newClient(true, false, timeout)
+	return f.newClient(true, timeout)
 }
 
 // HostRewriteTransport sends every request to target regardless of the
@@ -142,7 +144,7 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func (f *Factory) newClient(readOnly, sandbox bool, timeout time.Duration) *http.Client {
+func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
 	if f != nil {
 		base = f.base
@@ -152,6 +154,6 @@ func (f *Factory) newClient(readOnly, sandbox bool, timeout time.Duration) *http
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, sandbox: sandbox, fixture: base != nil, base: base},
+		Transport: &guardTransport{readOnly: readOnly, fixture: base != nil, base: base},
 	}
 }

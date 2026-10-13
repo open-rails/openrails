@@ -55,9 +55,11 @@ func TestRegistryIntegrity(t *testing.T) {
 			require.NoError(t, err, "%s/%s mint %s is not in the verified set", network, symbol, token.Mint)
 			require.NoError(t, config.ValidateTokenDecimals(symbol, d))
 		}
-		require.NotEmpty(t, set[DefaultAcceptedSymbol].Mint, network)
+		for _, symbol := range DefaultAcceptedSymbols {
+			require.NotEmpty(t, set[symbol].Mint, "%s/%s", network, symbol)
+		}
 	}
-	require.True(t, IsStablecoin(DefaultAcceptedSymbol))
+	require.Equal(t, []string{"SOL", "USDC"}, DefaultAcceptedSymbols, "nothing declared accepts SOL and USDC")
 
 	for _, sc := range knownStablecoins {
 		if token, ok := mainnet[sc.Symbol]; ok {

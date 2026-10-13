@@ -56,6 +56,7 @@ merchants:
     psps:
       nmi:
         rail: nmi
+        environment: sandbox
         account_id: test
         secrets: {security_key: test, webhook_signing_secret: test}
         settings: {tokenization_key: test}

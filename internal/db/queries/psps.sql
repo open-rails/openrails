@@ -170,6 +170,18 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 UPDATE billing.psps SET credential_duplicate_at = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND credential_duplicate_at IS NOT NULL;
 
+-- CROSS-MERCHANT: the oldest current PSP identity in none of environments,
+-- for the rule that a deployment's PSPs are all live or all non-live.
+-- name: PSPOutsideEnvironments :one
+SELECT p.id, m.slug, p.key, p.rail, p.environment, p.account_id
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.superseded_at IS NULL
+  AND m.deleted_at IS NULL
+  AND NOT (p.environment = ANY(sqlc.arg(environments)::text[]))
+ORDER BY p.created_at, p.id
+LIMIT 1;
+
 -- CROSS-MERCHANT: whether any merchant holds a PSP identity on rail in
 -- environment, archived ones included.
 -- name: PSPExistsOnRail :one

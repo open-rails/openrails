@@ -12,6 +12,7 @@ import (
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
 // MerchantRPCBuilder resolves one merchant's Solana RPC client at use time for
@@ -33,10 +34,6 @@ func (b *MerchantRPCBuilder) merchants() *merchants.Service {
 	return b.MerchantsFn()
 }
 
-func (b *MerchantRPCBuilder) testMode() bool {
-	return b != nil && b.Config != nil && config.IsTestMode(b.Config)
-}
-
 // Resolve arms the merchant's RPC client from its declared solana account's
 // settings, picking the pull scope (active, else newest archived for drain).
 // nil client with nil error = no declared account (caller skips/warns).
@@ -48,7 +45,7 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 	if svc == nil {
 		return nil, nil // nothing arms without the merchants service
 	}
-	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana", config.ExpectedProviderEnvironment(b.testMode()))
+	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana")
 	if err != nil {
 		return nil, fmt.Errorf("solana: resolve merchant %s rail account: %w", mid.String(), err)
 	}
@@ -60,18 +57,36 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 		// Malformed settings fail loud; there is no fallback client.
 		return nil, fmt.Errorf("solana: merchant %s account %s settings: %w", mid.String(), scope.AccountID, err)
 	}
-	network := "mainnet"
-	if b.testMode() {
-		network = "devnet"
-	}
 	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
 		Endpoint:        b.Endpoint,
 		LoopbackFixture: b.Endpoint != "",
 		RPCProvider:     settings.RPCProvider,
 		RPCAPIKey:       settings.RPCAPIKey,
-		Network:         network,
+		Network:         config.SolanaNetwork(scope.Environment),
 		ReadOnly:        b.Config != nil && config.IsProviderReadOnly(b.Config),
 	}), nil
+}
+
+// Network is the network the ctx merchant's Solana PSP pays on: devnet for a
+// sandbox PSP, mainnet otherwise and when it has none.
+func (b *MerchantRPCBuilder) Network(ctx context.Context) string {
+	svc := b.merchants()
+	mid, err := merchant.Require(ctx)
+	if svc == nil || err != nil {
+		return config.SolanaNetwork(config.EnvironmentLive)
+	}
+	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana")
+	if err != nil || !ok {
+		return config.SolanaNetwork(config.EnvironmentLive)
+	}
+	return config.SolanaNetwork(scope.Environment)
+}
+
+// RecurringTokens is the ctx merchant's network and its built-in mint table:
+// the recurring services' lookup, never what the merchant accepts.
+func (b *MerchantRPCBuilder) RecurringTokens(ctx context.Context) (string, map[string]config.TokenConfig) {
+	network := b.Network(ctx)
+	return network, solanatokens.ForNetwork(network)
 }
 
 // ChainReader adapts the builder to the intent verify leg's chain reads: the

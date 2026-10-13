@@ -11,9 +11,10 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 		rail, env, account, key string
 		want                    string
 	}{
-		{" Stripe ", "production", "acct_1", "SECRET_KEY", "psps/stripe/live/acct_1/secret_key"},
-		{"nmi", "sandbox", " 999999-0000 ", "security_key", "psps/nmi/test/999999-0000/security_key"},
-		{"solana", "devnet", "AKnL4", "private_key", "psps/solana/test/AKnL4/private_key"},
+		{" Stripe ", " LIVE ", "acct_1", "SECRET_KEY", "psps/stripe/live/acct_1/secret_key"},
+		{"nmi", "test", " 999999-0000 ", "security_key", "psps/nmi/test/999999-0000/security_key"},
+		{"nmi", "sandbox", " 999999-0000 ", "security_key", "psps/nmi/sandbox/999999-0000/security_key"},
+		{"solana", "sandbox", "AKnL4", "private_key", "psps/solana/sandbox/AKnL4/private_key"},
 		// Account ids are path-escaped so they can never add a path segment.
 		{"stripe", "live", "../evil/x", "secret_key", "psps/stripe/live/..%2Fevil%2Fx/secret_key"},
 	} {
@@ -31,6 +32,8 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 		{"", "live", "a", "secret_key"},
 		{"stripe", "", "a", "secret_key"}, // environment is never defaulted
 		{"stripe", "staging", "a", "secret_key"},
+		{"stripe", "production", "a", "secret_key"}, // no aliases
+		{"solana", "devnet", "a", "private_key"},
 		{"stripe", "live", " ", "secret_key"},
 		{"stripe", "live", "a", "publishable_key"},
 		{"nmi", "live", "mobius", "tokenization_key"}, // public setting, not a secret
@@ -77,12 +80,13 @@ func TestSecretWritability(t *testing.T) {
 // #662: the PSP id is a pure function of the canonical global natural key.
 func TestPSPIDDerivesFromCanonicalNaturalKey(t *testing.T) {
 	base := PspID("nmi", "live", "999999-0000")
-	for _, alias := range [][3]string{{"NMI", "live", "999999-0000"}, {" nmi ", "LIVE", "999999-0000"}, {"nmi", "production", "999999-0000"}, {"nmi", "mainnet", "999999-0000"}, {"nmi", "live", " 999999-0000 "}} {
+	for _, alias := range [][3]string{{"NMI", "live", "999999-0000"}, {" nmi ", "LIVE", "999999-0000"}, {"nmi", " live ", "999999-0000"}, {"nmi", "live", " 999999-0000 "}} {
 		require.Equal(t, base, PspID(alias[0], alias[1], alias[2]), "%q", alias)
 	}
-	for _, other := range [][3]string{{"stripe", "live", "999999-0000"}, {"nmi", "test", "999999-0000"}, {"nmi", "live", "999999-0001"}} {
+	for _, other := range [][3]string{{"stripe", "live", "999999-0000"}, {"nmi", "test", "999999-0000"}, {"nmi", "sandbox", "999999-0000"}, {"nmi", "live", "999999-0001"}} {
 		require.NotEqual(t, base, PspID(other[0], other[1], other[2]), "%q", other)
 	}
-	id, rail, env, account := PSPNaturalKey("NMI", "production", " 999999-0000 ")
+	require.NotEqual(t, PspID("nmi", "test", "999999-0000"), PspID("nmi", "sandbox", "999999-0000"), "a sandbox.nmi.com account is not the gateway's")
+	id, rail, env, account := PSPNaturalKey("NMI", "Live", " 999999-0000 ")
 	require.Equal(t, []any{base, "nmi", "live", "999999-0000"}, []any{id, rail, env, account})
 }

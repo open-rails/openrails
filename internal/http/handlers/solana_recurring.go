@@ -335,8 +335,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 	var tokens map[string]config.TokenConfig
 	if r.State.RailConfigs != nil {
 		if proc, cerr := r.State.RailConfigs.RailConfig(ctx, string(models.RailSolana), ""); cerr == nil && proc.Solana != nil {
-			network = proc.Solana.Network
-			tokens = proc.Solana.Tokens
+			network, tokens = proc.Solana.Network, proc.Solana.Tokens
 		}
 	}
 	svc := recurring.NewConfirmTierChangeService(
@@ -345,8 +344,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
 		subscriptions.NewSubscriptionRepo(r.State.DB),
 		r.State.DB,
-		network,
-		tokens,
+		recurring.NetworkTokens(network, tokens),
 	)
 	result, err := svc.Confirm(ctx, recurring.ConfirmTierChangeInput{
 		Signature:          signature,

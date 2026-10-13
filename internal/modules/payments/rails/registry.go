@@ -116,6 +116,11 @@ type Descriptor struct {
 	// ServerCardEntry: the gateway has a server-side vault call, so a PSP of
 	// this rail may declare card_entry: server.
 	ServerCardEntry bool
+
+	// Environments are the environments a PSP on the rail may declare: live
+	// (real money), test (the provider's own system, no money moves) and
+	// sandbox (the provider's separate sandbox system).
+	Environments []string
 }
 
 // NewSubscription classifies new-subscription enrollment on a rail.
@@ -184,10 +189,11 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous verifies only until
 		// webhook_overlap_expires_at.
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "card_entry", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
-		true,                  // OneOffSale (direct gateway sale)
-		NewSubscriptionEngine, // saved vault card charged by OpenRails
-		true,                  // ServerCardEntry (Direct Post customer_vault=add_customer)
+		[]string{"tokenization_key", "tokenization_url", "card_entry", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
+		true,                                // OneOffSale (direct gateway sale)
+		NewSubscriptionEngine,               // saved vault card charged by OpenRails
+		true,                                // ServerCardEntry (Direct Post customer_vault=add_customer)
+		[]string{"live", "test", "sandbox"}, // test: a gateway account in test mode; sandbox: sandbox.nmi.com
 	},
 	{
 		models.RailCCBill,
@@ -204,9 +210,10 @@ var descriptors = []Descriptor{
 		"",                // CancelPortalURL (cancels happen on our site)
 		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
 		[]string{"fallback_for", "fallback_after_failures"},
-		false,                     // OneOffSale
-		NewSubscriptionHostedForm, // an order's FlexForm sale; CCBill bills it
-		false,                     // ServerCardEntry (CCBill's own page takes the card)
+		false,                       // OneOffSale
+		NewSubscriptionHostedForm,   // an order's FlexForm sale; CCBill bills it
+		false,                       // ServerCardEntry (CCBill's own page takes the card)
+		[]string{"live", "sandbox"}, // sandbox: sandbox-api.ccbill.com
 	},
 	{
 		models.RailStripe,
@@ -225,9 +232,10 @@ var descriptors = []Descriptor{
 		// endpoint verifying, never past webhook_overlap_expires_at.
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
 		[]string{"publishable_key", "webhook_overlap_expires_at", "fallback_for", "fallback_after_failures"},
-		true,                  // OneOffSale
-		NewSubscriptionEngine, // saved PaymentMethod charged by OpenRails
-		false,                 // ServerCardEntry (Stripe's own fields take the card)
+		true,                     // OneOffSale
+		NewSubscriptionEngine,    // saved PaymentMethod charged by OpenRails
+		false,                    // ServerCardEntry (Stripe's own fields take the card)
+		[]string{"live", "test"}, // test: sk_test_/rk_test_ keys
 	},
 	{
 		models.RailSolana,
@@ -244,9 +252,10 @@ var descriptors = []Descriptor{
 		"", // CancelPortalURL
 		[]CredentialKey{{"private_key", false, false}}, // operator-only signer
 		[]string{"rpc_provider", "rpc_api_key", "tokens", "recipient_wallet"},
-		true,                       // OneOffSale (Solana Pay transfer)
-		NewSubscriptionOnChainPlan, // subscriber signs the price's on-chain plan
-		false,                      // ServerCardEntry (no card)
+		true,                        // OneOffSale (Solana Pay transfer)
+		NewSubscriptionOnChainPlan,  // subscriber signs the price's on-chain plan
+		false,                       // ServerCardEntry (no card)
+		[]string{"live", "sandbox"}, // live: mainnet; sandbox: devnet
 	},
 }
 
@@ -273,6 +282,13 @@ func All() []Descriptor {
 	out := make([]Descriptor, len(descriptors))
 	copy(out, descriptors)
 	return out
+}
+
+// Environments are the environments a PSP on rail may declare; nil for an
+// unknown rail.
+func Environments(rail models.Rail) []string {
+	d, _ := Lookup(rail)
+	return d.Environments
 }
 
 // HasRemoteCustomer reports whether the rail exposes a card-independent remote

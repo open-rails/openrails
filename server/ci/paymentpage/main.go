@@ -102,7 +102,6 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 			PublicBillingBaseURL: api, RateLimitsDisabled: true,
 			ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
 			// Cloudflare's always-passes test keys: the page loads the widget,
@@ -110,8 +109,8 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
 			Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
 				Settings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]openrails.PSPConfig{
-					"nmi":    openrails.NMIPSP{AccountID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
-					"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
+					"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+					"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}},
 		},
 		Auth: authkit.Config{
@@ -276,7 +275,7 @@ func (h *harness) stripeAuthenticate(w http.ResponseWriter, r *http.Request) {
 // holds for the merchant's account.
 func (h *harness) stripeDomains(w http.ResponseWriter, r *http.Request) {
 	ctx := merchant.WithID(r.Context(), h.mid)
-	scopes, err := h.rt.Merchants.ActivePSPScopesForRail(ctx, h.mid, string(models.RailStripe), h.rt.Merchants.Environment())
+	scopes, err := h.rt.Merchants.ActivePSPScopesForRail(ctx, h.mid, string(models.RailStripe))
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

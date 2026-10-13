@@ -132,7 +132,7 @@ func newProxyCharger(t *testing.T, p *fakeProxy) *Charger {
 	t.Cleanup(srv.Close)
 	bt, err := basistheory.New(basistheory.Config{APIKey: "key_test", BaseURL: srv.URL})
 	require.NoError(t, err)
-	posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{SecurityKey: "sk"}, "https://gw.example/transact.php", false)
+	posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{Environment: config.EnvironmentLive, SecurityKey: "sk"}, "https://gw.example/transact.php")
 	require.NoError(t, err)
 	return New(bt, GatewayConfig{SecurityKey: "sk", DirectPostURL: "https://gw.example/transact.php", Posture: posture})
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -95,24 +96,20 @@ func (s *Service) CustodianScopeByID(ctx context.Context, id billing.MerchantID,
 }
 
 // CustodianScopeByIdentity resolves a merchant's custodian by its vendor
-// identity (kind + environment + tenant id) — the shape a custodian webhook
-// carries once the merchant is already known.
-func (s *Service) CustodianScopeByIdentity(ctx context.Context, id billing.MerchantID, kind, environment, accountID string) (CustodianScope, bool, error) {
+// identity (kind + tenant id) — the shape a custodian webhook carries once the
+// merchant is already known. A merchant's custodians share one money class.
+func (s *Service) CustodianScopeByIdentity(ctx context.Context, id billing.MerchantID, kind, accountID string) (CustodianScope, bool, error) {
 	kind = custodians.Normalize(kind)
-	environment = normalizeProviderSecretEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
 	if s == nil || s.pool == nil || id.IsZero() || kind == "" || accountID == "" {
 		return CustodianScope{}, false, nil
-	}
-	if environment == "" {
-		return CustodianScope{}, false, errors.New("merchants: custodian environment must be live or test")
 	}
 	j, err := s.load(ctx, id)
 	if err != nil {
 		return CustodianScope{}, false, err
 	}
 	for _, c := range j.custodians {
-		if c.Kind == kind && c.Environment == environment && c.AccountID == accountID {
+		if c.Kind == kind && c.AccountID == accountID {
 			return c, true, nil
 		}
 	}
@@ -146,7 +143,7 @@ func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid
 		return nil
 	}
 	kind = custodians.Normalize(kind)
-	environment = normalizeProviderSecretEnvironment(environment)
+	environment = normalizeCustodianEnvironment(environment)
 	if environment == "" {
 		return errors.New("merchants: custodian environment must be live or test")
 	}
@@ -173,27 +170,33 @@ func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid
 // identical (an inbound event with a global provider-side id and no merchant
 // context) and so is the answer: a lookup by the global identity key. It
 // resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
-func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, environment, accountID string) (CustodianIdentity, bool, error) {
+func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, accountID string) (CustodianIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return CustodianIdentity{}, false, nil
 	}
 	kind = custodians.Normalize(kind)
-	environment = normalizeProviderSecretEnvironment(environment)
-	if environment == "" {
-		return CustodianIdentity{}, false, errors.New("merchants: custodian environment must be live or test")
+	var rows []gen.ResolveCustodianOwnerByIdentityRow
+	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
+		row, err := gen.New(s.pool).ResolveCustodianOwnerByIdentity(ctx, gen.ResolveCustodianOwnerByIdentityParams{
+			Kind:        kind,
+			Environment: &environment,
+			AccountID:   strings.TrimSpace(accountID),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return CustodianIdentity{}, false, err
+		}
+		rows = append(rows, row)
 	}
-	env := environment
-	row, err := gen.New(s.pool).ResolveCustodianOwnerByIdentity(ctx, gen.ResolveCustodianOwnerByIdentityParams{
-		Kind:        kind,
-		Environment: &env,
-		AccountID:   strings.TrimSpace(accountID),
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if len(rows) == 0 {
 		return CustodianIdentity{}, false, nil
 	}
-	if err != nil {
-		return CustodianIdentity{}, false, err
+	if len(rows) > 1 {
+		return CustodianIdentity{}, false, fmt.Errorf("merchants: %s tenant %s is a custodian in both money classes; its webhooks cannot tell them apart", kind, accountID)
 	}
+	row := rows[0]
 	return CustodianIdentity{
 		ID:          row.ID,
 		MerchantID:  billing.MerchantID(row.MerchantID),
@@ -219,7 +222,7 @@ func (s *Service) CustodianRoutePSPs(ctx context.Context, id billing.MerchantID,
 	}
 	var out []uuid.UUID
 	for _, p := range j.psps {
-		if !p.Archived && p.Rail == rail && p.Environment == custodian.Environment && p.CustodianID != nil && *p.CustodianID == custodianID {
+		if !p.Archived && p.Rail == rail && config.EnvironmentClass(p.Environment) == custodian.Environment && p.CustodianID != nil && *p.CustodianID == custodianID {
 			out = append(out, p.ID)
 		}
 	}

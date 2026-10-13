@@ -92,7 +92,7 @@ func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, now 
 	if configuration == nil {
 		return errors.New("merchant configuration not wired")
 	}
-	live, err := configuration.ActivePSPScopesForRail(ctx, billing.MerchantID(mid), string(models.RailNMI), configuration.Environment())
+	live, err := configuration.ActivePSPScopesForRail(ctx, billing.MerchantID(mid), string(models.RailNMI))
 	if err != nil || len(live) == 0 {
 		return err
 	}

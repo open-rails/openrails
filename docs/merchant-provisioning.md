@@ -212,10 +212,10 @@ Per merchant:
   replaces the stored one.
 - `psps.<key>` — one entry per PSP. `key` is the manifest PSP name a catalog
   price's `psps` and purchase use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
-  `stripe`, `solana`), `account_id`, `archived`, `custodian`, non-secret
-  `settings`, `secrets`, and (Solana) `signer`. There is no `environment`: it is
-  derived from the deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`),
-  so a deployment is all-test or all-live.
+  `stripe`, `solana`), `environment` (required: `live`, `test` or `sandbox`,
+  as the rail has them; see [PSP environments](psp-environments.md)),
+  `account_id`, `archived`, `custodian`, non-secret `settings`, `secrets`, and
+  (Solana) `signer`. A deployment's PSPs are all live or all non-live.
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
   `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the

@@ -21,7 +21,8 @@ func TestRecurringAllowlist(t *testing.T) {
 	} {
 		require.Equal(t, want, IsRecurringStablecoinSymbol(sym), sym)
 	}
-	require.True(t, IsRecurringStablecoinSymbol(solanatokens.DefaultAcceptedSymbol))
+	require.True(t, IsRecurringStablecoinSymbol(solanatokens.PreferredStablecoin))
+	require.False(t, IsRecurringStablecoinSymbol("SOL"), "a default-accepted SOL never rebills")
 
 	for _, network := range []string{"mainnet", "devnet"} {
 		mint, err := ResolveRecurringMint("USDC", network)

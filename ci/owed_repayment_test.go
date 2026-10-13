@@ -39,7 +39,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	require.NoError(t, err)
 	storedPrice, err := catalog.NewPriceService(database).GetByPublicID(ctx, price.ID)
 	require.NoError(t, err)
-	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", AccountID: "acct_owed_test"})
+	psp, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: "owed-stripe", Rail: "stripe", Environment: "test", AccountID: "acct_owed_test"})
 	require.NoError(t, err)
 
 	newCustomer := func() billing.CustomerID {

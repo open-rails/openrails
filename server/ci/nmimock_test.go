@@ -36,7 +36,7 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	slug := "nmimock-" + uuid.NewString()[:8]
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: as.URL, PSPs: map[string]openrails.PSPConfig{
-		"nmi": openrails.NMIPSP{AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+		"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 	}}}
 	bill, client := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 

@@ -122,15 +122,16 @@ func TestRuntimeWiringPolicies(t *testing.T) {
 	require.Equal(t, "https://console.example/admin", alertingDashboardBaseURL(cfg))
 }
 
-// Devnet money is fake: a devnet deployment never depends on Hermes, while
-// mainnet refuses to price an unknown feed. Neither path touches the network.
+// Devnet money is fake: a merchant whose Solana PSP is on devnet never
+// depends on Hermes, while mainnet refuses to price an unknown feed. Neither
+// path touches the network.
 func TestPythPriceProviderDevnetParity(t *testing.T) {
 	for _, sandbox := range []bool{true, false} {
-		cfg := &config.Config{TestMode: config.CredentialPostureLive}
+		network := config.SolanaNetwork(config.EnvironmentLive)
 		if sandbox {
-			cfg.TestMode = config.CredentialPostureSandbox
+			network = config.SolanaNetwork(config.EnvironmentSandbox)
 		}
-		provider, err := createPythPriceProvider(cfg)
+		provider, err := createPythPriceProvider(func(context.Context) string { return network })
 		require.NoError(t, err)
 		price, err := provider.PriceUSD(context.Background(), "WEIRD")
 		if sandbox {

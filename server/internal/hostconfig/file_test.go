@@ -79,7 +79,7 @@ func TestPort(t *testing.T) {
 	// A number in config.yaml skips UnmarshalText.
 	for value, ok := range map[int]bool{44553: true, 70000: false, -20983: false} {
 		f := defaults()
-		f.TestMode, f.ProviderWriteMode, f.Port = "sandbox", "full", port(value)
+		f.ProviderWriteMode, f.Port = "full", port(value)
 		f.DB.URL = testDatabaseURL
 		cfg, err := f.config()
 		require.NoError(t, err)
@@ -93,13 +93,11 @@ func TestConfigExampleLoads(t *testing.T) {
 	require.NoError(t, err)
 	bootEnv(t)
 	unsetenv(t, "DB_URL")
-	unsetenv(t, "TEST_MODE")
 	unsetenv(t, "PROVIDER_WRITE_MODE")
 	cfg, err := Load(example)
 	require.NoError(t, err)
 	require.Equal(t, "0.0.0.0", cfg.Host)
 	require.Equal(t, 3053, cfg.Port)
-	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 	require.Equal(t, billing.ProviderWriteModeFull, cfg.ProviderWriteMode)
 	require.Equal(t, "http://localhost:3053", cfg.Auth.Token.Issuer)
 	require.True(t, cfg.Auth.Keys.AllowEphemeralDevKeys)

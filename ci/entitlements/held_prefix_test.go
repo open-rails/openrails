@@ -84,7 +84,7 @@ func newFixture(t *testing.T) *fixture {
 	})
 	slug := "held-" + uuid.NewString()[:8]
 	cfg := openrails.Config{
-		Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+		Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Held"}},
 	}
 	bill, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: f.clock})

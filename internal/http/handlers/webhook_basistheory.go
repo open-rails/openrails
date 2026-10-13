@@ -28,12 +28,12 @@ var (
 	btKeyURLOverrideMu sync.RWMutex
 )
 
-func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
+func basisTheoryVerifier(environment string) *basistheory.WebhookVerifier {
 	btKeyURLOverrideMu.RLock()
 	keyURL := btKeyURLOverride
 	btKeyURLOverrideMu.RUnlock()
 	if keyURL == "" {
-		keyURL = webhooks.BasisTheoryWebhookKeyURL(r.State.Config)
+		keyURL = webhooks.BasisTheoryWebhookKeyURL(environment)
 	}
 	btVerifierMu.Lock()
 	defer btVerifierMu.Unlock()
@@ -69,7 +69,7 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID billin
 		r.ErrorCode(billing.CodeServiceUnavailable, "Merchant webhook routing is not configured")
 		return false
 	}
-	custodian, found, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), models.CustodianBasisTheory, webhookProviderEnvironment(r), accountID)
+	custodian, found, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), models.CustodianBasisTheory, accountID)
 	if err != nil {
 		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
 		return false
@@ -79,14 +79,14 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID billin
 		return false
 	}
 	r.Request = r.Request.WithContext(db.WithCustodianID(r.Request.Context(), custodian.ID))
-	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, body)
+	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, custodian.Environment, body)
 }
 
-func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID billing.MerchantID, tenantID string, body []byte) bool {
+func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID billing.MerchantID, tenantID, environment string, body []byte) bool {
 	rail := string(models.EventSourceBasisTheory)
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
-	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
+	if err := basisTheoryVerifier(environment).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context())
 		log.Warn("basistheory webhook signature verification failed")
 		r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")

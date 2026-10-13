@@ -87,6 +87,7 @@ const rails: RailDefinition[] = [
     display_name: "Stripe",
     credential_keys: ["secret_key", "webhook_secret"],
     setting_keys: [],
+    environments: ["live", "test"],
   },
 ]
 

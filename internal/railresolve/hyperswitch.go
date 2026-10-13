@@ -16,7 +16,7 @@ import (
 // before granting SDK or PSP access. An archive does not itself revoke an
 // existing obligation's custody.
 func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian merchants.CustodianScope) (*hyperswitch.Client, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(cfg)) {
+	if cfg == nil || cfg.HyperSwitch == nil || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || config.LiveEnvironment(custodian.Environment) && cfg.HyperSwitch.AllowLoopbackHTTP {
 		return nil, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)

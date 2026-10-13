@@ -637,3 +637,9 @@ func NewAccountStripeService(cfg *config.Config, merchantID, pspID uuid.UUID, ac
 func (s *StripeService) AccountIdentity() (uuid.UUID, uuid.UUID) {
 	return s.accountMerchantID, s.accountPSPID
 }
+
+// keyLive reports whether the scoped account key is live: what Stripe's
+// livemode must say of every object it returns.
+func (s *StripeService) keyLive() bool {
+	return strings.HasPrefix(s.accountSecret, "sk_live_") || strings.HasPrefix(s.accountSecret, "rk_live_")
+}

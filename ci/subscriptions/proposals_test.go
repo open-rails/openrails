@@ -34,7 +34,7 @@ func (w *world) allowDestructive() {
 // proposalsCLI is `openrails proposals` against this world, from a process
 // started with the given provider_write_mode, on the world's clock.
 func (w *world) proposalsCLI(writeMode string) hosttools.ProposalsOptions {
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: writeMode,
+	cfg := &config.Config{ProviderWriteMode: writeMode,
 		DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}}
 	return hosttools.ProposalsOptions{Config: cfg, PGXPool: w.pool, MerchantID: w.client[embedded].MerchantID(),
 		Actor: "e2e", Format: "json", Clock: w.clock}

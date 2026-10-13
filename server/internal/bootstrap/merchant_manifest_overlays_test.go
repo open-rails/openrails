@@ -16,11 +16,13 @@ merchants:
     psps:
       mobius:
         rail: nmi
+        environment: sandbox
         account_id: "999999"
         settings: {tokenization_url: "https://secure.networkmerchants.com/token/Collect.js", tokenization_key: public-key}
         secrets: {security_key: replace-with-live-nmi-security-key}
       ccbill:
         rail: ccbill
+        environment: sandbox
         account_id: "999999-0000"
 `
 
@@ -53,6 +55,7 @@ merchants:
 		"top-level catalogs": "catalogs: {x: 1}",
 		"account identity":   `merchants: {host-one: {psps: {mobius: {account_id: "attacker"}}}}`,
 		"rail":               "merchants: {host-one: {psps: {mobius: {rail: stripe}}}}",
+		"environment":        "merchants: {host-one: {psps: {mobius: {environment: live}}}}",
 		"processor settings": "merchants: {host-one: {psps: {mobius: {settings: {tokenization_key: attacker}}}}}",
 		"merchant profile":   "merchants: {host-one: {profile: {display_name: Attacker}}}",
 		"billing policy":     "merchants: {host-one: {billing_policies: {free: {kind: outstanding_cap}}}}",

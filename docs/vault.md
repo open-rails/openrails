@@ -91,8 +91,9 @@ returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 }
 ```
 
-`environment` is `live` or `test`; a deployment serves the documents of its own
-posture (`test_mode`). `account_id` is the rail's own id ([merchant
+`environment` is `live`, `test` or `sandbox`, as the rail has them
+([PSP environments](psp-environments.md)); a document in the other money class
+than the deployment's PSPs is refused. `account_id` is the rail's own id ([merchant
 provisioning](merchant-provisioning.md) lists each rail's). A Solana PSP's
 `account_id` is its signer's public key, and its document carries
 `"signer": {"mode": "vault_transit", "key": "<transit key>"}` or a

@@ -15,6 +15,7 @@ func TestExampleFilesRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "onlydemo", m.Slug)
 	require.Equal(t, openrails.NMIPSP{
+		Environment:          openrails.EnvironmentSandbox,
 		AccountID:            "000000",
 		TokenizationKey:      "your-public-tokenization-key",
 		SecurityKey:          "your-private-security-key",

@@ -73,16 +73,6 @@ func (s *MerchantsSource) service() *merchants.Service {
 	return s.MerchantsFn()
 }
 
-// environment is the deployment's PSP environment: test under test_mode,
-// live otherwise.
-func (s *MerchantsSource) environment() string {
-	return config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
-}
-
-func (s *MerchantsSource) testMode() bool {
-	return s.Config != nil && config.IsTestMode(s.Config)
-}
-
 // Armed is true only when the active account resolves with every required
 // scoped secret: a PSP declared without credentials (MerchantDeclaration.PSPs, an
 // import attribution) is an identity, not an armed rail.
@@ -120,12 +110,12 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (bi
 		if err != nil || !ok {
 			return mid, scope, ok, err
 		}
-		if scope.Rail != rail || scope.Environment != s.environment() {
-			return mid, merchants.PSPScope{}, false, fmt.Errorf("captured PSP does not match rail/environment")
+		if scope.Rail != rail {
+			return mid, merchants.PSPScope{}, false, fmt.Errorf("captured PSP does not match rail")
 		}
 		return mid, scope, true, nil
 	}
-	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail, s.environment())
+	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail)
 	if errors.Is(err, merchants.ErrNoActivePSP) {
 		return mid, merchants.PSPScope{}, false, nil
 	}
@@ -179,10 +169,11 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
 	out := &config.ResolvedPSP{
-		ID:        scope.ID,
-		Key:       scope.Key,
-		Rail:      models.Rail(scope.Rail),
-		AccountID: scope.AccountID,
+		ID:          scope.ID,
+		Key:         scope.Key,
+		Environment: scope.Environment,
+		Rail:        models.Rail(scope.Rail),
+		AccountID:   scope.AccountID,
 	}
 	// Stored settings are an ingestion plane too: a card_entry no boot would
 	// accept never arms.
@@ -240,12 +231,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		if err != nil {
 			return nil, err
 		}
-		deployment, err := config.NMIEndpointDeployment(scope.Settings)
-		if err != nil {
-			return nil, err
-		}
 		out.NMI = &config.NMIRailConfig{
-			EndpointDeployment:   deployment,
 			SecurityKey:          securityKey,
 			WebhookSigningSecret: signing,
 		}
@@ -257,7 +243,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		if err != nil {
 			return nil, err
 		}
-		solanaCfg, err := SolanaRailConfigFromSettings(settings, s.testMode())
+		solanaCfg, err := SolanaRailConfigFromSettings(settings, scope.Environment)
 		if err != nil {
 			return nil, fmt.Errorf("solana account %s: %w", scope.AccountID, err)
 		}
@@ -383,7 +369,7 @@ func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID s
 	if err != nil {
 		return nil, fmt.Errorf("resolve custodian %s: %w", kind, err)
 	}
-	custodian, ok, err := svc.CustodianScopeByIdentity(ctx, mid, kind, s.environment(), accountID)
+	custodian, ok, err := svc.CustodianScopeByIdentity(ctx, mid, kind, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -394,15 +380,12 @@ func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID s
 }
 
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
-// rail account's declared settings: the network follows test_mode, the token
-// set is exactly what was declared (USDC when nothing is), and the pricing
-// policy then drops tokens that cannot function. A misdeclared token set fails
-// closed: the PSP does not arm.
-func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) (*config.SolanaRailConfig, error) {
-	network := "mainnet"
-	if testMode {
-		network = "devnet"
-	}
+// rail account's declared settings: the network is the PSP environment's, the
+// token set is exactly what was declared (SOL and USDC when nothing is), and
+// the pricing policy then drops tokens that cannot function. A misdeclared
+// token set fails closed: the PSP does not arm.
+func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, environment string) (*config.SolanaRailConfig, error) {
+	network := config.SolanaNetwork(environment)
 	resolved, err := solanatokens.ResolveDeclared(network, settings.Tokens)
 	if err != nil {
 		return nil, err

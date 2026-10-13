@@ -53,6 +53,7 @@ merchants:
     psps:
       stripe:
         rail: stripe
+        environment: test
         account_id: acct_portal
         secrets: {secret_key: sk_test_portal, webhook_signing_secret: whsec_portal}
         settings: {publishable_key: pk_test_portal}

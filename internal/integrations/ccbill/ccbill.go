@@ -57,16 +57,16 @@ const (
 // ErrMissingSalt refuses a FlexForm client without its signing salt.
 var ErrMissingSalt = errors.New("ccbill salt is required to sign FlexForm links")
 
-// NewClient creates a CCBill client; testMode (config.IsTestMode) selects
+// NewClient creates a CCBill client; a sandbox PSP (cfg.Sandbox) uses
 // sandbox-api.ccbill.com over api.ccbill.com.
-func NewClient(cfg *config.CCBillConfig, testMode bool) (*CCBillClient, error) {
+func NewClient(cfg *config.CCBillConfig) (*CCBillClient, error) {
 	cfg = requireConfig(cfg)
 	if strings.TrimSpace(cfg.Salt) == "" {
 		return nil, ErrMissingSalt
 	}
 
 	baseURL := prodFlexFormBase
-	if testMode {
+	if cfg.Sandbox {
 		baseURL = sandboxFlexFormBase
 	}
 

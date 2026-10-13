@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/google/uuid"
 

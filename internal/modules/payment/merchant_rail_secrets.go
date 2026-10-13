@@ -68,7 +68,7 @@ func (s *PurchaseService) merchantSecretRef(ctx context.Context, ref merchants.S
 	return value, true, nil
 }
 
-func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, environment, key string) (string, bool, error) {
+func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, key string) (string, bool, error) {
 	if s == nil || s.MerchantSecrets == nil || s.ProviderSecrets == nil {
 		return "", false, nil
 	}
@@ -81,8 +81,8 @@ func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, envi
 		if err != nil {
 			return "", false, err
 		}
-		if scope.Rail != rail || scope.Environment != environment {
-			return "", false, errors.New("captured PSP does not match requested rail/environment")
+		if scope.Rail != rail {
+			return "", false, errors.New("captured PSP does not match the requested rail")
 		}
 		ref, err := scope.SecretRef(key)
 		if err != nil {
@@ -91,13 +91,13 @@ func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, envi
 		return s.merchantSecretRef(ctx, ref)
 	}
 	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
-		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, environment, key)
+		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, key)
 		if err != nil || !found {
 			return "", found, err
 		}
 		return s.merchantSecretRef(ctx, ref)
 	}
-	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, environment, key)
+	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, key)
 	if err != nil || !ok {
 		return "", ok, err
 	}
@@ -106,12 +106,6 @@ func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, envi
 
 func (s *PurchaseService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
-}
-
-// pspEnvironment is the environment PSP rows carry in this deployment: test
-// under test_mode, live otherwise.
-func (s *PurchaseService) pspEnvironment() string {
-	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && config.IsTestMode(s.Config))
 }
 
 // railTarget is a resolved purchase destination: the payment PROVIDER (the
@@ -185,7 +179,7 @@ func (s *PurchaseService) resolveRailTarget(ctx context.Context, requested strin
 	if !ok {
 		return railTarget{}, errors.New("payment provider key resolution is not configured")
 	}
-	scope, found, err := keys.PSPScopeByKey(ctx, tid, name, s.pspEnvironment())
+	scope, found, err := keys.PSPScopeByKey(ctx, tid, name)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
 	}
@@ -203,7 +197,7 @@ func (s *PurchaseService) resolveRailTarget(ctx context.Context, requested strin
 	if !ok {
 		return railTarget{}, errors.New("payment provider rail resolution is not configured")
 	}
-	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name, s.pspEnvironment())
+	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", name, err)
 	}
@@ -262,7 +256,7 @@ func (s *PurchaseService) resolveRailTargetForPSP(ctx context.Context, rail stri
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment provider account: %w", err)
 	}
-	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, rail, s.pspEnvironment())
+	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, rail)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", rail, err)
 	}
@@ -361,7 +355,7 @@ func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 	if err != nil {
 		return nil, err
 	}
-	return ccbill.NewClient(cfg, s.Config != nil && config.IsTestMode(s.Config))
+	return ccbill.NewClient(cfg)
 }
 
 func (s *PurchaseService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {
@@ -380,26 +374,24 @@ func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	if err != nil {
 		return nil, err
 	}
-	// Environment follows test_mode: sandbox deployments declare
-	// environment=test rows (ValidateRailSet enforces it).
-	env := s.pspEnvironment()
 	var scope merchants.PSPScope
 	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
 		scope, err = s.capturedPSPScope(ctx, pspID)
 		ok = err == nil
 	} else {
-		scope, ok, err = scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill), env)
+		scope, ok, err = scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !ok || scope.Rail != string(models.RailCCBill) || scope.Environment != env {
+	if !ok || scope.Rail != string(models.RailCCBill) {
 		return nil, errors.New("missing scoped merchant CCBill PSP")
 	}
 	cfg := &config.CCBillConfig{}
 	if base != nil {
 		*cfg = *base
 	}
+	cfg.Sandbox = scope.Environment == config.EnvironmentSandbox
 	// CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
 	// 999999-0000). Both parts are numeric, so the first dash is the separator.
 	acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
@@ -417,7 +409,7 @@ func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		{key: "datalink_username", dst: &cfg.DataLinkUsername},
 		{key: "datalink_password", dst: &cfg.DataLinkPassword},
 	} {
-		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), env, item.key)
+		value, ok, err := s.merchantProviderSecret(ctx, string(models.RailCCBill), item.key)
 		if err != nil {
 			return nil, fmt.Errorf("load merchant CCBill %s: %w", item.key, err)
 		}
@@ -453,7 +445,7 @@ func (s *PurchaseService) pspKeyArchived(ctx context.Context, selector string) b
 	if err != nil {
 		return false
 	}
-	archived, err := resolver.PSPKeyArchived(ctx, tid, selector, s.pspEnvironment())
+	archived, err := resolver.PSPKeyArchived(ctx, tid, selector)
 	if err != nil {
 		log.WithContext(ctx).WithError(err).Debug("PSP routing: archived-PSP lookup failed")
 		return false
@@ -485,9 +477,6 @@ func (s *PurchaseService) operationRailTarget(ctx context.Context, selector stri
 		scope, err := s.capturedPSPScope(ctx, pspID)
 		if err != nil {
 			return railTarget{}, err
-		}
-		if scope.Environment != s.pspEnvironment() {
-			return railTarget{}, errors.New("captured PSP environment mismatch")
 		}
 		if _, known := knownRails[selector]; known && selector != scope.Rail {
 			return railTarget{}, errors.New("captured PSP rail mismatch")

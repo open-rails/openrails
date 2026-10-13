@@ -25,7 +25,6 @@ func bootEnv(t *testing.T) (secretsDir string) {
 	secretsDir = t.TempDir()
 	t.Setenv("VAULT_SECRETS_PATH", secretsDir)
 	t.Setenv("DB_URL", testDatabaseURL)
-	t.Setenv("TEST_MODE", "sandbox")
 	t.Setenv("PROVIDER_WRITE_MODE", "full")
 	return secretsDir
 }
@@ -46,7 +45,6 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	bootEnv(t)
 	cfg, err := Load("")
 	require.NoError(t, err)
-	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 	require.Equal(t, billing.DefaultSchema, cfg.Database.Schema)
 	require.Equal(t, testDatabaseURL, cfg.DB.URL)
 	require.Empty(t, cfg.Auth.Token.Issuer, "no URL setting supplies an issuer fallback")
@@ -156,20 +154,6 @@ func TestLoadSourcePrecedence(t *testing.T) {
 	require.Equal(t, "from-env", password())
 	require.Equal(t, "from-flag", password(WithOverride("db.password", "from-flag")))
 	require.Equal(t, "from-env", os.Getenv("DB_PASSWORD"), "flags never write the process env")
-
-	unsetenv(t, "TEST_MODE")
-	_, err = Load(path)
-	require.ErrorContains(t, err, "test_mode is required", "posture is never inherited by omission")
-	cfg, err = Load(path, WithOverride("test_mode", "live"))
-	require.NoError(t, err)
-	require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
-	t.Setenv("TEST_MODE", "sandbox")
-	cfg, err = Load(path, WithOverride("test_mode", "live"))
-	require.NoError(t, err)
-	require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
-	t.Setenv("TEST_MODE", "true")
-	_, err = Load(path)
-	require.ErrorContains(t, err, "invalid test_mode")
 }
 
 // rate_limits_disabled turns the defaults off, from the file or the environment.
@@ -192,7 +176,6 @@ func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"),
 		"database:\n  schema: Archive_Test\ndb:\n  url: postgres://file.invalid/db\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n")
 	t.Setenv("DB_URL", "postgres://env.invalid/db")
-	unsetenv(t, "TEST_MODE")
 	cfg, err := LoadDatabase(path)
 	require.NoError(t, err)
 	require.Equal(t, "postgres://env.invalid/db", cfg.DB.URL)

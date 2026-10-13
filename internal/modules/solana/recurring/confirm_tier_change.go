@@ -11,7 +11,6 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -134,22 +133,20 @@ type ConfirmTierChangeService struct {
 	store       tierChangeStore
 	memberships tierChangeMembershipStore
 	transactor  tierChangeTransactor
-	network     string
-	tokens      map[string]config.TokenConfig
+	tokens      Tokens
 	now         func() time.Time
 }
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		chain:       chain,
 		lifecycle:   lifecycle,
 		store:       store,
 		memberships: memberships,
 		transactor:  transactor,
-		network:     network,
-		tokens:      normalizeRecurringTokens(firstTokenMap(tokens)),
+		tokens:      tokens,
 		now:         time.Now,
 	}
 }
@@ -206,7 +203,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if err != nil {
 		return nil, err
 	}
-	charged, err := s.verifyLanded(payment, oldRow, in)
+	charged, err := s.verifyLanded(ctx, payment, oldRow, in)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +330,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 
 		// Subscriber + merchant + authority are unchanged. The new plan and
 		// subscription PDAs identify the newly mirrored on-chain membership.
-		newRow, buildErr := s.buildNewRow(oldRow, newSub.ID, in, newPDA, newPeriodEnd)
+		newRow, buildErr := s.buildNewRow(ctx, oldRow, newSub.ID, in, newPDA, newPeriodEnd)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -370,7 +367,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 // verifyLanded proves the landed tier-change transaction
 // switched this subscriber from the old subscription to the new plan's terms,
 // returning the upgrade's pulled amount (0 for a downgrade).
-func (s *ConfirmTierChangeService) verifyLanded(payment *landedTx, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
+func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, payment *landedTx, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
 	var err error
 	if in.OrderAttemptID != uuid.Nil {
 		if err := payment.references(in.Reference); err != nil {
@@ -378,7 +375,7 @@ func (s *ConfirmTierChangeService) verifyLanded(payment *landedTx, oldRow *model
 		}
 	}
 	var keys [5]solanago.PublicKey
-	for i, v := range []string{oldRow.SubscriberWallet, oldRow.MerchantAddress, s.newMint(oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA} {
+	for i, v := range []string{oldRow.SubscriberWallet, oldRow.MerchantAddress, s.newMint(ctx, oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA} {
 		if keys[i], err = solanago.PublicKeyFromBase58(v); err != nil {
 			return 0, fmt.Errorf("recurring: stored solana subscription %s is malformed: %w", oldRow.SubscriptionPDA, err)
 		}
@@ -437,8 +434,8 @@ func (l *landedTx) tierChangeCharge(currency string, maximum int64) (int64, erro
 
 // newMint resolves the new plan's mint, falling back to the old row's mint
 // (the same for a same-group change).
-func (s *ConfirmTierChangeService) newMint(oldRow *models.SolanaSubscription, symbol string) string {
-	if resolved, err := ResolveRecurringMintFromTokens(symbol, s.tokens); err == nil && resolved != "" {
+func (s *ConfirmTierChangeService) newMint(ctx context.Context, oldRow *models.SolanaSubscription, symbol string) string {
+	if resolved, err := ResolveRecurringMintFromTokens(symbol, s.tokens.of(ctx)); err == nil && resolved != "" {
 		return resolved
 	}
 	return oldRow.Mint
@@ -446,8 +443,8 @@ func (s *ConfirmTierChangeService) newMint(oldRow *models.SolanaSubscription, sy
 
 // buildNewRow assembles the NEW solana_subscriptions row. It derives the new plan
 // PDA from the old row's merchant + the new plan id.
-func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
-	mintStr := s.newMint(oldRow, in.NewMintSymbol)
+func (s *ConfirmTierChangeService) buildNewRow(ctx context.Context, oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
+	mintStr := s.newMint(ctx, oldRow, in.NewMintSymbol)
 
 	planPDAStr := oldRow.PlanPDA
 	if merchant, perr := solanago.PublicKeyFromBase58(oldRow.MerchantAddress); perr == nil {

@@ -119,7 +119,7 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 		want string
 	}{
 		"local config flag":      {append([]string{"get-merchant-config", "--config", "local.yaml"}, remote...), "local-only"},
-		"local posture flag":     {append([]string{"get-merchant-config", "--test-mode", "live"}, remote...), "local-only"},
+		"local write mode flag":  {append([]string{"get-merchant-config", "--provider-write-mode", "readonly"}, remote...), "local-only"},
 		"merchant with remote":   {append([]string{"get-merchant-config", "--merchant", "shop"}, remote...), "--merchant is local-only"},
 		"remote without token":   {[]string{"get-merchant-config", "--server-url", server.URL}, "--token-file"},
 		"token without remote":   {[]string{"get-merchant-config", "--merchant", "shop", "--token-file", tokenPath}, "requires --server-url"},
@@ -159,7 +159,7 @@ func TestOperatorCommandsRefuseMalformedArguments(t *testing.T) {
 func TestRuntimeErrorsPrintNoUsage(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("VAULT_SECRETS_PATH", t.TempDir())
-	config := writeTemp(t, "config.yaml", "test_mode: sandbox\nprovider_write_mode: readonly\nredis:\n  typo: x\n")
+	config := writeTemp(t, "config.yaml", "provider_write_mode: readonly\nredis:\n  typo: x\n")
 	out, err := execute(newRootCmd(), "run-server", "--config", config)
 	require.ErrorContains(t, err, "invalid keys: typo")
 	require.NotContains(t, out, "Usage:")

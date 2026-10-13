@@ -48,7 +48,7 @@ func (r *Runtime) followPaymentDomain(mid billing.MerchantID, previous, current 
 	var psps []uuid.UUID
 	for key, doc := range current.PSPs {
 		p := doc.Value
-		if p.Rail != string(models.RailStripe) || p.Archived || p.Environment != r.Merchants.Environment() {
+		if p.Rail != string(models.RailStripe) || p.Archived {
 			continue
 		}
 		if _, rejected := current.Rejected[merchantdocs.PSPDoc(key)]; rejected {
@@ -100,7 +100,7 @@ func (r *Runtime) RegisterPaymentDomain(ctx context.Context, mid billing.Merchan
 	if err != nil {
 		return err
 	}
-	scopes, err := r.Merchants.ActivePSPScopesForRail(ctx, mid, string(models.RailStripe), r.Merchants.Environment())
+	scopes, err := r.Merchants.ActivePSPScopesForRail(ctx, mid, string(models.RailStripe))
 	if err != nil {
 		return err
 	}

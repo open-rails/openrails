@@ -281,10 +281,10 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		recorder := newStripeFake()
 		slug := "live-" + uuid.NewString()[:8]
 		rt, err := openrails.New(t.Context(), openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-			DB:        &openrails.DBConfig{URL: w.dsn},
-			Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}}},
+			Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+			ProviderWriteMode: openrails.ProviderWritesFull,
+			DB:                &openrails.DBConfig{URL: w.dsn},
+			Merchants:         map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}}},
 		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: recorder, Clock: w.clock})
 		if err != nil {
 			t.Logf("refused at construction: %v", err)
@@ -308,7 +308,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	})
 
 	t.Run("merchant-configured Collect.js origin", func(t *testing.T) {
-		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
+		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", Environment: "sandbox", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], w.auth, psps)
 		cfg := customerConfig(t, r.rt)

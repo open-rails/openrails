@@ -117,12 +117,11 @@ func overlapUntil(settings map[string]any) time.Time {
 	return at.UTC()
 }
 
-// live are the PSPs that take new work in environment on rail ("" any),
-// newest first.
-func (j joined) live(rail, environment string) []PSPScope {
+// live are the PSPs that take new work on rail ("" any), newest first.
+func (j joined) live(rail string) []PSPScope {
 	var out []PSPScope
 	for _, p := range slices.Backward(j.psps) {
-		if !p.Archived && p.Environment == environment && (rail == "" || p.Rail == rail) {
+		if !p.Archived && (rail == "" || p.Rail == rail) {
 			out = append(out, p)
 		}
 	}

@@ -115,8 +115,8 @@ type rival struct {
 func (w *world) rival() *rival {
 	// Its own identity provider: merchant A's credentials mean nothing there.
 	return w.peer("rival-"+uuid.NewString()[:8], &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]openrails.PSPConfig{
-		"stripe": {Rail: "stripe", AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}},
-		"nmi":    {Rail: "nmi", AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}},
+		"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}},
+		"nmi":    {Rail: "nmi", Environment: "sandbox", AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}},
 	})
 }
 
@@ -128,9 +128,9 @@ func (w *world) sibling() *rival {
 
 func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 	return map[string]openrails.PSPConfig{
-		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}, Settings: map[string]any{"publishable_key": "pk_test_e2e"}},
-		"nmi":    {Rail: "nmi", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
-		"ccbill": {Rail: "ccbill", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
+		"stripe": {Rail: "stripe", Environment: "test", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}, Settings: map[string]any{"publishable_key": "pk_test_e2e"}},
+		"nmi":    {Rail: "nmi", Environment: "sandbox", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
+		"ccbill": {Rail: "ccbill", Environment: "sandbox", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
 	}
 }
 
@@ -139,9 +139,9 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 	t := w.t
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
 	cfg := openrails.Config{
-		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
+		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+		ProviderWriteMode: openrails.ProviderWritesFull,
+		DB:                &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
 		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: psps, Issuer: issuer}},
 	}
 	if w.vault != nil {

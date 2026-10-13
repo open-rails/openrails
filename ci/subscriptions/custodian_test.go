@@ -187,7 +187,7 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 	w.custodians = map[string]openrails.CustodianConfig{"bt": {Kind: "basis_theory", AccountID: "bt-e2e",
 		Settings: map[string]any{"public_api_key": "key_public_e2e"}, Secrets: map[string]string{"api_key": "key_private_e2e"}}}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
+		psps["nmi-bt"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
 	// The merchant sells cards through its custodian's PSP.
 	routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi-bt"}}}

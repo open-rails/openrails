@@ -259,7 +259,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if account.PeriodHours != uint64(*req.BillingIntervalHours) || account.EndTs != 0 || (!req.Archived && account.Status != subscriptions.PlanStatusActive) {
 		return nil, apperr.Invalidf("Solana plan period, expiry or active state does not match the catalog")
 	}
-	token, err := resolveSolanaTokenFromMint(plan, account.Mint.String())
+	token, err := resolveSolanaTokenFromMint(ctx, plan, account.Mint.String())
 	if err != nil {
 		return nil, err
 	}

@@ -18,9 +18,9 @@ the doc map. Follow it top to bottom.
   The one exception is a PSP the merchant declared `card_entry: server`
   ([docs/rails/nmi.md](rails/nmi.md)), which puts the deployment in SAQ D; never
   enable it on your own.
-- **Sandbox first.** All development runs `test_mode = sandbox` — every rail routes to
-  its test environment and live credentials refuse to boot. Do not touch live
-  credentials until the full flow is proven.
+- **Non-live first.** All development declares every PSP `environment: test` or
+  `sandbox`; OpenRails verifies each with its provider and refuses a live PSP
+  beside them. Do not touch live credentials until the full flow is proven.
 - **Vocabulary:** a *rail* is the gateway kind (`nmi`/`ccbill`/`stripe`/`solana`); a
   *PSP* is the merchant's account on a rail (manifest key `psps:`). Config keys named
   `accounts:`/`rail_merchant_accounts` are retired and fail loudly.
@@ -44,14 +44,14 @@ Do not guess these; ask:
 Follow [embedded-integration.md](embedded-integration.md) section by section. The
 milestone order, each verifiable before the next:
 
-1. **Boot.** `openrails.Config` (explicit `TestMode`, `ProviderWriteMode`),
+1. **Boot.** `openrails.Config` (explicit `ProviderWriteMode`),
    `openrails.New` with the host's pgx pool in `Deps`. `New` creates or
    upgrades its billing schema and its River tables first. Verify: boot
    succeeds and the `billing` schema (or the configured one) exists; a missing
-   posture field refuses to boot (that is correct behavior, not a bug).
-2. **Merchant + rails.** Set `Config.Merchants` with the user's sandbox PSP entries
-   (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
-   the sandbox probe passes.
+   write mode refuses to boot (that is correct behavior, not a bug).
+2. **Merchant + rails.** Set `Config.Merchants` with the user's non-live PSP
+   entries, each declaring its `environment` (per-rail setup: [rails/](rails/)).
+   Verify: boot logs show the rail armed; for NMI the environment check passes.
 3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    apply it with a host command calling `client.ApplyCatalog`, run once and on
    each change, never at boot. Verify: catalog list routes return the products.
@@ -119,6 +119,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 - Purchase endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
 - Embedded config is programmatic: no file or environment is read, so nothing is
-  defaulted for you; unset `TestMode` refusing to boot is the designed behavior.
+  defaulted for you; a PSP without an `environment` refusing to boot is the
+  designed behavior.
 - Catalog amounts are integers in native units (`12_000_000` = $12). No dollar
   strings in the catalog document.

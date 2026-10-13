@@ -19,7 +19,7 @@ import (
 // path a sandbox stack takes.
 func client(t *testing.T, m *nmimock.Mock) *nmi.NMIClient {
 	t.Helper()
-	c, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "mock-key"}, true)
+	c, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "mock-key"})
 	require.NoError(t, err)
 	c.DirectPostURL, c.QueryURL, c.V5BaseURL = m.URL()+"/api/transact.php", m.URL()+"/api/query.php", m.URL()+"/api/v5"
 	c.LoopbackFixture = true

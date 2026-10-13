@@ -120,7 +120,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 				continue
 			}
 			if err := w.DB.RunInMerchantScope(ctx, merchantID, "stripe webhook reconcile", func(mctx context.Context) error {
-				psps, err := w.Merchants.ActivePSPScopesForRail(mctx, merchantID, string(models.RailStripe), config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)))
+				psps, err := w.Merchants.ActivePSPScopesForRail(mctx, merchantID, string(models.RailStripe))
 				if err != nil {
 					return fmt.Errorf("list stripe psps: %w", err)
 				}

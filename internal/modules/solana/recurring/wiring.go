@@ -19,10 +19,9 @@ import (
 // secretStoreGetter adapts the per-merchant merchants.MerchantSecretReader to the
 // solana.MerchantSecretGetter the keypair signer needs.
 type secretStoreGetter struct {
-	store       merchants.MerchantSecretReader
-	database    *db.DB
-	environment string
-	accountID   string
+	store     merchants.MerchantSecretReader
+	database  *db.DB
+	accountID string
 }
 
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.MerchantID, name string) (string, error) {
@@ -33,9 +32,9 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.Mer
 			err     error
 		)
 		if strings.TrimSpace(g.accountID) != "" {
-			account, ok, err = solanaPSPByIdentity(ctx, g.database, merchantID, g.environment, g.accountID)
+			account, ok, err = solanaPSPByIdentity(ctx, g.database, merchantID, g.accountID)
 		} else {
-			account, ok, err = primarySolanaPSP(ctx, g.database, merchantID, g.environment)
+			account, ok, err = primarySolanaPSP(ctx, g.database, merchantID)
 		}
 		if err != nil {
 			return "", err
@@ -60,27 +59,23 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.Mer
 	return sec.Value, nil
 }
 
-// NewSignerFromPSPs builds the per-merchant signer. environment
-// is required (#681): deployment posture, via config.ExpectedProviderEnvironment.
-func NewSignerFromPSPs(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration, environment string) solanaint.Signer {
-	env := strings.TrimSpace(environment)
+// NewSignerFromPSPs builds the per-merchant signer over its Solana PSP.
+func NewSignerFromPSPs(store merchants.MerchantSecretReader, transit solanaint.TransitClient, database *db.DB, ttl time.Duration) solanaint.Signer {
 	return pspSigner{
-		keypair:     solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database, environment: env}, ttl),
-		store:       store,
-		transit:     transit,
-		db:          database,
-		environment: env,
-		ttl:         ttl,
+		keypair: solanaint.NewKeypairSigner(secretStoreGetter{store: store, database: database}, ttl),
+		store:   store,
+		transit: transit,
+		db:      database,
+		ttl:     ttl,
 	}
 }
 
 type pspSigner struct {
-	keypair     solanaint.Signer
-	store       merchants.MerchantSecretReader
-	transit     solanaint.TransitClient
-	db          *db.DB
-	environment string
-	ttl         time.Duration
+	keypair solanaint.Signer
+	store   merchants.MerchantSecretReader
+	transit solanaint.TransitClient
+	db      *db.DB
+	ttl     time.Duration
 }
 
 func (s pspSigner) PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error) {
@@ -108,7 +103,7 @@ func (s pspSigner) SignMessageForPublicKey(ctx context.Context, merchantID billi
 }
 
 func (s pspSigner) resolve(ctx context.Context, merchantID billing.MerchantID) (solanaint.Signer, error) {
-	account, ok, err := primarySolanaPSP(ctx, s.db, merchantID, s.environment)
+	account, ok, err := primarySolanaPSP(ctx, s.db, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +128,7 @@ func (s pspSigner) resolve(ctx context.Context, merchantID billing.MerchantID) (
 }
 
 func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID billing.MerchantID, publicKey string) (solanaint.Signer, error) {
-	account, ok, err := solanaPSPByIdentity(ctx, s.db, merchantID, s.environment, publicKey)
+	account, ok, err := solanaPSPByIdentity(ctx, s.db, merchantID, publicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -147,10 +142,9 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID billing.M
 	switch cfg.Mode {
 	case "local_keypair":
 		return solanaint.NewKeypairSigner(secretStoreGetter{
-			store:       s.store,
-			database:    s.db,
-			environment: account.Environment,
-			accountID:   account.AccountID,
+			store:     s.store,
+			database:  s.db,
+			accountID: account.AccountID,
 		}, s.ttl), nil
 	case "vault_transit":
 		if s.transit == nil {
@@ -187,16 +181,12 @@ func signerConfigFromRow(account merchants.PSPScope) solanaSignerConfig {
 	return signer
 }
 
-func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment string) (merchants.PSPScope, bool, error) {
+func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.MerchantID) (merchants.PSPScope, bool, error) {
 	configuration := merchants.Of(database)
 	if configuration == nil || merchantID.IsZero() {
 		return merchants.PSPScope{}, false, nil
 	}
-	environment = strings.TrimSpace(environment)
-	if environment == "" {
-		return merchants.PSPScope{}, false, fmt.Errorf("solana: PSP environment is required")
-	}
-	scope, ok, err := configuration.ActivePSPScope(ctx, merchantID, "solana", environment)
+	scope, ok, err := configuration.ActivePSPScope(ctx, merchantID, "solana")
 	if errors.Is(err, merchants.ErrNoActivePSP) {
 		return merchants.PSPScope{}, false, nil
 	}
@@ -206,20 +196,16 @@ func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.M
 	return scope, ok, nil
 }
 
-func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment, accountID string) (merchants.PSPScope, bool, error) {
+func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID billing.MerchantID, accountID string) (merchants.PSPScope, bool, error) {
 	configuration := merchants.Of(database)
 	if configuration == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
 		return merchants.PSPScope{}, false, nil
-	}
-	environment = strings.TrimSpace(environment)
-	if environment == "" {
-		return merchants.PSPScope{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
 	scope, ok, err := configuration.PSPScopeByAccountID(ctx, merchantID, "solana", strings.TrimSpace(accountID))
 	if err != nil {
 		return merchants.PSPScope{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
 	}
-	if !ok || scope.Environment != environment {
+	if !ok {
 		return merchants.PSPScope{}, false, nil
 	}
 	return scope, true, nil

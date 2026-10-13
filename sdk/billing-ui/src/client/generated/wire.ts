@@ -533,6 +533,7 @@ export type CreateOrderParams = {
 export type CreatePSPParams = {
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
+  environment?: string
   account_id?: string
   settings?: Record<string, unknown> | null
   credentials?: Record<string, string> | null
@@ -1967,6 +1968,7 @@ export type RailDefinition = {
   display_name: string
   credential_keys: string[]
   setting_keys: string[]
+  environments: string[]
 }
 
 export type RateCard = {

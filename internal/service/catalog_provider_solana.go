@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -90,11 +89,13 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
 		return nil, err
 	}
-	return a.createRecurringPlan(ctx, in, a.defaultRecurringToken())
+	return a.createRecurringPlan(ctx, in, a.defaultRecurringToken(ctx))
 }
 
-func (a *solanaAdapter) defaultRecurringToken() string {
-	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil && config.IsTestMode(a.svc.rt.Config) {
+// defaultRecurringToken is the stablecoin a plan publishes in: DUSD for a
+// merchant whose Solana PSP is on devnet, USDC otherwise.
+func (a *solanaAdapter) defaultRecurringToken(ctx context.Context) string {
+	if plan, ok := a.planService(); ok && plan.Network(ctx) == "devnet" {
 		return solanaDUSDRecurringToken
 	}
 	return solanaDefaultRecurringToken
@@ -131,7 +132,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 
 	// symbol arrives already normalized (uppercased/trimmed) by Attach or is the
 	// canonical USDC default from AutoCreate.
-	mint, err := plan.ResolveMint(symbol)
+	mint, err := plan.ResolveMint(ctx, symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +248,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			return nil, fmt.Errorf("solana one-off prices take no settings (the settlement token is chosen at purchase); declare psps.solana: {}")
 		}
 		if symbol == "" {
-			symbol = a.defaultRecurringToken()
+			symbol = a.defaultRecurringToken(ctx)
 		}
 		out, err := a.createRecurringPlan(ctx, in, symbol)
 		if err != nil {
@@ -290,13 +291,13 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	// on-chain decimals, merchant resolution); skipped when it is unconfigured.
 	if plan, ok := a.planService(); ok {
 		if symbol == "" {
-			symbol, err = resolveSolanaTokenFromMint(plan, acct.Mint.String())
+			symbol, err = resolveSolanaTokenFromMint(ctx, plan, acct.Mint.String())
 			if err != nil {
 				return nil, err
 			}
 		}
 		if symbol != "" {
-			mint, err := plan.ResolveMint(symbol)
+			mint, err := plan.ResolveMint(ctx, symbol)
 			if err != nil {
 				return nil, err
 			}
@@ -338,13 +339,13 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	return out, nil
 }
 
-func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (string, error) {
+func resolveSolanaTokenFromMint(ctx context.Context, plan *recurring.PlanService, mint string) (string, error) {
 	for _, symbol := range [...]string{
 		solanaDefaultRecurringToken,
 		solanaUSD1RecurringToken,
 		solanaDUSDRecurringToken,
 	} {
-		configuredMint, err := plan.ResolveMint(symbol)
+		configuredMint, err := plan.ResolveMint(ctx, symbol)
 		if err == nil && strings.TrimSpace(configuredMint) == strings.TrimSpace(mint) {
 			return symbol, nil
 		}

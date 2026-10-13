@@ -130,8 +130,7 @@ type planReader interface {
 type PlanService struct {
 	submitter Submitter
 	reader    planReader // optional; enables the idempotent re-publish guard
-	network   string     // "mainnet" | "devnet"
-	tokens    map[string]config.TokenConfig
+	tokens    Tokens
 	now       func() time.Time
 }
 
@@ -139,8 +138,8 @@ type PlanService struct {
 // before submitting create_plan, so a re-publish with MATCHING terms is an
 // idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
 // immutable on-chain — see PublishPlan).
-func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string, tokens ...map[string]config.TokenConfig) *PlanService {
-	return &PlanService{submitter: submitter, reader: reader, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
+func NewPlanServiceWithReader(submitter Submitter, reader planReader, tokens Tokens) *PlanService {
+	return &PlanService{submitter: submitter, reader: reader, tokens: tokens, now: time.Now}
 }
 
 // MerchantAddress returns the merchant's on-chain merchant (cranker) address — the
@@ -150,10 +149,13 @@ func (s *PlanService) MerchantAddress(ctx context.Context, tenantID billing.Merc
 	return s.submitter.MerchantAddress(ctx, tenantID)
 }
 
+// Network is the network the ctx merchant's Solana PSP pays on.
+func (s *PlanService) Network(ctx context.Context) string { return s.tokens.network(ctx) }
+
 // ResolveMint returns the merchant's configured mint for a recurring-eligible
 // symbol. Decimals come from the mint on-chain (MintDecimals).
-func (s *PlanService) ResolveMint(symbol string) (string, error) {
-	return ResolveRecurringMintFromTokens(symbol, s.tokens)
+func (s *PlanService) ResolveMint(ctx context.Context, symbol string) (string, error) {
+	return ResolveRecurringMintFromTokens(symbol, s.tokens.of(ctx))
 }
 
 // MintDecimals returns the ON-CHAIN base-unit precision of the mint backing
@@ -161,7 +163,7 @@ func (s *PlanService) ResolveMint(symbol string) (string, error) {
 // amount is written immutably on-chain, so a wrong shift cannot be corrected
 // afterwards. Fails closed when no reader is wired or the mint is unreadable.
 func (s *PlanService) MintDecimals(ctx context.Context, symbol string) (int, error) {
-	mintStr, err := s.ResolveMint(symbol)
+	mintStr, err := s.ResolveMint(ctx, symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -261,7 +263,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 	symbol := normalizeSymbol(in.TokenSymbol)
-	mintStr, err := ResolveRecurringMintFromTokens(symbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(symbol, s.tokens.of(ctx))
 	if err != nil {
 		return nil, err // not recurring-eligible / no mint for network
 	}

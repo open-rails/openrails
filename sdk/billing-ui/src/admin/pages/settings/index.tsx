@@ -934,6 +934,13 @@ function accountIDHint(rail: string): string | undefined {
   }
 }
 
+// What each environment means for money, in the merchant's words.
+const ENVIRONMENT_LABELS: Record<string, string> = {
+  live: "Live: real money",
+  test: "Test: the provider's own system, no money moves",
+  sandbox: "Sandbox: the provider's separate sandbox",
+}
+
 const RAIL_NAMES: Record<string, string> = {
   nmi: "NMI",
   ccbill: "CCBill",
@@ -984,6 +991,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
   const form = useForm({
     defaultValues: {
       rail: "",
+      environment: "",
       key: "",
       accountID: "",
       credentials: {} as Record<string, string>,
@@ -998,6 +1006,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
         await createPSP.mutateAsync({
           key: value.key.trim().toLowerCase(),
           rail: value.rail as PSP["rail"],
+          environment: value.environment,
           account_id: value.accountID.trim(),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
@@ -1068,9 +1077,10 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                     value={field.state.value || null}
                     onValueChange={(value) => {
                       field.handleChange(value ?? "")
-                      // Each rail asks for different credentials, so anything
-                      // typed for the previous one is not carried over.
+                      // Each rail asks for different credentials and has its
+                      // own environments, so neither carries over.
                       form.setFieldValue("credentials", {})
+                      form.setFieldValue("environment", "")
                     }}
                   >
                     <SelectTrigger
@@ -1098,6 +1108,66 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                 </Field>
               )}
             </form.Field>
+            <form.Subscribe selector={(state) => state.values.rail}>
+              {(rail) => {
+                const environments =
+                  railDefinitions.find((definition) => definition.rail === rail)
+                    ?.environments ?? []
+                return (
+                  <form.Field
+                    name="environment"
+                    validators={{
+                      onChange: ({ value }) =>
+                        value
+                          ? undefined
+                          : "Choose whether it moves real money",
+                    }}
+                  >
+                    {(field) => (
+                      <Field
+                        label={adminText("Environment")}
+                        id={"pv-environment"}
+                        hint="Whether this PSP moves real money. It is checked with the provider before the PSP is used."
+                      >
+                        <Select
+                          items={environments.map((environment) => ({
+                            value: environment,
+                            label: adminText(
+                              ENVIRONMENT_LABELS[environment] ?? environment
+                            ),
+                          }))}
+                          value={field.state.value || null}
+                          onValueChange={(value) =>
+                            field.handleChange(value ?? "")
+                          }
+                        >
+                          <SelectTrigger
+                            id={adminId("pv-environment")}
+                            className="w-full"
+                            disabled={!rail}
+                            aria-invalid={field.state.meta.errors.length > 0}
+                          >
+                            <SelectValue
+                              placeholder={adminText("Pick an environment…")}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {environments.map((environment) => (
+                              <SelectItem key={environment} value={environment}>
+                                {adminText(
+                                  ENVIRONMENT_LABELS[environment] ?? environment
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormFieldErrors errors={field.state.meta.errors} />
+                      </Field>
+                    )}
+                  </form.Field>
+                )
+              }}
+            </form.Subscribe>
             <form.Field
               name="key"
               validators={{
@@ -1197,6 +1267,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
               selector={(state) =>
                 [
                   state.values.rail,
+                  state.values.environment,
                   state.values.key,
                   state.values.accountID,
                   state.canSubmit,
@@ -1204,7 +1275,14 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                 ] as const
               }
             >
-              {([rail, key, accountID, canSubmit, isSubmitting]) => (
+              {([
+                rail,
+                environment,
+                key,
+                accountID,
+                canSubmit,
+                isSubmitting,
+              ]) => (
                 <>
                   <Button
                     type="button"
@@ -1217,6 +1295,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
                     type="submit"
                     disabled={
                       !rail ||
+                      !environment ||
                       !key.trim() ||
                       !accountID.trim() ||
                       !canSubmit ||

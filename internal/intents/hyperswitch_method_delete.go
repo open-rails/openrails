@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/open-rails/openrails/internal/destructive"
 	"time"
+
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -83,7 +84,7 @@ func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.Bill
 	return Retryable("qualified native deletion permits exact retry through write gates")
 }
 func deletionBinding(row merchants.CustodianScope, cfg *config.Config) (charge.HyperSwitchBinding, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(cfg)) {
+	if cfg == nil || cfg.HyperSwitch == nil || row.Kind != models.CustodianHyperSwitch || config.LiveEnvironment(row.Environment) && cfg.HyperSwitch.AllowLoopbackHTTP {
 		return charge.HyperSwitchBinding{}, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(row.Kind, row.Settings)

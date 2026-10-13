@@ -89,11 +89,10 @@ products:
 	require.NoError(t, err)
 	slug := "instances-" + uuid.NewString()[:8]
 	cfg := openrails.Config{
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ReturnOrigins:     []string{"https://e2e.test"},
 		Redis:             &openrails.RedisConfig{Addr: e2eRedis(t)},
-		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Instances", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: account,
+		Merchants: map[string]openrails.MerchantDeclaration{slug: {DisplayName: "Instances", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: account,
 			Secrets: map[string]string{"secret_key": "sk_test_instances", "webhook_signing_secret": secret}}}}},
 	}
 

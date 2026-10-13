@@ -108,15 +108,13 @@ func TestWriteModeGatesMutationsBeforeTheWire(t *testing.T) {
 	require.Zero(t, f.count(http.MethodPost, "")+f.count(http.MethodPut, "")+f.count(http.MethodPatch, "")+f.count(http.MethodDelete, ""))
 
 	for name, cfg := range map[string]*config.Config{
-		"full":            {ProviderWriteMode: config.ProviderWriteModeFull},
-		"limited":         {ProviderWriteMode: config.ProviderWriteModeLimited},
-		"sandbox full":    {ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox},
-		"sandbox limited": {ProviderWriteMode: config.ProviderWriteModeLimited, TestMode: config.CredentialPostureSandbox},
+		"full":    {ProviderWriteMode: config.ProviderWriteModeFull},
+		"limited": {ProviderWriteMode: config.ProviderWriteModeLimited},
 	} {
 		_, err := send(t, Client(cfg, 0), http.MethodPost, f.URL+"/v1/customers", "sk_test_loopback")
 		require.NoError(t, err, name)
 	}
-	require.Equal(t, 4, f.count(http.MethodPost, "/v1/customers"))
+	require.Equal(t, 2, f.count(http.MethodPost, "/v1/customers"))
 }
 
 func TestGuardPinsVersionAndCarriesIdempotencyKey(t *testing.T) {
@@ -153,8 +151,8 @@ func TestTimeoutDefaults(t *testing.T) {
 }
 
 // An injected transport sits UNDER the guard: readonly still refuses writes
-// before the host transport, the version is still pinned, and sandbox posture
-// still refuses a live key.
+// before the host transport, the version is still pinned, and a live key never
+// reaches it.
 func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 	var reached atomic.Int64
 	factory := NewFactory(roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -163,16 +161,15 @@ func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
 	}))
 	full := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
-	sandbox := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}, 0)
 
 	_, err := send(t, full, http.MethodPost, APIBase+"/v1/products", "sk_live_x")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, providerposture.ErrDisarmed)
 	_, err = send(t, factory.ReadOnlyClient(0), http.MethodPost, APIBase+"/v1/products", "sk_test_x")
 	require.ErrorIs(t, err, ErrProviderReadOnly)
-	_, err = send(t, sandbox, http.MethodPost, APIBase+"/v1/products", "sk_live_x")
-	require.ErrorIs(t, err, providerposture.ErrDisarmed)
-	_, err = send(t, sandbox, http.MethodPost, APIBase+"/v1/products", "sk_test_x")
+	_, err = send(t, full, http.MethodPost, APIBase+"/v1/products", "sk_test_x")
 	require.NoError(t, err)
+	_, err = send(t, full, http.MethodGet, APIBase+"/v1/products", "sk_live_x")
+	require.NoError(t, err, "reads are never gated")
 	require.EqualValues(t, 2, reached.Load())
 
 	require.Equal(t, providerposture.Live, factory.VerifyPosture(context.Background(), "rk_live_x", "").Verdict)
@@ -185,10 +182,12 @@ func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 // sandboxClient routes api.stripe.com to the fake without the fixture
 // exemption, so the real posture gate runs.
 func sandboxClient(f *fakeStripe) *http.Client {
-	return &http.Client{Transport: &guardTransport{sandbox: true, base: HostRewriteTransport(f.URL)}}
+	return &http.Client{Transport: &guardTransport{base: HostRewriteTransport(f.URL)}}
 }
 
-func TestSandboxPostureVerifiesEachKeyOnceAndRefusesLive(t *testing.T) {
+// A test key's mutations hold a verified test-mode posture, read once per key;
+// a key with no test prefix that is not live is refused without a read.
+func TestTestKeysVerifyPostureOnce(t *testing.T) {
 	f := newFakeStripe(t, "false", "acct_1")
 	c := sandboxClient(f)
 	key := "sk_test_" + uuid.NewString()
@@ -208,10 +207,8 @@ func TestSandboxPostureVerifiesEachKeyOnceAndRefusesLive(t *testing.T) {
 
 	_, err := send(t, c, http.MethodGet, APIBase+"/v1/customers", "sk_live_"+uuid.NewString())
 	require.NoError(t, err, "reads are never posture-gated")
-	for name, key := range map[string]string{"live key": "sk_live_" + uuid.NewString(), "restricted live key": "rk_live_" + uuid.NewString(), "unprefixed key": uuid.NewString()} {
-		_, err := send(t, c, http.MethodPost, APIBase+"/v1/charges", key)
-		require.ErrorIs(t, err, providerposture.ErrDisarmed, name)
-	}
+	_, err = send(t, c, http.MethodPost, APIBase+"/v1/charges", uuid.NewString())
+	require.ErrorIs(t, err, providerposture.ErrDisarmed, "an unprefixed key")
 	require.Equal(t, 1, f.count(http.MethodGet, "/v1/balance"), "a key without a test prefix is refused without a provider read")
 
 	f.livemode.Store("true")
@@ -245,7 +242,7 @@ func TestPostureCheckBindsDeclaredAndConnectedAccount(t *testing.T) {
 
 func TestLoopbackFixtureStillRefusesLiveKeys(t *testing.T) {
 	f := newFakeStripe(t, "true", "acct_1")
-	c := &http.Client{Transport: &guardTransport{sandbox: true}}
+	c := &http.Client{Transport: &guardTransport{}}
 	_, err := send(t, c, http.MethodPost, f.URL+"/v1/charges", "sk_test_fixture")
 	require.NoError(t, err)
 	_, err = send(t, c, http.MethodPost, f.URL+"/v1/charges", "sk_live_fixture")

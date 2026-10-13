@@ -41,10 +41,11 @@ type NMIClient struct {
 	DirectPostURL string
 	// QueryURL is the classic Query API: v5 has no payments search and v4's
 	// report endpoint is partner-key-only.
-	QueryURL           string
-	V5BaseURL          string
-	TestMode           bool
-	endpointDeployment string
+	QueryURL  string
+	V5BaseURL string
+	// Environment is the PSP's declared environment: live and test use the
+	// regular gateway, sandbox sandbox.nmi.com.
+	Environment string
 	// ReadOnly blocks every mutation, classic and v5 non-GET, with
 	// ErrProviderReadOnly; reads stay available.
 	ReadOnly bool
@@ -104,8 +105,8 @@ func (e *CustomerVaultError) Error() string {
 
 // newClient builds an unbound client. Callers outside this package use
 // NewAccountClient: an NMI client never exists without the merchant, PSP,
-// account and endpoint deployment its credential belongs to.
-func newClient(provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
+// account and environment its credential belongs to.
+func newClient(provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
 	if cfg == nil {
 		return nil, errors.New("nmi provider configuration is required")
 	}
@@ -113,55 +114,40 @@ func newClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 	// No warning for a missing webhook secret: clients also serve catalog ops
 	// and credential probes. Webhook verification fails loudly without one.
 	webhookSecret := strings.TrimSpace(cfg.WebhookSecret)
-
 	securityKey := strings.TrimSpace(cfg.SecurityKey)
-	if !testMode && securityKey == "" {
-		return nil, fmt.Errorf("nmi provider '%s' security key is required in production mode", provider)
-	}
-	if testMode && securityKey == "" {
-		log.WithField("provider", provider).Warn("NMI security_key not configured - NMI API calls will be disabled")
+	if securityKey == "" {
+		return nil, fmt.Errorf("nmi provider '%s' security key is required", provider)
 	}
 
 	directPostURL := DefaultDirectPostURL
 	queryURL := DefaultQueryAPIURL
 	v5BaseURL := DefaultV5BaseURL
-	deployment := cfg.EndpointDeployment
-	if deployment == "" {
-		if testMode {
-			deployment = config.NMIEndpointSandbox
-		} else {
-			deployment = config.NMIEndpointGateway
-		}
-	}
-	if deployment != config.NMIEndpointGateway && deployment != config.NMIEndpointSandbox {
-		return nil, errors.New("invalid NMI endpoint deployment")
-	}
-	if !testMode && deployment == config.NMIEndpointSandbox {
-		return nil, errors.New("NMI sandbox endpoint requires test posture")
-	}
-	if deployment == config.NMIEndpointSandbox {
+	switch cfg.Environment {
+	case config.EnvironmentLive, config.EnvironmentTest:
+	case config.EnvironmentSandbox:
 		directPostURL = SandboxDirectPostURL
 		queryURL = SandboxQueryAPIURL
 		v5BaseURL = SandboxV5BaseURL
+	default:
+		return nil, fmt.Errorf("nmi provider '%s' environment %q must be live, test or sandbox", provider, cfg.Environment)
 	}
 
 	log.WithFields(log.Fields{
 		"provider":    provider,
-		"test_mode":   testMode,
+		"environment": cfg.Environment,
 		"v5":          v5BaseURL,
 		"direct_post": directPostURL,
 		"query":       queryURL,
 	}).Info("NMI endpoint selection")
 
 	return &NMIClient{
-		providerName:       provider,
-		SecurityKey:        securityKey,
-		WebhookSecret:      webhookSecret,
-		DirectPostURL:      directPostURL,
-		QueryURL:           queryURL,
-		V5BaseURL:          v5BaseURL,
-		TestMode:           testMode,
-		endpointDeployment: deployment,
+		providerName:  provider,
+		SecurityKey:   securityKey,
+		WebhookSecret: webhookSecret,
+		DirectPostURL: directPostURL,
+		QueryURL:      queryURL,
+		V5BaseURL:     v5BaseURL,
+		Environment:   cfg.Environment,
 		httpClient: &http.Client{
 			// Backstop only; the real bound is the per-request context
 			// deadline (nmiMutationTimeout / nmiReadTimeout).
@@ -443,21 +429,24 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 	return string(body), nil
 }
 
+// Live reports whether the client's PSP moves real money.
+func (c *NMIClient) Live() bool { return config.LiveEnvironment(c.Environment) }
+
 func (c *NMIClient) GetWebhookSecret() string {
 	return c.WebhookSecret
 }
 
 // NewAccountClient is the only exported NMI client constructor. It binds the
-// credential to its merchant, PSP, account and endpoint deployment, which is
-// also the identity its sandbox posture verdict is keyed by.
-func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
+// credential to its merchant, PSP, account and environment, which is also the
+// identity its posture verdict is keyed by.
+func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
 	if merchantID == uuid.Nil || pspID == uuid.Nil {
 		return nil, errors.New("provider account identity is required")
 	}
 	if strings.TrimSpace(provider) == "" || cfg == nil || strings.TrimSpace(cfg.SecurityKey) == "" {
 		return nil, errors.New("provider account and security key are required")
 	}
-	client, err := newClient(provider, cfg, testMode)
+	client, err := newClient(provider, cfg)
 	if err != nil {
 		return nil, err
 	}

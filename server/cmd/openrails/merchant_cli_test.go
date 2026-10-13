@@ -20,6 +20,7 @@ merchants:
     psps:
       mobius:
         rail: nmi
+        environment: sandbox
         account_id: "000000"
         settings:
           tokenization_key: public-key

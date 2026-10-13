@@ -61,6 +61,7 @@ merchants:
     psps:
       mobius:                 # your name for this PSP (any slug)
         rail: nmi
+        environment: live      # live | test | sandbox
         account_id: "1234567"  # dashboard "Gateway ID"
         settings:
           tokenization_url: https://secure.networkmerchants.com/token/Collect.js
@@ -71,8 +72,9 @@ merchants:
 ```
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
-never commit them. A PSP declares no environment: the deployment-level
-`test_mode` decides, and every PSP in the deployment follows it.
+never commit them. Every PSP declares its `environment`
+([PSP environments](../psp-environments.md)); a deployment is all live or all
+non-live.
 
 ### Card entry: browser or server
 
@@ -107,9 +109,9 @@ What OpenRails does in `server` mode:
 - A vault call whose answer is lost is settled by reading the vault id the
   operation named; if NMI does not show it, the buyer enters the card again.
   A card is never sent twice.
-- In live posture the `card` field is refused over plain HTTP: TLS must reach
-  OpenRails, or a trusted proxy (`trusted_proxies`) must say
-  `X-Forwarded-Proto: https`.
+- The `card` field is refused over plain HTTP unless the deployment holds no
+  live PSP: TLS must reach OpenRails, or a trusted proxy (`trusted_proxies`)
+  must say `X-Forwarded-Proto: https`.
 - Every other request field is still scanned for card numbers, and a PSP left
   on `browser` refuses `card` outright.
 
@@ -204,27 +206,28 @@ Payments → Health shows it beside OpenRails' own attempts.
 For local development, tunnel a stable public hostname to your dev server —
 see `docs/dev/local-webhooks.md`.
 
-### Sandbox testing
+### Environments and testing
 
-Run the deployment with `test_mode: sandbox` (env `TEST_MODE=sandbox`). Each
-NMI PSP then declares which NMI deployment its credentials belong to, in
-`settings.endpoint_deployment` (explicit; OpenRails never tries both):
+An NMI PSP's `environment` says which NMI system its credentials belong to and
+whether they move money; NMI's own answer must agree before the PSP arms:
 
-- `gateway` — a regular gateway account switched to test mode
-  (`secure.nmi.com` / `secure.networkmerchants.com`). Verified with the
-  read-only Query API `report_type=test_mode_status`; only a single
+- `live` — a regular gateway account (`secure.nmi.com` /
+  `secure.networkmerchants.com`). The read-only Query API
+  `report_type=test_mode_status` must answer `false`: an account left in test
+  mode approves without moving money and never arms as live.
+- `test` — a regular gateway account switched to test mode. Only a single
   well-formed `test_mode_enabled=true` arms it. Never a financial request.
-- `sandbox` (default when omitted) — NMI's dedicated sandbox service
-  (`sandbox.nmi.com`). NMI documents no read-only test-mode signal there, so it
-  is verified with one authorization on the non-issued test card: a simulator
-  approves it (then voided), a live account declines it.
+- `sandbox` — NMI's dedicated sandbox service (`sandbox.nmi.com`). NMI
+  documents no read-only test-mode signal there, so it is verified with one
+  authorization on the non-issued test card: a simulator approves it (then
+  voided), a live account declines it.
 
 ```yaml
       mobius:
         rail: nmi
+        environment: sandbox            # a sandbox.nmi.com account
         account_id: "1234567"           # dashboard Gateway ID
         settings:
-          endpoint_deployment: gateway  # or sandbox
           tokenization_url: https://secure.networkmerchants.com/token/Collect.js
           tokenization_key: public-collectjs-key
         secrets:
@@ -233,13 +236,13 @@ NMI PSP then declares which NMI deployment its credentials belong to, in
 ```
 
 Verification runs once per loaded credential set (startup, credential
-create/rotate), bound to merchant + PSP + endpoint + credential fingerprint.
-Every NMI client (purchase, card save, rebills, refunds, pulls,
+create/rotate), bound to merchant + PSP + environment + endpoint + credential
+fingerprint. Every NMI client (purchase, card save, rebills, refunds, pulls,
 custodian proxies) is built from that same PSP scope, so all of them share the
-one verdict; see [sandbox posture](../sandbox-posture.md). A false, unknown or
-unavailable verdict disarms the PSP: every NMI mutation is refused before
-anything is sent, reads still work, and the `openrails_psp_posture` probe fails
-until a background retry succeeds.
+one verdict; see [PSP environments](../psp-environments.md). A disagreeing,
+unknown or unavailable verdict disarms the PSP: every NMI mutation is refused
+before anything is sent, reads still work, and the `openrails_psp_posture`
+probe fails until a background retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields. Sandboxes generally cannot advance time, so
@@ -248,8 +251,8 @@ for a provider billing period.
 
 Your own end-to-end tests need no NMI account: package
 `openrailstest/nmimock` is a fake gateway on loopback. Set
-`Config.ProviderSandbox.NMIGatewayURL` to its `URL()` under
-`TestMode: openrails.Sandbox`, declare an NMI PSP with any credentials, and
+`Config.ProviderSandbox.NMIGatewayURL` to its `URL()`, declare an NMI PSP
+with `Environment: openrails.EnvironmentSandbox` and any credentials, and
 give the gateway the clock you pass as `Deps.Clock`, so a renewal is a clock
 step. `Tokenize(card)` is the Collect.js token a customer saves or pays with;
 `SetDecline(last4, nmimock.InsufficientFunds)` declines that card's next

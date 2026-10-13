@@ -20,7 +20,7 @@ func TestSecurityProviderAccountClaimsNeedProof(t *testing.T) {
 	w := newVaultWorld(t)
 	r := w.rival()
 	for _, account := range []string{"999999-0001", "999999-0000"} {
-		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "squat", Rail: billing.RailCCBill, AccountID: account})
+		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "squat", Rail: billing.RailCCBill, Environment: "sandbox", AccountID: account})
 		require.Error(t, err, "an unproven claim of %s is refused", account)
 		require.NotEqual(t, "merchant_config_read_only", codeOf(err), "the claim itself is refused")
 	}

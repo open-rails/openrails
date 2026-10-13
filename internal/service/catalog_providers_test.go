@@ -26,11 +26,11 @@ func nmiCatalogCtx() context.Context {
 }
 
 func nmiService(psps railresolve.FixedSet) *Service {
-	return &Service{rt: &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}, RailConfigs: psps}}
+	return &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, RailConfigs: psps}}
 }
 
 func newMobiusAdapterWithServer(serverURL string) *nmiAdapter {
-	svc := nmiService(railresolve.FixedSet{"mobius": {Rail: models.RailNMI, AccountID: "mobius", NMI: &config.NMIRailConfig{SecurityKey: "test-security-key"}}})
+	svc := nmiService(railresolve.FixedSet{"mobius": {Rail: models.RailNMI, Environment: config.EnvironmentSandbox, AccountID: "mobius", NMI: &config.NMIRailConfig{SecurityKey: "test-security-key"}}})
 	return &nmiAdapter{svc: svc, testEndpointURL: serverURL}
 }
 
@@ -111,8 +111,8 @@ func TestNMIAdapterAutoCreatePreservesPriceIdentity(t *testing.T) {
 func TestNMIAdapterTargetsResolvedAccount(t *testing.T) {
 	srv, creates := fakeNMIPlans(t, nil)
 	a := &nmiAdapter{svc: nmiService(railresolve.FixedSet{
-		"mobius": {Rail: models.RailNMI, AccountID: "100001", NMI: &config.NMIRailConfig{SecurityKey: "primary-key"}},
-		"backup": {Rail: models.RailNMI, AccountID: "100002", Archived: true, NMI: &config.NMIRailConfig{SecurityKey: "secondary-key"}},
+		"mobius": {Rail: models.RailNMI, Environment: config.EnvironmentSandbox, AccountID: "100001", NMI: &config.NMIRailConfig{SecurityKey: "primary-key"}},
+		"backup": {Rail: models.RailNMI, Environment: config.EnvironmentSandbox, AccountID: "100002", Archived: true, NMI: &config.NMIRailConfig{SecurityKey: "secondary-key"}},
 	}), testEndpointURL: srv.URL}
 	ids, err := a.AutoCreate(nmiCatalogCtx(), autoCreateContext{PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30), TargetAccountID: "100002"})
 	require.NoError(t, err)
@@ -204,7 +204,6 @@ func TestNMICatalogClientUsesConfiguredSandboxEndpoint(t *testing.T) {
 		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("private endpoint must take priority") }))
 		t.Cleanup(other.Close)
 		a := newMobiusAdapterWithServer("")
-		a.svc.rt.Config.TestMode = config.CredentialPostureSandbox
 		a.svc.rt.Config.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
 		if privateOverride {
 			a.testEndpointURL = gateway.URL
@@ -221,7 +220,7 @@ func TestNMICatalogClientUsesConfiguredSandboxEndpoint(t *testing.T) {
 
 func newStripeAdapterWithServer(serverURL string) *stripeAdapter {
 	return &stripeAdapter{svc: &Service{rt: &app.Runtime{
-		Config:      &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
+		Config:      &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		RailConfigs: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_wirepin"}}},
 	}}, testBaseURL: serverURL}
 }

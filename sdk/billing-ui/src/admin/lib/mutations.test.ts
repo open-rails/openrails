@@ -288,10 +288,15 @@ const cases: Case[] = [
   [
     "adds a PSP",
     (c, g) =>
-      g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1" }),
+      g(M.createPSP(c), {
+        key: "mobius",
+        rail: "nmi",
+        environment: "sandbox",
+        account_id: "gw_1",
+      }),
     "POST /merchant/psps",
     ["psps"],
-    { key: "mobius", rail: "nmi", account_id: "gw_1" },
+    { key: "mobius", rail: "nmi", environment: "sandbox", account_id: "gw_1" },
   ],
   [
     "rotates PSP credentials",

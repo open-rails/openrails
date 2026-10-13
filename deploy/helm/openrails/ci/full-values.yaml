@@ -3,7 +3,6 @@ replicaCount: 2
 image:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 config:
-  test_mode: live
   provider_write_mode: full
   public_billing_base_url: https://billing.example.com
   auth:

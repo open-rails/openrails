@@ -22,7 +22,7 @@ func trailingInitID(ix solanago.CompiledInstruction) int64 {
 func newSubscribeSvc(t *testing.T, rpc chain) (*PrepareSubscribeService, solanago.PublicKey) {
 	t.Helper()
 	signer, submitter, merchantPub := newCranker(t)
-	svc := NewPrepareSubscribeService(submitter, signer, rpc, "devnet", testTokens())
+	svc := NewPrepareSubscribeService(submitter, signer, rpc, NetworkTokens("devnet", testTokens()))
 	svc.authorityReadBackoff = time.Nanosecond
 	return svc, merchantPub
 }
@@ -173,7 +173,7 @@ func TestPrepareTierChangeBundle(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			signer, _, merchantPub := newCranker(t)
-			svc := NewPrepareTierChangeService(signer, chain{authorityInitID: withAuthority(42), balance: 1 << 40}, "devnet", testTokens())
+			svc := NewPrepareTierChangeService(signer, chain{authorityInitID: withAuthority(42), balance: 1 << 40}, NetworkTokens("devnet", testTokens()))
 			in := tierChangeInput(t)
 			in.IsUpgrade = tc.upgrade
 			in.FirstChargeBaseUnits = 31_330_000
@@ -208,7 +208,7 @@ func TestPrepareTierChangeRefusals(t *testing.T) {
 		in.IsUpgrade = true
 		in.FirstChargeBaseUnits = 31_330_000
 		mutate(&in)
-		_, err := NewPrepareTierChangeService(signer, rpc, "devnet", testTokens()).Prepare(context.Background(), in)
+		_, err := NewPrepareTierChangeService(signer, rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), in)
 		return err
 	}
 	funded := chain{authorityInitID: withAuthority(42), balance: 1 << 40}

@@ -66,7 +66,7 @@ func (f *nmiFake) client(t *testing.T) *NMIClient { return nmiClient(t, f.URL) }
 
 func nmiClient(t *testing.T, base string) *NMIClient {
 	t.Helper()
-	c, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "wire-key"}, true)
+	c, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "wire-key", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	c.DirectPostURL, c.QueryURL, c.V5BaseURL = base+"/transact", base+"/query", base
 	c.LoopbackFixture = true

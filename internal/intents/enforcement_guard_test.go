@@ -56,10 +56,10 @@ var providerWriteSurface = map[string]string{
 	"CreateCustomerVaultFromCard":     "write", // stores a card the server received
 
 	// --- reads ----------------------------------------------------------
-	// Sandbox posture verification: query reads, or the dedicated sandbox's
+	// Environment verification: query reads, or the dedicated sandbox's
 	// simulated-only qualification probe; never live money.
 	"CheckPosture":                 "read",
-	"CheckLivePosture":             "read",
+	"Live":                         "read",
 	"PostureCheck":                 "read",
 	"VerifyPosture":                "read",
 	"PostureKey":                   "read",

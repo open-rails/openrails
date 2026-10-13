@@ -76,7 +76,7 @@ func newPayShop(t *testing.T) *payShop {
 	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("pay"), DisplayName: "Pay Shop"})
 	require.NoError(t, err)
 	s.mid = entry.MerchantID
-	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: "e2e-" + uuid.NewString()[:8],
+	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", AccountID: "e2e-" + uuid.NewString()[:8],
 		Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
 		Credentials: map[string]string{"security_key": "e2e-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 	require.NoError(t, err)

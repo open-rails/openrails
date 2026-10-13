@@ -66,6 +66,8 @@ func TestTypedPSPsCoverTheRailRegistry(t *testing.T) {
 				want.Settings = put(want.Settings, name, sample)
 			case "account_id":
 				want.AccountID = sample.(string)
+			case "environment":
+				want.Environment = sample.(string)
 			case "archived":
 				want.Archived = true
 			case "custodian":
@@ -129,25 +131,27 @@ slug: onlydemo
 psps:
   mobius:
     rail: nmi
+    environment: sandbox
     account_id: "000000"
     settings: {tokenization_key: tk, webhook_overlap_expires_at: "2026-10-08T00:00:00Z"}
     secrets: {security_key: sk, webhook_signing_secret: whs, webhook_signing_secret_previous: old}
-  stripe: {rail: stripe, account_id: acct_1, archived: true, secrets: {secret_key: sk_test_1, webhook_signing_secret: whsec_1}}
-  ccbill: {rail: ccbill, account_id: 999999-0000, secrets: {salt: s}}
+  stripe: {rail: stripe, environment: test, account_id: acct_1, archived: true, secrets: {secret_key: sk_test_1, webhook_signing_secret: whsec_1}}
+  ccbill: {rail: ccbill, environment: sandbox, account_id: 999999-0000, secrets: {salt: s}}
   wallet:
     rail: solana
+    environment: sandbox
     signer: {mode: vault_transit, key: transit-key}
     settings: {rpc_provider: public, tokens: {SOL: {}, XYZ: {mint: m}}}
 `))
 	require.NoError(t, err)
 	require.Equal(t, map[string]PSPConfig{
 		"mobius": NMIPSP{
-			AccountID: "000000", TokenizationKey: "tk",
+			Environment: EnvironmentSandbox, AccountID: "000000", TokenizationKey: "tk",
 			SecurityKey: "sk", WebhookSigningSecret: "whs",
 			WebhookSigningSecretPrevious: "old", WebhookOverlapExpiresAt: time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC),
 		}.PSPConfig(),
-		"stripe": StripePSP{AccountID: "acct_1", Archived: true, SecretKey: "sk_test_1", WebhookSigningSecret: "whsec_1"}.PSPConfig(),
-		"ccbill": CCBillPSP{AccountID: "999999-0000", Salt: "s"}.PSPConfig(),
-		"wallet": SolanaPSP{TransitKey: "transit-key", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m"}}}.PSPConfig(),
+		"stripe": StripePSP{Environment: EnvironmentTest, AccountID: "acct_1", Archived: true, SecretKey: "sk_test_1", WebhookSigningSecret: "whsec_1"}.PSPConfig(),
+		"ccbill": CCBillPSP{Environment: EnvironmentSandbox, AccountID: "999999-0000", Salt: "s"}.PSPConfig(),
+		"wallet": SolanaPSP{Environment: EnvironmentSandbox, TransitKey: "transit-key", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m"}}}.PSPConfig(),
 	}, m.PSPs)
 }

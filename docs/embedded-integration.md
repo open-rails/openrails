@@ -99,12 +99,13 @@ issues no grants.
 
 `openrails.Config` is plain data; `openrails.Deps` is everything the engine
 reaches outside its process. `Config` and its sections carry `yaml` and `json`
-keys (`test_mode`, `db.url`, `vault.kv_mount`, …), so a host can decode its own
-file into it. Construction refuses to boot unless posture is explicit:
+keys (`provider_write_mode`, `db.url`, `vault.kv_mount`, …), so a host can
+decode its own file into it. Whether money is real is each PSP's declared
+`environment` ([PSP environments](psp-environments.md)), never a `Config`
+field. Construction refuses to boot unless the write mode is explicit:
 
 | Config field | Required | Meaning |
 |---|---|---|
-| `TestMode` | yes | `openrails.Sandbox` or `openrails.Live`. The zero value is refused; it never silently means live. |
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
 | `Database` | default `billing` | `Schema`: the Postgres schema of OpenRails' tables. `RiverSchema` (default `Schema` + `_river`): where OpenRails' River jobs live; `Start` runs them there, on its own client or the host's fleet (section 4). `New` creates or upgrades both. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
@@ -119,7 +120,7 @@ file into it. Construction refuses to boot unless posture is explicit:
 | `Vault` | A borrowed Vault client. PSP secrets come from a declared merchant's PSPs or the secret store. |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
-| `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused with `TestMode` live. |
+| `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused beside a live PSP. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
@@ -255,7 +256,7 @@ required secret is declared but not armed, in Go as in YAML.
 | Rail | Secrets (required first) | Settings |
 | --- | --- | --- |
 | `stripe` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key`, `webhook_overlap_expires_at` |
-| `nmi` | `security_key`, `webhook_signing_secret`; `webhook_signing_secret_previous` | `tokenization_key`, `tokenization_url`, `endpoint_deployment`, `card_entry`, `webhook_overlap_expires_at` |
+| `nmi` | `security_key`, `webhook_signing_secret`; `webhook_signing_secret_previous` | `tokenization_key`, `tokenization_url`, `card_entry`, `webhook_overlap_expires_at` |
 | `ccbill` | `salt`; `datalink_username`, `datalink_password` | |
 | `solana` | `private_key` (or `signer: {mode: vault_transit, key: …}`) | `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet` |
 
@@ -588,7 +589,7 @@ prefix (`/v1/webhooks/{rail}/{account_id}`; see [the API guide](api/endpoints.md
 signatures and updates subscriptions/entitlements; your app just reads the results.
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md). In your
 end-to-end tests, `openrailstest/nmimock` stands in for NMI and
-`openrailstest/stripemock` for Stripe on loopback (see [NMI](rails/nmi.md#sandbox-testing)
+`openrailstest/stripemock` for Stripe on loopback (see [NMI](rails/nmi.md#environments-and-testing)
 and [Stripe](rails/stripe.md#sandbox-testing) sandbox testing).
 
 Customers' emails and names come from `Deps.UserInfo`, asked on every read. A

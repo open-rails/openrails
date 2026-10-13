@@ -89,11 +89,11 @@ type Service struct {
 	// config is the merchants' configuration: their documents in a file or
 	// Vault.
 	config *merchantdocs.Cache
-	// providerEnvironment is the deployment posture (#681): test under
-	// test_mode, live otherwise. PSPs resolve in THIS environment only.
-	providerEnvironment string
-	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the #348
-	// test_mode arm-time probe (refuseLiveNMIUnderTestMode) hits, so tests can
+	// fakeProviders are the fake providers wired beside this deployment's
+	// PSPs: with any, a live PSP is refused.
+	fakeProviders []string
+	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the
+	// arm-time environment probe (verifyNMIEnvironment) hits, so tests can
 	// point it at a fake gateway instead of the real NMI API. Empty in
 	// production — the probe uses nmi.NewClient's documented default.
 	nmiProbeV5BaseURL string
@@ -128,7 +128,7 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 }
 
 // NewService builds the lifecycle service over the merchants' configuration,
-// in the PSP environment and with the platform vault cfg names.
+// with the platform vault and fake providers cfg names.
 func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Config) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
@@ -144,14 +144,14 @@ func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Co
 		return nil, err
 	}
 	service.config = configuration
-	service.providerEnvironment = config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
+	service.fakeProviders = config.FakeProviders(cfg)
 	service.platformVault = cfg.PlatformVault
 	return service, nil
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
-// lookup over billing.merchants, with no secret store and no PSP
-// environment (scoped credential lookups are unavailable). It is the lifecycle
+// lookup over billing.merchants, with no secret store (scoped credential
+// lookups are unavailable). It is the lifecycle
 // slice the control-plane provisioning seam needs (#738).
 func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	if pool == nil {
@@ -179,9 +179,6 @@ func (s *Service) WithConfig(configuration *merchantdocs.Cache) *Service {
 	}
 	return s
 }
-
-// Environment is the deployment's PSP environment.
-func (s *Service) Environment() string { return s.providerEnvironment }
 
 // Provision claims req.Slug for a new merchant bound to req.PermissionGroupID.
 // bind runs first, in the same transaction, and creates that group, so a claim

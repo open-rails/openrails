@@ -27,16 +27,16 @@ import (
 
 // StartProviderPosture verifies, in the background, every PSP credential set
 // of the merchants this runtime loads at startup (its configured merchant plus
-// the declared ones), then re-verifies unknown verdicts with capped
-// full-jitter backoff until each is known. Construction never waits on a
-// provider. A PSP not proven to match the posture stays disarmed (its
-// mutations are refused) while reads and other PSPs keep working; Ready
-// reports it as degraded. A PSP whose configuration changes later is verified
-// again as each replica reloads it (followPSPPosture), or at its first
-// mutation.
+// the declared ones) against the PSP's declared environment, then re-verifies
+// unknown verdicts with capped full-jitter backoff until each is known.
+// Construction never waits on a provider. A PSP the provider does not prove to
+// be in its declared environment stays disarmed (its mutations are refused)
+// while reads and other PSPs keep working; Ready reports it as degraded. A PSP
+// whose configuration changes later is verified again as each replica reloads
+// it (followPSPPosture), or at its first mutation.
 //
-// Under live posture every NMI account must prove it is not in test mode
-// (SEC-33): an account left in test mode approves without moving money.
+// Every NMI account proves its environment (SEC-33): an account left in test
+// mode approves without moving money, so it never arms as live.
 func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
 		if r != nil {
@@ -59,8 +59,6 @@ func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 // verifyProviderPosture verifies every loaded PSP whose verdict is not yet
 // known and returns how many remain unknown.
 func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID) int {
-	live := !config.IsTestMode(r.Config)
-	environment := config.ExpectedProviderEnvironment(!live)
 	registry := providerposture.Process()
 	pending := 0
 	seen := map[billing.MerchantID]bool{}
@@ -70,9 +68,9 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 		}
 		seen[mid] = true
 		var ids []uuid.UUID
-		scopes, err := r.Merchants.LivePSPScopes(merchant.WithID(ctx, mid), mid, environment)
+		scopes, err := r.Merchants.LivePSPScopes(merchant.WithID(ctx, mid), mid)
 		for _, scope := range scopes {
-			if !live || scope.Rail == string(models.RailNMI) {
+			if verifiesPosture(scope) {
 				ids = append(ids, scope.ID)
 			}
 		}
@@ -108,6 +106,12 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 
 const postureCheckTimeout = 30 * time.Second
 
+// verifiesPosture reports whether the PSP's environment is proven with its
+// provider at load: every NMI account, and every non-live PSP.
+func verifiesPosture(scope merchants.PSPScope) bool {
+	return scope.Rail == string(models.RailNMI) || !config.LiveEnvironment(scope.Environment)
+}
+
 // verifyPSPPosture reports whether the PSP's verdict is now known.
 func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) bool {
 	svc := r.Merchants
@@ -128,7 +132,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
 			return !errors.Is(err, merchants.ErrConfigUnavailable)
 		}
-		if client.LoopbackFixture && client.TestMode {
+		if client.LoopbackFixture && !client.Live() {
 			return true
 		}
 		if r.NMIPostureV5BaseURL != "" {
@@ -153,7 +157,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		}
 		status, check = client.VerifyPosture(ctx), client.CheckPosture
 	case string(models.RailCCBill):
-		log.WithContext(ctx).WithFields(fields).Warn("provider posture: CCBill has no authoritative test-mode signal; its mutations are refused under sandbox posture")
+		log.WithContext(ctx).WithFields(fields).Warn("provider posture: CCBill has no authoritative test-mode signal; a sandbox CCBill PSP's mutations are refused")
 		return true
 	default:
 		return true
@@ -192,10 +196,9 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 	if len(changed) == 0 {
 		return
 	}
-	live := !config.IsTestMode(r.Config)
 	r.Go("provider posture follow", func(ctx context.Context) {
 		ctx = merchant.WithID(ctx, mid)
-		scopes, err := r.Merchants.LivePSPScopes(ctx, mid, r.Merchants.Environment())
+		scopes, err := r.Merchants.LivePSPScopes(ctx, mid)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
@@ -207,7 +210,7 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 		for _, scope := range scopes {
 			if !changed[strings.ToLower(scope.Key)] {
 				unchanged[scope.ID] = true
-			} else if !live || scope.Rail == string(models.RailNMI) {
+			} else if verifiesPosture(scope) {
 				verify[scope.ID] = true
 			}
 		}

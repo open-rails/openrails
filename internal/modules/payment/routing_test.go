@@ -27,11 +27,11 @@ type pspCatalog struct {
 	err      error
 }
 
-func (c pspCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string, string) (string, bool, error) {
+func (c pspCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (c pspCatalog) PSPScopeByKey(_ context.Context, _ billing.MerchantID, key, _ string) (merchants.PSPScope, bool, error) {
+func (c pspCatalog) PSPScopeByKey(_ context.Context, _ billing.MerchantID, key string) (merchants.PSPScope, bool, error) {
 	for _, s := range c.scopes {
 		if strings.EqualFold(s.Key, key) {
 			return s, true, c.err
@@ -40,7 +40,7 @@ func (c pspCatalog) PSPScopeByKey(_ context.Context, _ billing.MerchantID, key, 
 	return merchants.PSPScope{}, false, c.err
 }
 
-func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ billing.MerchantID, rail, _ string) ([]merchants.PSPScope, error) {
+func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ billing.MerchantID, rail string) ([]merchants.PSPScope, error) {
 	var out []merchants.PSPScope
 	for _, s := range c.scopes {
 		if strings.EqualFold(s.Rail, rail) {
@@ -50,7 +50,7 @@ func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ billing.Merchant
 	return out, c.err
 }
 
-func (c pspCatalog) PSPKeyArchived(_ context.Context, _ billing.MerchantID, key, _ string) (bool, error) {
+func (c pspCatalog) PSPKeyArchived(_ context.Context, _ billing.MerchantID, key string) (bool, error) {
 	for _, k := range c.archived {
 		if k == key {
 			return true, nil
@@ -61,11 +61,11 @@ func (c pspCatalog) PSPKeyArchived(_ context.Context, _ billing.MerchantID, key,
 
 type keyOnlyCatalog struct{}
 
-func (keyOnlyCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string, string) (string, bool, error) {
+func (keyOnlyCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (keyOnlyCatalog) PSPScopeByKey(context.Context, billing.MerchantID, string, string) (merchants.PSPScope, bool, error) {
+func (keyOnlyCatalog) PSPScopeByKey(context.Context, billing.MerchantID, string) (merchants.PSPScope, bool, error) {
 	return merchants.PSPScope{}, false, nil
 }
 
@@ -76,7 +76,7 @@ func merchantCtx() context.Context { return merchant.WithID(context.Background()
 func armedAll() railresolve.FixedSet {
 	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, AccountID: "acct_stripe", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"}},
-		"nmi":    {Rail: models.RailNMI, AccountID: "acct_nmi", NMI: &config.NMIRailConfig{SecurityKey: "security_test"}},
+		"nmi":    {Rail: models.RailNMI, Environment: config.EnvironmentSandbox, AccountID: "acct_nmi", NMI: &config.NMIRailConfig{SecurityKey: "security_test"}},
 		"ccbill": {Rail: models.RailCCBill, AccountID: "999999-0000", CCBill: &config.CCBillRailConfig{Salt: "salt_test"}},
 	}
 }

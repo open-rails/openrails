@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -69,7 +70,7 @@ func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, custody Custo
 		return HyperSwitchBinding{}, err
 	}
 	row := accounts.BillingCustodian
-	if accounts.BillingPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != accounts.BillingPsp.Environment {
+	if accounts.BillingPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != config.EnvironmentClass(accounts.BillingPsp.Environment) {
 		return HyperSwitchBinding{}, ErrInstrumentChanged
 	}
 	scope, ok, err := custody.CustodianScopeByID(ctx, billing.MerchantID(method.MerchantID), row.ID)

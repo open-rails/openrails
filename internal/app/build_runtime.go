@@ -83,26 +83,20 @@ type runtimeOverrides struct {
 	Vault           *vaultapi.Client
 }
 
-// effectiveSolanaNetwork derives the Solana network purely from the test_mode
-// axis — devnet under test_mode, mainnet otherwise. There is deliberately no
-// override knob (#349): test_mode already answers the question.
-func effectiveSolanaNetwork(cfg *config.Config) string {
-	if cfg != nil && config.IsTestMode(cfg) {
-		return "devnet"
-	}
-	return "mainnet"
-}
-
-// devnetParityPriceProvider wraps the Pyth client under test_mode (#360).
-// Devnet money is fake and a devnet deployment must never require Hermes:
-// feed-backed symbols are still priced via Hermes when it is reachable
-// (realistic SOL quotes), but ANY failure — missing feed, network error,
-// staleness — degrades to $1.00 parity instead of erroring.
+// devnetParityPriceProvider wraps the Pyth client (#360) for a merchant whose
+// Solana PSP is on devnet. Devnet money is fake and a sandbox PSP must never
+// require Hermes: feed-backed symbols are still priced via Hermes when it is
+// reachable (realistic SOL quotes), but ANY failure — missing feed, network
+// error, staleness — degrades to $1.00 parity instead of erroring.
 type devnetParityPriceProvider struct {
-	inner solanamodule.TokenPriceProvider
+	inner   solanamodule.TokenPriceProvider
+	network func(context.Context) string
 }
 
 func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) (float64, error) {
+	if p.network == nil || p.network(ctx) != "devnet" {
+		return p.inner.PriceUSD(ctx, symbol)
+	}
 	if p.inner != nil {
 		if price, err := p.inner.PriceUSD(ctx, symbol); err == nil && price > 0 {
 			return price, nil
@@ -114,7 +108,7 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 	return 1.0, nil
 }
 
-func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvider, error) {
+func createPythPriceProvider(network func(context.Context) string) (solanamodule.TokenPriceProvider, error) {
 	// Always constructed (#788): whether a merchant's Solana rail is armed is
 	// per-merchant runtime state, not boot config; the client is a cheap
 	// lazily-used HTTP wrapper.
@@ -137,10 +131,7 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 	if err != nil {
 		return nil, fmt.Errorf("create pyth client: %w", err)
 	}
-	if effectiveSolanaNetwork(cfg) == "devnet" {
-		return devnetParityPriceProvider{inner: client}, nil
-	}
-	return client, nil
+	return devnetParityPriceProvider{inner: client, network: network}, nil
 }
 
 func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
@@ -185,11 +176,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisOwned = redisClient != nil
 	}
 
-	solanaPriceProvider, err := createPythPriceProvider(cfg)
-	if err != nil {
-		return nil, err
-	}
-
 	// #788 Layer C: ONE rail resolution seam for the whole runtime. The
 	// merchants service is wired after the services it arms, so every
 	// resolver closes over the runtime pointer assigned below.
@@ -229,6 +215,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+	}
+	solanaPriceProvider, err := createPythPriceProvider(solanaRPCResolver.Network)
+	if err != nil {
+		return nil, err
 	}
 
 	// Who customers are: the host's directory in process, else the kept copy.

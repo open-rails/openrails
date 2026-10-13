@@ -107,7 +107,7 @@ instance and no sticky session. Without Redis, run one instance.
 
 ### What must be identical
 
-- **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`, the
+- **Configuration**: the schemas, `ProviderWriteMode`, the
   merchant's configuration (`Config.Merchants` with its PSPs and secrets, or the
   same Vault KV mount), `Config.RateLimits`, `Config.Captcha`,
   `Config.TrustedProxies` and `Config.ReturnOrigins`. Every start applies the
@@ -1196,7 +1196,7 @@ trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
 | `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. |
 | `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
 | `api.stripe.com` | Stripe PSPs. |
-| `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by `test_mode`. |
+| `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by each PSP's `environment`. |
 | `api.ccbill.com`, `sandbox-api.ccbill.com`, `datalink.ccbill.com` | CCBill PSPs. |
 | `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians. |
 | `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, `*.helius-rpc.com` | Solana PSPs' RPC (`provider_sandbox.solana_rpc_url` replaces it). |
@@ -1208,12 +1208,13 @@ the FX hosts leaves cross-currency quotes failing and nothing else.
 
 ## Operating modes (the safety levers)
 
-Security defaults are independent of provider sandbox/live posture. Declare both
-`provider_write_mode` (`full`, `limited`, `readonly`) and `test_mode` (`sandbox`,
-`live`) explicitly. CLI flags override environment variables, which override YAML.
-An unset write policy fails closed to `readonly` wherever it is consulted;
-constructor validation requires an explicit policy. Sandbox validates test
-credentials and never relaxes issuer, signing, storage or proxy protections.
+Security defaults are independent of the PSPs' environments. Declare
+`provider_write_mode` (`full`, `limited`, `readonly`) explicitly, and every
+PSP's `environment` (`live`, `test`, `sandbox`) in the merchant configuration.
+CLI flags override environment variables, which override YAML. An unset write
+policy fails closed to `readonly` wherever it is consulted; constructor
+validation requires an explicit policy. A non-live PSP never relaxes issuer,
+signing, storage or proxy protections.
 
 Narrow local exceptions are configured explicitly in the server's AuthKit (for
 example `auth.registration.allow_missing_senders`, `auth.http.direct_peer_ip`).
@@ -1245,9 +1246,9 @@ stored ownership; `provider_write_mode` remains a separate gate.
 A merchant's write posture and the book's identity can lower the mode for one
 merchant or the whole book (see above); the lower mode applies.
 
-What each provider write mode permits (`test_mode` applies orthogonally: with
-sandbox the same matrix holds against sandbox rails, so no real money can move
-in any mode):
+What each provider write mode permits (PSP environments apply orthogonally: in
+a non-live deployment the same matrix holds against test and sandbox rails, so
+no real money can move in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -1271,26 +1272,24 @@ Provider receipt recovery runs in every mode. The NMI/Stripe freshness gate is
 an additional prerequisite for existing-obligation collection and destructive
 work, including under `full`; see [provider recovery](provider-recovery.md).
 
-### `test_mode` — sandbox credentials
+### PSP environments — real money or not
 
-`test_mode = sandbox` is sandbox money with whatever behavior
-`provider_write_mode` selects: every rail routes to its test environment, and
-credential guarantees attach — a live Stripe key (`sk_live_`/`rk_live_`)
-refuses to boot; each NMI account is probed when armed with one auth on the
-canonical non-issued test PAN (only a simulator approves it — a decline
-proves a live account and refuses the arm); CCBill uses the sandbox API host;
-Solana derives devnet. Each NMI arm requires a fresh probe (manifest
-reconciliation and the provider API alike); unavailable, indeterminate or live
-responses refuse the arm, and an update that omits credentials re-probes the
-stored key — a secret-backend failure cannot bypass it. Nothing caches a
-verdict. Production mode does not run the sandbox probe.
-Sandbox is allowed in every environment — what keeps it honest is
-rail-credential validation (the live-key refusal and the NMI live-gateway
-probe, which ask the credential itself), not the environment string.
+Every PSP declares `environment: live | test | sandbox`, and the provider's own
+answer must agree before the PSP is used
+([PSP environments](psp-environments.md)): a Stripe key's prefix matches it;
+each NMI account answers the read-only `test_mode_status` query (a live PSP
+must not be in test mode, a test PSP must be) or, on sandbox.nmi.com, one auth
+on the canonical non-issued test PAN (only a simulator approves it); a sandbox
+CCBill PSP uses the sandbox API host and its mutations are refused; a Solana
+PSP pays on mainnet (live) or devnet (sandbox). Each NMI arm requires a fresh
+check (manifest reconciliation and the provider API alike); unavailable,
+indeterminate or disagreeing answers refuse the arm, and an update that omits
+credentials re-checks the stored key.
 
-The converse Stripe mismatch is also fatal in every environment: explicit
-`test_mode = live` with an `sk_test_` or `rk_test_` key refuses boot instead of
-silently disabling the configured rail.
+A deployment is all live or all non-live: a PSP of the other class, declared or
+already in the database, is refused at boot and when created, and fake
+providers (`provider_sandbox`, `Deps` test seams) are refused beside a live
+PSP.
 
 ### Cutover: booting against production credentials
 

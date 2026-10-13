@@ -17,8 +17,19 @@ import (
 // Every refusal below happens before bootstrap: the configs carry no database,
 // so reaching it would fail with a different error.
 func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
-	sandbox := config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly}
-	live := config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}
+	sandbox := config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+	live := config.Config{ProviderWriteMode: config.ProviderWriteModeFull, Merchants: map[string]config.MerchantDeclaration{"shop": {PSPs: map[string]config.PSPConfig{
+		"stripe": {Rail: billing.RailStripe, Environment: config.EnvironmentLive, AccountID: "acct_1"},
+	}}}}
+	psps := func(environments ...string) func(*config.Config) {
+		return func(c *config.Config) {
+			declared := map[string]config.PSPConfig{}
+			for i, environment := range environments {
+				declared[[]string{"mobius", "wallet"}[i]] = config.PSPConfig{Rail: []billing.Rail{billing.RailNMI, billing.RailSolana}[i], Environment: environment, AccountID: "1"}
+			}
+			c.Merchants = map[string]config.MerchantDeclaration{"shop": {PSPs: declared}}
+		}
+	}
 	with := func(base config.Config, edit func(*config.Config)) config.Config { edit(&base); return base }
 	var seam http.RoundTripper = http.DefaultTransport
 	for name, tc := range map[string]struct {
@@ -40,12 +51,17 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"issuer not a URL":              {with(sandbox, func(c *config.Config) { c.Merchants = map[string]config.MerchantDeclaration{"a": {Issuer: "shop"}} }), config.Deps{}, "not an absolute URL"},
 		"river schema injection":        {with(sandbox, func(c *config.Config) { c.Database.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
 		"derived river schema too long": {with(sandbox, func(c *config.Config) { c.Database.Schema = strings.Repeat("b", 42) }), config.Deps{}, "set Config.Database.RiverSchema"},
-		"posture unset":                 {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
-		"write mode unset":              {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
-		"unknown write mode":            {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
-		"stripe seam on live":           {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
-		"nmi seam on live":              {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
-		"clock seam on live":            {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
+		"environment undeclared":        {with(sandbox, psps("")), config.Deps{}, "psps.mobius.environment is required"},
+		"environment the rail lacks":    {with(sandbox, psps(config.EnvironmentLive, config.EnvironmentTest)), config.Deps{}, `solana has no "test" environment`},
+		"live beside non-live":          {with(sandbox, psps(config.EnvironmentLive, config.EnvironmentSandbox)), config.Deps{}, "a deployment is all live or all non-live: live PSPs shop/mobius beside non-live PSPs shop/wallet (sandbox)"},
+		"loopback gateway beside live": {with(live, func(c *config.Config) {
+			c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: "http://127.0.0.1:9"}
+		}), config.Deps{}, "provider_sandbox.nmi_gateway_url is a test seam and is refused beside a live PSP (shop/stripe)"},
+		"write mode unset":    {config.Config{}, config.Deps{}, "ProviderWriteMode is required"},
+		"unknown write mode":  {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
+		"stripe seam on live": {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
+		"nmi seam on live":    {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
+		"clock seam on live":  {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, err := New(context.Background(), tc.cfg, tc.deps)
@@ -56,21 +72,19 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 }
 
 func TestEmbeddedDefaults(t *testing.T) {
-	for _, posture := range []config.CredentialPosture{config.CredentialPostureSandbox, config.CredentialPostureLive} {
-		cfg := &config.Config{TestMode: posture, ProviderWriteMode: " Full "}
-		_, err := validate(cfg, config.Deps{})
-		require.NoError(t, err)
-		require.Equal(t, config.DefaultRateLimits(), cfg.RateLimits, "an embedded surface never ships unthrottled")
-		require.Equal(t, config.CaptchaProviderTurnstile, config.CaptchaProvider(cfg.Captcha))
-	}
+	cfg0 := &config.Config{ProviderWriteMode: " Full "}
+	_, err := validate(cfg0, config.Deps{})
+	require.NoError(t, err)
+	require.Equal(t, config.DefaultRateLimits(), cfg0.RateLimits, "an embedded surface never ships unthrottled")
+	require.Equal(t, config.CaptchaProviderTurnstile, config.CaptchaProvider(cfg0.Captcha))
 
 	custom := &config.RateLimitsConfig{"purchase": {RequestsPerMinute: 1}}
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeLimited, RateLimits: custom}
-	_, err := validate(cfg, config.Deps{})
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited, RateLimits: custom}
+	_, err = validate(cfg, config.Deps{})
 	require.NoError(t, err)
 	require.Same(t, custom, cfg.RateLimits)
 
-	cfg = &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, RateLimitsDisabled: true}
+	cfg = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, RateLimitsDisabled: true}
 	_, err = validate(cfg, config.Deps{})
 	require.NoError(t, err)
 	require.Nil(t, cfg.RateLimits, "an explicit opt-out stays a passthrough")

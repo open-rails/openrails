@@ -11,7 +11,6 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	log "github.com/sirupsen/logrus"
@@ -76,10 +75,9 @@ type PrepareSubscribeService struct {
 	// signer is the cranker key: it pre-signs the transfer slot of the atomic
 	// [subscribe + transfer_subscription] bundle while the wallet completes the
 	// fee-payer slot. It MUST be the merchant (cranker) key.
-	signer  solanaint.Signer
-	rpc     prepareRPC
-	network string
-	tokens  map[string]config.TokenConfig
+	signer solanaint.Signer
+	rpc    prepareRPC
+	tokens Tokens
 	// authorityReadBackoff shortens the retry only in package tests; zero keeps
 	// the production default.
 	authorityReadBackoff time.Duration
@@ -88,8 +86,8 @@ type PrepareSubscribeService struct {
 // NewPrepareSubscribeService builds a PrepareSubscribeService. signer pre-signs
 // the bundle's transfer slot and MUST be the key the Submitter resolves as the
 // merchant address.
-func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string, tokens ...map[string]config.TokenConfig) *PrepareSubscribeService {
-	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
+func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, tokens Tokens) *PrepareSubscribeService {
+	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, tokens: tokens}
 }
 
 // PrepareSubscribeInput describes the plan + subscriber to enroll. Plan terms are
@@ -141,7 +139,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return nil, fmt.Errorf("recurring: invalid plan terms (amount/period)")
 	}
 
-	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens.of(ctx))
 	if err != nil {
 		return nil, err
 	}

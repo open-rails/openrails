@@ -44,9 +44,6 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		q := gen.New(tx)
 		for _, key := range set.CustodianKeys() {
 			c := set.Custodians[key].Value
-			if c.Environment != s.providerEnvironment {
-				continue
-			}
 			if err := validateCustodianDocument(key, c); err != nil {
 				reject(merchantdocs.CustodianDoc(key), err.Error())
 				continue
@@ -76,11 +73,14 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), "a PSP's account identity cannot change; add a separate PSP and keep this account for existing billing")
 				continue
 			}
-			if p.Environment != s.providerEnvironment {
-				continue
-			}
 			if err := validatePSPDocument(key, p, set); err != nil {
 				reject(merchantdocs.PSPDoc(key), err.Error())
+				continue
+			}
+			if why, err := s.environmentRefusal(ctx, q, p.Environment); err != nil {
+				return err
+			} else if why != "" {
+				reject(merchantdocs.PSPDoc(key), why)
 				continue
 			}
 			row, why, err := s.registerPSP(ctx, q, id, key, p)
@@ -223,8 +223,8 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 	if err := config.ValidatePSPKeys(key, config.PSPConfig{Rail: billing.Rail(rail), Settings: p.Settings, Secrets: p.Secrets}); err != nil {
 		return err
 	}
-	if normalizeProviderSecretEnvironment(p.Environment) != p.Environment {
-		return fmt.Errorf("environment must be live or test")
+	if err := config.ValidatePSPEnvironment(key, rail, p.Environment); err != nil {
+		return err
 	}
 	account := strings.TrimSpace(p.AccountID)
 	if account == "" {
@@ -241,11 +241,7 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 		if err != nil {
 			return err
 		}
-		network := "mainnet"
-		if p.Environment == config.ProviderEnvironmentTest {
-			network = "devnet"
-		}
-		if _, err := solanatokens.ResolveDeclared(network, settings.Tokens); err != nil {
+		if _, err := solanatokens.ResolveDeclared(config.SolanaNetwork(p.Environment), settings.Tokens); err != nil {
 			return err
 		}
 	} else if p.Signer != nil {
@@ -258,18 +254,26 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 	if _, err := config.CardEntry(rail, p.Settings, custodian != ""); err != nil {
 		return err
 	}
-	if _, err := config.NMIEndpointDeployment(p.Settings); rail == string(models.RailNMI) && err != nil {
-		return err
+	if rail == string(models.RailStripe) {
+		if err := config.ValidateStripeSecretKeyEnvironment(p.Environment, p.Secrets["secret_key"]); err != nil {
+			return err
+		}
+		if raw, ok := p.Settings["publishable_key"]; ok {
+			value, _ := raw.(string)
+			if err := config.ValidateStripePublishableKeyEnvironment(p.Environment, value); err != nil {
+				return fmt.Errorf("settings.publishable_key: %w", err)
+			}
+		}
 	}
 	if err := config.ValidatePSPFallback(key, p.Settings, func(primary string) bool {
-		held, ok := set.PSPs[primary]
-		return ok && held.Value.Environment == p.Environment
+		_, ok := set.PSPs[primary]
+		return ok
 	}); err != nil {
 		return err
 	}
 	if custodian != "" {
 		held, ok := set.Custodians[custodian]
-		if !ok || held.Value.Environment != p.Environment {
+		if !ok || held.Value.Environment != config.EnvironmentClass(p.Environment) {
 			return fmt.Errorf("custodian %q is not declared (declared: %s)", custodian, strings.Join(set.CustodianKeys(), ", "))
 		}
 		d, err := custodians.Require(held.Value.Kind)
@@ -286,7 +290,7 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 // validateCustodianDocument checks a custodian document as the file parser
 // checks a declaration.
 func validateCustodianDocument(key string, c merchantdocs.Custodian) error {
-	if normalizeProviderSecretEnvironment(c.Environment) != c.Environment {
+	if normalizeCustodianEnvironment(c.Environment) != c.Environment {
 		return fmt.Errorf("environment must be live or test")
 	}
 	return config.ValidateCustodianEntry(config.CustodianEntry{

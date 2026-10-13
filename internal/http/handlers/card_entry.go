@@ -8,21 +8,22 @@ import (
 
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/cardguard"
-	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
 // cardFieldAdmitted applies the request-level rules for the typed `card` field,
 // writing the refusal when one fails: never beside a payment_token, never over
-// plain HTTP in live posture, and no card number in any other field. Whether
-// the PSP takes cards on the server is decided where the PSP is resolved.
+// plain HTTP unless no live PSP exists, and no card number in any other field.
+// Whether the PSP takes cards on the server is decided where the PSP is
+// resolved.
 func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) bool {
 	if hasToken {
 		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())
 		return false
 	}
-	if live := r.State == nil || r.State.Config == nil || !config.IsTestMode(r.State.Config); live && !r.SecureTransport() {
+	if !r.SecureTransport() && !noLivePSP(r) {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "card_requires_https", "a card is accepted only over HTTPS"))
 		return false
 	}
@@ -33,6 +34,19 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 		}
 	}
 	return true
+}
+
+// noLivePSP reports whether the deployment proves it holds no live PSP.
+func noLivePSP(r *httprequest.Request) bool {
+	if r.State == nil {
+		return false
+	}
+	probe := livePSPProbe(r)
+	if probe == nil {
+		return false
+	}
+	presence, err := probe(r.Request.Context())
+	return err == nil && presence == merchants.LiveRailAbsent
 }
 
 func optionalStrings(values ...*string) []string {

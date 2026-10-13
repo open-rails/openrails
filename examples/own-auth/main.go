@@ -46,7 +46,6 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	// merchant its session's BoundScope names.
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchants: map[string]openrails.MerchantDeclaration{
 			"acme":   {DisplayName: "Acme"},

@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -229,7 +228,7 @@ func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		if err != nil {
 			return err
 		}
-		if !live || psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
+		if !live || psp.Archived || psp.Rail != method.Rail {
 			return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
 		instrument, err := enrollmentInstrument(ctx, d.Gen(ctx), method, terms.PSPID)

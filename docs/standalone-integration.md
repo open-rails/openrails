@@ -83,13 +83,9 @@ openrails run-server --config /etc/openrails/config.yaml \
   against the rails (see [operations.md](operations.md) for the full matrix;
   `limited` parks system-initiated writes like dunning, `readonly` blocks all
   provider writes at the wire). Declare it explicitly; unset internal policy fails closed to `readonly`.
-- `test_mode: sandbox | live` — the credential axis, orthogonal to the above.
-  `sandbox` routes every rail to its test environment and refuses live
-  credentials at boot (live Stripe keys rejected, NMI accounts probed), so no
-  real money can move. `live` similarly refuses Stripe test keys in every
-  environment rather than silently disabling the rail. Sandbox is allowed in
-  every environment — credential validation, not the env string, keeps it
-  honest.
+- Each PSP's `environment: live | test | sandbox` in the merchant manifest:
+  whether it moves real money, verified with the provider before use. A
+  deployment is all live or all non-live ([PSP environments](psp-environments.md)).
 - An `https` `auth.token.issuer`: the server's own AuthKit
   ([runtime configuration](runtime-configuration.md#authentication)).
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or
@@ -120,7 +116,7 @@ document skips a product, price or meter whose field an edit set differently,
 reports it and exits non-zero, unless `--force-conflicts` ([catalog
 ownership](catalog-ownership.md)). An already applied document replays, so it
 never overwrites later edits. This does not change provider permissions,
-sandbox/live posture, or `provider_write_mode`.
+PSP environments, or `provider_write_mode`.
 
 Manifest walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
@@ -445,7 +441,7 @@ including the embedded payment page page, so its tagged `go.mod` keeps a replace
 
 ```go
 srv, err := server.New(ctx, server.Config{
-    Engine: openrails.Config{TestMode: openrails.Live, ProviderWriteMode: openrails.ProviderWritesFull},
+    Engine: openrails.Config{ProviderWriteMode: openrails.ProviderWritesFull},
     Auth: authkit.Config{ // github.com/open-rails/authkit
         Token: authkit.TokenConfig{Issuer: "https://billing.example.com"},
         Keys:  authkit.KeysConfig{Path: "/vault/auth"},

@@ -58,7 +58,6 @@ func TestRetiredAndUnknownInputsRefuseBoot(t *testing.T) {
 		{"ENCRYPTION_MASTER_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", []string{"ENCRYPTION_MASTER_KEY was removed"}},
 		{"MODE", "full", []string{"mode was removed", "provider_write_mode"}},
 		{"BILLING_MODE", "full", []string{"mode was removed", "provider_write_mode"}},
-		{"TEST_ENV", "true", []string{"TEST_ENV was never consumed and is removed (or#915)"}},
 		{"EMAIL_SMTP_FROM", "not a mailbox", []string{"email_smtp.from (EMAIL_SMTP_FROM)"}},
 		{"OPENRAILS_CATALOG_RECONCILIATION_INTERVAL", "30m", []string{"renamed", "CATALOG_RECONCILIATION_INTERVAL"}},
 		{"OPENRAILS_SQL_TRACE", "1", []string{"renamed", "db.sql_trace"}},

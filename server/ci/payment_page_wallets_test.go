@@ -67,7 +67,7 @@ func TestPaymentPageRegistersItsHostForWallets(t *testing.T) {
 	shop, ctx := handle(t, srv, entry.MerchantID), merchant.WithID(t.Context(), entry.MerchantID)
 	stripe.SeedPaymentMethodDomain("acct_known", paymentHost, false)
 	declare := func(key, account string) billing.PSPID {
-		psp, err := shop.CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, AccountID: account,
+		psp, err := shop.CreatePSP(t.Context(), billing.CreatePSPParams{Key: key, Rail: billing.RailStripe, Environment: "test", AccountID: account,
 			Settings:    map[string]any{"publishable_key": "pk_test_" + key},
 			Credentials: map[string]string{"secret_key": "sk_test_" + account, "webhook_signing_secret": "whsec_" + key}})
 		require.NoError(t, err)

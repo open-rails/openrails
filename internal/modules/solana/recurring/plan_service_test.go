@@ -90,7 +90,7 @@ func newPlanService(t *testing.T, c planChain) (*PlanService, *recordingSubmitte
 	t.Helper()
 	sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey()}
 	c.sub = sub
-	return NewPlanServiceWithReader(sub, c, "devnet", testTokens()), sub
+	return NewPlanServiceWithReader(sub, c, NetworkTokens("devnet", testTokens())), sub
 }
 
 func planInput(amount uint64, decimals int) PublishPlanInput {
@@ -177,7 +177,7 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	d, err := svc.MintDecimals(context.Background(), "USDC")
 	require.NoError(t, err)
 	require.Equal(t, 9, d)
-	_, err = NewPlanServiceWithReader(&recordingSubmitter{}, nil, "devnet", testTokens()).MintDecimals(context.Background(), "USDC")
+	_, err = NewPlanServiceWithReader(&recordingSubmitter{}, nil, NetworkTokens("devnet", testTokens())).MintDecimals(context.Background(), "USDC")
 	require.Error(t, err, "no reader armed has no fallback precision")
 }
 
@@ -200,7 +200,7 @@ func TestPublishPlanRepublish(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey()}
 			chain := planChain{mintDecimals: 6, existing: planBlob(sub.merchantPub, tc.mint, tc.amount, tc.hours, 1_600_000_000), sub: sub}
-			h, err := NewPlanServiceWithReader(sub, chain, "devnet", testTokens()).PublishPlan(context.Background(), planInput(10_000_000, 6))
+			h, err := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens())).PublishPlan(context.Background(), planInput(10_000_000, 6))
 			if !tc.idempotent {
 				require.ErrorContains(t, err, "IMMUTABLE")
 				require.Empty(t, sub.submits)
@@ -221,7 +221,7 @@ func TestPublishPlanRetryEnsuresReceivingATA(t *testing.T) {
 	created := [2]uint64{10_000_000, 720}
 	sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey(), failATA: true}
 	chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub}
-	svc := NewPlanServiceWithReader(sub, chain, "devnet", testTokens())
+	svc := NewPlanServiceWithReader(sub, chain, NetworkTokens("devnet", testTokens()))
 	in := planInput(10_000_000, 6)
 
 	_, err := svc.PublishPlan(context.Background(), in)

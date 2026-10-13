@@ -56,6 +56,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
     psps:
       solana:
         rail: solana
+        environment: sandbox
         signer: {mode: local_keypair}
         secrets: {private_key: %s}
         settings: {rpc_provider: public, tokens: {DUSD: {}}}

@@ -11,6 +11,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/config"
+
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -22,7 +24,7 @@ import (
 // against the PSP document whose identity it names, never a storage path.
 func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
-	environment = normalizeProviderSecretEnvironment(environment)
+	environment = normalizePSPEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
 	key, err := NormalizePSPSecretKey(rail, key)
 	if err != nil {
@@ -32,7 +34,7 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 		return "", apperr.Invalidf("PSP secret requires rail")
 	}
 	if environment == "" {
-		return "", apperr.Invalidf("PSP secret environment must be live or test")
+		return "", apperr.Invalidf("PSP secret environment must be live, test or sandbox")
 	}
 	if accountID == "" {
 		return "", apperr.Invalidf("PSP secret requires account id")
@@ -47,7 +49,7 @@ func CustodianSecretName(kind, environment, accountID, key string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	environment = normalizeProviderSecretEnvironment(environment)
+	environment = normalizeCustodianEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
 	slotName := strings.ToLower(strings.TrimSpace(key))
 	if _, ok := d.Secret(slotName); !ok {
@@ -73,7 +75,7 @@ func ParseCustodianSecretName(name string) (kind, environment, accountID, key st
 	if derr != nil {
 		return "", "", "", "", true, derr
 	}
-	environment = normalizeProviderSecretEnvironment(parts[2])
+	environment = normalizeCustodianEnvironment(parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
 		return "", "", "", "", true, fmt.Errorf("invalid custodian account id escape: %w", err)
@@ -96,7 +98,7 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 		return "", "", "", "", false, nil
 	}
 	rail = normalizeProviderSecretType(parts[1])
-	environment = normalizeProviderSecretEnvironment(parts[2])
+	environment = normalizePSPEnvironment(parts[2])
 	accountID, err = url.PathUnescape(parts[3])
 	if err != nil {
 		return "", "", "", "", true, fmt.Errorf("invalid PSP id escape: %w", err)
@@ -152,14 +154,23 @@ func normalizeProviderSecretType(rail string) string {
 	return strings.ToLower(strings.TrimSpace(rail))
 }
 
-func normalizeProviderSecretEnvironment(environment string) string {
-	// Empty is NOT defaulted (#681): the caller must know its environment
-	// (deployment posture) — a silent live default hid sandbox lookups.
-	switch strings.ToLower(strings.TrimSpace(environment)) {
-	case "live", "prod", "production", "mainnet":
-		return "live"
-	case "test", "sandbox", "devnet", "testnet":
-		return "test"
+// normalizePSPEnvironment is a PSP's declared environment, or "" when it is
+// none: live, test or sandbox, never defaulted.
+func normalizePSPEnvironment(environment string) string {
+	switch e := strings.ToLower(strings.TrimSpace(environment)); e {
+	case config.EnvironmentLive, config.EnvironmentTest, config.EnvironmentSandbox:
+		return e
+	default:
+		return ""
+	}
+}
+
+// normalizeCustodianEnvironment is a custodian's money class, or "" when it
+// is none: live or test.
+func normalizeCustodianEnvironment(environment string) string {
+	switch e := strings.ToLower(strings.TrimSpace(environment)); e {
+	case config.EnvironmentLive, config.EnvironmentTest:
+		return e
 	default:
 		return ""
 	}

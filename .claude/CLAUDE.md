@@ -113,7 +113,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 ## PSP identity
 - `billing.psps` is an OPERATOR-DECLARED catalog. There is NO runtime "whoami" and NO
   account-mismatch guard. `account_id` is an opaque, operator-declared label.
-- A merchant declares a PSP as `psps.<key>: {rail: nmi, account_id: …, settings: …}`
+- A merchant declares a PSP as `psps.<key>: {rail: nmi, environment: live|test|sandbox, account_id: …, settings: …}`
   (`openrails.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
   credentials under `psps.<key>.secrets`. Merchant configuration is that file (read-only)
   or, with `vault.kv_mount`, Vault: one document per object

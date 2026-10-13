@@ -70,13 +70,14 @@ well-known token's on-chain identity:
 | network | built-in symbols |
 |---|---|
 | mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
-| devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD`, `DUSD` |
+| devnet (`environment: sandbox`) | `SOL`, `USDC`, `PYUSD`, `DUSD` |
 
 The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
 accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
-two. Declare nothing and you accept **USDC only** — the one token present on
-every network that is also recurring-eligible, so a zero-configuration merchant
-can take one-off payments and rebill. `GET /v1/me/config`
+two. Declare nothing and you accept **SOL and USDC**, each at its current
+price; both are on every network, and USDC is recurring-eligible, so a
+zero-configuration merchant can take one-off payments and rebill (rebilling is
+stablecoin-only). `GET /v1/me/config`
 (`payment.solana.tokens`) advertises exactly this set, never more.
 
 - **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
@@ -88,7 +89,7 @@ can take one-off payments and rebill. `GET /v1/me/config`
 - `DUSD` is an embedded host's devnet test stablecoin (`Dev USD`). It is not available
   on mainnet and must never be configured in a live merchant manifest.
 - **`decimals`** — never configurable: read from the SPL mint on-chain.
-- **Under `test_mode`** the devnet column applies. Devnet mints are
+- **On a sandbox PSP** the devnet column applies. Devnet mints are
   per-deployment artefacts with no canonical address, so a built-in symbol with
   no devnet entry (`USDT`, `USD1`, `USDG`) is simply not built-in there —
   declare it like any other ad-hoc devnet token, with an explicit `mint:`.
@@ -201,9 +202,16 @@ only, across every merchant and PSP.
 
 ### Devnet testing
 
-The network is derived structurally from the deployment's `test_mode`:
-sandbox → **devnet**, live → mainnet. There is no independent network knob, and
-a PSP declares no environment of its own.
+The network is the PSP's declared `environment`: `sandbox` → **devnet**,
+`live` → mainnet. There is no independent network knob. The key is free text,
+e.g. `solana-devnet`:
+
+```yaml
+      solana-devnet:
+        rail: solana
+        environment: sandbox
+        signer: { mode: vault_transit, key: openrails-solana }
+```
 
 To exercise the flows on devnet:
 
@@ -217,7 +225,7 @@ To exercise the flows on devnet:
   `initialize_subscription_authority` in front of subscribe + first pull, using
   the program's `UNKNOWN_INIT_ID` same-slot check).
 
-Devnet money is fake: under test_mode the token-price provider falls back to
+Devnet money is fake: for a sandbox PSP the token-price provider falls back to
 $1.00 parity when live pricing is unavailable, so devnet never requires a price
 feed.
 

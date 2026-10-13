@@ -26,12 +26,7 @@ func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Co
 	if err != nil {
 		return activeSolanaPSP{}, false, nil
 	}
-	environment := config.ExpectedProviderEnvironment(false)
-	if cfg != nil {
-		environment = config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
-	}
-
-	scope, ok, err := merchants.Of(database).ActivePSPScope(ctx, tid, string(models.RailSolana), environment)
+	scope, ok, err := merchants.Of(database).ActivePSPScope(ctx, tid, string(models.RailSolana))
 	if errors.Is(err, merchants.ErrNoActivePSP) || (err == nil && !ok) {
 		return activeSolanaPSP{}, false, nil
 	}

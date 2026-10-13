@@ -7,25 +7,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-const (
-	NMIEndpointGateway = "gateway"
-	NMIEndpointSandbox = "sandbox"
-)
-
-// NMIEndpointDeployment selects a gateway deployment, never credential posture.
-// An omitted setting preserves historical test-mode endpoint selection.
-func NMIEndpointDeployment(settings map[string]any) (string, error) {
-	raw, exists := settings["endpoint_deployment"]
-	if !exists {
-		return "", nil
-	}
-	value, ok := raw.(string)
-	if !ok || value != NMIEndpointGateway && value != NMIEndpointSandbox {
-		return "", fmt.Errorf("NMI endpoint_deployment must be gateway or sandbox")
-	}
-	return value, nil
-}
-
 // A PSP's card_entry setting: where a new card is typed (#1129).
 const (
 	// CardEntryBrowser: the gateway's own fields take the card and OpenRails

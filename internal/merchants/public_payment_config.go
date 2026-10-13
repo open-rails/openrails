@@ -225,14 +225,14 @@ func publicSettingValue(settings map[string]any, key string) string {
 	}
 }
 
-// PublicPSPs lists the merchant's ARMED PSPs for environment with each
-// one's public browser config. Armed means exactly what purchase means by it:
-// a non-archived billing.psps row for this merchant, rail and environment
-// whose full credential shape resolves — armed reports that, with the same
-// resolver purchase routes through. A PSP declared without credentials (an
-// import attribution) is an identity, never advertised as available.
-func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
-	scopes, err := s.LivePSPScopes(ctx, id, environment)
+// PublicPSPs lists the merchant's ARMED PSPs with each one's public browser
+// config. Armed means exactly what purchase means by it: a non-archived
+// billing.psps row for this merchant and rail whose full credential shape
+// resolves — armed reports that, with the same resolver purchase routes
+// through. A PSP declared without credentials (an import attribution) is an
+// identity, never advertised as available.
+func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
+	scopes, err := s.LivePSPScopes(ctx, id)
 	if err != nil {
 		return nil, err
 	}

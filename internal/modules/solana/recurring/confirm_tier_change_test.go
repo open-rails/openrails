@@ -141,7 +141,7 @@ func (c *tierChain) another(t *testing.T) *tierChain {
 // subscriber.
 func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput, *solanago.Transaction) {
 	t.Helper()
-	res, err := NewPrepareTierChangeService(c.signer, c.rpc, "devnet", testTokens()).Prepare(context.Background(), PrepareTierChangeInput{
+	res, err := NewPrepareTierChangeService(c.signer, c.rpc, NetworkTokens("devnet", testTokens())).Prepare(context.Background(), PrepareTierChangeInput{
 		MerchantID: testMerchantID, SubscriberWallet: c.old.SubscriberWallet, MintSymbol: "USDC",
 		OldPlanPDA: c.old.PlanPDA, OldSubscriptionPDA: c.old.SubscriptionPDA,
 		NewPlanID: 99, NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
@@ -176,7 +176,7 @@ func (c *tierChain) land(t *testing.T, tx *solanago.Transaction) solanago.Signat
 }
 
 func (c *tierChain) service(life *tierLifecycle, store *tierStore) *ConfirmTierChangeService {
-	svc := NewConfirmTierChangeService(c.rpc, life, store, store, inlineTx{}, "devnet", testTokens())
+	svc := NewConfirmTierChangeService(c.rpc, life, store, store, inlineTx{}, NetworkTokens("devnet", testTokens()))
 	svc.now = func() time.Time { return c.now }
 	return svc
 }
@@ -400,7 +400,7 @@ func TestConfirmTierChangeIsIdempotent(t *testing.T) {
 	store := &tierStore{oldRow: c.old, receipt: &models.SolanaTierChangeReceipt{Signature: in.Signature, PriceID: in.NewPriceID, SubscriptionID: existing}}
 	life := &tierLifecycle{}
 
-	res, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, "devnet", testTokens()).Confirm(context.Background(), in)
+	res, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, NetworkTokens("devnet", testTokens())).Confirm(context.Background(), in)
 	require.NoError(t, err)
 	require.True(t, res.AlreadyConfirmed)
 	require.Equal(t, existing, res.Receipt.SubscriptionID)
@@ -412,7 +412,7 @@ func TestConfirmTierChangeIsIdempotent(t *testing.T) {
 		{OldSubscriptionID: in.OldSubscriptionID, UserID: in.UserID, NewPriceID: in.NewPriceID, Signature: "another-signature"},
 		{OldSubscriptionID: in.OldSubscriptionID, UserID: uuid.NewString(), NewPriceID: in.NewPriceID, Signature: in.Signature},
 	} {
-		_, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, "devnet", testTokens()).Confirm(context.Background(), changed)
+		_, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, NetworkTokens("devnet", testTokens())).Confirm(context.Background(), changed)
 		require.ErrorIs(t, err, ErrPaymentUnverified)
 	}
 	require.Zero(t, chain.reads)

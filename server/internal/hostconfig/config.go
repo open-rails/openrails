@@ -81,7 +81,6 @@ type fileConfig struct {
 	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
 
 	ProviderWriteMode string `koanf:"provider_write_mode"`
-	TestMode          string `koanf:"test_mode"`
 
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
@@ -210,10 +209,6 @@ func (s *smtpFile) config() (*billing.SMTPConfig, error) {
 
 // config is the loaded file as the server's configuration.
 func (f *fileConfig) config() (*Config, error) {
-	posture, err := billing.ParseCredentialPosture(f.TestMode)
-	if err != nil {
-		return nil, err
-	}
 	auth, err := authConfig(f.Auth)
 	if err != nil {
 		return nil, err
@@ -225,7 +220,6 @@ func (f *fileConfig) config() (*Config, error) {
 	return &Config{
 		Config: &billing.Config{
 			ProviderWriteMode:             f.ProviderWriteMode,
-			TestMode:                      posture,
 			Database:                      f.Database,
 			PublicBillingBaseURL:          f.PublicBillingBaseURL,
 			DashboardBaseURL:              f.DashboardBaseURL,

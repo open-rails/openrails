@@ -69,8 +69,8 @@ func (s session) CheckRecentSignIn(context.Context) error {
 func main() {
  var a openrails.Authenticator = ownAuth{}
  routes := openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
- cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
- if routes.Auth == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
+ cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly}
+ if routes.Auth == nil || cfg.ProviderWriteMode != openrails.ProviderWritesReadOnly { panic("unreachable") }
 }
 GO
 (cd "$consumer_dir" && go mod tidy && go run .)

@@ -1,5 +1,5 @@
 // Package providerposture records whether a PSP credential set loaded under
-// test_mode=sandbox is proven to simulate money. A credential set is verified
+// a non-live PSP is proven to simulate money. A credential set is verified
 // once when it is loaded (runtime startup, credential create/rotate, or the
 // first time a process loads a credential it has not seen); every provider
 // mutation consults the cached verdict. Anything but a proven simulated verdict

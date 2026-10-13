@@ -171,7 +171,7 @@ func newHyperSwitchMember(t *testing.T) (*world, *hyperSwitchMember) {
 		Settings: map[string]any{"public_api_key": "pk_hs_e2e", "profile_id": "pro_e2e"}, Secrets: map[string]string{"api_key": "hs_api_key_e2e"}}}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		// The merchant's one NMI account takes its cards through HyperSwitch.
-		psps["nmi"] = openrails.NMIPSP{AccountID: "e2e-nmi-hs", SecurityKey: "e2e-nmi-hs-key", WebhookSigningSecret: "nmi_hs_webhook_e2e", Custodian: "hs"}.PSPConfig()
+		psps["nmi"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-hs", SecurityKey: "e2e-nmi-hs-key", WebhookSigningSecret: "nmi_hs_webhook_e2e", Custodian: "hs"}.PSPConfig()
 	}
 	w.start()
 	m := &hyperSwitchMember{hs: hs, keyed: w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})}

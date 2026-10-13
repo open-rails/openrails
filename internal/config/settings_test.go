@@ -66,22 +66,6 @@ func TestValidateCustodianEntry(t *testing.T) {
 	}
 }
 
-func TestNMIEndpointDeployment(t *testing.T) {
-	for settings, want := range map[string]string{"": "", NMIEndpointGateway: NMIEndpointGateway, NMIEndpointSandbox: NMIEndpointSandbox} {
-		in := map[string]any{}
-		if settings != "" {
-			in["endpoint_deployment"] = settings
-		}
-		got, err := NMIEndpointDeployment(in)
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	}
-	for _, bad := range []any{"live", "", true} {
-		_, err := NMIEndpointDeployment(map[string]any{"endpoint_deployment": bad})
-		require.Error(t, err, "deployment is never credential posture: %v", bad)
-	}
-}
-
 // card_entry (#1129) defaults to browser; server is an explicit declaration,
 // refused where the gateway has no server-side vault call or a custodian
 // takes the card.

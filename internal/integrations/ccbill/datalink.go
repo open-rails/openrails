@@ -55,7 +55,7 @@ func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
 		ClientSubAcc: cfg.ClientSubAcc,
 		Username:     cfg.DataLinkUsername,
 		Password:     cfg.DataLinkPassword,
-		DevMode:      cfg.TestMode,
+		DevMode:      cfg.Sandbox,
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Minute,
 		},

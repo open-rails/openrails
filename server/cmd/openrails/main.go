@@ -29,7 +29,7 @@ func main() {
 	}
 }
 
-// bootNMIProbeV5BaseURL is a test-only override for the test_mode NMI arm
+// bootNMIProbeV5BaseURL is a test-only override for the NMI environment arm
 // probe target during the boot-manifest reconcile; empty in production.
 var bootNMIProbeV5BaseURL string
 
@@ -51,9 +51,6 @@ func newRootCmd() *cobra.Command {
 			var loadOpts []hostconfig.LoadOption
 			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
 				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
-			}
-			if posture, err := cmd.Flags().GetString("test-mode"); err == nil && strings.TrimSpace(posture) != "" {
-				loadOpts = append(loadOpts, hostconfig.WithOverride("test_mode", strings.TrimSpace(posture)))
 			}
 
 			load := hostconfig.Load
@@ -77,8 +74,6 @@ func newRootCmd() *cobra.Command {
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
 		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required to boot)")
-	rootCmd.PersistentFlags().
-		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; posture must be explicit")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",

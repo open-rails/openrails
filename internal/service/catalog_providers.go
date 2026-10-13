@@ -475,10 +475,6 @@ type railAccountRef struct {
 	accountID string
 }
 
-func (s *Service) catalogProviderEnvironment() string {
-	return config.ExpectedProviderEnvironment(s.rt != nil && s.rt.Config != nil && config.IsTestMode(s.rt.Config))
-}
-
 // merchantAccountRails maps the ctx merchant's declared account keys
 // (psps.key — the manifest `psps.<key>` name,
 // e.g. "mobius") to their rails. Best-effort: no merchant ctx / DB means only
@@ -492,7 +488,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 	if err != nil {
 		return out
 	}
-	rows, err := merchants.Of(s.catalogDatabase()).LivePSPScopes(ctx, mid, s.catalogProviderEnvironment())
+	rows, err := merchants.Of(s.catalogDatabase()).LivePSPScopes(ctx, mid)
 	if err != nil {
 		log.WithContext(ctx).WithError(err).Warn("catalog: list declared rail accounts failed; only rail names resolve")
 		return out
@@ -523,7 +519,7 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		return
 	}
 	railName := strings.ToLower(strings.TrimSpace(rail))
-	rows, err := merchants.Of(s.catalogDatabase()).ActivePSPScopesForRail(ctx, mid, railName, s.catalogProviderEnvironment())
+	rows, err := merchants.Of(s.catalogDatabase()).ActivePSPScopesForRail(ctx, mid, railName)
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("rail", rail).
 			Warn("secondary catalog sync: list declared accounts failed")

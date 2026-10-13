@@ -6,7 +6,6 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -35,15 +34,14 @@ type tierChangeRPC interface {
 // The SubscriptionAuthority already exists (same-mint subscription), so there is
 // no init step.
 type PrepareTierChangeService struct {
-	signer  solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
-	rpc     tierChangeRPC
-	network string
-	tokens  map[string]config.TokenConfig
+	signer solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
+	rpc    tierChangeRPC
+	tokens Tokens
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, network string, tokens ...map[string]config.TokenConfig) *PrepareTierChangeService {
-	return &PrepareTierChangeService{signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
+func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
+	return &PrepareTierChangeService{signer: signer, rpc: rpc, tokens: tokens}
 }
 
 // PrepareTierChangeInput describes the old subscription + the new plan. New-plan
@@ -110,7 +108,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		}
 	}
 
-	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens.of(ctx))
 	if err != nil {
 		return nil, err
 	}

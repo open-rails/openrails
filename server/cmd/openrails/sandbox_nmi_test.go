@@ -49,7 +49,7 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	}
 
 	// The catalog reference check reads the seeded plan through the real client.
-	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "fake"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "fake"})
 	if err != nil {
 		t.Fatal(err)
 	}

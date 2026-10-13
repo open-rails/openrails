@@ -39,11 +39,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if securityKey == "" {
 			return false, nil
 		}
-		deployment, err := config.NMIEndpointDeployment(p.Settings)
-		if err != nil {
-			return false, err
-		}
-		client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, p.Environment == "test")
+		client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
 		if err != nil {
 			return false, fmt.Errorf("merchants: build nmi credential probe: %w", err)
 		}
@@ -76,7 +72,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			ClientSubAcc:     clientSubAcc,
 			DataLinkUsername: username,
 			DataLinkPassword: password,
-			TestMode:         p.Environment == "test",
+			Sandbox:          p.Environment == config.EnvironmentSandbox,
 		})
 		if s.ccbillCredentialProbeBaseURL != "" {
 			client.BaseURL = s.ccbillCredentialProbeBaseURL

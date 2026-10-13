@@ -89,7 +89,7 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.Equal(t, identities, w.platformIdentities(), "choosing again and reloading record no second identity")
 
 	// A PSP that could not charge platform cards is refused before any write.
-	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, AccountID: "acct_e2etwo",
+	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", AccountID: "acct_e2etwo",
 		Settings: map[string]any{"publishable_key": "pk_test_two"}, Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}})
 	require.Equal(t, "platform_vault_unreachable", codeOf(err))
 	// Nor is a PSP document written into Vault directly whose own server
@@ -161,7 +161,7 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 
 	boot := func(cfg openrails.Config) error {
 		cfg.Database = openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}
-		cfg.TestMode, cfg.ProviderWriteMode = openrails.Sandbox, openrails.ProviderWritesReadOnly
+		cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly
 		bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
 		if err == nil {
 			_ = bill.Close(context.Background())

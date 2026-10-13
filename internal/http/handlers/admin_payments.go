@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"hash/fnv"
 	"math"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -213,11 +214,11 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 			log.WithError(err).WithField("payment_id", paymentID).Warn("nmi refund rail unavailable")
 			return api.Coded(refundCodeRailUnavailable, "nmi refunds are unavailable: the payment's rail account is not armed")
 		}
-		// A credential set already known to fail sandbox posture refuses here;
-		// an unverified one is verified by the dispatch gate itself.
-		if client.TestMode && !client.LoopbackFixture {
+		// A credential set already known to fail its environment check refuses
+		// here; an unverified one is verified by the dispatch gate itself.
+		if !client.Live() && !client.LoopbackFixture {
 			if status, known := providerposture.Process().Lookup(client.PostureKey()); known && !status.Armed() {
-				return api.Coded(refundCodeRailUnavailable, "nmi refunds are unavailable: sandbox posture is not verified ("+status.Verdict.String()+")")
+				return api.Coded(refundCodeRailUnavailable, "nmi refunds are unavailable: the account's "+client.Environment+" environment is not verified ("+status.Verdict.String()+")")
 			}
 		}
 	default:

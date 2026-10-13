@@ -25,7 +25,7 @@ func newNMITestClient(t *testing.T, h http.Handler) *nmi.NMIClient {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "k", WebhookSecret: "s"})
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL

@@ -27,38 +27,15 @@ type configContextKey string
 // ConfigContextKey is the context key the CLI stores the loaded *Config under.
 const ConfigContextKey configContextKey = "config"
 
-// CredentialPosture says which provider credentials are accepted: sandbox or
-// live. The zero value is unset, which New refuses.
-type CredentialPosture string
-
-const (
-	CredentialPostureSandbox CredentialPosture = "sandbox"
-	CredentialPostureLive    CredentialPosture = "live"
-)
-
-// ParseCredentialPosture reads a posture from text; empty is unset.
-func ParseCredentialPosture(text string) (CredentialPosture, error) {
-	switch p := CredentialPosture(strings.ToLower(strings.TrimSpace(text))); p {
-	case "", CredentialPostureSandbox, CredentialPostureLive:
-		return p, nil
-	default:
-		return "", fmt.Errorf("invalid test_mode %q: must be %q or %q", p, CredentialPostureSandbox, CredentialPostureLive)
-	}
-}
-
 // Config is the engine's configuration: plain data. Everything that reaches
-// outside the process is in Deps. TestMode and ProviderWriteMode are required.
+// outside the process is in Deps. ProviderWriteMode is required. Whether money
+// is real is each PSP's declared environment, never the deployment's.
 type Config struct {
 	// ProviderWriteMode is how much OpenRails may do against payment
 	// providers: "full" (normal operation), "limited" (no system-initiated
 	// provider writes) or "readonly" (no provider writes: it never charges
-	// anyone). Required. Independent of TestMode.
+	// anyone). Required.
 	ProviderWriteMode string `yaml:"provider_write_mode" json:"provider_write_mode"`
-
-	// TestMode selects sandbox or live provider credentials. Required. It
-	// never relaxes authentication, transport security or credential
-	// encryption.
-	TestMode CredentialPosture `yaml:"test_mode" json:"test_mode"`
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database" json:"database"`
@@ -127,13 +104,13 @@ type Config struct {
 
 	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
 	// webhook origins. CCBill signs nothing, so the source address is the
-	// authentication: the list is honored only with TestMode sandbox and no
-	// live CCBill PSP. Empty accepts CCBill's own ranges alone.
+	// authentication: the list is honored only while no live PSP exists.
+	// Empty accepts CCBill's own ranges alone.
 	CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 
-	// ProviderSandbox points sandbox provider clients at loopback gateways, to
-	// qualify a process against fake providers. Refused with TestMode live
-	// and for anything but a literal loopback address.
+	// ProviderSandbox points non-live PSPs' provider clients at loopback
+	// gateways, to qualify a process against fake providers. Refused beside a
+	// live PSP and for anything but a literal loopback address.
 	ProviderSandbox *ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 	// HyperSwitch is the host's trusted HyperSwitch deployment.
 	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
@@ -165,8 +142,7 @@ type ProviderSandboxConfig struct {
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
-// gateway declaration: a live posture, or a destination that is not a literal
-// loopback address.
+// gateway declaration whose destination is not a literal loopback address.
 var ErrProviderSandboxGateway = errors.New("provider_sandbox gateway refused")
 
 // SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
@@ -227,9 +203,6 @@ func validateProviderSandbox(cfg *Config) error {
 	for key, gateway := range map[string]string{"nmi_gateway_url": SandboxNMIGatewayURL(cfg), "stripe_api_url": SandboxStripeAPIURL(cfg), "solana_rpc_url": SandboxSolanaRPCURL(cfg), "ccbill_datalink_url": SandboxCCBillDataLinkURL(cfg)} {
 		if gateway == "" {
 			continue
-		}
-		if cfg.TestMode == CredentialPostureLive {
-			return fmt.Errorf("%w: %s with test_mode=live never talks to a fake provider", ErrProviderSandboxGateway, key)
 		}
 		if err := ValidateLoopbackGatewayURL(gateway); err != nil {
 			return fmt.Errorf("provider_sandbox.%s: %w", key, err)
@@ -519,23 +492,6 @@ func validateSchema(raw string) error {
 	return nil
 }
 
-// PSP environments (#641): the credentials' nature. A deployment is
-// all-test OR all-live; test_mode is the switch.
-const (
-	ProviderEnvironmentTest = "test"
-	ProviderEnvironmentLive = "live"
-)
-
-// ExpectedProviderEnvironment is the environment every PSP runs in
-// for the given test_mode: test under sandbox, live in production. It is DERIVED
-// (#882) — a PSP never declares it.
-func ExpectedProviderEnvironment(testMode bool) string {
-	if testMode {
-		return ProviderEnvironmentTest
-	}
-	return ProviderEnvironmentLive
-}
-
 // ReservedPSPRails maps a PSP name to the rail it implies, so a
 // config entry named after a self-contained gateway need not restate its rail.
 var ReservedPSPRails = map[string]models.Rail{
@@ -561,6 +517,8 @@ type ResolvedPSP struct {
 	// `psps.<key>` map name, e.g. "mobius"). Resolution OUTPUT only — set by
 	// railresolve sources, never declared inside the entry itself.
 	Key string
+	// Environment is the PSP's declared environment: live, test or sandbox.
+	Environment string
 	// Rail is the gateway this account is on: nmi, ccbill, stripe, solana.
 	// Required unless the account name is itself a reserved gateway name.
 	Rail models.Rail
@@ -594,7 +552,6 @@ type ResolvedPSP struct {
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
 // names match the store/manifest canonical secret keys (#711).
 type NMIRailConfig struct {
-	EndpointDeployment   string
 	SecurityKey          string
 	WebhookSigningSecret string
 }
@@ -628,8 +585,7 @@ type SolanaRailConfig struct {
 	// RPCAPIKey is the API key for the selected RPC provider (currently helius).
 	RPCAPIKey string
 	Tokens    map[string]TokenConfig
-	// Network is DERIVED from test_mode at startup (devnet under test_mode,
-	// mainnet otherwise) — not configurable (#349).
+	// Network is the PSP environment's: devnet under sandbox, mainnet live.
 	Network string
 }
 
@@ -793,11 +749,10 @@ func (p *ResolvedPSP) CustodianKey() string {
 // ToNMIProviderSettings converts the rail config to NMI client settings.
 // Only valid for NMI-type rails.
 func (p *ResolvedPSP) ToNMIProviderSettings() *NMIProviderSettings {
-	s := &NMIProviderSettings{}
+	s := &NMIProviderSettings{Environment: p.Environment}
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
 		s.WebhookSecret = p.NMI.WebhookSigningSecret
-		s.EndpointDeployment = p.NMI.EndpointDeployment
 	}
 	return s
 }
@@ -819,7 +774,7 @@ func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
 // from the declared AccountID (#711 — identity is declared once); a malformed
 // AccountID leaves the pair empty and is rejected by validateCCBillRail.
 func (p *ResolvedPSP) ToCCBillConfig() *CCBillConfig {
-	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
+	c := &CCBillConfig{Sandbox: p.Environment == EnvironmentSandbox}
 	if acc, sub, err := SplitCCBillAccountID(p.EffectiveAccountID()); err == nil {
 		c.ClientAccNum = acc
 		c.ClientSubAcc = sub
@@ -833,11 +788,11 @@ func (p *ResolvedPSP) ToCCBillConfig() *CCBillConfig {
 }
 
 // NMIProviderSettings is what the NMI client actually reads (#710): the
-// credential pair. Sandbox posture is nmi.NewClient's testMode argument.
+// credential pair and the PSP's environment, which selects the gateway.
 type NMIProviderSettings struct {
-	EndpointDeployment string
-	SecurityKey        string
-	WebhookSecret      string
+	Environment   string
+	SecurityKey   string
+	WebhookSecret string
 }
 
 // CCBillConfig is the derived CCBill CLIENT config (programmatic-only): the
@@ -846,7 +801,8 @@ type CCBillConfig struct {
 	Salt         string
 	ClientSubAcc string
 	ClientAccNum string
-	TestMode     bool
+	// Sandbox selects CCBill's sandbox (a sandbox PSP).
+	Sandbox bool
 
 	DataLinkUsername string
 	DataLinkPassword string
@@ -892,9 +848,7 @@ type RateLimitsConfig map[string]*RateLimit
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
 var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
 
-// Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
-// mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
-// is renamed "full".
+// Provider write modes (#346, #355) — see Config.ProviderWriteMode.
 const (
 	ProviderWriteModeFull     = "full"
 	ProviderWriteModeLimited  = "limited"
@@ -1017,15 +971,6 @@ func Validate(cfg *Config) error {
 	// env knob silently fell back to 1h on a typo.
 	if _, _, err := CatalogReconciliationSchedule(cfg); err != nil {
 		return err
-	}
-
-	// A typo never silently takes an unrecognized branch.
-	switch cfg.TestMode {
-	case CredentialPostureSandbox, CredentialPostureLive:
-	case "":
-		return fmt.Errorf("test_mode is required: choose sandbox or live")
-	default:
-		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
 	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
@@ -1175,7 +1120,8 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	return nil
 }
 
-// ValidateRailSet checks every declared rail and its credential posture.
+// ValidateRailSet checks every declared rail and each Stripe key against its
+// PSP's environment.
 func ValidateRailSet(cfg *Config, rails PSPSet) error {
 	if len(rails) == 0 {
 		return nil
@@ -1183,62 +1129,49 @@ func ValidateRailSet(cfg *Config, rails PSPSet) error {
 	if err := validateRails(cfg, rails); err != nil {
 		return fmt.Errorf("rails validation failed: %w", err)
 	}
-	return validateStripeKeyForTestMode(cfg, rails)
-}
-
-// validateStripeKeyForTestMode enforces the two credential/test_mode
-// mismatches symmetrically: a live key can never run under sandbox posture,
-// and a test key can never run under live posture. A mismatch must fail boot
-// rather than silently disable a configured rail.
-func validateStripeKeyForTestMode(cfg *Config, rails PSPSet) error {
-	if cfg == nil {
-		cfg = &Config{}
-	}
-	for name, stripeProc := range rails {
-		if stripeProc == nil || stripeProc.EffectiveRail(name) != models.RailStripe || stripeProc.Stripe == nil {
+	for name, p := range rails {
+		if p == nil || p.EffectiveRail(name) != models.RailStripe || p.Stripe == nil {
 			continue
 		}
-
-		if err := ValidateStripeCredentialPosture(cfg, stripeProc.Stripe.SecretKey); err != nil {
+		if err := ValidateStripeSecretKeyEnvironment(p.Environment, p.Stripe.SecretKey); err != nil {
 			return fmt.Errorf("stripe rail %q: %w", strings.ToLower(strings.TrimSpace(name)), err)
 		}
 	}
 	return nil
 }
 
-// ValidateStripeCredentialPosture checks a single supplied Stripe key against
-// the runtime posture without requiring a complete account or probing Stripe.
-func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error {
+// ValidateStripeSecretKeyEnvironment refuses a Stripe key that disagrees with
+// its PSP's declared environment: a live key moves real money, a test key
+// never does. Stripe's key prefix is the provider's own answer.
+func ValidateStripeSecretKeyEnvironment(environment, secretKey string) error {
 	secretKey = strings.TrimSpace(secretKey)
 	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
 	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
-	if secretKey != "" && ((!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_")) {
+	if secretKey == "" {
+		return nil
+	}
+	if (!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_") {
 		return fmt.Errorf("invalid Stripe secret key format: expected sk_live_, rk_live_, sk_test_, or rk_test_ with a nonempty value")
 	}
-	if cfg != nil && IsTestMode(cfg) {
-		if isLiveKey {
-			return fmt.Errorf("live key (sk_live_/rk_live_) is not allowed when test_mode=sandbox; use a test key or set test_mode=live")
-		}
-	} else if isTestKey {
-		return fmt.Errorf("test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox")
+	if isLiveKey && !LiveEnvironment(environment) {
+		return fmt.Errorf("a live key (sk_live_/rk_live_) moves real money; the PSP declares environment %q", environment)
+	}
+	if isTestKey && LiveEnvironment(environment) {
+		return fmt.Errorf("a test key (sk_test_/rk_test_) moves no money; the PSP declares environment live")
 	}
 	return nil
 }
 
-// ValidateStripePublishableKeyPosture checks a declared browser key the same
-// way: pk_test_ only under sandbox, pk_live_ only under live.
-func ValidateStripePublishableKeyPosture(cfg *Config, key string) error {
+// ValidateStripePublishableKeyEnvironment checks a declared browser key the
+// same way: pk_live_ only on a live PSP, pk_test_ only on a test one.
+func ValidateStripePublishableKeyEnvironment(environment, key string) error {
 	key = strings.TrimSpace(key)
 	live, test := strings.HasPrefix(key, "pk_live_"), strings.HasPrefix(key, "pk_test_")
 	if (!live && !test) || len(key) <= len("pk_test_") {
 		return fmt.Errorf("invalid Stripe publishable key format: expected pk_live_ or pk_test_ with a nonempty value")
 	}
-	if cfg != nil && IsTestMode(cfg) {
-		if live {
-			return fmt.Errorf("live publishable key (pk_live_) is not allowed when test_mode=sandbox")
-		}
-	} else if test {
-		return fmt.Errorf("test publishable key (pk_test_) is not allowed when test_mode=live")
+	if live != LiveEnvironment(environment) {
+		return fmt.Errorf("publishable key %s… disagrees with the PSP's environment %q", key[:len("pk_test_")], environment)
 	}
 	return nil
 }
@@ -1503,20 +1436,6 @@ func GetProviderWriteMode(cfg *Config) string {
 	return mode
 }
 
-// IsTestMode returns true if payment rails should use sandbox/test
-// environments and the sandbox-credential guarantees apply (#355): Stripe
-// live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
-// Orthogonal to ProviderWriteMode (pure behavior). Unset (empty) reads as
-// live, matching the historical bool zero value; standalone Load() always
-// resolves TestMode explicitly before this is read, and embedded.New refuses
-// to construct with it unset (#745), so "unset" in practice only reaches this
-// accessor via a direct Config{} literal in a test. Sandbox is allowed in
-// every environment (#762) — Validate no longer rejects test_mode=sandbox
-// outside development.
-func IsTestMode(cfg *Config) bool {
-	return cfg.TestMode == CredentialPostureSandbox
-}
-
 // IsLimitedMode returns true if proactive payment-provider operations
 // (dunning charges/cancellations, usage order collection, Solana
 // pulls, catalog provider-object writes) are disabled, leaving only reactive,
@@ -1588,7 +1507,6 @@ func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaPr
 // OpenRails processes. Keep this out of Load so one-off CLIs do not look like
 // they started the payment server.
 func LogStartupStatus(cfg *Config) {
-	logTestModeStatus(cfg)
 	logOperatingModeStatus(cfg)
 }
 
@@ -1605,22 +1523,5 @@ func logOperatingModeStatus(cfg *Config) {
 		log.Info("   Set provider_write_mode=full to resume proactive operations")
 	case ProviderWriteModeFull:
 		log.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
-	}
-}
-
-// logTestModeStatus logs the credential environment at startup.
-// This helps operators confirm whether they're on sandbox or live credentials.
-func logTestModeStatus(cfg *Config) {
-	if IsTestMode(cfg) {
-		log.Warn("⚠️  TEST ENV ENABLED - No real charges will be processed")
-		log.Info("   Payment providers will use sandbox/test environments:")
-		log.Info("   - NMI: secure.networkmerchants.com with test-mode transactions")
-		log.Info("   - CCBill: sandbox-api.ccbill.com")
-		log.Info("   - Stripe: requires sk_test_* key")
-		log.Info("   - Solana: devnet")
-	} else {
-		log.Warn("🔴 LIVE CREDENTIALS - Real charges enabled")
-		log.Info("   Payment providers will use production environments")
-
 	}
 }

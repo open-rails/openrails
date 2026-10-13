@@ -28,7 +28,7 @@ unless noted.
 | Automation or unknown-class customer credential starts a card charge | `TestSecurityAutomationCredentialCannotCharge` | Upgrade and saved-card purchase require the customer's interactive session |
 | `findings:resolve` retargets a recommendation at another payment or subscription | `TestSecurityFindingOverrideCannotRetarget` | Overrides cannot change the ids a recommendation names |
 | Browser-chosen cheaper price, archived price, negative price or duration, tampered confirm fields | `TestSecurityPurchaseTermsAreServerSide` | Catalog-derived terms; DB amount and duration checks |
-| Live Stripe key reachable through an injected transport in a sandbox deployment | `TestSecurityProviderConfigurationSafety` | Live keys are disarmed under sandbox posture |
+| Live Stripe key reachable through an injected transport or a loopback fake | `TestSecurityProviderConfigurationSafety` | A live key never reaches a fake provider; a key disagreeing with its PSP's environment refuses to load |
 | Merchant-configured Collect.js origin skims cards | `TestSecurityProviderConfigurationSafety` | Only NMI's Collect.js is served |
 | Card testing through card saves | `TestSecurityCardTestingIsThrottled` | Per-customer and per-address `payment` rate limit |
 | Leaked rotated-out webhook secret forges "paid" notices after rotation, Stripe and NMI | `TestSecurityRotatedWebhookSecretExpires` | The previous secret verifies only until `webhook_overlap_expires_at` (default 24h, max 168h), never without one; `retire_webhook_overlap` ends it at once |

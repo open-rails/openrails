@@ -38,7 +38,7 @@ type Deps struct {
 	// customers get no email.
 	UserInfo UserInfo
 
-	// Test seams, refused with Config.TestMode live. StripeTransport and
+	// Test seams, refused beside a live PSP. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX
 	// source's, which each process reads its rates from into memory; Clock
 	// drives renewal dates, retries and entitlement windows.

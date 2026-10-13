@@ -63,55 +63,57 @@ func TestMerchantManifestValidation(t *testing.T) {
 		return "version: 1\nmerchants:\n  host-three:\n    display_name: Host Three\n" + fragment
 	}
 	psp := func(fragment string) string {
-		return base("    psps:\n      stripe:\n        rail: stripe\n        account_id: acct_test_123\n" + fragment)
+		return base("    psps:\n      stripe:\n        rail: stripe\n        environment: test\n        account_id: acct_test_123\n" + fragment)
 	}
 	remote := func(fragment string) string {
 		return base("    remote_application:\n" + fragment)
 	}
 	for name, tc := range map[string]struct{ body, want string }{
-		"unknown top-level key":        {"version: 1\ntenantz: []\n", "tenantz"},
-		"auth section":                 {"version: 1\nauth:\n  users: []\nmerchants:\n  x:\n    display_name: X\n", "auth"},
-		"authkit authority":            {"users:\n  - username: operator\n", "users"},
-		"catalogs":                     {"version: 1\ncatalogs: []\n", "catalogs"},
-		"no merchants":                 {"version: 1\n", "at least one merchant"},
-		"wrong version":                {"version: 2\nmerchants:\n  x:\n    display_name: X\n", "version must be 1"},
-		"merchant name removed":        {"version: 1\nmerchants:\n  host-three:\n    name: Host Three\n", `unknown field "name"`},
-		"support email removed":        {base("    settings:\n      profile:\n        support_email: s@example.com\n"), "support_email"},
-		"settings outside settings":    {base("    profile:\n      display_name: X\n"), `unknown field "profile"`},
-		"invoice block retired":        {base("    invoice:\n      monthly_floor: 1\n"), `unknown field "invoice"`},
-		"window as duration":           {base("    settings:\n      delegated_invoker_wasted_spend_limits:\n        - { key: burst, window: 15m, limit: 5 }\n"), `unknown field "window"`},
-		"negative floor":               {base("    settings:\n      monthly_floor: -1\n"), "settings"},
-		"policy names an undeclared":   {base("    settings:\n      billing_policy_bindings:\n        - { policy: nope }\n"), "undeclared policy"},
-		"issuer section removed":       {base("    issuer:\n      issuer: https://auth.example\n"), "issuer"},
-		"profile URL scheme":           {base("    settings:\n      profile:\n        logo_url: ftp://cdn.example/logo.png\n"), "profile.logo_url"},
-		"api_host removed":             {base("    api_host: api.host-three.example\n"), "merchants.host-three.api_host was removed"},
-		"remote without issuer":        {remote("      jwks_uri: https://auth.example/jwks\n"), "remote_application.issuer is required"},
-		"remote two trust sources":     {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      public_keys:\n        - public_key_pem: x\n"), "exactly one of jwks_uri, jwks, or public_keys"},
-		"remote no trust source":       {remote("      issuer: https://auth.example\n"), "must set jwks_uri, jwks, or public_keys"},
-		"remote non-http jwks":         {remote("      issuer: https://auth.example\n      jwks_uri: file:///etc/jwks\n"), "jwks_uri must be an http"},
-		"remote allowed origins":       {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      allowed_origins: [https://auth.example]\n"), "allowed_origins"},
-		"renamed rail accounts":        {base("    rail_merchant_accounts: {}\n"), "merchants.host-three.rail_merchant_accounts was renamed to psps"},
-		"renamed provider accounts":    {base("    provider_accounts: {}\n"), "merchants.host-three.provider_accounts was renamed to psps"},
-		"slug inside an entry":         {base("    slug: host-three\n"), "merchants.host-three.slug is not accepted: the entry's key is its slug"},
-		"psp routing removed":          {psp("        routing: standby\n"), `unknown field "routing"`},
-		"psp mode removed":             {psp("        mode: primary\n"), `unknown field "mode"`},
-		"psp role removed":             {psp("        role: primary\n"), `unknown field "role"`},
-		"psp environment retired":      {psp("        environment: live\n"), `unknown field "environment"`},
-		"unknown secret":               {psp("        secrets: {api_key: one}\n"), `merchant "host-three" psps.stripe.secrets: unknown field "api_key" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`},
-		"stripe setting typo":          {psp("        settings: {publishable_kye: pk_test_1}\n"), `merchant "host-three" psps.stripe.settings: unknown field "publishable_kye" (stripe takes fallback_after_failures, fallback_for, publishable_key, webhook_overlap_expires_at)`},
-		"nmi setting typo":             {base("    psps:\n      mobius:\n        rail: nmi\n        account_id: p\n        settings: {tokenization_kye: t}\n"), `merchant "host-three" psps.mobius.settings: unknown field "tokenization_kye" (nmi takes card_entry, endpoint_deployment, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)`},
-		"nmi secret typo":              {base("    psps:\n      mobius:\n        rail: nmi\n        account_id: p\n        secrets: {security_kye: s}\n"), `merchant "host-three" psps.mobius.secrets: unknown field "security_kye"`},
-		"ccbill takes no settings":     {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: 999999-0000\n        settings: {salt: s}\n"), `merchant "host-three" psps.ccbill.settings: unknown field "salt" (ccbill takes fallback_after_failures, fallback_for)`},
-		"ccbill secret typo":           {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: 999999-0000\n        secrets: {slat: s}\n"), `merchant "host-three" psps.ccbill.secrets: unknown field "slat" (ccbill takes datalink_password, datalink_username, salt)`},
-		"solana setting typo":          {base("    psps:\n      solana:\n        rail: solana\n        signer: { mode: local_keypair }\n        settings: {recipient_walet: w}\n"), `merchant "host-three" psps.solana.settings: unknown field "recipient_walet" (solana takes recipient_wallet, rpc_api_key, rpc_provider, tokens)`},
-		"solana secret typo":           {base("    psps:\n      solana:\n        rail: solana\n        signer: { mode: local_keypair }\n        secrets: {private_kye: k}\n"), `merchant "host-three" psps.solana.secrets: unknown field "private_kye" (solana takes private_key)`},
-		"unknown rail":                 {base("    psps:\n      mobius:\n        rail: nmii\n        account_id: p\n"), `merchant "host-three" psps.mobius.rail: unknown rail "nmii"`},
-		"psp without rail":             {base("    psps:\n      mobius:\n        account_id: p\n"), "psps.mobius.rail is required"},
-		"psp rail-keyed block":         {base("    psps:\n      mobius:\n        nmi:\n          account_id: p\n"), `unknown field "nmi"`},
-		"nmi tokenization is setting":  {base("    psps:\n      mobius:\n        rail: nmi\n        account_id: p\n        secrets: {tokenization_key: t}\n"), `psps.mobius.secrets: unknown field "tokenization_key"`},
-		"solana network not a PSP key": {base("    psps:\n      solana:\n        rail: solana\n        network: devnet\n"), `unknown field "network"`},
-		"solana without signer":        {base("    psps:\n      solana:\n        rail: solana\n        archived: false\n"), "requires a signer"},
-		"ccbill slash account":         {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"999999/0000\"\n"), "CCBill account_id uses a dash"},
+		"unknown top-level key":          {"version: 1\ntenantz: []\n", "tenantz"},
+		"auth section":                   {"version: 1\nauth:\n  users: []\nmerchants:\n  x:\n    display_name: X\n", "auth"},
+		"authkit authority":              {"users:\n  - username: operator\n", "users"},
+		"catalogs":                       {"version: 1\ncatalogs: []\n", "catalogs"},
+		"no merchants":                   {"version: 1\n", "at least one merchant"},
+		"wrong version":                  {"version: 2\nmerchants:\n  x:\n    display_name: X\n", "version must be 1"},
+		"merchant name removed":          {"version: 1\nmerchants:\n  host-three:\n    name: Host Three\n", `unknown field "name"`},
+		"support email removed":          {base("    settings:\n      profile:\n        support_email: s@example.com\n"), "support_email"},
+		"settings outside settings":      {base("    profile:\n      display_name: X\n"), `unknown field "profile"`},
+		"invoice block retired":          {base("    invoice:\n      monthly_floor: 1\n"), `unknown field "invoice"`},
+		"window as duration":             {base("    settings:\n      delegated_invoker_wasted_spend_limits:\n        - { key: burst, window: 15m, limit: 5 }\n"), `unknown field "window"`},
+		"negative floor":                 {base("    settings:\n      monthly_floor: -1\n"), "settings"},
+		"policy names an undeclared":     {base("    settings:\n      billing_policy_bindings:\n        - { policy: nope }\n"), "undeclared policy"},
+		"issuer section removed":         {base("    issuer:\n      issuer: https://auth.example\n"), "issuer"},
+		"profile URL scheme":             {base("    settings:\n      profile:\n        logo_url: ftp://cdn.example/logo.png\n"), "profile.logo_url"},
+		"api_host removed":               {base("    api_host: api.host-three.example\n"), "merchants.host-three.api_host was removed"},
+		"remote without issuer":          {remote("      jwks_uri: https://auth.example/jwks\n"), "remote_application.issuer is required"},
+		"remote two trust sources":       {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      public_keys:\n        - public_key_pem: x\n"), "exactly one of jwks_uri, jwks, or public_keys"},
+		"remote no trust source":         {remote("      issuer: https://auth.example\n"), "must set jwks_uri, jwks, or public_keys"},
+		"remote non-http jwks":           {remote("      issuer: https://auth.example\n      jwks_uri: file:///etc/jwks\n"), "jwks_uri must be an http"},
+		"remote allowed origins":         {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      allowed_origins: [https://auth.example]\n"), "allowed_origins"},
+		"renamed rail accounts":          {base("    rail_merchant_accounts: {}\n"), "merchants.host-three.rail_merchant_accounts was renamed to psps"},
+		"renamed provider accounts":      {base("    provider_accounts: {}\n"), "merchants.host-three.provider_accounts was renamed to psps"},
+		"slug inside an entry":           {base("    slug: host-three\n"), "merchants.host-three.slug is not accepted: the entry's key is its slug"},
+		"psp routing removed":            {psp("        routing: standby\n"), `unknown field "routing"`},
+		"psp mode removed":               {psp("        mode: primary\n"), `unknown field "mode"`},
+		"psp role removed":               {psp("        role: primary\n"), `unknown field "role"`},
+		"psp environment the rail lacks": {base("    psps:\n      stripe:\n        rail: stripe\n        environment: sandbox\n        account_id: acct_test_123\n"), `merchant "host-three" psps.stripe.environment: stripe has no "sandbox" environment (live, test)`},
+		"psp environment missing":        {base("    psps:\n      stripe:\n        rail: stripe\n        account_id: acct_test_123\n"), `merchant "host-three" psps.stripe.environment is required`},
+		"psps mixing live and non-live":  {base("    psps:\n      stripe:\n        rail: stripe\n        environment: live\n        account_id: acct_test_123\n      ccbill:\n        rail: ccbill\n        environment: sandbox\n        account_id: 999999-0000\n"), "a deployment is all live or all non-live: live PSPs host-three/stripe beside non-live PSPs host-three/ccbill (sandbox)"},
+		"unknown secret":                 {psp("        secrets: {api_key: one}\n"), `merchant "host-three" psps.stripe.secrets: unknown field "api_key" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`},
+		"stripe setting typo":            {psp("        settings: {publishable_kye: pk_test_1}\n"), `merchant "host-three" psps.stripe.settings: unknown field "publishable_kye" (stripe takes fallback_after_failures, fallback_for, publishable_key, webhook_overlap_expires_at)`},
+		"nmi setting typo":               {base("    psps:\n      mobius:\n        rail: nmi\n        environment: sandbox\n        account_id: p\n        settings: {tokenization_kye: t}\n"), `merchant "host-three" psps.mobius.settings: unknown field "tokenization_kye" (nmi takes card_entry, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)`},
+		"nmi secret typo":                {base("    psps:\n      mobius:\n        rail: nmi\n        environment: sandbox\n        account_id: p\n        secrets: {security_kye: s}\n"), `merchant "host-three" psps.mobius.secrets: unknown field "security_kye"`},
+		"ccbill takes no settings":       {base("    psps:\n      ccbill:\n        rail: ccbill\n        environment: sandbox\n        account_id: 999999-0000\n        settings: {salt: s}\n"), `merchant "host-three" psps.ccbill.settings: unknown field "salt" (ccbill takes fallback_after_failures, fallback_for)`},
+		"ccbill secret typo":             {base("    psps:\n      ccbill:\n        rail: ccbill\n        environment: sandbox\n        account_id: 999999-0000\n        secrets: {slat: s}\n"), `merchant "host-three" psps.ccbill.secrets: unknown field "slat" (ccbill takes datalink_password, datalink_username, salt)`},
+		"solana setting typo":            {base("    psps:\n      solana:\n        rail: solana\n        environment: sandbox\n        signer: { mode: local_keypair }\n        settings: {recipient_walet: w}\n"), `merchant "host-three" psps.solana.settings: unknown field "recipient_walet" (solana takes recipient_wallet, rpc_api_key, rpc_provider, tokens)`},
+		"solana secret typo":             {base("    psps:\n      solana:\n        rail: solana\n        environment: sandbox\n        signer: { mode: local_keypair }\n        secrets: {private_kye: k}\n"), `merchant "host-three" psps.solana.secrets: unknown field "private_kye" (solana takes private_key)`},
+		"unknown rail":                   {base("    psps:\n      mobius:\n        rail: nmii\n        account_id: p\n"), `merchant "host-three" psps.mobius.rail: unknown rail "nmii"`},
+		"psp without rail":               {base("    psps:\n      mobius:\n        account_id: p\n"), "psps.mobius.rail is required"},
+		"psp rail-keyed block":           {base("    psps:\n      mobius:\n        nmi:\n          account_id: p\n"), `unknown field "nmi"`},
+		"nmi tokenization is setting":    {base("    psps:\n      mobius:\n        rail: nmi\n        environment: sandbox\n        account_id: p\n        secrets: {tokenization_key: t}\n"), `psps.mobius.secrets: unknown field "tokenization_key"`},
+		"solana network not a PSP key":   {base("    psps:\n      solana:\n        rail: solana\n        environment: sandbox\n        network: devnet\n"), `unknown field "network"`},
+		"solana without signer":          {base("    psps:\n      solana:\n        rail: solana\n        environment: sandbox\n        archived: false\n"), "requires a signer"},
+		"ccbill slash account":           {base("    psps:\n      ccbill:\n        rail: ccbill\n        environment: sandbox\n        account_id: \"999999/0000\"\n"), "CCBill account_id uses a dash"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseMerchantConfigManifest([]byte(tc.body))
@@ -120,9 +122,9 @@ func TestMerchantManifestValidation(t *testing.T) {
 	}
 
 	// A declared Solana account_id is ignored (derived from the signer), not an error.
-	_, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      solana:\n        rail: solana\n        account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n        signer: { mode: local_keypair }\n        secrets:\n          private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")))
+	_, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      solana:\n        rail: solana\n        environment: sandbox\n        account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n        signer: { mode: local_keypair }\n        secrets:\n          private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")))
 	require.NoError(t, err)
-	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"999999-0000\"\n")))
+	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        rail: ccbill\n        environment: sandbox\n        account_id: \"999999-0000\"\n")))
 	require.NoError(t, err)
 	require.Equal(t, "999999-0000", m.Merchants["host-three"].PSPs["ccbill"].AccountID)
 }

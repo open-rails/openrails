@@ -1,8 +1,8 @@
 # Runtime security and public URLs
 
-Security policy is independent of `test_mode: sandbox | live`. Both postures
-require encrypted managed database credentials, verified provider webhook
-signatures and an explicit provider write mode.
+Security policy is independent of the PSPs' environments. Live and non-live
+deployments alike require encrypted managed database credentials, verified
+provider webhook signatures and an explicit provider write mode.
 `env` / `ENV`, `api_url` / `API_URL`, and
 `new_subscription_collection_policy` / `NEW_SUBSCRIPTION_COLLECTION_POLICY` are
 retired inputs and refuse configuration loading.

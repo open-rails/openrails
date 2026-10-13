@@ -103,20 +103,26 @@ func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Ch
 	return PostureCheck(http.DefaultTransport, secretKey, "", declared)
 }
 
-// requirePosture gates one sandbox-posture mutation on its key's verdict.
+// requirePosture gates one test key's mutation on its verdict.
 // Requests to a literal loopback IP are fixtures (code-level test seams): they
 // still require a test-mode key prefix but cannot reach Stripe.
 func requirePosture(req *http.Request, transport http.RoundTripper) error {
 	secretKey := requestSecret(req)
 	endpoint := req.URL.Scheme + "://" + req.URL.Host
 	account := req.Header.Get("Stripe-Account")
-	if ip := net.ParseIP(req.URL.Hostname()); ip != nil && ip.IsLoopback() {
+	if loopbackDestination(req) {
 		if liveSecretKey(secretKey) {
 			return fmt.Errorf("%w: stripe live key under sandbox posture", providerposture.ErrDisarmed)
 		}
 		return nil
 	}
 	return providerposture.Process().Require(req.Context(), PostureKey(secretKey, endpoint, account), PostureCheck(transport, secretKey, account, ""))
+}
+
+// loopbackDestination reports a request to a literal loopback IP: a fixture.
+func loopbackDestination(req *http.Request) bool {
+	ip := net.ParseIP(req.URL.Hostname())
+	return ip != nil && ip.IsLoopback()
 }
 
 func requestSecret(req *http.Request) string {

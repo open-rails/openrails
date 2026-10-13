@@ -3,7 +3,9 @@ pkg openrails, const CredentialAccessToken auth.CredentialKind = "access_token"
 pkg openrails, const CredentialDeviceKey auth.CredentialKind = "device_key"
 pkg openrails, const CredentialSession auth.CredentialKind = "session"
 pkg openrails, const CredentialSignedToken auth.CredentialKind = "signed_token"
-pkg openrails, const Live config.CredentialPosture = "live"
+pkg openrails, const EnvironmentLive untyped string = "live"
+pkg openrails, const EnvironmentSandbox untyped string = "sandbox"
+pkg openrails, const EnvironmentTest untyped string = "test"
 pkg openrails, const ProviderWritesFull untyped string = "full"
 pkg openrails, const ProviderWritesLimited untyped string = "limited"
 pkg openrails, const ProviderWritesReadOnly untyped string = "readonly"
@@ -12,7 +14,6 @@ pkg openrails, const ReadCatalog config.Read = "catalog"
 pkg openrails, const ReadMerchantConfiguration config.Read = "merchant_configuration"
 pkg openrails, const ReadMeters config.Read = "meters"
 pkg openrails, const ReadPublicConfig config.Read = "public_config"
-pkg openrails, const Sandbox config.CredentialPosture = "sandbox"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
@@ -292,6 +293,7 @@ pkg openrails, type CCBillPSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type CCBillPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type CCBillPSP struct, DatalinkPassword string `psp:"secrets.datalink_password"`
 pkg openrails, type CCBillPSP struct, DatalinkUsername string `psp:"secrets.datalink_username"`
+pkg openrails, type CCBillPSP struct, Environment string `psp:"environment"`
 pkg openrails, type CCBillPSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
 pkg openrails, type CCBillPSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type CCBillPSP struct, Salt string `psp:"secrets.salt,required"`
@@ -332,14 +334,11 @@ pkg openrails, type Config struct, ReadCache config.ReadCache `yaml:"read_cache"
 pkg openrails, type Config struct, Redis *config.RedisConfig `yaml:"redis" json:"redis"`
 pkg openrails, type Config struct, ReturnOrigins []string `yaml:"return_origins" json:"return_origins"`
 pkg openrails, type Config struct, SMTP *config.SMTPConfig `yaml:"smtp" json:"smtp"`
-pkg openrails, type Config struct, TestMode config.CredentialPosture `yaml:"test_mode" json:"test_mode"`
 pkg openrails, type Config struct, TrustedProxies []string `yaml:"trusted_proxies" json:"trusted_proxies"`
 pkg openrails, type Config struct, Vault *config.VaultConfig `yaml:"vault" json:"vault"`
 pkg openrails, type Config struct, WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
 pkg openrails, type Credential = billingauth.Credential
 pkg openrails, type CredentialKind = billingauth.CredentialKind
-pkg openrails, type CredentialPosture = config.CredentialPosture
-pkg openrails, type CredentialPosture string
 pkg openrails, type CustodianConfig = config.CustodianConfig
 pkg openrails, type CustodianConfig struct
 pkg openrails, type CustodianConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -426,7 +425,7 @@ pkg openrails, type NMIPSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type NMIPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type NMIPSP struct, CardEntry string `psp:"settings.card_entry"`
 pkg openrails, type NMIPSP struct, Custodian string `psp:"custodian"`
-pkg openrails, type NMIPSP struct, EndpointDeployment string `psp:"settings.endpoint_deployment"`
+pkg openrails, type NMIPSP struct, Environment string `psp:"environment"`
 pkg openrails, type NMIPSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
 pkg openrails, type NMIPSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type NMIPSP struct, SecurityKey string `psp:"secrets.security_key,required"`
@@ -441,6 +440,7 @@ pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
 pkg openrails, type PSPConfig struct, Archived bool `yaml:"archived,omitempty"`
 pkg openrails, type PSPConfig struct, Custodian string `yaml:"custodian,omitempty"`
+pkg openrails, type PSPConfig struct, Environment string `yaml:"environment"`
 pkg openrails, type PSPConfig struct, Rail billing.Rail `yaml:"rail"`
 pkg openrails, type PSPConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
 pkg openrails, type PSPConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
@@ -524,6 +524,7 @@ pkg openrails, type SMTPConfig struct, Port int `yaml:"port" json:"port"`
 pkg openrails, type SMTPConfig struct, Username string `yaml:"username" json:"username"`
 pkg openrails, type SolanaPSP struct
 pkg openrails, type SolanaPSP struct, Archived bool `psp:"archived"`
+pkg openrails, type SolanaPSP struct, Environment string `psp:"environment"`
 pkg openrails, type SolanaPSP struct, PrivateKey string `psp:"secrets.private_key"`
 pkg openrails, type SolanaPSP struct, RPCAPIKey string `psp:"settings.rpc_api_key"`
 pkg openrails, type SolanaPSP struct, RPCProvider string `psp:"settings.rpc_provider"`
@@ -537,6 +538,7 @@ pkg openrails, type StartOption func(*startOptions)
 pkg openrails, type StripePSP struct
 pkg openrails, type StripePSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type StripePSP struct, Archived bool `psp:"archived"`
+pkg openrails, type StripePSP struct, Environment string `psp:"environment"`
 pkg openrails, type StripePSP struct, FallbackAfterFailures int `psp:"settings.fallback_after_failures"`
 pkg openrails, type StripePSP struct, FallbackFor []string `psp:"settings.fallback_for"`
 pkg openrails, type StripePSP struct, PublishableKey string `psp:"settings.publishable_key"`
@@ -1625,6 +1627,7 @@ pkg openrails/billing, type CreateOrderParams struct, PayURL *OrderPayURLParams 
 pkg openrails/billing, type CreatePSPParams struct
 pkg openrails/billing, type CreatePSPParams struct, AccountID string `json:"account_id"`
 pkg openrails/billing, type CreatePSPParams struct, Credentials map[string]string `json:"credentials"`
+pkg openrails/billing, type CreatePSPParams struct, Environment string `json:"environment"`
 pkg openrails/billing, type CreatePSPParams struct, Key string `json:"key"`
 pkg openrails/billing, type CreatePSPParams struct, Rail Rail `json:"rail"`
 pkg openrails/billing, type CreatePSPParams struct, Settings map[string]any `json:"settings"`
@@ -2618,6 +2621,7 @@ pkg openrails/billing, type PSPCredential struct, Configured bool `json:"configu
 pkg openrails/billing, type PSPCredential struct, ValidatedAt *time.Time `json:"validated_at"`
 pkg openrails/billing, type PSPDeclaration struct
 pkg openrails/billing, type PSPDeclaration struct, AccountID string
+pkg openrails/billing, type PSPDeclaration struct, Environment string
 pkg openrails/billing, type PSPDeclaration struct, Key string
 pkg openrails/billing, type PSPDeclaration struct, Rail Rail
 pkg openrails/billing, type PSPID [16]byte
@@ -3052,6 +3056,7 @@ pkg openrails/billing, type Rail string
 pkg openrails/billing, type RailDefinition struct
 pkg openrails/billing, type RailDefinition struct, CredentialKeys []string `json:"credential_keys"`
 pkg openrails/billing, type RailDefinition struct, DisplayName string `json:"display_name"`
+pkg openrails/billing, type RailDefinition struct, Environments []string `json:"environments"`
 pkg openrails/billing, type RailDefinition struct, Rail Rail `json:"rail"`
 pkg openrails/billing, type RailDefinition struct, SettingKeys []string `json:"setting_keys"`
 pkg openrails/billing, type RecordExternalPaymentParams struct

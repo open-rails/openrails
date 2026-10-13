@@ -43,6 +43,7 @@ merchants:
     psps:
       solana:
         rail: solana
+        environment: sandbox
         signer: { mode: vault_transit, key: `+transitKey+` }
 `), 0o600))
 

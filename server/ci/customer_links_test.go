@@ -139,6 +139,7 @@ merchants:
     psps:
       nmi:
         rail: nmi
+        environment: sandbox
         account_id: test
         secrets: {security_key: test, webhook_signing_secret: test}
         settings: {tokenization_key: test}
@@ -147,6 +148,7 @@ merchants:
     psps:
       nmi:
         rail: nmi
+        environment: sandbox
         account_id: mart
         secrets: {security_key: mart, webhook_signing_secret: mart}
         settings: {tokenization_key: mart}

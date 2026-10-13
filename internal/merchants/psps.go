@@ -33,8 +33,8 @@ var (
 	ErrPSPExists = apperr.New(http.StatusConflict, "psp_exists", "merchants: the account is already a PSP")
 	// ErrPSPKeyTaken: another PSP holds the key.
 	ErrPSPKeyTaken = apperr.New(http.StatusConflict, "psp_key_taken", "merchants: another PSP holds this key")
-	// ErrPSPCredentialsRejected: the provider refused the credentials for this
-	// deployment's posture.
+	// ErrPSPCredentialsRejected: the provider refused the credentials, or
+	// answered that they are not in the PSP's declared environment.
 	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, "psp_credentials_rejected", "the provider rejected the credentials")
 	// ErrPSPClaimUnproven refuses a merchant's first claim of an account whose
 	// credentials do not prove control of it (SEC-33). The operator declares
@@ -43,6 +43,9 @@ var (
 	// ErrRevisionMismatch refuses an edit naming a revision the document has
 	// moved past.
 	ErrRevisionMismatch = apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, "the configuration changed since the revision the request names; read it again")
+	// ErrPSPEnvironmentMixed: a deployment's PSPs are all live or all
+	// non-live, and this PSP is the other.
+	ErrPSPEnvironmentMixed = apperr.New(http.StatusConflict, "psp_environment_mixed", "a deployment's PSPs are all live or all non-live")
 	// ErrConfigReadOnly refuses an edit of configuration read from a file.
 	ErrConfigReadOnly = apperr.New(http.StatusConflict, "merchant_config_read_only", "the merchant's configuration is read from a file; change the file")
 )
@@ -50,7 +53,7 @@ var (
 // providerCredentialError types a provider-side credential rejection; any
 // other probe outcome (transport, indeterminate) stays an internal failure.
 func providerCredentialError(err error) error {
-	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) || errors.Is(err, nmi.ErrTestModeUnderLivePosture) || errors.Is(err, nmi.ErrSandboxEndpointUnderLive) {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrEnvironmentMismatch) {
 		return fmt.Errorf("%w: %v", ErrPSPCredentialsRejected, err)
 	}
 	return err
@@ -95,13 +98,14 @@ func RailDefinitions() []billing.RailDefinition {
 			DisplayName:    descriptor.DisplayName,
 			CredentialKeys: credentialKeys,
 			SettingKeys:    pspSettingKeys(string(descriptor.Rail)),
+			Environments:   descriptor.Environments,
 		})
 	}
 	return out
 }
 
-// ListPSPs returns one page of the merchant's PSPs in the deployment's
-// environment, newest first. Credential values are never returned.
+// ListPSPs returns one page of the merchant's PSPs, newest first. Credential
+// values are never returned.
 func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params billing.PSPListParams) (billing.ListPage[billing.PSP], error) {
 	j, err := s.load(ctx, id)
 	if err != nil {
@@ -133,7 +137,7 @@ func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params bi
 		}
 	}
 	for _, p := range slices.Backward(j.psps) {
-		if p.Environment != s.providerEnvironment || (rail != "" && p.Rail != rail) || (params.Archived != nil && p.Archived != *params.Archived) {
+		if (rail != "" && p.Rail != rail) || (params.Archived != nil && p.Archived != *params.Archived) {
 			continue
 		}
 		if afterAt != nil && afterID != nil && !(p.CreatedAt.Before(*afterAt) || p.CreatedAt.Equal(*afterAt) && strings.Compare(p.ID.String(), afterID.String()) < 0) {
@@ -205,6 +209,10 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if !merchantdocs.KeyShape.MatchString(key) {
 		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
 	}
+	environment := strings.TrimSpace(req.Environment)
+	if err := config.ValidatePSPEnvironment(key, rail, environment); err != nil {
+		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
+	}
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
 		return billing.PSP{}, apperr.Invalidf("account_id is required").WithParam("account_id")
@@ -222,7 +230,7 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
 		return billing.PSP{}, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
 	}
-	doc := merchantdocs.PSP{Rail: rail, Environment: s.providerEnvironment, AccountID: accountID, Settings: mergeSettings(nil, req.Settings), Secrets: credentials}
+	doc := merchantdocs.PSP{Rail: rail, Environment: environment, AccountID: accountID, Settings: mergeSettings(nil, req.Settings), Secrets: credentials}
 	set, err := s.config.Get(ctx, id)
 	if err != nil {
 		return billing.PSP{}, err
@@ -238,7 +246,12 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	}
 	// An identity this merchant declared under the same key (imported
 	// history) is armed by its document; any other owner refuses.
-	if owner, found, err := s.ResolvePSPByIdentity(ctx, rail, s.providerEnvironment, accountID); err != nil {
+	if why, err := s.environmentRefusal(ctx, gen.New(s.pool), environment); err != nil {
+		return billing.PSP{}, err
+	} else if why != "" {
+		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentMixed, why)
+	}
+	if owner, found, err := s.ResolvePSPByIdentity(ctx, rail, environment, accountID); err != nil {
 		return billing.PSP{}, err
 	} else if found {
 		row, ok, err := s.pspRowByID(ctx, id, owner.ID)
@@ -249,7 +262,7 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 			return billing.PSP{}, fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
 		}
 	}
-	if err := s.refuseLiveNMIUnderTestMode(ctx, id, doc); err != nil {
+	if err := s.verifyNMIEnvironment(ctx, id, doc); err != nil {
 		return billing.PSP{}, err
 	}
 	probed, err := s.probePaymentProviderCredentials(ctx, id, doc)
@@ -330,7 +343,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 				}
 				return s.pspWithObligations(ctx, id, scope)
 			}
-			if len(j.live(scope.Rail, scope.Environment)) <= 1 && !req.AllowLast {
+			if len(j.live(scope.Rail)) <= 1 && !req.AllowLast {
 				return billing.PSP{}, &LastActivePSPError{PSP: billing.PSPID(scope.ID)}
 			}
 			next.Archived = true
@@ -350,7 +363,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 			}
 			next.Settings = mergeSettings(next.Settings, req.Settings)
 			if len(credentials) > 0 {
-				if err := s.refuseLiveNMIUnderTestMode(ctx, id, next); err != nil {
+				if err := s.verifyNMIEnvironment(ctx, id, next); err != nil {
 					return billing.PSP{}, err
 				}
 				if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
@@ -721,10 +734,11 @@ func credentialValidatedAt(rail, key string, validatedAt *time.Time) *time.Time 
 	return nil
 }
 
-// refuseLiveNMIUnderTestMode requires a fresh simulated result before arming
-// sandbox NMI credentials; a live deployment refuses an account left in test
-// mode (SEC-33). Live or indeterminate responses refuse the arm.
-func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.MerchantID, p merchantdocs.PSP) error {
+// verifyNMIEnvironment requires NMI's own answer to agree with the PSP's
+// declared environment before its credentials are armed: a live account not
+// in test mode, a test-mode gateway account, or a sandbox.nmi.com account.
+// A disagreeing or indeterminate answer refuses the arm.
+func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantID, p merchantdocs.PSP) error {
 	if p.Rail != string(models.RailNMI) {
 		return nil
 	}
@@ -732,14 +746,9 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.Mer
 	if securityKey == "" {
 		return nil
 	}
-	sandbox := s.providerEnvironment == "test"
-	deployment, err := config.NMIEndpointDeployment(p.Settings)
+	client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
 	if err != nil {
-		return err
-	}
-	client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, sandbox)
-	if err != nil {
-		return fmt.Errorf("construct NMI posture qualification client: %w", err)
+		return fmt.Errorf("construct NMI environment qualification client: %w", err)
 	}
 	if s.nmiWire != nil {
 		s.nmiWire(client)
@@ -747,11 +756,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.Mer
 	if s.nmiProbeV5BaseURL != "" {
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
-	check := nmi.CheckTestModeArm
-	if !sandbox {
-		check = nmi.CheckLiveArm
-	}
-	if err := check(ctx, client); err != nil {
+	if err := nmi.CheckEnvironmentArm(ctx, client); err != nil {
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", p.Rail, p.AccountID, err))
 	}
 	return nil
@@ -759,8 +764,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.Mer
 
 // DeclarePSP records a PSP identity without a document, for imported billing
 // facts attributed to it. It never arms the PSP; an account already declared
-// keeps its id, key and discovered state. The environment is the
-// deployment's.
+// keeps its id, key and discovered state.
 func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declaration billing.PSPDeclaration) (billing.PSP, error) {
 	if s == nil || s.pool == nil {
 		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
@@ -778,7 +782,15 @@ func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declara
 	case accountID == "":
 		return billing.PSP{}, apperr.Invalidf("account_id is required").WithParam("account_id")
 	}
-	environment := s.providerEnvironment
+	environment := strings.TrimSpace(declaration.Environment)
+	if err := config.ValidatePSPEnvironment(key, rail, environment); err != nil {
+		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
+	}
+	if why, err := s.environmentRefusal(ctx, gen.New(s.pool), environment); err != nil {
+		return billing.PSP{}, err
+	} else if why != "" {
+		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentMixed, why)
+	}
 	if err := AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
 		return billing.PSP{}, err
 	}

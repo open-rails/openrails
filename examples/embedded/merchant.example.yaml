@@ -6,6 +6,7 @@ display_name: OnlyDemo
 psps:
   mobius: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
+    environment: sandbox # live (real money), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
     account_id: "000000" # the NMI dashboard's "Gateway ID"
     settings:
       tokenization_key: your-public-tokenization-key # the browser's card fields use it

@@ -72,7 +72,7 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) 
 		cfg.PublicBillingBaseURL = "https://e2e.test" + mountPrefix
 	}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		psps["solana"] = openrails.SolanaPSP{
+		psps["solana"] = openrails.SolanaPSP{Environment: openrails.EnvironmentSandbox,
 			PrivateKey:  signer.String(),
 			RPCProvider: "public",
 			Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},

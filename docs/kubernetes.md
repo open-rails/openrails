@@ -30,7 +30,6 @@ A minimal `values.yaml`:
 
 ```yaml
 config:                        # config.yaml (config.example.yaml has every key)
-  test_mode: live              # sandbox | live
   provider_write_mode: full    # full | limited | readonly
   public_billing_base_url: https://billing.example.com
   auth:                        # the server's AuthKit, in AuthKit's keys
@@ -77,8 +76,8 @@ first run, and `catalog.yaml` is there for `openrails catalog apply`, which an
 operator runs: starting the server never applies a catalog. A change to
 `config` or `files` rolls the pods.
 
-The server refuses to boot on an unknown key, an unset `test_mode` or
-`provider_write_mode`, or an `http` issuer. Its log names the key.
+The server refuses to boot on an unknown key, an unset `provider_write_mode`,
+or an `http` issuer. Its log names the key.
 
 ## Secrets
 

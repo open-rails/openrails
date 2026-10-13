@@ -60,7 +60,7 @@ func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, 
 		return nil, errors.New("Stripe card save unavailable")
 	}
 	account, err := s.SubscriptionService.Database().Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
-	if err != nil || account.Rail != string(models.RailStripe) || account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
+	if err != nil || account.Rail != string(models.RailStripe) {
 		return nil, ErrOrderAttemptValidation
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)

@@ -18,95 +18,82 @@ import (
 type probeContextKey struct{}
 
 // PostureKey binds a posture verdict to this client's exact merchant, PSP
-// account, endpoints and security key.
+// account, environment, endpoints and security key.
 func (c *NMIClient) PostureKey() providerposture.Key {
 	key := providerposture.Key{
 		Rail:       "nmi",
 		MerchantID: c.accountMerchantID,
 		PSPID:      c.accountPSPID,
 		AccountID:  c.providerName,
-		Endpoint:   strings.Join([]string{c.endpointDeployment, c.DirectPostURL, c.QueryURL, c.v5BaseURL()}, " "),
+		Endpoint:   strings.Join([]string{c.Environment, c.DirectPostURL, c.QueryURL, c.v5BaseURL()}, " "),
 		Credential: providerposture.Fingerprint(c.SecurityKey),
 	}
-	if !c.TestMode {
+	if c.Live() {
 		key.Expect = providerposture.Live
 	}
 	return key
 }
 
-// VerifyPosture runs the authoritative test-mode check and records the verdict
-// for every client that loads the same credential. It runs when credentials
-// load (startup, create, rotation). Under live posture the account must be
-// proven live.
+// VerifyPosture runs NMI's authoritative check of the declared environment
+// and records the verdict for every client that loads the same credential. It
+// runs when credentials load (startup, create, rotation).
 func (c *NMIClient) VerifyPosture(ctx context.Context) providerposture.Status {
-	if !c.TestMode {
-		return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckLivePosture)
-	}
-	if c.LoopbackFixture {
+	if c.LoopbackFixture && !c.Live() {
 		return providerposture.Status{Key: c.PostureKey(), Verdict: providerposture.Simulated}
 	}
-	return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckPosture)
+	return providerposture.Process().Verify(ctx, c.PostureKey(), c.PostureCheck())
 }
 
-// PostureCheck is the check that arms this client under its posture.
+// PostureCheck is the check that proves the declared environment: a live or
+// test account answers the regular gateway's read-only test_mode_status, a
+// sandbox account the sandbox's qualification probe.
 func (c *NMIClient) PostureCheck() providerposture.Check {
-	if !c.TestMode {
-		return c.CheckLivePosture
-	}
 	return c.CheckPosture
 }
 
-// CheckLivePosture proves a live deployment's NMI account is not in test mode
-// through the read-only test_mode_status query. A test-mode account approves
-// without moving money, so it must never grant access under live posture.
-func (c *NMIClient) CheckLivePosture(ctx context.Context) (providerposture.Verdict, error) {
-	if c.endpointDeployment == config.NMIEndpointSandbox {
-		return providerposture.Simulated, ErrSandboxEndpointUnderLive
-	}
-	result, err := c.readGatewayTestMode(context.WithValue(ctx, probeContextKey{}, c))
-	switch {
-	case err != nil:
-		return providerposture.Unknown, err
-	case result == ProbeLive:
-		return providerposture.Live, nil
-	case result == ProbeSimulated:
-		return providerposture.Simulated, ErrTestModeUnderLivePosture
-	default:
-		return providerposture.Unknown, errors.New("NMI test-mode verification was indeterminate")
-	}
-}
-
-// CheckPosture is the NMI authoritative signal: the regular gateway's
-// read-only test_mode_status, or the dedicated sandbox's qualification probe.
+// CheckPosture asks NMI whether the account moves real money and refuses an
+// answer that disagrees with the declared environment. A test-mode account
+// approves without moving money, so it must never grant access as live.
 func (c *NMIClient) CheckPosture(ctx context.Context) (providerposture.Verdict, error) {
-	result, err := c.qualifyAccount(context.WithValue(ctx, probeContextKey{}, c))
+	ctx = context.WithValue(ctx, probeContextKey{}, c)
+	var result TestModeProbeResult
+	var err error
+	if c.Environment == config.EnvironmentSandbox {
+		result, err = c.ProbeTestMode(ctx)
+	} else {
+		result, err = c.readGatewayTestMode(ctx)
+	}
 	switch {
 	case err != nil:
 		return providerposture.Unknown, err
-	case result == ProbeSimulated:
-		return providerposture.Simulated, nil
+	case result == ProbeLive && c.Live():
+		return providerposture.Live, nil
 	case result == ProbeLive:
-		return providerposture.Live, ErrLiveCredentialsUnderTestMode
+		return providerposture.Live, fmt.Errorf("%w: it moves real money; the PSP declares %s", ErrEnvironmentMismatch, c.Environment)
+	case result == ProbeSimulated && !c.Live():
+		return providerposture.Simulated, nil
+	case result == ProbeSimulated:
+		return providerposture.Simulated, fmt.Errorf("%w: it is in test mode; the PSP declares live (disable test mode in the NMI gateway)", ErrEnvironmentMismatch)
 	default:
 		return providerposture.Unknown, errors.New("NMI test-mode verification was indeterminate")
 	}
 }
 
 // requireArmed gates every mutation: the credential must hold a cached verdict
-// matching the posture (simulated under sandbox, live under live); an unseen
-// credential is verified once, inline.
+// matching its declared environment (live, or simulated for test and
+// sandbox); an unseen credential is verified once, inline.
 func (c *NMIClient) requireArmed(ctx context.Context, target string) error {
 	if ctx.Value(probeContextKey{}) == c {
 		return nil
 	}
-	if !c.TestMode {
+	if c.Live() {
 		// A live credential proves it is not in test mode before its first
 		// mutation: verified on load, or inline (bounded, once) when this
 		// process has not seen it.
 		if c.LoopbackFixture {
 			return nil
 		}
-		return providerposture.Process().Require(ctx, c.PostureKey(), c.CheckLivePosture)
+		return providerposture.Process().Require(ctx, c.PostureKey(), c.CheckPosture)
 	}
 	if c.LoopbackFixture {
 		if err := config.ValidateLoopbackGatewayURL(target); err != nil {
@@ -188,21 +175,14 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 	}
 }
 
-func (c *NMIClient) qualifyAccount(ctx context.Context) (TestModeProbeResult, error) {
-	if c.endpointDeployment == config.NMIEndpointGateway {
-		return c.readGatewayTestMode(ctx)
-	}
-	return c.ProbeTestMode(ctx)
-}
-
 // ProxyPostureClient is the posture identity of a PSP credential that a
-// custodian proxy forwards. The declared endpoint deployment selects the
-// destination (DirectPostURL) and the official signal; it is never inferred
-// from a URL. fixtureDestination (code seams and the loopback
-// provider_sandbox only) replaces the destination and skips verification:
-// OpenRails never dials it itself, only the custodian does.
-func ProxyPostureClient(merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string, testMode bool) (*NMIClient, error) {
-	client, err := NewAccountClient(merchantID, pspID, accountID, cfg, testMode)
+// custodian proxy forwards. The declared environment selects the destination
+// (DirectPostURL) and the official signal; it is never inferred from a URL.
+// fixtureDestination (code seams and the loopback provider_sandbox only)
+// replaces the destination and skips verification: OpenRails never dials it
+// itself, only the custodian does.
+func ProxyPostureClient(merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string) (*NMIClient, error) {
+	client, err := NewAccountClient(merchantID, pspID, accountID, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +199,7 @@ func (c *NMIClient) RequireArmedFor(ctx context.Context, destination, securityKe
 	if c == nil {
 		return fmt.Errorf("%w: NMI proxy has no posture identity", providerposture.ErrDisarmed)
 	}
-	if c.TestMode && (destination != c.DirectPostURL || securityKey != c.SecurityKey) {
+	if !c.Live() && (destination != c.DirectPostURL || securityKey != c.SecurityKey) {
 		return fmt.Errorf("%w: proxy credential or destination is not the verified NMI account", providerposture.ErrDisarmed)
 	}
 	if c.proxyFixture {

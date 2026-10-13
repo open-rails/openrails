@@ -55,11 +55,6 @@ func (a *NMIArmer) merchants() *merchants.Service {
 	return a.MerchantsFn()
 }
 
-func (a *NMIArmer) testMode() bool { return a != nil && a.Config != nil && config.IsTestMode(a.Config) }
-
-// Environment is the deployment's PSP environment.
-func (a *NMIArmer) Environment() string { return config.ExpectedProviderEnvironment(a.testMode()) }
-
 // ResolveNMIClient arms the client for the stamped provenance account when
 // present (archived stays chargeable for existing obligations), else the
 // merchant's NMI pull scope.
@@ -101,7 +96,7 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid billing.MerchantID, rai
 		}
 		return scope, true, nil
 	}
-	return svc.PullPSPScope(ctx, mid, rail, a.Environment())
+	return svc.PullPSPScope(ctx, mid, rail)
 }
 
 // NMIClient builds the store-armed client for scope through the one factory.

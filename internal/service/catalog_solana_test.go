@@ -87,9 +87,9 @@ func solanaFixture(chain *fakeChain, network string, tokens map[string]string, r
 	for symbol, mint := range tokens {
 		cfg[symbol] = config.TokenConfig{Mint: mint}
 	}
-	plan := recurring.NewPlanServiceWithReader(chain, nil, network, cfg)
+	plan := recurring.NewPlanServiceWithReader(chain, nil, recurring.NetworkTokens(network, cfg))
 	if reader {
-		plan = recurring.NewPlanServiceWithReader(chain, chain, network, cfg)
+		plan = recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens(network, cfg))
 	}
 	return &solanaAdapter{svc: &Service{rt: &app.Runtime{SolanaPlanService: plan}}}
 }
@@ -138,7 +138,6 @@ func TestSolanaAdapterBranches(t *testing.T) {
 	require.Equal(t, "USDC", out[solanaKeyMintSymbol], "live recurring defaults to USDC")
 
 	sandbox := solanaFixture(newFakeChain(map[string]uint8{dusdMint: 6}), "devnet", map[string]string{"DUSD": dusdMint}, true)
-	sandbox.svc.rt.Config = &config.Config{TestMode: config.CredentialPostureSandbox}
 	out, err = sandbox.AutoCreate(solanaCtx(), recurringTerms(29_000_000))
 	require.NoError(t, err)
 	require.Equal(t, "DUSD", out[solanaKeyMintSymbol], "sandbox recurring defaults to DUSD")
@@ -172,13 +171,13 @@ func TestSolanaAdapterBranches(t *testing.T) {
 	require.False(t, missing)
 	require.Nil(t, drift)
 
-	plan := recurring.NewPlanServiceWithReader(newFakeChain(nil), nil, "mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}, "USD1": {Mint: "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD"}})
-	token, err := resolveSolanaTokenFromMint(plan, "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD")
+	plan := recurring.NewPlanServiceWithReader(newFakeChain(nil), nil, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}, "USD1": {Mint: "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD"}}))
+	token, err := resolveSolanaTokenFromMint(t.Context(), plan, "USD1USD1USD1USD1USD1USD1USD1USD1USD1USD1USD")
 	require.NoError(t, err)
 	require.Equal(t, "USD1", token)
-	_, err = resolveSolanaTokenFromMint(plan, solanago.NewWallet().PublicKey().String())
+	_, err = resolveSolanaTokenFromMint(t.Context(), plan, solanago.NewWallet().PublicKey().String())
 	require.Error(t, err, "unconfigured mint")
-	_, err = resolveSolanaTokenFromMint(plan, "usd1usd1usd1usd1usd1usd1usd1usd1usd1usd1usd")
+	_, err = resolveSolanaTokenFromMint(t.Context(), plan, "usd1usd1usd1usd1usd1usd1usd1usd1usd1usd1usd")
 	require.Error(t, err, "base58 is case-sensitive")
 }
 
@@ -229,7 +228,7 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 		binary.LittleEndian.PutUint64(raw[83:91], 720)
 		binary.LittleEndian.PutUint64(raw[91:99], 1_700_000_000)
 		chain.accounts[address] = raw
-		return chain, recurring.NewPlanServiceWithReader(chain, chain, "mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}}), address
+		return chain, recurring.NewPlanServiceWithReader(chain, chain, recurring.NetworkTokens("mainnet", map[string]config.TokenConfig{"USDC": {Mint: usdcMint}})), address
 	}
 
 	chain, plan, address := setup()

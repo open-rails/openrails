@@ -69,9 +69,6 @@ func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src rail
 	if strings.TrimSpace(c.DataLinkUsername) == "" || strings.TrimSpace(c.DataLinkPassword) == "" {
 		return nil, fmt.Errorf("ccbill account %s has no datalink credentials", proc.EffectiveAccountID())
 	}
-	if cfg != nil {
-		c.TestMode = config.IsTestMode(cfg)
-	}
 	dl := ccbill.NewDataLinkClient(c)
 	if cfg != nil {
 		dl.ReadOnly = config.IsProviderReadOnly(cfg)

@@ -8,7 +8,6 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
@@ -23,14 +22,13 @@ import (
 type EnrollService struct {
 	chain     landedTxReader
 	submitter Submitter // for MerchantAddress
-	network   string
-	tokens    map[string]config.TokenConfig
+	tokens    Tokens
 	now       func() time.Time
 }
 
 // NewEnrollService builds an EnrollService.
-func NewEnrollService(chain landedTxReader, submitter Submitter, network string, tokens ...map[string]config.TokenConfig) *EnrollService {
-	return &EnrollService{chain: chain, submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
+func NewEnrollService(chain landedTxReader, submitter Submitter, tokens Tokens) *EnrollService {
+	return &EnrollService{chain: chain, submitter: submitter, tokens: tokens, now: time.Now}
 }
 
 // EnrollInput is the attempt whose first payment activates a subscription.
@@ -79,7 +77,7 @@ func (s *EnrollService) Verify(ctx context.Context, in EnrollInput) (*Enrollment
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
-	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
+	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens.of(ctx))
 	if err != nil {
 		return nil, err
 	}

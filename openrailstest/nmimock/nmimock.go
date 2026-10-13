@@ -8,11 +8,10 @@
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
 //	client, err := openrails.New(ctx, openrails.Config{
-//		TestMode:          openrails.Sandbox,
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
-//			"nmi": openrails.NMIPSP{AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+//			"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //

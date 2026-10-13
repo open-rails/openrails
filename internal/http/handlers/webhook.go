@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -267,7 +266,6 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 	if r.State == nil || r.State.Merchants == nil {
 		return false, false
 	}
-	environment := webhookProviderEnvironment(r)
 	switch {
 	case rails.IsNMI(models.Rail(rail)):
 		body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
@@ -283,7 +281,7 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		account, release, ok := resolveWebhookPSP(r, string(models.RailNMI), environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, string(models.RailNMI), accountID)
 		if !ok {
 			return true, false
 		}
@@ -302,7 +300,7 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		account, release, ok := resolveWebhookPSP(r, subscriptions.RailCCBill, environment, accountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailCCBill, accountID)
 		if !ok {
 			return true, false
 		}
@@ -324,14 +322,14 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 		}
 		// A custodian event routes by the custodian's tenant identity: it
 		// resolves a custodian, not a PSP (one custodian may back several).
-		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
+		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, tenantID)
 		if !ok {
 			return true, false
 		}
 		defer release()
-		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, body)
+		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, custodian.Environment, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, release, ok := resolveWebhookPSP(r, subscriptions.RailStripe, environment, routeAccountID)
+		account, release, ok := resolveWebhookPSP(r, subscriptions.RailStripe, routeAccountID)
 		if !ok {
 			return true, false
 		}
@@ -346,28 +344,24 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 	}
 }
 
-func webhookProviderEnvironment(r *httprequest.Request) string {
-	return config.ExpectedProviderEnvironment(r != nil && r.State != nil && r.State.Config != nil && config.IsTestMode(r.State.Config))
-}
-
 // ccbillWebhookIPAllowed binds the request to the ONE CCBill source-IP gate
 // (webhookauth.CCBillIPAllowed) that the embedded Service surface also calls.
 func ccbillWebhookIPAllowed(r *httprequest.Request, clientIP string) bool {
 	if r == nil || r.State == nil {
 		return iputil.IsValidCCBillIP(clientIP)
 	}
-	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, ccbillLivePSPProbe(r), clientIP)
+	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, livePSPProbe(r), clientIP)
 }
 
-// ccbillLivePSPProbe binds the catalog probe to the request; a var so handler
-// tests can stub the DB-backed merchants service. Returning nil (no merchants
-// service) fails the gate closed.
-var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
+// livePSPProbe binds the deployment's live-PSP probe to the request; a var so
+// handler tests can stub the DB-backed merchants service. Returning nil (no
+// merchants service) fails every gate on it closed.
+var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 	if r.State.Merchants == nil {
 		return nil
 	}
 	return func(ctx context.Context) (merchants.LiveRailPresence, error) {
-		return r.State.Merchants.ProbeLiveRailPSPs(ctx, subscriptions.RailCCBill)
+		return r.State.Merchants.ProbeLivePSPs(ctx)
 	}
 }
 
@@ -375,19 +369,18 @@ var ccbillLivePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 // account belongs to, pins BOTH on the request (merchant id, psp id) and pins the
 // merchant's DB connection. The returned release must be deferred by the caller —
 // see pinWebhookMerchantConn for why the pin cannot live in middleware.
-func resolveWebhookPSP(r *httprequest.Request, rail, environment, accountID string) (merchants.PSPIdentity, func(), bool) {
-	return pinWebhookAccount(r, rail, environment, accountID,
-		r.State.Merchants.ResolvePSPByIdentity)
+func resolveWebhookPSP(r *httprequest.Request, rail, accountID string) (merchants.PSPIdentity, func(), bool) {
+	return pinWebhookAccount(r, rail, accountID, r.State.Merchants.ResolvePSPByAccount)
 }
 
 // resolveWebhookCustodianAccount resolves the custodian a tenant identity
 // belongs to and pins its merchant, but no PSP id: a custodian may back
 // several PSPs, and its event is about the instrument, not a gateway.
-func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, tenantID string) (merchants.CustodianIdentity, func(), bool) {
+func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID string) (merchants.CustodianIdentity, func(), bool) {
 	noop := func() {}
-	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, environment, tenantID)
+	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, tenantID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"custodian": kind, "environment": environment, "account_id": tenantID}).Error("webhook custodian resolution failed")
+		log.WithError(err).WithFields(log.Fields{"custodian": kind, "account_id": tenantID}).Error("webhook custodian resolution failed")
 		r.ErrorCode(billing.CodeInternalError, "Custodian resolution failed")
 		return merchants.CustodianIdentity{}, noop, false
 	}
@@ -406,13 +399,13 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, t
 	return custodian, release, true
 }
 
-func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID string,
-	resolve func(context.Context, string, string, string) (merchants.PSPIdentity, bool, error),
+func pinWebhookAccount(r *httprequest.Request, rail, accountID string,
+	resolve func(context.Context, string, string) (merchants.PSPIdentity, bool, error),
 ) (merchants.PSPIdentity, func(), bool) {
 	noop := func() {}
-	account, ok, err := resolve(r.Request.Context(), rail, environment, accountID)
+	account, ok, err := resolve(r.Request.Context(), rail, accountID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"rail": rail, "environment": environment, "account_id": accountID}).Error("webhook PSP resolution failed")
+		log.WithError(err).WithFields(log.Fields{"rail": rail, "account_id": accountID}).Error("webhook PSP resolution failed")
 		r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
 		return merchants.PSPIdentity{}, noop, false
 	}

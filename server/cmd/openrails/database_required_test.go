@@ -18,7 +18,7 @@ func TestRunServerRefusesWithoutDatabase(t *testing.T) {
 	}
 	t.Setenv("VAULT_SECRETS_PATH", t.TempDir())
 	config := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(config, []byte("test_mode: sandbox\nprovider_write_mode: readonly\n"), 0o600))
+	require.NoError(t, os.WriteFile(config, []byte("provider_write_mode: readonly\n"), 0o600))
 	for _, args := range [][]string{{"run-server"}, {"run-worker"}, {"migrate", "up"}} {
 		_, err := execute(newRootCmd(), append(args, "--config", config)...)
 		require.ErrorContains(t, err, "no database configured", args)

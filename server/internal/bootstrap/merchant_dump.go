@@ -52,13 +52,13 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		return nil, err
 	}
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{
-		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))},
+		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug)},
 	}}, nil
 }
 
-// dumpDeclaration is a configuration as its manifest declares it: the
-// documents of environment, without credentials.
-func dumpDeclaration(set merchantdocs.Set, slug, environment string) config.MerchantDeclaration {
+// dumpDeclaration is a configuration as its manifest declares it: its
+// documents, without credentials.
+func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclaration {
 	doc := set.Merchant.Value
 	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, Settings: doc.Settings}
 	if out.DisplayName == "" {
@@ -66,9 +66,6 @@ func dumpDeclaration(set merchantdocs.Set, slug, environment string) config.Merc
 	}
 	for _, key := range set.CustodianKeys() {
 		c := set.Custodians[key].Value
-		if c.Environment != environment {
-			continue
-		}
 		if out.Custodians == nil {
 			out.Custodians = map[string]config.CustodianConfig{}
 		}
@@ -76,13 +73,10 @@ func dumpDeclaration(set merchantdocs.Set, slug, environment string) config.Merc
 	}
 	for _, key := range set.PSPKeys() {
 		p := set.PSPs[key].Value
-		if p.Environment != environment {
-			continue
-		}
 		if out.PSPs == nil {
 			out.PSPs = map[string]config.PSPConfig{}
 		}
-		entry := config.PSPConfig{Rail: billing.Rail(p.Rail), AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
+		entry := config.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
 		if p.Signer != nil && p.Signer.Mode != "" && p.Signer.Mode != "local_keypair" {
 			entry.Signer = &config.PSPSignerConfig{Mode: p.Signer.Mode, Key: p.Signer.Key}
 		}

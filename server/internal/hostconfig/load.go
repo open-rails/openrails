@@ -138,8 +138,8 @@ type loadOptions struct {
 	overrides map[string]any
 }
 
-// WithOverride overlays one koanf config key (e.g. "test_mode",
-// "provider_write_mode") above every other source.
+// WithOverride overlays one koanf config key (e.g. "provider_write_mode")
+// above every other source.
 func WithOverride(key string, value any) LoadOption {
 	return func(o *loadOptions) {
 		if o.overrides == nil {
@@ -360,12 +360,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if k.Exists("mode") || os.Getenv("MODE") != "" || os.Getenv("BILLING_MODE") != "" {
 		return nil, fmt.Errorf("mode was removed (#710): set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
 	}
-	// HARD CUT (or#915): TEST_ENV was documented in .env.example but never
-	// consumed — an operator who set it believed they had chosen a credential
-	// posture and had not. Refuse, never silently drop.
-	if os.Getenv("TEST_ENV") != "" {
-		return nil, fmt.Errorf("TEST_ENV was never consumed and is removed (or#915): set test_mode (env TEST_MODE, flag --test-mode) to sandbox|live")
-	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL") != "" {
 		return nil, fmt.Errorf("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL was renamed (#712): set catalog_reconciliation_interval (env CATALOG_RECONCILIATION_INTERVAL)")
@@ -483,9 +477,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot — or#915): %w", err)
 	}
 
-	if !k.Exists("test_mode") {
-		return nil, fmt.Errorf("test_mode is required: declare sandbox or live")
-	}
 	if f.RateLimitsDisabled { // defaults() seeded them; off means none
 		f.RateLimits, f.Captcha = nil, nil
 	}

@@ -37,7 +37,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 		Args:  cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if serverURL != "" {
-				for _, flag := range []string{"config", "provider-write-mode", "test-mode", "merchant"} {
+				for _, flag := range []string{"config", "provider-write-mode", "merchant"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s is local-only and cannot be used with --server-url", flag)
 					}

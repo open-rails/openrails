@@ -36,7 +36,7 @@ func (w *world) migrateCustody(export hosttools.VaultExport) hosttools.CustodyMi
 	require.NoError(w.t, err)
 	path := filepath.Join(w.t.TempDir(), "merchants.yaml")
 	require.NoError(w.t, os.WriteFile(path, manifest, 0o600))
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull,
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull,
 		DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}}
 	res, err := hosttools.MigrateCustody(w.t.Context(), hosttools.CustodyMigrationOptions{Config: cfg, PGXPool: w.pool,
 		MerchantID: w.client[embedded].MerchantID(), Export: export, Apply: true, MerchantManifestPath: path})
@@ -55,7 +55,7 @@ func remapWorld(t *testing.T) (w *world, bt *btFake, proxied func(number string)
 	w.custodians = map[string]openrails.CustodianConfig{"bt": {Kind: "basis_theory", AccountID: "bt-e2e",
 		Settings: map[string]any{"public_api_key": "key_public_e2e"}, Secrets: map[string]string{"api_key": "key_private_e2e"}}}
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
+		psps["nmi-bt"] = openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
 	// The merchant sells cards through its custodian's PSP.
 	routing := []billing.PSPRoutingRule{{Prefer: []string{"nmi-bt"}}}
@@ -90,7 +90,7 @@ func (w *world) remapToCustodian(bt *btFake, method, token, number string) {
 	bt.tokens[token] = number
 	bt.mu.Unlock()
 	res := w.migrateCustody(hosttools.VaultExport{ExportedAt: w.clock.Now(), SourceRail: "nmi", SourcePSPID: w.psp["nmi"].UUID(), Custodian: "bt",
-		PSP:    hosttools.CustodyPSPRef{Rail: "nmi", Environment: "test", AccountID: "e2e-nmi-bt"},
+		PSP:    hosttools.CustodyPSPRef{Rail: "nmi", Environment: "sandbox", AccountID: "e2e-nmi-bt"},
 		Tokens: []hosttools.ImportedToken{{SourceRailCustomerRef: w.vaultOf(method), Token: token, Fingerprint: "fp_" + number}}})
 	require.Equal(w.t, map[hosttools.CustodyOutcome]int{hosttools.CustodyRemapped: 1}, res.Counts, "%+v", res.Rows)
 	require.Equal(w.t, "basis_theory", w.methodRow(method, "custodian"))

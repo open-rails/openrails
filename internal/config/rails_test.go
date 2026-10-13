@@ -7,46 +7,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func postureConfig(sandbox bool) *Config {
-	posture := CredentialPostureLive
-	if sandbox {
-		posture = CredentialPostureSandbox
-	}
-	return &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: posture}
-}
+func railsConfig() *Config { return &Config{ProviderWriteMode: ProviderWriteModeFull} }
 
 func stripeRail(key string) *ResolvedPSP {
-	return &ResolvedPSP{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: key, WebhookSigningSecret: "whsec_fixture"}}
+	environment := EnvironmentTest
+	if len(key) > 8 && key[3:8] == "live_" {
+		environment = EnvironmentLive
+	}
+	return &ResolvedPSP{Rail: models.RailStripe, Environment: environment, Stripe: &StripeRailConfig{SecretKey: key, WebhookSigningSecret: "whsec_fixture"}}
 }
 
-// A key never runs under the opposite posture, archived accounts included, and
-// refusal never rewrites the credential.
-func TestStripeCredentialsMatchDeclaredPosture(t *testing.T) {
+// A Stripe key agrees with its PSP's declared environment, archived accounts
+// included, and refusal never rewrites the credential.
+func TestStripeCredentialsMatchDeclaredEnvironment(t *testing.T) {
 	for _, prefix := range []string{"sk", "rk"} {
 		for _, keyMode := range []string{"test", "live"} {
-			for _, sandbox := range []bool{true, false} {
+			for _, environment := range []string{EnvironmentTest, EnvironmentLive} {
 				key := prefix + "_" + keyMode + "_abc123"
 				for _, archived := range []bool{false, true} {
 					rails := PSPSet{"stripe": stripeRail(key)}
+					rails["stripe"].Environment = environment
 					rails["stripe"].Archived = archived
-					err := ValidateRailSet(postureConfig(sandbox), rails)
-					require.Equal(t, sandbox == (keyMode == "test"), err == nil, "%s sandbox=%v archived=%v", key, sandbox, archived)
+					err := ValidateRailSet(railsConfig(), rails)
+					require.Equal(t, environment == keyMode, err == nil, "%s %s archived=%v", key, environment, archived)
 					require.Equal(t, key, rails["stripe"].Stripe.SecretKey)
 				}
 			}
 		}
 	}
 	for _, malformed := range []string{"sk_test_", "pk_test_abc", "whsec_abc"} {
-		require.ErrorContains(t, ValidateStripeCredentialPosture(postureConfig(true), malformed), "invalid Stripe secret key format")
+		require.ErrorContains(t, ValidateStripeSecretKeyEnvironment(EnvironmentTest, malformed), "invalid Stripe secret key format")
 	}
-	require.NoError(t, ValidateStripeCredentialPosture(postureConfig(false), ""), "an absent key only disables purchase")
+	require.NoError(t, ValidateStripeSecretKeyEnvironment(EnvironmentLive, ""), "an absent key only disables purchase")
 
-	for _, sandbox := range []bool{true, false} {
-		cfg := postureConfig(sandbox)
-		require.Equal(t, sandbox, ValidateStripePublishableKeyPosture(cfg, "pk_test_abc") == nil)
-		require.Equal(t, !sandbox, ValidateStripePublishableKeyPosture(cfg, "pk_live_abc") == nil)
-		require.Error(t, ValidateStripePublishableKeyPosture(cfg, "sk_test_abc"))
-		require.Error(t, ValidateStripePublishableKeyPosture(cfg, "pk_test_"))
+	for _, environment := range []string{EnvironmentTest, EnvironmentLive} {
+		require.Equal(t, environment == EnvironmentTest, ValidateStripePublishableKeyEnvironment(environment, "pk_test_abc") == nil)
+		require.Equal(t, environment == EnvironmentLive, ValidateStripePublishableKeyEnvironment(environment, "pk_live_abc") == nil)
+		require.Error(t, ValidateStripePublishableKeyEnvironment(environment, "sk_test_abc"))
+		require.Error(t, ValidateStripePublishableKeyEnvironment(environment, "pk_test_"))
 	}
 }
 
@@ -95,7 +93,7 @@ func TestRailSetShapeValidation(t *testing.T) {
 		"custody unknown kind":        {PSPSet{"mobius": custody(nmi("w"), ResolvedCustodian{Custodian: "vaultco", AccountID: "t", APIKey: "k"})}, "vaultco"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := ValidateRailSet(postureConfig(true), row.rails)
+			err := ValidateRailSet(railsConfig(), row.rails)
 			if row.want == "" {
 				require.NoError(t, err)
 			} else {

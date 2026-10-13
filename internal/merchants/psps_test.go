@@ -23,10 +23,10 @@ func TestRailDefinitions(t *testing.T) {
 	// or#879/or#880: custody is not a rail and its key is not an NMI credential;
 	// solana's signer is operator-only, so no merchant-visible slots.
 	require.Equal(t, []billing.RailDefinition{
-		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}, SettingKeys: []string{"tokenization_key"}},
-		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}, SettingKeys: []string{}},
-		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}, SettingKeys: []string{"publishable_key"}},
-		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}, SettingKeys: []string{}},
+		{Rail: "nmi", DisplayName: "Credit Card", Environments: []string{"live", "test", "sandbox"}, CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}, SettingKeys: []string{"tokenization_key"}},
+		{Rail: "ccbill", DisplayName: "Credit Card", Environments: []string{"live", "sandbox"}, CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}, SettingKeys: []string{}},
+		{Rail: "stripe", DisplayName: "Stripe", Environments: []string{"live", "test"}, CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}, SettingKeys: []string{"publishable_key"}},
+		{Rail: "solana", DisplayName: "Solana", Environments: []string{"live", "sandbox"}, CredentialKeys: []string{}, SettingKeys: []string{}},
 	}, RailDefinitions())
 }
 

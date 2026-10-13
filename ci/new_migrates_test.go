@@ -53,12 +53,11 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 	return pool
 }
 
-// The least a host writes: the two posture fields and a pool on an empty
+// The least a host writes: the write mode and a pool on an empty
 // database. No schema, catalog, merchant or PSP.
 func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	client, err := openrails.New(t.Context(), openrails.Config{
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
@@ -79,7 +78,7 @@ func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 func TestNewRefusesUnknownPSPKeys(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	for want, psp := range map[string]openrails.PSPConfig{
-		`openrails: Config.Merchants["host-one"].psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, endpoint_deployment, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
+		`openrails: Config.Merchants["host-one"].psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
 			Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"},
 		},
 		`openrails: Config.Merchants["host-one"].psps.p.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`: {
@@ -87,8 +86,8 @@ func TestNewRefusesUnknownPSPKeys(t *testing.T) {
 		},
 	} {
 		_, err := openrails.New(t.Context(), openrails.Config{
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			Merchants: map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{"p": psp}}},
+			ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Merchants:         map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{"p": psp}}},
 		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 		require.EqualError(t, err, want)
 	}
@@ -102,7 +101,7 @@ func TestNewRefusesUnknownPSPKeys(t *testing.T) {
 // new month, they race to create the same partitions.
 func TestReplicasRaceNewOnAnEmptyDatabase(t *testing.T) {
 	dsn := emptyDatabase(t)
-	cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
+	cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly}
 	pools := make([]*pgxpool.Pool, 4)
 	for i := range pools {
 		pools[i] = openPool(t, dsn)

@@ -55,7 +55,6 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) config() openrails.Config {
 	return openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: f.schema, RiverSchema: f.schema},
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		ReturnOrigins:     []string{"https://e2e.test"},
 	}

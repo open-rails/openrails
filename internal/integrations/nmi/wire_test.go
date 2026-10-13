@@ -173,30 +173,29 @@ func TestV5CursorDecodesStringNumberAndNull(t *testing.T) {
 	require.Error(t, json.Unmarshal([]byte(`{"next_cursor":{}}`), &page))
 }
 
-func TestClientConstructionBindsPostureAndEndpoints(t *testing.T) {
-	sandbox, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
+func TestClientConstructionBindsEnvironmentAndEndpoints(t *testing.T) {
+	sandbox, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	require.Equal(t, []string{SandboxDirectPostURL, SandboxQueryAPIURL, SandboxV5BaseURL}, []string{sandbox.DirectPostURL, sandbox.QueryURL, sandbox.V5BaseURL})
-	live, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, false)
-	require.NoError(t, err)
-	require.Equal(t, []string{DefaultDirectPostURL, DefaultQueryAPIURL, DefaultV5BaseURL}, []string{live.DirectPostURL, live.QueryURL, live.V5BaseURL})
-	gateway, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", EndpointDeployment: config.NMIEndpointGateway}, true)
-	require.NoError(t, err)
-	require.Equal(t, DefaultV5BaseURL, gateway.V5BaseURL)
+	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
+		gateway, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: environment})
+		require.NoError(t, err)
+		require.Equal(t, []string{DefaultDirectPostURL, DefaultQueryAPIURL, DefaultV5BaseURL}, []string{gateway.DirectPostURL, gateway.QueryURL, gateway.V5BaseURL}, environment)
+	}
 
-	_, err = newClient("nmi", &config.NMIProviderSettings{}, false)
+	_, err = newClient("nmi", &config.NMIProviderSettings{Environment: config.EnvironmentLive})
 	require.ErrorContains(t, err, "security key is required")
-	_, err = newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", EndpointDeployment: config.NMIEndpointSandbox}, false)
-	require.Error(t, err, "sandbox endpoint requires test posture")
-	_, err = newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", EndpointDeployment: "staging"}, true)
-	require.Error(t, err)
+	for _, environment := range []string{"", "staging", "devnet"} {
+		_, err = newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: environment})
+		require.ErrorContains(t, err, "must be live, test or sandbox", environment)
+	}
 
-	_, err = NewAccountClient(uuid.Nil, uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
+	_, err = NewAccountClient(uuid.Nil, uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: config.EnvironmentSandbox})
 	require.Error(t, err)
-	_, err = NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: " "}, true)
+	_, err = NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: " ", Environment: config.EnvironmentSandbox})
 	require.Error(t, err)
 	merchant, psp := uuid.New(), uuid.New()
-	bound, err := NewAccountClient(merchant, psp, "nmi", &config.NMIProviderSettings{SecurityKey: " k "}, true)
+	bound, err := NewAccountClient(merchant, psp, "nmi", &config.NMIProviderSettings{SecurityKey: " k ", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	gotMerchant, gotPSP := bound.AccountIdentity()
 	require.Equal(t, []uuid.UUID{merchant, psp}, []uuid.UUID{gotMerchant, gotPSP})
@@ -208,7 +207,7 @@ func TestClientConstructionBindsPostureAndEndpoints(t *testing.T) {
 // preflight (it compares both keys) or reach the gateway untrimmed.
 func TestPaddedAccountKeyIsTrimmedOnTheWire(t *testing.T) {
 	f := newNMIFake(t, reply(""))
-	c, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: " padded-key\n"}, true)
+	c, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: " padded-key\n", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	c.DirectPostURL, c.QueryURL, c.V5BaseURL = f.URL+"/transact", f.URL+"/query", f.URL
 	c.LoopbackFixture = true
@@ -228,7 +227,7 @@ func TestPaddedAccountKeyIsTrimmedOnTheWire(t *testing.T) {
 // Reads get the tight bound, mutations the generous one; a shorter caller
 // deadline always wins.
 func TestPerRequestDeadlineBounds(t *testing.T) {
-	client, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
+	client, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", Environment: config.EnvironmentSandbox})
 	require.NoError(t, err)
 	for mutating, want := range map[bool]time.Duration{false: nmiReadTimeout, true: nmiMutationTimeout} {
 		req, cancel, err := client.newRequest(context.Background(), http.MethodPost, "http://127.0.0.1:1/x", nil, mutating)

@@ -15,6 +15,7 @@ display_name: Host One
 psps:
   mobius:
     rail: nmi
+    environment: test
     account_id: "100001"
     secrets: {security_key: sk, webhook_signing_secret: whs}
 `))
@@ -40,7 +41,7 @@ psps:
 // PSP, the key and the keys the rail does take.
 func TestParseMerchantDeclarationRefusesUnknownPSPKeys(t *testing.T) {
 	doc := func(psp string) string { return "slug: x\ndisplay_name: X\npsps:\n  p: " + psp + "\n" }
-	nmiSettings := "(nmi takes card_entry, endpoint_deployment, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)"
+	nmiSettings := "(nmi takes card_entry, fallback_after_failures, fallback_for, tokenization_key, tokenization_url, webhook_overlap_expires_at)"
 	stripeSettings := "(stripe takes fallback_after_failures, fallback_for, publishable_key, webhook_overlap_expires_at)"
 	for psp, want := range map[string]string{
 		`{rail: nmi, account_id: "1", settings: {tokenisation_key: tk}}`:               `psps.p.settings: unknown field "tokenisation_key" ` + nmiSettings,
@@ -61,15 +62,34 @@ func TestParseMerchantDeclarationRefusesUnknownPSPKeys(t *testing.T) {
 	}
 
 	// Secret keys match as the secret store reads them.
-	_, err := ParseMerchantDeclaration([]byte(doc(`{rail: nmi, account_id: "1", secrets: {Security_Key: sk}}`)))
+	_, err := ParseMerchantDeclaration([]byte(doc(`{rail: nmi, environment: live, account_id: "1", secrets: {Security_Key: sk}}`)))
 	require.NoError(t, err)
+}
+
+// Every PSP declares whether it moves real money, in an environment its rail
+// has, and one merchant's PSPs are all live or all non-live.
+func TestParseMerchantDeclarationRequiresEnvironments(t *testing.T) {
+	doc := func(psps string) string { return "slug: x\ndisplay_name: X\npsps:\n" + psps }
+	for psps, want := range map[string]string{
+		"  p: {rail: nmi, account_id: \"1\"}\n":                                                               "psps.p.environment is required",
+		"  p: {rail: stripe, environment: sandbox, account_id: acct_1}\n":                                     `psps.p.environment: stripe has no "sandbox" environment (live, test)`,
+		"  p: {rail: ccbill, environment: test, account_id: 999999-0000}\n":                                   `psps.p.environment: ccbill has no "test" environment (live, sandbox)`,
+		"  p: {rail: solana, environment: devnet}\n":                                                          `psps.p.environment: solana has no "devnet" environment (live, sandbox)`,
+		"  p: {rail: nmi, environment: live, account_id: \"1\"}\n  q: {rail: solana, environment: sandbox}\n": "a deployment is all live or all non-live: live PSPs x/p beside non-live PSPs x/q (sandbox)",
+	} {
+		_, err := ParseMerchantDeclaration([]byte(doc(psps)))
+		require.ErrorContains(t, err, want, psps)
+	}
+	m, err := ParseMerchantDeclaration([]byte(doc("  mobius: {rail: nmi, environment: sandbox, account_id: \"1\"}\n  solana-devnet: {rail: solana, environment: sandbox}\n  ccbill: {rail: ccbill, environment: sandbox, account_id: 999999-0000}\n")))
+	require.NoError(t, err)
+	require.Equal(t, EnvironmentSandbox, m.PSPs["solana-devnet"].Environment)
 }
 
 // A fallback names other declared PSPs, and unlocks after a whole number of
 // failures (2 unless declared).
 func TestParseMerchantDeclarationChecksFallbacks(t *testing.T) {
 	doc := func(ccbill string) string {
-		return "slug: x\ndisplay_name: X\npsps:\n  mobius: {rail: nmi, account_id: \"1\"}\n  ccbill: {rail: ccbill, account_id: 999999-0000, settings: " + ccbill + "}\n"
+		return "slug: x\ndisplay_name: X\npsps:\n  mobius: {rail: nmi, environment: sandbox, account_id: \"1\"}\n  ccbill: {rail: ccbill, environment: sandbox, account_id: 999999-0000, settings: " + ccbill + "}\n"
 	}
 	m, err := ParseMerchantDeclaration([]byte(doc("{fallback_for: [Mobius]}")))
 	require.NoError(t, err)

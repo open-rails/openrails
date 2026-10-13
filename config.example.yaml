@@ -5,7 +5,8 @@
 # (PSPs, custodians, settings) lives in the merchant manifest or in Vault.
 
 provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it unset
-test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED: the credential posture is never inherited by omission
+# Whether money is real is each PSP's declared environment (live | test |
+# sandbox) in the merchant configuration, never this file's.
 
 host: 0.0.0.0
 port: 3053
@@ -154,8 +155,8 @@ rate_limits:
 
 # EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
 # CCBill signs nothing, so this list is authentication: entries are honored only
-# under test_mode: sandbox and only while no live CCBill PSP exists anywhere in
-# the catalog. `/0` is refused. Empty (default) accepts CCBill's ranges alone.
+# while no live PSP exists anywhere in the deployment. `/0` is refused. Empty
+# (default) accepts CCBill's ranges alone.
 # ccbill_webhook_ip_allowlist:
 #   - 127.0.0.1/32
 

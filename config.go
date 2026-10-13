@@ -14,15 +14,13 @@ import (
 // definitions; gopls and pkg.go.dev show them through the alias.
 
 type (
-	// Config is the engine's configuration: plain data. TestMode and
-	// ProviderWriteMode are required.
+	// Config is the engine's configuration: plain data. ProviderWriteMode is
+	// required.
 	Config = config.Config
 	// Deps is everything the engine reaches outside its process: connections,
 	// credentials and the host's hooks.
 	Deps = config.Deps
 
-	// CredentialPosture is Config.TestMode: Sandbox or Live.
-	CredentialPosture = config.CredentialPosture
 	// Routes is the HTTP surface the adapters mount on the root router.
 	Routes = config.Routes
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
@@ -119,10 +117,14 @@ type (
 )
 
 const (
-	// Sandbox accepts only sandbox PSP credentials.
-	Sandbox = config.CredentialPostureSandbox
-	// Live accepts only live PSP credentials.
-	Live = config.CredentialPostureLive
+	// EnvironmentLive is a PSP that moves real money.
+	EnvironmentLive = config.EnvironmentLive
+	// EnvironmentTest is a PSP on the provider's own system that moves no
+	// money: an NMI account in test mode, Stripe test keys.
+	EnvironmentTest = config.EnvironmentTest
+	// EnvironmentSandbox is a PSP on the provider's separate sandbox system:
+	// sandbox.nmi.com, CCBill's sandbox, Solana devnet.
+	EnvironmentSandbox = config.EnvironmentSandbox
 
 	// ProviderWritesFull is normal operation.
 	ProviderWritesFull = config.ProviderWriteModeFull

@@ -37,6 +37,7 @@ merchants:
     psps:
       nmi:
         rail: nmi
+        environment: sandbox
         account_id: test
         secrets: {security_key: test}
 `, shop))

@@ -254,7 +254,6 @@ func startApp(t *testing.T) *app {
 	merchant.Issuer = issuer
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
-		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},

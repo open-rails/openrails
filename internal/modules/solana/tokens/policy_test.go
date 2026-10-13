@@ -92,7 +92,7 @@ func TestResolveDeclared(t *testing.T) {
 	for _, network := range []string{"mainnet", "devnet"} {
 		out, err = ResolveDeclared(network, nil)
 		require.NoError(t, err)
-		require.Equal(t, map[string]config.TokenConfig{"USDC": ForNetwork(network)["USDC"]}, out)
+		require.Equal(t, map[string]config.TokenConfig{"SOL": ForNetwork(network)["SOL"], "USDC": ForNetwork(network)["USDC"]}, out)
 	}
 
 	const custom = "MyTk1111111111111111111111111111111111111111"

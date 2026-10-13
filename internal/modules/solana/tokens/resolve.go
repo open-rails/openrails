@@ -6,15 +6,15 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// DefaultAcceptedSymbol is the token a merchant accepts when they declare
-// nothing. Only USDC: it is on every network and on the recurring allowlist, so
-// a zero-config merchant can take one-off payments and rebill. Anything more is
-// an explicit merchant choice.
-const DefaultAcceptedSymbol = PreferredStablecoin
+// DefaultAcceptedSymbols are the tokens a merchant accepts when they declare
+// nothing: SOL and USDC, each at its current price. Both are on every network;
+// rebilling takes USDC alone (the recurring allowlist is stablecoins). Anything
+// else is an explicit merchant choice.
+var DefaultAcceptedSymbols = []string{"SOL", PreferredStablecoin}
 
 // ResolveDeclared turns a merchant's declared token map into the accepted token
 // set for network. The declared set IS the accepted set; nothing declared means
-// DefaultAcceptedSymbol. The registry only resolves a known symbol's on-chain
+// DefaultAcceptedSymbols. The registry only resolves a known symbol's on-chain
 // identity, never what is accepted.
 //
 //   - A registry symbol is selected by name (`tokens: {USDC: {}}`) and takes
@@ -29,7 +29,11 @@ const DefaultAcceptedSymbol = PreferredStablecoin
 func ResolveDeclared(network string, declared map[string]config.TokenConfig) (map[string]config.TokenConfig, error) {
 	registry := ForNetwork(network)
 	if len(declared) == 0 {
-		return map[string]config.TokenConfig{DefaultAcceptedSymbol: registry[DefaultAcceptedSymbol]}, nil
+		out := make(map[string]config.TokenConfig, len(DefaultAcceptedSymbols))
+		for _, symbol := range DefaultAcceptedSymbols {
+			out[symbol] = registry[symbol]
+		}
+		return out, nil
 	}
 	out := make(map[string]config.TokenConfig, len(declared))
 	for rawSymbol, token := range declared {

@@ -8,11 +8,10 @@
 //	stripe := stripemock.New(stripemock.Options{Clock: clock.Now})
 //	defer stripe.Close()
 //	client, err := openrails.New(ctx, openrails.Config{
-//		TestMode:          openrails.Sandbox,
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
 //		Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
-//			"stripe": openrails.StripePSP{AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
+//			"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //	// … openrailshttp.Mount(mux, client, routes); srv := httptest.NewServer(mux)

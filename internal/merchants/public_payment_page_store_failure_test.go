@@ -20,7 +20,7 @@ func TestStoreFailure(t *testing.T) {
 		{"request canceled", fmt.Errorf("resolve: %w", context.Canceled), true},
 		{"request deadline", context.DeadlineExceeded, true},
 		{"credential backend", errors.New("secret backend unavailable"), false},
-		{"settings", errors.New("NMI endpoint_deployment must be gateway or sandbox"), false},
+		{"settings", errors.New("NMI environment must be live, test or sandbox"), false},
 	} {
 		if got := storeFailure(c.err); got != c.want {
 			t.Errorf("%s: storeFailure = %v, want %v", c.name, got, c.want)

@@ -81,6 +81,11 @@ type MerchantSecrets struct {
 type PSPConfig struct {
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
 	Rail billing.Rail `yaml:"rail"`
+	// Environment is whether the PSP moves real money: live, test (the
+	// provider's own system, no money moves) or sandbox (the provider's
+	// separate sandbox system), as the rail has them. Required, and verified
+	// with the provider before the PSP is used.
+	Environment string `yaml:"environment"`
 	// AccountID is the rail's own id for the account (NMI Gateway ID, Stripe
 	// acct_…, CCBill clientAccnum-clientSubacc). Solana derives it from the
 	// signer.
@@ -99,6 +104,15 @@ type PSPConfig struct {
 	// Solana: rpc_provider, rpc_api_key, tokens,
 	// recipient_wallet).
 	Settings map[string]any `yaml:"settings,omitempty"`
+}
+
+// ValidatePSPDeclaration refuses a declared PSP whose rail, keys or
+// environment the rail does not take.
+func ValidatePSPDeclaration(psp string, p PSPConfig) error {
+	if err := ValidatePSPKeys(psp, p); err != nil {
+		return err
+	}
+	return ValidatePSPEnvironment(psp, strings.ToLower(strings.TrimSpace(string(p.Rail))), p.Environment)
 }
 
 // ValidatePSPKeys refuses a rail that does not exist and a settings or
@@ -233,14 +247,17 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	}
 	m := f.MerchantDeclaration
 	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
-		if err := ValidatePSPKeys(key, m.PSPs[key]); err != nil {
+		if err := ValidatePSPDeclaration(key, m.PSPs[key]); err != nil {
 			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 		}
+	}
+	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
+	if err := ValidateDeploymentEnvironments(DeclaredEnvironments([]MerchantDeclaration{m})); err != nil {
+		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 	}
 	if err := ValidatePSPFallbacks(m.PSPs); err != nil {
 		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 	}
-	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
 }
 
@@ -312,7 +329,7 @@ func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
 			issuers[m.Issuer] = key
 		}
 		for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
-			if err := ValidatePSPKeys(psp, m.PSPs[psp]); err != nil {
+			if err := ValidatePSPDeclaration(psp, m.PSPs[psp]); err != nil {
 				return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 			}
 		}
@@ -320,6 +337,9 @@ func DeclaredMerchants(cfg *Config) ([]MerchantDeclaration, error) {
 			return nil, fmt.Errorf("Config.Merchants[%q].%w", key, err)
 		}
 		out = append(out, m)
+	}
+	if err := ValidateDeploymentEnvironments(DeclaredEnvironments(out)); err != nil {
+		return nil, fmt.Errorf("Config.Merchants: %w", err)
 	}
 	return out, nil
 }

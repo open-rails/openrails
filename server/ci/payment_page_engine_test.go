@@ -29,7 +29,7 @@ func TestEmbeddedEnginePaymentPage(t *testing.T) {
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
 		DisplayName: "Shared pay", Issuer: "https://identity.e2e.test",
 		Settings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
-		PSPs:     map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},
+		PSPs:     map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},
 	}}
 	publisher, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	for _, origin := range []string{"http://pay.e2e.test", "https://api.e2e.test", "https://identity.e2e.test", "https://pay.e2e.test/path"} {

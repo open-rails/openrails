@@ -134,36 +134,36 @@ func NormalizeCredentialVersionKey(key string) string {
 // PSPSecretResolver resolves the canonical secret name for the active PSP a
 // merchant should use.
 type PSPSecretResolver interface {
-	ActivePSPSecretName(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (string, bool, error)
+	ActivePSPSecretName(ctx context.Context, merchantID billing.MerchantID, rail, key string) (string, bool, error)
 }
 
 // PSPSecretRefResolver is PSPSecretResolver as a SecretRef.
 type PSPSecretRefResolver interface {
-	ActivePSPSecretRef(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (SecretRef, bool, error)
+	ActivePSPSecretRef(ctx context.Context, merchantID billing.MerchantID, rail, key string) (SecretRef, bool, error)
 }
 
 // PSPScopeResolver resolves the selected PSP without requiring a particular
 // secret key.
 type PSPScopeResolver interface {
-	ActivePSPScope(ctx context.Context, merchantID billing.MerchantID, rail, environment string) (PSPScope, bool, error)
+	ActivePSPScope(ctx context.Context, merchantID billing.MerchantID, rail string) (PSPScope, bool, error)
 }
 
 // PSPKeyResolver resolves a live PSP by its key: the payment-provider name
 // purchase requests and catalog provider_links use.
 type PSPKeyResolver interface {
-	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key, environment string) (PSPScope, bool, error)
+	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key string) (PSPScope, bool, error)
 }
 
 // PSPRailScopesResolver lists every live PSP on a rail: purchase's
 // unambiguous rail-kind fallback (#848).
 type PSPRailScopesResolver interface {
-	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail, environment string) ([]PSPScope, error)
+	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail string) ([]PSPScope, error)
 }
 
 // ArchivedPSPKeyResolver reports whether a key names an ARCHIVED PSP (or#288),
 // so routing can tell "you retired this PSP" from "no such PSP".
 type ArchivedPSPKeyResolver interface {
-	PSPKeyArchived(ctx context.Context, merchantID billing.MerchantID, key, environment string) (bool, error)
+	PSPKeyArchived(ctx context.Context, merchantID billing.MerchantID, key string) (bool, error)
 }
 
 // PSPIdentityScopeResolver resolves a PSP by identity for existing

@@ -223,10 +223,10 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	// NMI sandbox accounts refuse any customer email that is not the account
 	// owner's own address (403 E_ACCESS_DENIED), which fails vault creation
-	// outright. The email is not needed to vault a card, so omit it in test
-	// mode rather than block every sandbox purchase.
+	// outright. The email is not needed to vault a card, so a non-live PSP
+	// omits it rather than block every sandbox purchase.
 	vaultEmail := req.Email
-	if s != nil && s.Config != nil && config.IsTestMode(s.Config) {
+	if !config.LiveEnvironment(scope.Environment) {
 		vaultEmail = ""
 	}
 	vaultData := nmi.CreateCustomerVaultData{
@@ -497,9 +497,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		if err != nil {
 			return nil, nil, err
 		}
-		// Environment follows deployment posture (#681): test rows under test_mode.
-		env := config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
-		scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailNMI), env)
+		scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailNMI))
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
 		}
@@ -519,8 +517,8 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 var (
 	// ErrPSPRequired: a card is saved with a named PSP.
 	ErrPSPRequired = errors.New("psp_id is required")
-	// ErrPSPUnavailable: the PSP is unknown, archived or of another
-	// environment; new cards are not saved with it.
+	// ErrPSPUnavailable: the PSP is unknown or archived; new cards are not
+	// saved with it.
 	ErrPSPUnavailable = errors.New("the PSP does not take new cards")
 )
 
@@ -538,7 +536,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForPSP(ctx context.Context, p
 	if err != nil {
 		return nil, nil, err
 	}
-	if !ok || scope.Archived || scope.Environment != config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config)) {
+	if !ok || scope.Archived {
 		return nil, nil, ErrPSPUnavailable
 	}
 	if !rails.SupportsPaymentMethodCRUD(models.Rail(scope.Rail)) {

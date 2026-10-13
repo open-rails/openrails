@@ -67,7 +67,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
 		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
 	}

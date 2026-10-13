@@ -96,10 +96,6 @@ func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
 	return b.MerchantsFn()
 }
 
-func (b *MerchantCollectionAdapterBuilder) testMode() bool {
-	return b.Config != nil && config.IsTestMode(b.Config)
-}
-
 // nmiArmer is the shared store-armed NMI client plane this builder delegates
 // scope, secret and client construction to.
 func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {

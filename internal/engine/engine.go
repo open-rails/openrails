@@ -12,6 +12,8 @@ package engine
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"fmt"
 	"net/http"
@@ -118,6 +120,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
+	rt.Merchants.WithFakeProviders(seams(deps)...)
 	// Each declared merchant is provisioned before a route or a worker can
 	// see it; the issuer that binds its credentials is recorded with it.
 	ids := make([]billing.MerchantID, len(declarations))
@@ -161,11 +164,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 // Config.Merchants in slug order. Every refusal happens before any resource
 // opens.
 func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, error) {
-	switch cfg.TestMode {
-	case config.CredentialPostureSandbox, config.CredentialPostureLive:
-	default:
-		return nil, fmt.Errorf("openrails: Config.TestMode is required; set Sandbox or Live explicitly")
-	}
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
@@ -183,14 +181,9 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return nil, err
 	}
-	if cfg.TestMode == config.CredentialPostureLive {
-		for name, set := range map[string]bool{
-			"StripeTransport": deps.StripeTransport != nil, "NMITransport": deps.NMITransport != nil, "FXTransport": deps.FXTransport != nil,
-			"Clock": deps.Clock != nil,
-		} {
-			if set {
-				return nil, fmt.Errorf("openrails: Deps.%s is a test seam and is refused with TestMode live", name)
-			}
+	if live := declaredLive(declarations); live != "" {
+		if fakes := fakeProviders(cfg, deps); len(fakes) > 0 {
+			return nil, fmt.Errorf("openrails: %s is a test seam and is refused beside a live PSP (%s)", strings.Join(fakes, ", "), live)
 		}
 	}
 	if deps.Email != nil && cfg.SMTP != nil {
@@ -208,6 +201,40 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 		}
 	}
 	return declarations, nil
+}
+
+// fakeProviders names the test seams and fake providers cfg and deps wire:
+// only a deployment with no live PSP may use them.
+func fakeProviders(cfg *config.Config, deps config.Deps) []string {
+	out := append(config.FakeProviders(cfg), seams(deps)...)
+	slices.Sort(out)
+	return out
+}
+
+// seams names the Deps test seams wired.
+func seams(deps config.Deps) []string {
+	var out []string
+	for name, set := range map[string]bool{
+		"Deps.StripeTransport": deps.StripeTransport != nil, "Deps.NMITransport": deps.NMITransport != nil, "Deps.FXTransport": deps.FXTransport != nil,
+		"Deps.Clock": deps.Clock != nil,
+	} {
+		if set {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// declaredLive names a live PSP the declarations declare, or "".
+func declaredLive(declarations []config.MerchantDeclaration) string {
+	environments := config.DeclaredEnvironments(declarations)
+	for _, name := range slices.Sorted(maps.Keys(environments)) {
+		if config.LiveEnvironment(environments[name]) {
+			return name
+		}
+	}
+	return ""
 }
 
 func validIdentifier(s string) bool {

@@ -33,7 +33,7 @@ func engineResponse(status int, v any) *http.Response {
 func engineFixture() (*StripeService, StripeEnginePaymentParams) {
 	p := StripeEnginePaymentParams{MerchantID: uuid.New(), PSPID: uuid.New(), CustomerID: uuid.New(), OperationID: uuid.New(), AmountMinor: 1299, Currency: "USD", Initial: true}
 	p.Instrument = charge.FrozenInstrument{PSPID: p.PSPID, Custodian: models.CustodianPSP, RailCustomerRef: "cus_fixture", RailMethodRef: "pm_fixture"}
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
 	return NewAccountStripeService(cfg, p.MerchantID, p.PSPID, "acct_fixture", "sk_test_fixture"), p
 }
 

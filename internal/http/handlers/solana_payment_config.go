@@ -19,7 +19,7 @@ import (
 )
 
 // effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// config: its PSP's settings over the test_mode-derived network and curated
+// config: its PSP's settings over its environment's network and curated
 // token defaults. nil = not armed, or a signer change awaits approval.
 func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {
 	if r.State.RailConfigs == nil {

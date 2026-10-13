@@ -87,9 +87,8 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 // handler-assembly time (not per request), so one query per rail is not a hot
 // path concern.
 func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid billing.MerchantID) routesurface.ProviderRoutes {
-	env := config.ExpectedProviderEnvironment(rt.Config != nil && config.IsTestMode(rt.Config))
 	armed := func(rail string) bool {
-		_, ok, err := rt.Merchants.ActivePSPScope(ctx, mid, rail, env)
+		_, ok, err := rt.Merchants.ActivePSPScope(ctx, mid, rail)
 		return err == nil && ok
 	}
 	stripe := armed(string(models.RailStripe))

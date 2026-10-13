@@ -61,12 +61,11 @@ modes"](operations.md#operating-modes-the-safety-levers).
   the system initiates nothing; `readonly` = nothing writes to a provider at
   all, wire-enforced. Provider reads and verified local financial recovery
   continue in every mode.
-- **`test_mode`** (`TEST_MODE`, `--test-mode`) — the credential axis:
-  `sandbox | live`; required explicitly with no implicit posture default. Sandbox routes every rail to
-  its test environment and refuses live credentials at boot (live Stripe keys
-  rejected, NMI accounts probed with a test card). Live posture likewise
-  refuses Stripe test keys in every environment instead of silently disabling
-  the rail, so no real money can move under sandbox regardless of write mode.
+- **PSP `environment`** — declared on every PSP in the merchant manifest
+  (`live | test | sandbox`) and verified with the provider before the PSP is
+  used ([PSP environments](psp-environments.md)). A deployment is all live or
+  all non-live, so no real money can move in a non-live deployment regardless
+  of write mode.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|

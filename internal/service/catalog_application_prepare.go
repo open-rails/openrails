@@ -196,7 +196,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						declaredRails = append(declaredRails, rail)
 						continue
 					}
-					account, found, err := selectCatalogApplicationPSP(accounts, key, link, scoped.catalogProviderEnvironment())
+					account, found, err := selectCatalogApplicationPSP(accounts, key, link)
 					if err != nil {
 						return nil, err
 					}
@@ -230,7 +230,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					out.checks = append(out.checks, catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
 				}
 				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
-					if err := requireSellablePrice(priceKey, request, declaredRails, accounts, scoped.catalogProviderEnvironment()); err != nil {
+					if err := requireSellablePrice(priceKey, request, declaredRails, accounts); err != nil {
 						return nil, err
 					}
 				}
@@ -292,7 +292,7 @@ func catalogLinkContains(stored, declared map[string]string) bool {
 	}
 	return true
 }
-func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link map[string]string, environment string) (merchants.PSPScope, bool, error) {
+func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link map[string]string) (merchants.PSPScope, bool, error) {
 	var selected merchants.PSPScope
 	found := false
 	for _, row := range accounts {
@@ -305,7 +305,7 @@ func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link
 				return selected, false, apperr.Invalidf("provider key and account id disagree")
 			}
 		}
-		if rowKey != key || row.Environment != environment {
+		if rowKey != key {
 			continue
 		}
 		if rail := link["rail"]; rail != "" && !strings.EqualFold(rail, row.Rail) {
@@ -354,7 +354,7 @@ func sameCatalogLinks(a, b map[string]map[string]string) bool {
 // requireSellablePrice refuses an active price that declares PSPs yet no rail
 // can sell new: none of its declared rails supports its kind, and no armed
 // rail sells it on local terms (#1078). Purchase would otherwise be empty.
-func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []merchants.PSPScope, environment string) error {
+func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []merchants.PSPScope) error {
 	recurring := request.BillingIntervalHours != nil
 	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
 	for _, rail := range declared {
@@ -364,7 +364,7 @@ func requireSellablePrice(key string, request billing.CreatePriceParams, declare
 	}
 	for _, account := range accounts {
 		rail := models.Rail(account.Rail)
-		if !account.Archived && account.Environment == environment && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) {
+		if !account.Archived && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) {
 			return nil
 		}
 	}

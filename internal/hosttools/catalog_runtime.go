@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
@@ -83,11 +82,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	readConfig := *cfg
 	readConfig.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: &readConfig, MerchantsFn: func() *merchants.Service { return rt.Merchants }}
-	network := "mainnet"
-	if config.IsTestMode(cfg) {
-		network = "devnet"
-	}
-	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants, environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}, rt.SolanaRPCResolver.ChainReader(), network, solanatokens.ForNetwork(network))
+	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants}, rt.SolanaRPCResolver.ChainReader(), rt.SolanaRPCResolver.RecurringTokens)
 	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return fail(err)
 	}
@@ -102,8 +97,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 // Submitter. This catalog-only adapter can resolve public account identity but
 // deliberately cannot sign or submit instructions, irrespective of write mode.
 type catalogPlanAddressReader struct {
-	merchants   *merchants.Service
-	environment string
+	merchants *merchants.Service
 }
 
 func (r catalogPlanAddressReader) MerchantAddress(ctx context.Context, id billing.MerchantID) (solanago.PublicKey, error) {
@@ -111,7 +105,7 @@ func (r catalogPlanAddressReader) MerchantAddress(ctx context.Context, id billin
 	if err != nil || bound != id {
 		return solanago.PublicKey{}, fmt.Errorf("Solana catalog merchant scope mismatch")
 	}
-	scope, ok, err := r.merchants.ActivePSPScope(ctx, id, "solana", r.environment)
+	scope, ok, err := r.merchants.ActivePSPScope(ctx, id, "solana")
 	if err != nil {
 		return solanago.PublicKey{}, err
 	}
