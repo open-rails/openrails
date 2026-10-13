@@ -17,11 +17,22 @@ import (
 )
 
 // Two hosts embed OpenRails on one database, each with a River schema of its
-// own. A periodic pass is queued by one of them per period, a fleet's own
-// state (its River jobs) is rescued by each, and when the holder stops the
-// other takes over once the lease has expired.
-func TestTwoFleetsQueueEachPeriodicPassOnce(t *testing.T) {
+// own. Fleets declaring the same merchants queue each periodic pass once
+// between them, and when the holder stops another takes over once the lease
+// has expired. Fleets declaring different merchants each queue every pass:
+// credentials only one holds must never wait on the other's lease.
+func TestFleetsOnOneMerchantSetQueueEachPeriodicPassOnce(t *testing.T) {
+	periodicLeases(t, []string{"shop-a"}, []string{"shop-a"})
+}
+
+func TestFleetsOnDifferentMerchantSetsEachQueueEveryPeriodicPass(t *testing.T) {
+	periodicLeases(t, []string{"shop-a"}, []string{"shop-b"})
+}
+
+func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 	f := newFixture(t)
+	shared := len(merchants0) == len(merchants1) && merchants0[0] == merchants1[0]
+	sets := [][]string{merchants0, merchants1}
 	schemas := []string{f.schema, f.schema + "_host2"}
 	t.Cleanup(func() {
 		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schemas[1]}.Sanitize()+" CASCADE")
@@ -34,8 +45,12 @@ func TestTwoFleetsQueueEachPeriodicPassOnce(t *testing.T) {
 	if hour.Sub(now) < time.Minute {
 		hour = hour.Add(time.Hour)
 	}
-	start := func(schema string, boundary time.Time) (rt *openrails.Engine, stop func()) {
+	start := func(schema string, merchants []string, boundary time.Time) (rt *openrails.Engine, stop func()) {
 		cfg := f.config()
+		cfg.Merchants = map[string]openrails.MerchantDeclaration{}
+		for _, slug := range merchants {
+			cfg.Merchants[slug] = openrails.MerchantDeclaration{DisplayName: slug}
+		}
 		var err error
 		cfg.Database.RiverSchema = schema
 		rt, err = openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
@@ -87,8 +102,8 @@ func TestTwoFleetsQueueEachPeriodicPassOnce(t *testing.T) {
 
 	// Both fleets tick at the hour: each leased pass is queued once across
 	// them, and the fleet-local pass by both.
-	_, stopOne := start(schemas[0], hour)
-	_, stopTwo := start(schemas[1], hour)
+	_, stopOne := start(schemas[0], sets[0], hour)
+	_, stopTwo := start(schemas[1], sets[1], hour)
 	eventually("each leased pass is queued", func() bool {
 		for _, kind := range leased {
 			if q := queued(kind, hour); q[schemas[0]]+q[schemas[1]] < 1 {
@@ -99,14 +114,19 @@ func TestTwoFleetsQueueEachPeriodicPassOnce(t *testing.T) {
 		return q[schemas[0]] == 1 && q[schemas[1]] == 1
 	})
 	time.Sleep(2 * time.Second)
-	holders := map[string]string{}
 	for _, kind := range leased {
 		q := queued(kind, hour)
+		if !shared {
+			require.Equal(t, map[string]int{schemas[0]: 1, schemas[1]: 1}, q, "%s is queued by each fleet", kind)
+			continue
+		}
 		require.Equal(t, 1, q[schemas[0]]+q[schemas[1]], "%s is queued once across both fleets: %v", kind, q)
 		var holder string
 		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT holder FROM "+leases+" WHERE kind = $1", kind).Scan(&holder))
 		require.Equal(t, 1, q[holder], "%s is queued by its lease holder", kind)
-		holders[kind] = holder
+	}
+	if !shared {
+		return
 	}
 
 	// Both fleets stop; their leases are the dead holder's and lapse a few
@@ -117,7 +137,7 @@ func TestTwoFleetsQueueEachPeriodicPassOnce(t *testing.T) {
 	_, err := f.pool.Exec(t.Context(), "UPDATE "+leases+" SET holder = $1, expires_at = now() + interval '5 seconds'", schemas[0])
 	require.NoError(t, err)
 	next := hour.Add(time.Hour)
-	_, stopThree := start(schemas[1], next)
+	_, stopThree := start(schemas[1], sets[1], next)
 	defer stopThree()
 	eventually("the survivor takes the passes over", func() bool {
 		for _, kind := range leased {

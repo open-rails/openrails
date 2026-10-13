@@ -207,13 +207,17 @@ it is stalled.
 
 **Several hosts, one merchant.** Hosts that embed OpenRails on one database,
 each with its own River schema, share the periodic work: provider refresh,
-renewal and recovery sweeps, Solana pulls, the account updater. A fleet claims a
-pass's lease in `periodic_leases` (held for four fifths of the period) before
-queueing it, and another fleet finds it held and skips that pass. A stopped
-fleet's lease expires, so the others take its passes over at their next tick.
-A fleet's own River jobs and Redis counters are still tended by that fleet, and
-work a request starts (a provider call, an enqueued intent) runs on the engine
-that received it. Give each host its own `RiverSchema`.
+renewal and recovery sweeps, Solana pulls, the account updater. A fleet claims
+a pass's lease in `periodic_leases` (held for four fifths of the period) before
+queueing it, and another fleet finds it held and skips that pass. A lease is
+per pass and per merchant set: a hash of the merchant ids the fleet declares in
+`Config.Merchants`. Fleets declaring the same merchants share it and dedupe;
+fleets declaring different merchants each run every pass, since only each holds
+its merchants' PSP credentials; overlapping sets both run, a safe duplicate. A
+stopped fleet's lease expires, so the others take its passes over at their next
+tick. A fleet's own River jobs and Redis counters are still tended by that
+fleet, and work a request starts (a provider call, an enqueued intent) runs on
+the engine that received it. Give each host its own `RiverSchema`.
 
 **Inserting an engine job.** The one job a host inserts itself is the usage
 sweep: `workers.Insert(ctx, openrails.UsageSweepArgs{FinalizePreviousMonth: true}, nil)`

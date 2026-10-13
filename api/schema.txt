@@ -95,7 +95,7 @@ migration 0091_destructive_kind_account_deletion.up.sql sha256:fd108701f47bbc834
 migration 0093_price_psps.up.sql sha256:372948218fe67c2478a5397afbb7ed7bb83cbc25e305611d57efa4ba24eeab89
 migration 0095_foreign_findings.up.sql sha256:94005a83ed9701f583e0eee453b6224f960dab285295b4f0b4c4ce950a022c82
 migration 0096_psp_declared_environment.up.sql sha256:eec7846c97147b96d106f1600cb1b506f32956bdf0e1cc43c3e0489fcaf53692
-migration 0097_periodic_leases.up.sql sha256:72118e89934a0d7ed6761c0dd60cf425e96a1fc9e4eb81a387396702f67e7c5f
+migration 0097_periodic_leases.up.sql sha256:877ddbe1e6a0442feb17b1b6350b072ae1bb480b47dae6b2fd9baebcf4ebf284
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1718,13 +1718,15 @@ table billing.payments
 
 table billing.periodic_leases
   column kind text NOT NULL
+  column merchant_set text NOT NULL
   column holder text NOT NULL
   column expires_at timestamp with time zone NOT NULL
   column claimed_at timestamp with time zone NOT NULL DEFAULT now()
   constraint periodic_leases_holder_check CHECK ((holder <> ''::text))
   constraint periodic_leases_kind_check CHECK ((kind <> ''::text))
-  constraint periodic_leases_pkey PRIMARY KEY (kind)
-  index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind)
+  constraint periodic_leases_merchant_set_check CHECK ((merchant_set <> ''::text))
+  constraint periodic_leases_pkey PRIMARY KEY (kind, merchant_set)
+  index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind, merchant_set)
 
 table billing.price_key_movements
   column id uuid NOT NULL DEFAULT uuidv7()
