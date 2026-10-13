@@ -801,3 +801,75 @@ describe("OrderPayment", () => {
     })
   })
 })
+
+const platformElements = vi.hoisted(() => ({
+  create: vi.fn(async () => ({ id: "ti_platform" })),
+  destroy: vi.fn(async () => undefined),
+}))
+vi.mock("@basis-theory/web-elements", () => ({
+  default: () => ({
+    createElement: () => ({ mount: async () => undefined }),
+    tokenIntents: { create: platformElements.create },
+    destroy: platformElements.destroy,
+  }),
+}))
+
+it.each(["unconfirmed", "declined"])("platform card %s retry preserves the right payment identity", async (outcome) => {
+  platformElements.create.mockClear()
+  const requests: RequestInit[] = []
+  const platformOrder = (payment: Record<string, unknown>, status = "open") => ({
+    ...order(payment, status),
+    payment_options: [{ psp_id: "psp_nmi", rail: "nmi", accepts: ["new_card"] }],
+  })
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/me/config")) return Response.json({ ...config, payment: { psps: [{
+      psp_id: "psp_nmi", key: "nmi", rail: "nmi", custodian: "platform", display_name: "Card", flow: "tokenize",
+      config: { public_api_key: "public-platform-key" },
+    }] } })
+    if (input.endsWith("/config")) return Response.json(deployment)
+    if (input.includes("/me/payment-methods")) return Response.json({ data: [], next_cursor: null })
+    if (input.endsWith("/me/orders/ord_1")) return Response.json(platformOrder({}))
+    if (input.endsWith("/pay") && init) {
+      requests.push(init)
+      if (requests.length === 1) {
+        if (outcome === "unconfirmed") throw new TypeError("connection lost")
+        return Response.json({ error: { type: "card_error", code: "card_declined", message: "Card declined",
+          order: platformOrder({ last_payment_error: { reason: "generic_decline", message: "Card declined" } }) },
+        }, { status: 402 })
+      }
+      return Response.json(platformOrder({ status: "succeeded" }, "complete"))
+    }
+    return Response.json({}, { status: 404 })
+  })
+  const { container } = render(<BillingProvider client={createBillingClient({ fetch })}><OrderPayment orderId="ord_1" /></BillingProvider>)
+  await screen.findByRole("form", { name: "Secure platform card payment" })
+  fireEvent.change(screen.getByLabelText("Name on card"), { target: { value: "Pat Reader" } })
+  fireEvent.change(screen.getByLabelText("Country"), { target: { value: "US" } })
+  fireEvent.change(screen.getByLabelText(/ZIP/), { target: { value: "94107" } })
+  const pay = screen.getByRole("button", { name: /Pay / })
+  await waitFor(() => expect(pay).toBeEnabled())
+  fireEvent.click(pay)
+  if (outcome === "unconfirmed") {
+    const retry = await screen.findByRole("button", { name: "Retry payment" })
+    await waitFor(() => expect(retry).toBeEnabled())
+    fireEvent.click(retry)
+  } else {
+    await screen.findByText("Card declined")
+    await waitFor(() => expect(pay).toBeEnabled())
+    fireEvent.click(pay)
+  }
+  await screen.findByText("Payment complete")
+  expect(requests).toHaveLength(2)
+  const keys = requests.map((request) => new Headers(request.headers).get("Idempotency-Key"))
+  expect(keys[0]).toBeTruthy()
+  if (outcome === "unconfirmed") {
+    expect(keys[1]).toEqual(keys[0])
+    expect(requests[1].body).toEqual(requests[0].body)
+    expect(platformElements.create).toHaveBeenCalledTimes(1)
+  } else {
+    expect(keys[1]).not.toEqual(keys[0])
+    expect(platformElements.create).toHaveBeenCalledTimes(2)
+  }
+  expect(container.querySelector('input[autocomplete="cc-number"]')).toBeNull()
+  expect(container.querySelector('input[autocomplete="cc-csc"]')).toBeNull()
+})

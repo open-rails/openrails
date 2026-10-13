@@ -101,6 +101,61 @@ It needs `vault.kv_mount`: its keys are at
 their `custodian_id`, so the custodian checks hold for them as for any
 custodian. The key `platform` is reserved: no merchant custodian takes it.
 
+### Platform NMI one-time purchases
+
+Platform collection currently supports a new card on a one-time NMI order.
+`OrderPayment` collects it with Basis Theory Web Elements, sends only the token
+intent and billing details to OpenRails, and charges through the existing NMI
+sale operation. Recurring purchases, saved-card-only charging, migration,
+network tokens, and Stripe platform collection are not enabled by this path.
+Existing merchant custody remains the default.
+
+The operator-managed KV document at the path above has this shape:
+
+```json
+{
+  "api_key": "<private platform application key>",
+  "collection_applications": {
+    "<merchant UUID>": {
+      "id": "<public collection application UUID>",
+      "public_api_key": "<public collection application key>"
+    }
+  }
+}
+```
+
+Provision a distinct public collection application for each merchant in the
+configured tenant, with only token-intent creation permission and the merchant's
+allowed browser origins. The private application needs token-intent reads,
+token creation and the detokenizing proxy permissions. Do not grant token
+reveal or proxy access to a browser application. Application provisioning and
+permission verification are operator steps; OpenRails does not create them.
+Missing credentials or a shared collection application fail closed. Only the
+public key appears in customer configuration.
+
+Token intents have no merchant containers. Before charging, OpenRails checks
+the vendor-reported `tenant_id` and `created_by` against this merchant's
+configured application. After approval, conversion uses an operation-derived
+idempotency key and the fixed container `/merchants/<merchant UUID>/`.
+OpenRails verifies the returned tenant and container before storing an active
+`custodian=platform` method. A decline does not convert or accept a method.
+Existing card retention/consent policy still applies.
+
+An unconfirmed browser request retries the same token, billing details and
+idempotency key. An accepted sale's durable submission fence prevents another
+charge; the existing verifier completes conversion from the retained receipt.
+An expired token intent can leave a confirmed payment with no saved method,
+following the existing Basis Theory recovery policy.
+
+The hosted payment page permits `https://*.basistheory.com` in `script-src`,
+`frame-src`, and `connect-src`. Embedded hosts must permit those sources too.
+See the vendor's [token intents](https://developers.basistheory.com/docs/api/tokens/token-intents),
+[token containers](https://developers.basistheory.com/docs/api/tokens), and
+[Web Elements security guidance](https://developers.basistheory.com/docs/sdks/web/web-elements/v3/security).
+Local provider fakes verify the request/receipt contract, not live vendor
+qualification. Sandbox qualification of application permissions, iframe
+collection, proxy approval/decline, and conversion recovery remains required.
+
 `payment_methods.wallet_card_id` names the customer wallet card a merchant's
 copy was made from; it is NULL for a card given to the merchant.
 

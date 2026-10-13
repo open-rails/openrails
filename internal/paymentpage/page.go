@@ -17,6 +17,11 @@ import (
 // Collect.js may be loaded from (merchants.NMICollectJSURLAllowed).
 var railOrigins = []origins{
 	{
+		script:  []string{"https://*.basistheory.com"},
+		frame:   []string{"https://*.basistheory.com"},
+		connect: []string{"https://*.basistheory.com"},
+	},
+	{
 		script:  []string{"https://js.stripe.com", "https://*.js.stripe.com"},
 		frame:   []string{"https://js.stripe.com", "https://*.js.stripe.com", "https://hooks.stripe.com"},
 		connect: []string{stripeapi.APIBase},

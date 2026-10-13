@@ -80,6 +80,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
+    "@basis-theory/web-elements": "^3.2.0",
     "@hugeicons/core-free-icons": "^4.2.3",
     "@hugeicons/react": "^1.1.9",
     "@stripe/stripe-js": "^9.17.0",

@@ -37,6 +37,7 @@ import {
   TokenizedCardForm,
   type TokenizedCardData,
 } from "./tokenized-card-form"
+import { PlatformCardForm } from "./components/platform-card-form"
 import type { SavedPaymentMethod } from "./types"
 import { cn } from "cn"
 
@@ -70,6 +71,10 @@ export interface OrderPaymentProps {
   appearance?: BillingAppearance
   className?: string
 }
+
+const platformCard = (psp: PspConfig) =>
+  psp.custodian === "platform" && psp.rail === "nmi" &&
+  psp.flow === "tokenize" && !psp.status && !!psp.config?.public_api_key
 
 const settled = (order: Order) =>
   order.status === "complete" || order.status === "processing"
@@ -171,7 +176,7 @@ export function OrderPayment({
   const cardPsps = psps.filter((psp) => {
     const driver = cardSetupDriver(psp)
     return (
-      (driver === "collect_js" || driver === "stripe_elements") &&
+      (driver === "collect_js" || driver === "stripe_elements" || platformCard(psp)) &&
       options.some(
         (option) =>
           option.psp_id === psp.psp_id && option.accepts.includes("new_card")
@@ -287,7 +292,8 @@ export function OrderPayment({
 
   // pay answers whether the payment went through (or awaits its rail).
   const pay = async (
-    payment: () => Promise<OrderPaymentInput>
+    payment: () => Promise<OrderPaymentInput>,
+    preserveUnconfirmed = false
   ): Promise<boolean> => {
     if (busy || order.collection_owner !== "engine") return false
     setBusy(true)
@@ -306,6 +312,7 @@ export function OrderPayment({
           ? cause.message
           : m.error(cause)
       )
+      if (preserveUnconfirmed) throw cause
       setKey(crypto.randomUUID())
       return false
     } finally {
@@ -503,7 +510,19 @@ export function OrderPayment({
                   ))}
                 </select>
               ) : null}
-              {cardSetupDriver(psp) === "collect_js" ? (
+              {platformCard(psp) ? (
+                <PlatformCardForm
+                  key={psp.psp_id}
+                  publicKey={psp.config!.public_api_key!}
+                  submitLabel={payLabel}
+                  disabled={busy || !open}
+                  onTokenized={(card) => pay(async () => ({
+                    token: card.payment_token,
+                    psp_id: psp.psp_id,
+                    billing_details: billingDetailsOf(card),
+                  }), true)}
+                />
+              ) : cardSetupDriver(psp) === "collect_js" ? (
                 <TokenizedCardForm
                   key={psp.psp_id}
                   tokenizationKey={psp.config!.tokenization_key!}
