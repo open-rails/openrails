@@ -245,7 +245,11 @@ type OrderCard struct {
 
 // OrderCharge is what paying did: Failed when its attempt ended without
 // moving money, Declined when the issuer declined it.
-type OrderCharge struct{ Failed, Declined bool }
+type OrderCharge struct {
+	Failed, Declined bool
+	// CardDecline is the newly observed refusal, never an old terminal result.
+	CardDecline uuid.UUID
+}
 
 // ErrOrderPSPRequired: more than one PSP takes new cards for the order.
 var ErrOrderPSPRequired = apperr.Invalidf("more than one PSP takes this payment for the order: name payment.psp_id").WithParam("payment.psp_id")
@@ -369,7 +373,11 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		if err != nil {
 			return OrderCharge{}, err
 		}
-		return s.afterOrderCharge(ctx, order, attemptID, intent)
+		out, err := s.afterOrderCharge(ctx, order, attemptID, intent)
+		if out.Declined && prior.Status != intents.StatusFailedTerminal {
+			out.CardDecline = intent.ID
+		}
+		return out, err
 	case !db.IsNotFound(err):
 		return OrderCharge{}, err
 	}
@@ -544,7 +552,11 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 	if err != nil {
 		return OrderCharge{}, err
 	}
-	return s.afterOrderCharge(ctx, order, attemptID, intent)
+	out, err := s.afterOrderCharge(ctx, order, attemptID, intent)
+	if out.Declined {
+		out.CardDecline = intent.ID
+	}
+	return out, err
 }
 
 // NewCardOption is the PSP a new card's token belongs to: the one named, or
@@ -841,7 +853,11 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 	if err != nil {
 		return OrderCharge{}, err
 	}
-	return s.afterOrderCharge(ctx, order, *order.AttemptID, current)
+	out, err := s.afterOrderCharge(ctx, order, *order.AttemptID, current)
+	if out.Declined && operation.Status != intents.StatusFailedTerminal {
+		out.CardDecline = current.ID
+	}
+	return out, err
 }
 
 // orderClosedKey marks the sale of an order canceled or expired while its

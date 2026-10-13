@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -112,6 +115,9 @@ func orderID(r *httprequest.Request) (billing.OrderID, bool) {
 // otherwise), or, when its payment failed, 402 card_error carrying the order,
 // as Stripe's carries its PaymentIntent. A replay says so.
 func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
+	if answer.CardDecline != uuid.Nil {
+		recordOrderCardDecline(r, answer.CardDecline)
+	}
 	r.SetHeader("Cache-Control", "no-store")
 	if answer.Replayed {
 		r.SetHeader("Idempotent-Replayed", "true")
@@ -127,6 +133,23 @@ func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
 	}
 	out.Order = answer.Order
 	r.APIError(out)
+}
+
+// Only add the captcha failure here, using the HTTP limiter's subjects.
+// The payment path owns the separate blocking count.
+func recordOrderCardDecline(r *httprequest.Request, decline uuid.UUID) {
+	if r.State.CardAbuseGuard == nil {
+		return
+	}
+	ctx := r.Request.Context()
+	id, _ := merchant.FromContext(ctx)
+	// Two confirmations can observe the same refusal. Count it once.
+	count, _ := r.State.AbuseState.Count(ctx, "order_card_decline:"+id.String()+":"+decline.String(), 1, 24*time.Hour)
+	if count != 1 {
+		return
+	}
+	attack := r.State.CardFailureLedger != nil && r.State.CardFailureLedger.AttackMode(ctx, id.UUID())
+	r.State.CardAbuseGuard.RecordChargeFailure(ctx, id.UUID(), middleware.SubjectKeysFromContext(ctx), attack)
 }
 
 // writeOrder writes an order read or changed without a payment.
