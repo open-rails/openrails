@@ -272,7 +272,11 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 		if err := p.Instrument.Matches(method); err != nil {
 			return err
 		}
-		return mandates.Recheck(ctx, h.database().NewWithPgxTx(tx).Gen(ctx), in.MerchantID, p.Instrument.Mandate)
+		q := h.database().NewWithPgxTx(tx).Gen(ctx)
+		if err := mandates.Recheck(ctx, q, in.MerchantID, p.ReuseConsent); err != nil {
+			return err
+		}
+		return mandates.Recheck(ctx, q, in.MerchantID, p.Instrument.Mandate)
 	})
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true})), false
@@ -404,9 +408,13 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	defer cancel()
 	ctx = db.WithPSPID(ctx, *in.PspID)
 	var saved *models.PaymentMethod
+	var storageErr error
 	if p.OrderID != uuid.Nil && outcome.Class == intents.OutcomeSucceeded {
 		if saved, err = h.newCardMethod(ctx, in, p, receipt); err != nil {
-			return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
+			if !p.Recurring || p.Instrument.Custodian != models.CustodianPlatform {
+				return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
+			}
+			storageErr = err
 		}
 	}
 	var declined *models.PaymentMethod
@@ -516,6 +524,11 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
 		}
+		if storageErr != nil {
+			// The receipt already prevents another charge. Keep this intent open
+			// for card conversion while committing the order's paid access.
+			return nil
+		}
 		if !success && p.NewCard && p.OrderID == uuid.Nil {
 			if declined, err = declinedCard(ctx, d, in.MerchantID, p.PaymentMethodID); err != nil {
 				return err
@@ -538,6 +551,9 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	})
 	if err != nil {
 		return intents.Ambiguous("sale receipt retained; local completion pending: " + err.Error())
+	}
+	if storageErr != nil {
+		return intents.Ambiguous("order paid; card storage pending: " + storageErr.Error())
 	}
 	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
 	if saved != nil && saved.Custodian == models.CustodianBasisTheory {

@@ -31,7 +31,10 @@ type InitialMembershipTerms struct {
 	ProductID           uuid.UUID               `json:"product_id"`
 	PriceID             uuid.UUID               `json:"price_id"`
 	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
-	ProductName         string                  `json:"product_name"`
+	// AwaitingMethod preserves a paid order's membership when its card could
+	// not be stored. It cannot renew until a recurring agreement is established.
+	AwaitingMethod bool   `json:"awaiting_method,omitempty"`
+	ProductName    string `json:"product_name"`
 	// Quantity is the seats of a per-seat price, nil otherwise;
 	// RecurringAmount is the unit price times Quantity.
 	Quantity        *int      `json:"quantity,omitempty"`
@@ -94,7 +97,10 @@ func (t InitialMembershipTerms) Validate() error {
 	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
 		return err
 	}
-	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
+	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Pending || t.Replaces != nil || t.Adds != nil) {
+		return errors.New("awaiting method requires a paid engine order without a saved card")
+	}
+	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine && !t.AwaitingMethod || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
 		return errors.New("initial membership terms are incomplete")
 	}
 	for _, instant := range []time.Time{t.AcceptedAt, t.PeriodStart, t.PeriodEnd} {

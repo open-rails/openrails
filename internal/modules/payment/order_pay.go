@@ -164,7 +164,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 				return nil, err
 			}
 		}
-		if (o.Custodian != models.CustodianBasisTheory && o.Custodian != models.CustodianPlatform) || oneTime {
+		if o.Custodian != models.CustodianBasisTheory || oneTime {
 			options = append(options, o)
 		}
 	}
@@ -177,11 +177,6 @@ func (s *OrderAttemptService) CustomerOrderOptions(ctx context.Context, customer
 	options, err := s.OrderOptions(ctx, prices, products)
 	if err != nil || customer == uuid.Nil {
 		return options, err
-	}
-	for _, price := range prices {
-		if price.IsRecurring() {
-			return options, nil
-		}
 	}
 	if !slices.ContainsFunc(options, func(o OrderOption) bool { return o.Rail == string(models.RailNMI) }) {
 		return options, nil
@@ -488,15 +483,16 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		}
 		// A HyperSwitch-held card pays an order that opens a subscription
 		// (its proxy takes no one-time card-on-file charge); a Basis Theory
-		// card pays one-time lines after collection, or by saved platform consent.
+		// card pays after collection, or by saved platform consent. Only platform
+		// custody supports recurring orders through the proxy.
 		heldElsewhere := method.Custodian != models.CustodianPSP
 		switch {
 		case !heldElsewhere:
 		case method.CustodianID == nil:
 			return OrderCharge{}, orders.ErrOptionMissing
 		case method.Custodian == models.CustodianHyperSwitch && order.HasRecurring() && collected == "":
-		case method.Custodian == models.CustodianPlatform && !order.HasRecurring() && collected == "":
-		case (method.Custodian == models.CustodianBasisTheory || method.Custodian == models.CustodianPlatform) && !order.HasRecurring() && collected != "":
+		case method.Custodian == models.CustodianPlatform && collected == "":
+		case (method.Custodian == models.CustodianPlatform || method.Custodian == models.CustodianBasisTheory && !order.HasRecurring()) && collected != "":
 		default:
 			return OrderCharge{}, orders.ErrOptionMissing
 		}
@@ -590,7 +586,11 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 				if err != nil {
 					return err
 				}
-				instrument.Mandate = mandates.Lineage(consent)
+				if order.HasRecurring() {
+					payload.ReuseConsent = mandates.Lineage(consent)
+				} else {
+					instrument.Mandate = mandates.Lineage(consent)
+				}
 			} else if !(order.HasRecurring() && row.Rail == string(models.RailStripe)) {
 				if instrument.Mandate, err = mandates.Citable(ctx, q, mid.UUID(), order.CustomerID, methodID, chosen.PSPID, row.Rail, agreement); err != nil {
 					return err

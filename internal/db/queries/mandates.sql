@@ -151,6 +151,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY (sqlc.
   AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: HasSubscriptionMandate :one
+-- Storage recovery must never replace a subsequently selected or revoked card.
+SELECT EXISTS (
+  SELECT 1 FROM billing.mandates
+  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+    AND customer_id = sqlc.arg(customer_id)::uuid
+    AND subscription_id = sqlc.arg(subscription_id)::uuid AND kind = 'recurring'
+);
+
 -- name: ListLiveAgreementsPage :many
 -- The customer's live charge agreements, newest first: what the merchant may
 -- charge its cards for without it. card_on_file covers no such charge.

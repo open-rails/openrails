@@ -34,6 +34,7 @@ import (
 // transaction.
 type Memberships interface {
 	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
+	EnsureRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription) error
 }
 
 // Charge is money a provider took for an order, as its qualified receipt
@@ -118,6 +119,11 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if order.Status == string(billing.OrderComplete) {
 		if charge != nil && uuidOf(order.PaymentID) != charge.PaymentID {
 			return "", errLateApprovalDup
+		}
+		if charge != nil && charge.PaymentMethodID != uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy {
+			if err := s.restoreOrderCard(ctx, d, order, charge, now); err != nil {
+				return "", err
+			}
 		}
 		return OutcomeComplete, nil
 	}
@@ -306,6 +312,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			RecurringIntervalHours: intPtr(line.BillingIntervalHours),
 			AcceptedAt:             now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}
+		terms.AwaitingMethod = charge.PaymentMethodID == uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy
 		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
 			ExistingOrderID: &order.ID, PaymentMetadata: map[string]any{"order_id": order.ID.String()},
@@ -322,7 +329,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			return err
 		}
 		// The engine's card agreement; a provider holds its own.
-		if charge.Enrolled == nil {
+		if charge.Enrolled == nil && charge.PaymentMethodID != uuid.Nil {
 			if _, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
 				Rail: charge.Rail, Kind: paycharge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: charge.lineage(), AcceptedAt: now}); err != nil {
 				return err

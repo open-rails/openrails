@@ -206,6 +206,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if err := terms.Validate(); err != nil {
 			return nil, nil, err
 		}
+		if terms.AwaitingMethod && params.ExistingOrderID == nil {
+			return nil, nil, errors.New("awaiting method requires a paid order")
+		}
 		if params.InitialPaymentReversal != "" && (terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Amount <= 0 || params.Rail != models.RailStripe || (params.InitialPaymentReversal != "refund" && params.InitialPaymentReversal != "dispute")) {
 			return nil, nil, errors.New("invalid accepted initial payment reversal")
 		}
@@ -515,6 +518,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				subscription.StartedAt = terms.AcceptedAt
 				subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = nil, nil
 			}
+			if terms.AwaitingMethod {
+				subscription.Status = models.StatusAwaitingMethod
+				deadline, err := awaitMethodDeadline(ctx, dbb, priceService, subscription)
+				if err != nil {
+					return nil, nil, err
+				}
+				subscription.GraceEndsAt = &deadline
+			}
 		}
 		if params.Prepared != nil && params.Prepared.CancelAfterInitial {
 			if _, err := Transition(subscription, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: params.Prepared.AcceptedAt}, params.Prepared.AcceptedAt); err != nil {
@@ -599,8 +610,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 					}).Info("Granted subscription access")
 				}
 			}
-			if err := pushRenewalGrace(ctx, dbb, entitlementService, subscription, periodStartsAt, periodEndsAt); err != nil {
-				return nil, nil, err
+			var graceErr error
+			if params.Prepared != nil && params.Prepared.AwaitingMethod {
+				graceErr = s.dunningAccess(ctx, dbb, entitlementService, subscription, now)
+			} else {
+				graceErr = pushRenewalGrace(ctx, dbb, entitlementService, subscription, periodStartsAt, periodEndsAt)
+			}
+			if graceErr != nil {
+				return nil, nil, graceErr
 			}
 		}
 	}
@@ -1172,7 +1189,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method) != nil {
+			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || (method.RailCustomerRef == nil && method.Custodian != models.CustodianPlatform) || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianPlatform) || observedInstrument.Matches(method) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 			if _, err := mandates.ForSubscription(ctx, q, subscription.MerchantID, subscription.CustomerID, subscription.ID, method.ID, subscription.PspID); err != nil {

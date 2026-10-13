@@ -93,9 +93,15 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 		return readFailure(err)
 	}
 	if ok && !account.Declared {
+		if method.Custodian == models.CustodianPlatform {
+			return unsupported(account.ErrUndeclared())
+		}
 		return unusable(account.ErrUndeclared())
 	}
 	if !ok || account.Archived {
+		if method.Custodian == models.CustodianPlatform {
+			return unsupported(errors.New("renewal account is unavailable"))
+		}
 		return unusable(errors.New("archived account cannot admit a new engine renewal"))
 	}
 	if method.CustodianID != nil {

@@ -18,6 +18,8 @@ func TestEngineExecutionBindings(t *testing.T) {
 	custodyID := uuid.New()
 	proxied := provider
 	proxied.Custodian, proxied.CustodianID = models.CustodianHyperSwitch, &custodyID
+	platform := provider
+	platform.Custodian, platform.CustodianID, platform.RailCustomerRef = models.CustodianPlatform, &custodyID, ""
 	binding := &HyperSwitchBinding{AccountID: "account", ProfileID: "profile", APIBaseURL: "https://vault.example"}
 
 	for _, tc := range []struct {
@@ -28,6 +30,7 @@ func TestEngineExecutionBindings(t *testing.T) {
 		{"native_nmi", "nmi", provider, nil},
 		{"stripe", "stripe", provider, nil},
 		{"proxied_nmi", "nmi", proxied, binding},
+		{"platform_nmi", "nmi", platform, nil},
 	} {
 		require.NoError(t, ValidateEngineInstrument(tc.rail, tc.instrument, tc.binding), tc.name)
 		require.NoError(t, ValidateRenewalMandate(tc.instrument), tc.name)
@@ -58,6 +61,8 @@ func TestEngineExecutionBindings(t *testing.T) {
 		{"native_cannot_carry_proxy_binding", "nmi", provider, binding},
 		{"proxy_requires_frozen_profile", "nmi", proxied, nil},
 		{"proxy_binding_must_be_canonical", "nmi", proxied, &badBinding},
+		{"platform_stripe_is_not_qualified", "stripe", platform, nil},
+		{"platform_cannot_use_hyperswitch_binding", "nmi", platform, binding},
 		{"basis_theory_has_no_engine_transport", "nmi", basis, nil},
 		{"no_provider_account", "nmi", FrozenInstrument{Custodian: models.CustodianPSP, RailCustomerRef: "c", RailMethodRef: "m"}, nil},
 	} {

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -44,6 +45,9 @@ func engineCollectionBinding(ctx context.Context, q *gen.Queries, custody charge
 	if method.Custodian == models.CustodianHyperSwitch {
 		return charge.FreezeHyperSwitchBinding(ctx, q, custody, method, psp, deployment)
 	}
+	if method.Custodian == models.CustodianPlatform && method.CustodianID != nil {
+		return binding, charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, psp), nil)
+	}
 	if method.Custodian != models.CustodianPSP || method.CustodianID != nil {
 		return binding, errors.New("engine card custody is unsupported")
 	}
@@ -56,6 +60,15 @@ type recurringNMICharger interface {
 }
 
 func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, psp uuid.UUID, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
+	if method.Custodian == models.CustodianPlatform {
+		platform, ok := resolver.(interface {
+			ResolvePlatformNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
+		})
+		if !ok {
+			return nil, errors.New("platform NMI collection is unavailable")
+		}
+		return platform.ResolvePlatformNMICharge(ctx, method, psp)
+	}
 	if method.Custodian == models.CustodianHyperSwitch {
 		return PrepareHyperSwitchCharge(ctx, resolver, method, psp, binding)
 	}
