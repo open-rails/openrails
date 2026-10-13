@@ -354,7 +354,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	if r.RailPaymentMethodService != nil {
 		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService, r.Clock))
 		registry.Register(intents.NewHyperSwitchMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock))
-		registry.Register(intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), clock))
+		registry.Register(intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock))
 	}
 	// Solana recurring pull: the handler wraps the crank with a pre-submit
 	// signature write-ahead and chain-read verification. Its core worker has no

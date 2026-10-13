@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -21,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A Stripe card is saved in one call: the page's Stripe fields make a pm_,
@@ -56,7 +56,7 @@ func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, 
 	if err != nil || customer == uuid.Nil {
 		return nil, errors.New("Stripe card save needs its customer")
 	}
-	if s == nil || s.SubscriptionService == nil || s.Config == nil || config.IsProviderReadOnly(s.Config) || s.customerStore() == nil || resolver == nil {
+	if s == nil || s.SubscriptionService == nil || s.Config == nil || resolver == nil {
 		return nil, errors.New("Stripe card save unavailable")
 	}
 	account, err := s.SubscriptionService.Database().Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
@@ -70,15 +70,8 @@ func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, 
 	if !found || service == nil {
 		return nil, errors.New("Stripe account unavailable")
 	}
-	customerRef, err := resolveStripeCustomerWith(db.WithPSPID(ctx, psp), s.customerStore(), service, user)
-	if err != nil {
-		return nil, err
-	}
-	if customerRef == "" {
-		return nil, errors.New("Stripe customer mapping unavailable")
-	}
 	return &stripeCardSave{service: service, customer: customer, psp: psp,
-		params: subscriptions.StripeEngineSetupParams{MerchantID: mid.UUID(), PSPID: psp, CustomerID: customer, CustomerRef: customerRef}}, nil
+		params: subscriptions.StripeEngineSetupParams{MerchantID: mid.UUID(), PSPID: psp, CustomerID: customer}}, nil
 }
 
 // StripeCardID is the method a customer's token becomes: a retry of the same
@@ -101,6 +94,16 @@ func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 		return s.ConfirmStripeCard(ctx, existing.ID, user, resolver)
 	} else if !db.IsNotFound(err) {
 		return SavedCard{}, err
+	}
+	if (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, account.params.MerchantID).ReadOnly() {
+		return SavedCard{}, errors.New("Stripe card save unavailable: provider writes are disabled")
+	}
+	account.params.CustomerRef, err = resolveStripeCustomerWith(db.WithPSPID(ctx, psp), s.customerStore(), account.service, user)
+	if err != nil {
+		return SavedCard{}, err
+	}
+	if account.params.CustomerRef == "" {
+		return SavedCard{}, errors.New("Stripe customer mapping unavailable")
 	}
 	read, err := account.service.ReadPaymentMethodCard(ctx, token)
 	if err != nil {
@@ -179,6 +182,9 @@ func (s *PurchaseService) ConfirmStripeCard(ctx context.Context, methodID uuid.U
 		return SavedCard{}, err
 	}
 	account.params.SessionID = row.ID
+	// Recovery uses the customer accepted when this card was saved. Resolving
+	// a customer again could create one while provider writes are held.
+	account.params.CustomerRef = method.RailCustomerRef
 	setup, found, err := account.service.ReadEngineSetup(ctx, account.params, method.SetupRef)
 	if err != nil {
 		return SavedCard{}, err
