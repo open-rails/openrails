@@ -165,9 +165,10 @@ func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	}
 }
 
-// taggedPaths are the Stripe endpoints that create an object.
-var taggedPaths = map[string]bool{"/v1/customers": true, "/v1/subscriptions": true, "/v1/invoices": true,
-	"/v1/payment_intents": true, "/v1/products": true, "/v1/prices": true, "/v1/setup_intents": true, "/v1/refunds": true}
+// taggedPaths are the Stripe endpoints OpenRails creates objects at; it
+// creates no products, prices or subscriptions.
+var taggedPaths = map[string]bool{"/v1/customers": true, "/v1/invoices": true,
+	"/v1/payment_intents": true, "/v1/setup_intents": true, "/v1/refunds": true}
 
 // tagBook adds the book id to the metadata of a request creating an object.
 func tagBook(req *http.Request) *http.Request {

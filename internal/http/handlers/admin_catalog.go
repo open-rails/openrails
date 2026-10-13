@@ -220,8 +220,8 @@ func ListPrices(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPrice reads a price; ?verify=true also reads each linked PSP's copy and
-// reports its drift.
+// GetPrice reads a price; ?verify=true also reads a provider price's terms at
+// its provider and reports their drift.
 func GetPrice(r *httprequest.Request) {
 	id, ok := priceIDParam(r)
 	if !ok {
@@ -235,15 +235,14 @@ func GetPrice(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.GetPrice(r.Request.Context(), id)
+	read := svc.GetPrice
+	if query.Verify {
+		read = svc.VerifyPublicPriceSync
+	}
+	out, err := read(r.Request.Context(), id)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
-	}
-	if query.Verify {
-		if states, vErr := svc.VerifyPublicPriceSync(r.Request.Context(), id); vErr == nil && len(states) > 0 {
-			out.PSPs = states
-		}
 	}
 	r.JSON(http.StatusOK, out)
 }

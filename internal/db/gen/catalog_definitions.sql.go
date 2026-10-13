@@ -213,7 +213,7 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.bil
            JOIN billing.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
            WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id
        ), '{}'::jsonb)::jsonb AS psp_links,
-       p.archived
+       p.archived, p.provider_owned, p.sell_via
 FROM billing.prices p
 JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
 WHERE p.merchant_id = $1::uuid AND NOT p.archived
@@ -233,6 +233,8 @@ type ListLiveCatalogPricesWithPSPLinksRow struct {
 	Quantity             []byte
 	PspLinks             []byte
 	Archived             bool
+	ProviderOwned        bool
+	SellVia              []string
 }
 
 func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchantID uuid.UUID) ([]ListLiveCatalogPricesWithPSPLinksRow, error) {
@@ -257,6 +259,8 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 			&i.Quantity,
 			&i.PspLinks,
 			&i.Archived,
+			&i.ProviderOwned,
+			&i.SellVia,
 		); err != nil {
 			return nil, err
 		}
