@@ -261,7 +261,11 @@ func (m *Mock) customer(v *Vault) obj {
 	for i, b := range v.Extra {
 		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": details(b.Card)})
 	}
-	return obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing}
+	out := obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing}
+	if v.Book != "" {
+		out["merchant_defined_fields"] = obj{"20": v.Book}
+	}
+	return out
 }
 
 func planJSON(p Plan) obj {
@@ -289,9 +293,13 @@ func (m *Mock) schedule(s *Schedule) obj {
 			name = p.Name
 		}
 	}
-	return obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": condition, "paused_subscription": paused,
-		"amount": s.Amount, "next_billing_date": s.NextBilling.Format("2006-01-02"),
+	out := obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": condition, "paused_subscription": paused,
+		"amount": s.Amount, "next_billing_date": s.NextBilling.Format("2006-01-02"), "start_date": s.Created.UTC().Format("2006-01-02"),
 		"plan": obj{"id": s.Plan, "plan_name": name, "plan_amount": s.Amount, "day_frequency": itoa(days), "month_frequency": itoa(months), "plan_payments": "0"}}
+	if s.Book != "" {
+		out["merchant_defined_fields"] = obj{"20": s.Book}
+	}
+	return out
 }
 
 func sortedKeys[V any](m map[string]V) []string {

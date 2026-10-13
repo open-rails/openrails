@@ -132,6 +132,12 @@ type Finding struct {
 	// instead of escalating to the admin queue.
 	IntentEvidence map[string]any
 
+	// Provenance is whose an unknown provider object is (booktag.Provenance),
+	// "" when not classified; Quiet marks one that is informational: it
+	// alerts nobody and never holds provider recovery.
+	Provenance string
+	Quiet      bool
+
 	// Apply is the enforce instruction derived during the diff; nil when the
 	// finding is advisory-only (requires_review types, intent-annotated drift).
 	// Never persisted.

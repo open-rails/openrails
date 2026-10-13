@@ -46,6 +46,22 @@ func (q *Queries) GetBookArmed(ctx context.Context) (bool, error) {
 	return book_armed, err
 }
 
+const getBookTag = `-- name: GetBookTag :one
+SELECT book_id, tagging_started_at FROM billing.book_identity WHERE singleton
+`
+
+type GetBookTagRow struct {
+	BookID           uuid.UUID
+	TaggingStartedAt time.Time
+}
+
+func (q *Queries) GetBookTag(ctx context.Context) (GetBookTagRow, error) {
+	row := q.db.QueryRow(ctx, getBookTag)
+	var i GetBookTagRow
+	err := row.Scan(&i.BookID, &i.TaggingStartedAt)
+	return i, err
+}
+
 const getWritePosture = `-- name: GetWritePosture :one
 SELECT
     COALESCE(p.mode, 'full')::text AS mode,

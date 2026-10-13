@@ -94,6 +94,7 @@ sql:
       - "internal/migrate/postgres/0099_psp_rail_environments.up.sql"
       - "internal/migrate/postgres/0100_solana_treasury.up.sql"
       - "internal/migrate/postgres/0101_solana_crankers.up.sql"
+      - "internal/migrate/postgres/0102_book_id.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

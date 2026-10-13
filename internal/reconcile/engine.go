@@ -527,6 +527,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	newChangeBuilder(buildLocalIndex(local), local, now).attach(findings)
 	bindApplyActions(findings, binding.ID, runID)
+	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)

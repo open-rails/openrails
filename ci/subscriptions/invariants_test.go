@@ -93,10 +93,25 @@ func (w *world) checkMoneyInvariants() {
 		t.Errorf("invariants: read open operations: %v", err)
 		return
 	}
+	// A charge the book classified as another book's is not this book's money.
+	foreign := map[string]bool{}
+	frows, err := w.pool.Query(ctx, `SELECT subject_key FROM `+schema+`.reconciliation_findings
+		WHERE finding_type = 'pull.charge.missing' AND evidence @> '{"quiet_foreign":true}'`)
+	if err != nil {
+		t.Errorf("invariants: read foreign charges: %v", err)
+		return
+	}
+	for frows.Next() {
+		var id string
+		if err := frows.Scan(&id); err == nil {
+			foreign[id] = true
+		}
+	}
+	frows.Close()
 	var unrecorded []string
 	if unresolved == 0 {
 		for id, live := range provider {
-			if live && !local[id] && !local[intentOf[id]] {
+			if live && !local[id] && !local[intentOf[id]] && !foreign[id] {
 				unrecorded = append(unrecorded, id)
 			}
 		}

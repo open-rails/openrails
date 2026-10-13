@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
@@ -261,6 +262,13 @@ type V5Customer struct {
 	ID      string              `json:"id"`
 	Created string              `json:"created"`
 	Billing []V5CustomerBilling `json:"billing"`
+	// MerchantDefinedFields are the vault's merchant-defined fields by id.
+	MerchantDefinedFields map[string]string `json:"merchant_defined_fields"`
+}
+
+// BookID is the billing book the vault carries, "" for none.
+func (c *V5Customer) BookID() string {
+	return strings.TrimSpace(c.MerchantDefinedFields[booktag.NMIFieldID])
 }
 
 // PrimaryBilling returns the priority-1 (or first) billing record.
@@ -381,9 +389,16 @@ type V5Subscription struct {
 	// "active" on live subscriptions, "inactive" after a delete. The v5 GET
 	// answers 200 for deleted ones (a tombstone); only never-existed ids 404.
 	// The list excludes deleted ones.
-	DelayedCondition   string  `json:"delayed_condition"`
-	PausedSubscription any     `json:"paused_subscription"` // "0"/"1" string on the wire despite docs
-	Plan               *V5Plan `json:"plan"`
+	DelayedCondition string `json:"delayed_condition"`
+	// MerchantDefinedFields are the schedule's merchant-defined fields by id.
+	MerchantDefinedFields map[string]string `json:"merchant_defined_fields"`
+	PausedSubscription    any               `json:"paused_subscription"` // "0"/"1" string on the wire despite docs
+	Plan                  *V5Plan           `json:"plan"`
+}
+
+// BookID is the billing book the schedule carries, "" for none.
+func (s *V5Subscription) BookID() string {
+	return strings.TrimSpace(s.MerchantDefinedFields[booktag.NMIFieldID])
 }
 
 // canceledAtNMI reports whether the record is a deletion tombstone.

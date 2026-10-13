@@ -79,6 +79,9 @@ func (m *Mock) AddSchedule(s Schedule) string {
 	if s.ID == "" {
 		s.ID = m.next("rsub")
 	}
+	if s.Created.IsZero() {
+		s.Created = m.now()
+	}
 	m.schedules[s.ID] = &s
 	return s.ID
 }
@@ -144,7 +147,7 @@ func (m *Mock) AddScheduleSale(id string, at time.Time) Sale {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.mustSchedule(id)
-	return m.addSale(Sale{Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: id, At: at})
+	return m.addSale(Sale{Book: s.Book, Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: id, At: at})
 }
 
 // AddRecentCharge is a charge of amount on c just processed for another
@@ -188,7 +191,7 @@ func (m *Mock) RenewSchedule(id string, approve bool) Sale {
 }
 
 func (m *Mock) renew(s *Schedule, approve bool) Sale {
-	sale := Sale{Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: s.ID, At: s.NextBilling}
+	sale := Sale{Book: s.Book, Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: s.ID, At: s.NextBilling}
 	if !approve {
 		v := m.mustVault(s.Vault)
 		code := v.Card.Decline // the issuer's answer for this card, else a soft decline

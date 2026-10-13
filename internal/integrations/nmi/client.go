@@ -16,6 +16,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/decline"
 )
@@ -349,6 +350,7 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 		return "", errors.Join(ErrNotDispatched, ErrProviderReadOnly)
 	}
 
+	body = c.tagged(ctx, requestType, body)
 	// Local validation and arming still precede dispatch. Only failures after
 	// HTTP Do begins are transport-ambiguous.
 	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, bytes.NewReader(body), true)
@@ -394,6 +396,24 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	}
 
 	return string(answer), nil
+}
+
+// createsObject: the request types that make a transaction, vault or schedule.
+var createsObject = map[string]bool{"sale": true, "auth": true, "credit": true, "validate": true, "offline": true,
+	"refund": true, "add_subscription": true, "add_customer": true}
+
+// tagged appends the book id to a request that creates an object. The result
+// may share body's array, which a caller holding a card wipes whole; one that
+// had to grow is wiped here.
+func (c *NMIClient) tagged(ctx context.Context, requestType string, body []byte) []byte {
+	if !createsObject[requestType] || bytes.Contains(body, []byte(booktag.NMIField+"=")) {
+		return body
+	}
+	id := booktag.For(c.accountMerchantID).ID(ctx)
+	if id == "" {
+		return body
+	}
+	return append(body, "&"+booktag.NMIField+"="+url.QueryEscape(id)...)
 }
 
 // sendQueryRequest posts to the Query API: a POST on the wire but a read, so

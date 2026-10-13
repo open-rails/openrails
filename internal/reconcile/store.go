@@ -65,6 +65,13 @@ type FindingRecord struct {
 	ApprovalRunID  *uuid.UUID `json:"-"`
 }
 
+// Quiet reports a finding about a provider object this book did not create:
+// informational, never notified, never held against provider recovery.
+func (r FindingRecord) Quiet() bool {
+	quiet, _ := r.Evidence["quiet_foreign"].(bool)
+	return quiet
+}
+
 // RunRecord is a persisted reconciliation run.
 type RunRecord struct {
 	ID             uuid.UUID       `json:"id"`
@@ -148,6 +155,12 @@ func findingEvidence(f Finding) []byte {
 	}
 	if len(f.IntentEvidence) > 0 {
 		evidence["intent"] = f.IntentEvidence
+	}
+	if f.Provenance != "" {
+		evidence["provenance"] = f.Provenance
+	}
+	if f.Quiet {
+		evidence["quiet_foreign"] = true
 	}
 	return marshalEvidence(evidence)
 }

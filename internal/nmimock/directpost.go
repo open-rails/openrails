@@ -80,7 +80,7 @@ func (m *Mock) sale(form url.Values) string {
 		amount, currency, scheduleID = s.Amount, "USD", s.ID
 	}
 	if code := charged.Decline; code != "" {
-		d := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
+		d := &Sale{Book: book(form), TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
 			Currency: currency, Card: *charged, Declined: code, At: m.now()}
 		m.sales = append(m.sales, d)
 		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
@@ -93,7 +93,7 @@ func (m *Mock) sale(form url.Values) string {
 	if !m.unsupportedDuplicateCheck && (m.duplicateOf(*charged, form.Get("amount")) || m.withinDupSeconds(*charged, form)) {
 		return rejected("Duplicate transaction REFID:3187654322")
 	}
-	s := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
+	s := &Sale{Book: book(form), TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
 		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
 		Initial: form.Get("initial_transaction_id"), Card: *charged, At: m.now()}
 	if s.BillingID == "" {
@@ -126,7 +126,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 		return rejected("Invalid Payment Token")
 	}
 	order, amount, currency := form.Get("orderid"), form.Get("amount"), strings.ToUpper(form.Get("currency"))
-	s := &Sale{TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
+	s := &Sale{Book: book(form), TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
 		InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id"), Card: c, At: m.now()}
 	if c.Decline != "" && c.Decline != "vault" {
 		s.Declined = c.Decline
@@ -134,7 +134,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 		fields := []string{"response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
 			"orderid", order, "type", "sale", "response_code", c.Decline}
 		if form.Get("customer_vault") == "add_customer" && c.VaultsDeclined {
-			v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+			v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
 			m.vaults[v.ID] = v
 			fields = append(fields, "customer_vault_id", v.ID)
 		}
@@ -154,7 +154,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 			m.refusedSaves++
 			return rejected("Card refused REFID:3187654326")
 		}
-		v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+		v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
 		m.vaults[v.ID] = v
 		s.Vault, s.BillingID = v.ID, v.BillingID
 		fields = append(fields, "customer_vault_id", v.ID)
@@ -176,12 +176,13 @@ func (m *Mock) addSubscription(form url.Values) (string, string) {
 	if !ok || v == nil {
 		return "", "Invalid plan or vault"
 	}
-	s := &Schedule{ID: m.next("rsub"), Vault: v.ID, Plan: plan.ID, Amount: plan.Amount, Order: form.Get("orderid"), Days: plan.Days, Months: plan.Months}
+	s := &Schedule{Book: book(form), ID: m.next("rsub"), Vault: v.ID, Plan: plan.ID, Amount: plan.Amount, Order: form.Get("orderid"), Days: plan.Days, Months: plan.Months}
 	if next, err := time.Parse("20060102", form.Get("start_date")); err == nil {
 		s.NextBilling = next
 	} else {
 		s.NextBilling = s.advance(m.now().Truncate(24 * time.Hour))
 	}
+	s.Created = m.now()
 	m.schedules[s.ID] = s
 	return s.ID, ""
 }
@@ -392,7 +393,7 @@ func (m *Mock) vaultCard(form url.Values) string {
 	if m.vaults[id] != nil {
 		return rejected("Duplicate Customer Vault Id REFID:3187654329")
 	}
-	m.vaults[id] = &Vault{ID: id, BillingID: billing, Card: c}
+	m.vaults[id] = &Vault{Book: book(form), ID: id, BillingID: billing, Card: c}
 	return answer("response", "1", "responsetext", "Customer Added", "authcode", "", "transactionid", "", "avsresponse", "", "cvvresponse", "",
 		"orderid", "", "type", "", "response_code", "100", "customer_vault_id", id)
 }
@@ -430,3 +431,6 @@ func brandOf(number string) string {
 	}
 	return ""
 }
+
+// book is the merchant-defined field 20 of a request.
+func book(form url.Values) string { return form.Get("merchant_defined_field_20") }

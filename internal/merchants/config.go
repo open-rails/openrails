@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/booktag"
 	"slices"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 	set, err := s.config.Get(ctx, id)
 	if err != nil {
 		return joined{}, err
+	}
+	if !booktag.Registered(id.UUID()) {
+		booktag.Register(id.UUID(), booktag.NewSource(s.database.GenDirectory()))
 	}
 	var pspRows []gen.BillingPsp
 	var custodianRows []gen.BillingCustodian

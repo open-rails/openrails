@@ -32,8 +32,11 @@ type Card struct {
 // Vault is a Customer Vault record: its priority-1 billing entry, then Extra.
 type Vault struct {
 	ID, BillingID string
-	Card          Card
-	Extra         []Billing
+	// Book is the merchant-defined field 20 the vault carries: the billing
+	// book that created it.
+	Book  string
+	Card  Card
+	Extra []Billing
 	// NoBrand omits card_type from reads, as some live accounts do.
 	NoBrand bool
 }
@@ -55,7 +58,11 @@ type Plan struct {
 // readable as a tombstone (delayed_condition=inactive) and leaves lists.
 type Schedule struct {
 	ID, Vault, Plan, Amount string
-	Order                   string
+	// Book is the merchant-defined field 20 the schedule carries. Created is
+	// when it was made (start_date); zero means now.
+	Book    string
+	Created time.Time
+	Order   string
 	// Days or Months is the cadence (Days 30 when both are zero).
 	Days, Months    int
 	NextBilling     time.Time
@@ -67,7 +74,9 @@ type Schedule struct {
 // Sale is a sale NMI processed, approved or declined.
 type Sale struct {
 	TransactionID, OrderID, Vault, BillingID string
-	OrderDescription                         string
+	// Book is the merchant-defined field 20 the transaction carries.
+	Book             string
+	OrderDescription string
 	// Condition overrides the Query API transaction state for pending/error fixtures.
 	Condition string
 	// Amount is the wire decimal ("9.99").

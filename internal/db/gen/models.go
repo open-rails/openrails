@@ -106,6 +106,10 @@ type BillingBookIdentity struct {
 	SchemaOid        pgtype.Uint32
 	ArmedBy          string
 	ArmedAt          time.Time
+	// The book's logical identity, written into every provider object OpenRails creates; kept by arm_book and by a dump and restore of the database.
+	BookID uuid.UUID
+	// When the book began tagging provider objects with book_id; an untagged object created before it predates the tag.
+	TaggingStartedAt time.Time
 }
 
 // A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.

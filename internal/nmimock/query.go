@@ -47,20 +47,35 @@ type xmlAction struct {
 }
 
 type xmlTransaction struct {
-	XMLName          xml.Name  `xml:"transaction"`
-	TransactionID    string    `xml:"transaction_id"`
-	TransactionType  string    `xml:"transaction_type"`
-	Condition        string    `xml:"condition"`
-	OrderID          string    `xml:"order_id"`
-	OrderDescription string    `xml:"order_description"`
-	CCNumber         string    `xml:"cc_number"`
-	CCBin            string    `xml:"cc_bin"`
-	CCType           string    `xml:"cc_type"`
-	AVSResponse      string    `xml:"avs_response"`
-	CSCResponse      string    `xml:"csc_response"`
-	CustomerVaultID  string    `xml:"customer_vault_id"`
-	Currency         string    `xml:"currency"`
-	Action           xmlAction `xml:"action"`
+	XMLName          xml.Name `xml:"transaction"`
+	TransactionID    string   `xml:"transaction_id"`
+	TransactionType  string   `xml:"transaction_type"`
+	Condition        string   `xml:"condition"`
+	OrderID          string   `xml:"order_id"`
+	OrderDescription string   `xml:"order_description"`
+	CCNumber         string   `xml:"cc_number"`
+	CCBin            string   `xml:"cc_bin"`
+	CCType           string   `xml:"cc_type"`
+	AVSResponse      string   `xml:"avs_response"`
+	CSCResponse      string   `xml:"csc_response"`
+	CustomerVaultID  string   `xml:"customer_vault_id"`
+	Currency         string   `xml:"currency"`
+	// MDF is merchant-defined field 20, present when the transaction carries one.
+	MDF    []xmlMDF  `xml:"merchant_defined_field"`
+	Action xmlAction `xml:"action"`
+}
+
+type xmlMDF struct {
+	ID    string `xml:"id,attr"`
+	Value string `xml:",chardata"`
+}
+
+// bookField is the merchant-defined fields of a transaction made by book.
+func bookField(book string) []xmlMDF {
+	if book == "" {
+		return nil
+	}
+	return []xmlMDF{{ID: "20", Value: book}}
 }
 
 // cardTransaction is a transaction on card c with the card fields and the
@@ -148,12 +163,15 @@ func (m *Mock) search(form url.Values) string {
 		txn := cardTransaction(s.TransactionID, condition, s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: s.Amount, ActionType: "sale", Date: s.At.UTC().Format(queryTime),
 			Success: success, Source: source, ResponseText: text, ResponseCode: code})
 		txn.OrderDescription = s.OrderDescription
+		txn.MDF = bookField(s.Book)
 		add(txn, s.At, s.ScheduleID)
 	}
 	for _, r := range m.refunds {
 		s := r.Sale
-		add(cardTransaction(r.ID, "pendingsettlement", s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: decimalCents(r.Cents), ActionType: "refund", Date: r.At.UTC().Format(queryTime),
-			Success: "1", Source: "api", ResponseText: "SUCCESS", ResponseCode: "100"}), r.At, s.ScheduleID)
+		refunded := cardTransaction(r.ID, "pendingsettlement", s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: decimalCents(r.Cents), ActionType: "refund", Date: r.At.UTC().Format(queryTime),
+			Success: "1", Source: "api", ResponseText: "SUCCESS", ResponseCode: "100"})
+		refunded.MDF = bookField(s.Book)
+		add(refunded, r.At, s.ScheduleID)
 	}
 	if !schedules {
 		for _, v := range m.validations {

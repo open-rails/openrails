@@ -69,7 +69,7 @@ var excludedColumns = map[string]string{
 	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
-	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at",
+	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at book_id tagging_started_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
 	"periodic_leases":               "kind merchant_set holder expires_at claimed_at",

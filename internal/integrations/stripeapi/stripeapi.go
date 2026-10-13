@@ -5,13 +5,17 @@
 package stripeapi
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
@@ -66,6 +70,9 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Header.Get(VersionHeader) == "" {
 		req = req.Clone(req.Context())
 		req.Header.Set(VersionHeader, APIVersion)
+	}
+	if mutating {
+		req = tagBook(req)
 	}
 	return t.transport().RoundTrip(req)
 }
@@ -156,4 +163,39 @@ func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 		Timeout:   timeout,
 		Transport: &guardTransport{readOnly: readOnly, fixture: base != nil, base: base},
 	}
+}
+
+// taggedPaths are the Stripe endpoints that create an object.
+var taggedPaths = map[string]bool{"/v1/customers": true, "/v1/subscriptions": true, "/v1/invoices": true,
+	"/v1/payment_intents": true, "/v1/products": true, "/v1/prices": true, "/v1/setup_intents": true, "/v1/refunds": true}
+
+// tagBook adds the book id to the metadata of a request creating an object.
+func tagBook(req *http.Request) *http.Request {
+	if req.Method != http.MethodPost || !taggedPaths[req.URL.Path] || req.Body == nil {
+		return req
+	}
+	mid, ok := merchant.FromContext(req.Context())
+	if !ok {
+		return req
+	}
+	id := booktag.For(mid.UUID()).ID(req.Context())
+	if id == "" {
+		return req
+	}
+	raw, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return req
+	}
+	form, err := url.ParseQuery(string(raw))
+	key := "metadata[" + booktag.StripeKey + "]"
+	if err == nil && form.Get(key) == "" {
+		form.Set(key, id)
+		raw = []byte(form.Encode())
+	}
+	req = req.Clone(req.Context())
+	req.Body = io.NopCloser(bytes.NewReader(raw))
+	req.ContentLength = int64(len(raw))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+	return req
 }

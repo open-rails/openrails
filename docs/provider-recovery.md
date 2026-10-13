@@ -32,6 +32,18 @@ operator closes it as `foreign` (see Proposals in
 [operations](operations.md)); a dismissed one still holds until it is closed
 as `foreign` too.
 
+Every provider object OpenRails creates carries the billing book's identity: NMI
+merchant-defined field 20, Stripe metadata `openrails_book`. The id belongs to the
+book, so it survives a restore and `openrails book arm`. An unknown provider
+object that no record names, and that carries this book's id, is lost: critical,
+alerted, and it holds recovery on every PSP. One that carries another book's id,
+or none and was created after the book began tagging, is foreign: low severity,
+never alerted, never held against recovery, and its webhooks answer 200 and are
+only logged. An object with no id from before tagging began is foreign on a PSP
+that moves no money and keeps the behaviour above on one that does. A catalog
+plan no price names is foreign on a non-live PSP. A record that names the object
+always keeps full handling. CCBill and Solana carry no book id.
+
 A cancel the customer or the merchant asks for is never held, by recovery or
 by readonly mode. It is recorded at once: an engine-owned subscription renews
 no more and keeps access as the cancel mode says. A provider-billed schedule

@@ -144,6 +144,8 @@ type NMITransactionEventBody struct {
 	Subscription      *NMISubscriptionRef   `json:"subscription"`
 	Action            *NMIAction            `json:"action"`
 	TransactionDetail *NMITransactionDetail `json:"transaction"`
+	// MerchantDefinedFields carry the billing book that created the transaction.
+	MerchantDefinedFields json.RawMessage `json:"merchant_defined_fields"`
 }
 
 type NMITransactionDetail struct {

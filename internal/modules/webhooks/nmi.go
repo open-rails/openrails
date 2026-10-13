@@ -1061,13 +1061,20 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 	}
 	if original == nil {
 		if originalTxnID == "" || originalTxnID == txnID {
-			// Retryable: redelivery wins once the sale materializes.
+			// Retryable: redelivery wins once the sale materializes; an object
+			// this book did not create never will.
+			if quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+				return nil
+			}
 			return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
 		}
 		var err error
 		original, err = s.PaymentService.GetByPSPTransactionID(ctx, rail, originalTxnID)
 		if err != nil {
 			if db.IsNotFound(err) {
+				if quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+					return nil
+				}
 				return fmt.Errorf("original payment %q not found for NMI refund %q", originalTxnID, txnID)
 			}
 			return fmt.Errorf("resolve original payment for NMI refund: %w", err)
@@ -1201,6 +1208,9 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		} else {
 			// The void may race the sale webhook: a retryable error (NMI
 			// redelivers on non-2xx) applies it once the sale lands.
+			if body, perr := s.parseTransactionEventBody(); perr == nil && quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+				return nil
+			}
 			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
 			return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
 		}

@@ -2454,6 +2454,67 @@ func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, arg Mar
 	return result.RowsAffected(), nil
 }
 
+const pSPForeignObjectCheck = `-- name: PSPForeignObjectCheck :one
+SELECT p.live::boolean AS live,
+    (EXISTS(SELECT 1 FROM billing.subscriptions s
+            WHERE s.merchant_id=p.merchant_id AND s.psp_id=p.id AND $1::text IS NOT NULL
+              AND s.rail_subscription_id=$1::text)
+     OR EXISTS(SELECT 1 FROM billing.payment_methods pm
+            WHERE pm.merchant_id=p.merchant_id AND pm.psp_id=p.id AND $2::text IS NOT NULL
+              AND pm.rail_customer_ref=$2::text)
+     OR EXISTS(SELECT 1 FROM billing.psp_customers pc
+            WHERE pc.merchant_id=p.merchant_id AND pc.psp_id=p.id AND $2::text IS NOT NULL
+              AND pc.remote_customer_ref=$2::text)
+     OR EXISTS(SELECT 1 FROM billing.price_psp_bindings b
+            WHERE b.merchant_id=p.merchant_id AND b.psp_id=p.id AND $3::text IS NOT NULL
+              AND b.plan_id=$3::text)
+     OR EXISTS(SELECT 1 FROM billing.payments pay
+            WHERE pay.merchant_id=p.merchant_id AND pay.psp_id=p.id AND $4::text IS NOT NULL
+              AND pay.transaction_id=$4::text)
+     OR EXISTS(SELECT 1 FROM billing.orders o
+            WHERE o.merchant_id=p.merchant_id AND $5::uuid IS NOT NULL AND o.id=$5::uuid)
+     OR EXISTS(SELECT 1 FROM billing.provider_intents i
+            WHERE i.merchant_id=p.merchant_id AND $5::uuid IS NOT NULL AND i.id=$5::uuid)
+     OR EXISTS(SELECT 1 FROM billing.subscriptions s
+            WHERE s.merchant_id=p.merchant_id AND $5::uuid IS NOT NULL AND s.id=$5::uuid)
+    )::boolean AS named
+FROM billing.psps p
+WHERE p.merchant_id=$6::uuid AND p.id=$7::uuid
+`
+
+type PSPForeignObjectCheckParams struct {
+	SubscriptionRef *string
+	CustomerRef     *string
+	PlanID          *string
+	TransactionID   *string
+	ReferenceID     *uuid.UUID
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+}
+
+type PSPForeignObjectCheckRow struct {
+	Live  bool
+	Named bool
+}
+
+// Whether the PSP moves real money, and whether anything of the merchant names a
+// provider object: a subscription or plan by id, a vault or customer
+// reference, or an order or operation by uuid. Each probe is a key lookup.
+func (q *Queries) PSPForeignObjectCheck(ctx context.Context, arg PSPForeignObjectCheckParams) (PSPForeignObjectCheckRow, error) {
+	row := q.db.QueryRow(ctx, pSPForeignObjectCheck,
+		arg.SubscriptionRef,
+		arg.CustomerRef,
+		arg.PlanID,
+		arg.TransactionID,
+		arg.ReferenceID,
+		arg.MerchantID,
+		arg.PspID,
+	)
+	var i PSPForeignObjectCheckRow
+	err := row.Scan(&i.Live, &i.Named)
+	return i, err
+}
+
 const proposalPaymentID = `-- name: ProposalPaymentID :one
 SELECT id FROM billing.payments
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid

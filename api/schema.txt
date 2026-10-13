@@ -100,6 +100,7 @@ migration 0098_order_number_sequence.up.sql sha256:3c5aa151fff3043f260bb93049685
 migration 0099_psp_rail_environments.up.sql sha256:c2591ae4f3a8157d326ba09efd431e18e3f70e20bebf3a327d6069fb10f848a0
 migration 0100_solana_treasury.up.sql sha256:e9e6beb0bd3e8dee97d57ffa4716c29ece04d21bad3d1fbd562b9f86e04c4f25
 migration 0101_solana_crankers.up.sql sha256:cfc788945c60ae49644969b1cbc339f60db59f419cc4609e24a581419869952f
+migration 0102_book_id.up.sql sha256:c339a6b0581464cfda66c8b6edc68f00d98a67c29bda0162393574a835eb3600
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -226,6 +227,8 @@ table billing.book_identity
   column schema_oid oid NOT NULL
   column armed_by text NOT NULL
   column armed_at timestamp with time zone NOT NULL DEFAULT now()
+  column book_id uuid NOT NULL DEFAULT uuidv7()
+  column tagging_started_at timestamp with time zone NOT NULL DEFAULT now()
   constraint book_identity_armed_by_check CHECK ((armed_by <> ''::text))
   constraint book_identity_pkey PRIMARY KEY (singleton)
   constraint book_identity_singleton_check CHECK (singleton)

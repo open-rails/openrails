@@ -14,7 +14,7 @@ INSERT INTO billing.reconciliation_findings (
     id, merchant_id, finding_type, subject_key, severity, status,
     rail, psp_id, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value,
-    created_at, last_seen_at, updated_at
+    evidence, created_at, last_seen_at, updated_at
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, 'catalog.' || sqlc.arg(kind)::text,
     jsonb_build_array(sqlc.arg(psp_id)::uuid::text, sqlc.arg(openrails_resource_type)::text,
@@ -24,6 +24,11 @@ INSERT INTO billing.reconciliation_findings (
     sqlc.arg(openrails_resource_type)::text, sqlc.narg(openrails_resource_id)::text,
     sqlc.narg(external_resource_id)::text, sqlc.narg(field)::text,
     sqlc.narg(openrails_value)::text, sqlc.narg(external_value)::text,
+    -- An orphan names no local object and a plan cannot carry the book id, so
+    -- on a non-live PSP it is foreign (pre-tag).
+    CASE WHEN sqlc.arg(kind)::text LIKE 'orphan\_in\_%'
+          AND EXISTS(SELECT 1 FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid AND NOT p.live)
+         THEN '{"quiet_foreign":true,"provenance":"pre_tag"}'::jsonb END,
     sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_at)::timestamptz
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
@@ -34,6 +39,7 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     status = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored' ELSE 'reconcile_required' END,
     resolved_at = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at END,
     resolution = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution END,
+    evidence = EXCLUDED.evidence,
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = EXCLUDED.updated_at
 WHERE EXCLUDED.last_seen_at >= billing.reconciliation_findings.last_seen_at

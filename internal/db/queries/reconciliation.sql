@@ -342,6 +342,36 @@ SELECT (EXISTS(SELECT 1 FROM billing.subscriptions s
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = sqlc.arg(id)::uuid AND f.finding_type LIKE 'pull.%';
 
+-- name: PSPForeignObjectCheck :one
+-- Whether the PSP moves real money, and whether anything of the merchant names a
+-- provider object: a subscription or plan by id, a vault or customer
+-- reference, or an order or operation by uuid. Each probe is a key lookup.
+SELECT p.live::boolean AS live,
+    (EXISTS(SELECT 1 FROM billing.subscriptions s
+            WHERE s.merchant_id=p.merchant_id AND s.psp_id=p.id AND sqlc.narg(subscription_ref)::text IS NOT NULL
+              AND s.rail_subscription_id=sqlc.narg(subscription_ref)::text)
+     OR EXISTS(SELECT 1 FROM billing.payment_methods pm
+            WHERE pm.merchant_id=p.merchant_id AND pm.psp_id=p.id AND sqlc.narg(customer_ref)::text IS NOT NULL
+              AND pm.rail_customer_ref=sqlc.narg(customer_ref)::text)
+     OR EXISTS(SELECT 1 FROM billing.psp_customers pc
+            WHERE pc.merchant_id=p.merchant_id AND pc.psp_id=p.id AND sqlc.narg(customer_ref)::text IS NOT NULL
+              AND pc.remote_customer_ref=sqlc.narg(customer_ref)::text)
+     OR EXISTS(SELECT 1 FROM billing.price_psp_bindings b
+            WHERE b.merchant_id=p.merchant_id AND b.psp_id=p.id AND sqlc.narg(plan_id)::text IS NOT NULL
+              AND b.plan_id=sqlc.narg(plan_id)::text)
+     OR EXISTS(SELECT 1 FROM billing.payments pay
+            WHERE pay.merchant_id=p.merchant_id AND pay.psp_id=p.id AND sqlc.narg(transaction_id)::text IS NOT NULL
+              AND pay.transaction_id=sqlc.narg(transaction_id)::text)
+     OR EXISTS(SELECT 1 FROM billing.orders o
+            WHERE o.merchant_id=p.merchant_id AND sqlc.narg(reference_id)::uuid IS NOT NULL AND o.id=sqlc.narg(reference_id)::uuid)
+     OR EXISTS(SELECT 1 FROM billing.provider_intents i
+            WHERE i.merchant_id=p.merchant_id AND sqlc.narg(reference_id)::uuid IS NOT NULL AND i.id=sqlc.narg(reference_id)::uuid)
+     OR EXISTS(SELECT 1 FROM billing.subscriptions s
+            WHERE s.merchant_id=p.merchant_id AND sqlc.narg(reference_id)::uuid IS NOT NULL AND s.id=sqlc.narg(reference_id)::uuid)
+    )::boolean AS named
+FROM billing.psps p
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid;
+
 -- name: ResolveProposal :execrows
 -- approved and superseded close as fixed, dismissed and foreign as ignored (a
 -- dismissed proposal is raised again only on other evidence). The execution or

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/booktag"
 	"io"
 	"net/http"
 	"net/url"
@@ -293,8 +294,10 @@ type stripeSubscriptionJSON struct {
 			} `json:"price"`
 		} `json:"data"`
 	} `json:"items"`
-	DefaultPaymentMethod json.RawMessage `json:"default_payment_method"`
-	LatestInvoice        json.RawMessage `json:"latest_invoice"`
+	DefaultPaymentMethod json.RawMessage   `json:"default_payment_method"`
+	LatestInvoice        json.RawMessage   `json:"latest_invoice"`
+	Created              int64             `json:"created"`
+	Metadata             map[string]string `json:"metadata"`
 }
 
 type stripePaymentMethodJSON struct {
@@ -353,7 +356,11 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 		RawStatus:          s.Status,
 		CustomerID:         s.Customer,
 		Currency:           strings.ToUpper(s.Currency),
+		BookID:             strings.TrimSpace(s.Metadata[booktag.StripeKey]),
 		Raw:                obj,
+	}
+	if s.Created > 0 {
+		sub.CreatedAt = time.Unix(s.Created, 0).UTC()
 	}
 	periodStart, periodEnd := s.CurrentPeriodStart, s.CurrentPeriodEnd
 	if len(s.Items.Data) > 0 {
@@ -399,15 +406,16 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 
 func normalizeStripeCharge(obj json.RawMessage) RemoteTransaction {
 	var c struct {
-		ID             string `json:"id"`
-		Amount         int64  `json:"amount"`
-		Currency       string `json:"currency"`
-		Created        int64  `json:"created"`
-		Paid           bool   `json:"paid"`
-		Status         string `json:"status"` // succeeded | pending | failed
-		Captured       bool   `json:"captured"`
-		FailureCode    string `json:"failure_code"`
-		FailureMessage string `json:"failure_message"`
+		ID             string            `json:"id"`
+		Amount         int64             `json:"amount"`
+		Currency       string            `json:"currency"`
+		Created        int64             `json:"created"`
+		Paid           bool              `json:"paid"`
+		Status         string            `json:"status"` // succeeded | pending | failed
+		Captured       bool              `json:"captured"`
+		FailureCode    string            `json:"failure_code"`
+		FailureMessage string            `json:"failure_message"`
+		Metadata       map[string]string `json:"metadata"`
 	}
 	_ = json.Unmarshal(obj, &c)
 
@@ -417,6 +425,7 @@ func normalizeStripeCharge(obj json.RawMessage) RemoteTransaction {
 		Success:       c.Status == "succeeded",
 		AmountCents:   c.Amount,
 		Currency:      strings.ToUpper(c.Currency),
+		BookID:        strings.TrimSpace(c.Metadata[booktag.StripeKey]),
 		Raw:           obj,
 	}
 	if c.Created > 0 {
@@ -434,11 +443,12 @@ func normalizeStripeCharge(obj json.RawMessage) RemoteTransaction {
 
 func normalizeStripeRefund(obj json.RawMessage) RemoteTransaction {
 	var r struct {
-		ID       string `json:"id"`
-		Amount   int64  `json:"amount"`
-		Currency string `json:"currency"`
-		Created  int64  `json:"created"`
-		Status   string `json:"status"` // succeeded | pending | failed | canceled
+		ID       string            `json:"id"`
+		Amount   int64             `json:"amount"`
+		Currency string            `json:"currency"`
+		Created  int64             `json:"created"`
+		Status   string            `json:"status"` // succeeded | pending | failed | canceled
+		Metadata map[string]string `json:"metadata"`
 	}
 	_ = json.Unmarshal(obj, &r)
 
@@ -448,6 +458,7 @@ func normalizeStripeRefund(obj json.RawMessage) RemoteTransaction {
 		Success:       r.Status == "succeeded",
 		AmountCents:   r.Amount,
 		Currency:      strings.ToUpper(r.Currency),
+		BookID:        strings.TrimSpace(r.Metadata[booktag.StripeKey]),
 		Raw:           obj,
 	}
 	if r.Created > 0 {

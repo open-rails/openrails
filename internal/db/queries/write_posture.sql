@@ -31,3 +31,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid FOR UPDATE;
 
 -- name: DeleteWritePosture :exec
 DELETE FROM billing.merchant_write_posture WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: GetBookTag :one
+SELECT book_id, tagging_started_at FROM billing.book_identity WHERE singleton;

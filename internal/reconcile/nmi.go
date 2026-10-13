@@ -108,6 +108,8 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 type nmiCustomerIdentity struct {
 	Email    string
 	Username string
+	// Book is the billing book the vault carries.
+	Book string
 }
 
 func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiCustomerIdentity, now time.Time) ([]RemoteSubscription, error) {
@@ -166,9 +168,14 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
 		}
 		sub.Paused = nmiFlag(s.PausedSubscription)
+		sub.BookID = s.BookID()
+		sub.CreatedAt = nmiDate(s.StartDate)
 		if who, ok := identity[railCustomerRef]; ok {
 			sub.Email = who.Email
 			sub.Username = who.Username
+			if sub.BookID == "" {
+				sub.BookID = who.Book
+			}
 		}
 		if s.Plan != nil {
 			sub.PlanID = strings.TrimSpace(s.Plan.ID)
@@ -360,6 +367,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 			// Most NMI reports omit schedule identity; preserve it when present
 			// instead of weakening exact attribution into a vault match.
 			SubscriptionID: strings.TrimSpace(t.SubscriptionID),
+			BookID:         t.BookID(),
 			Type:           txnType,
 			Success:        success,
 			Currency:       strings.TrimSpace(t.Currency),
@@ -469,6 +477,7 @@ func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]
 		identity[entry.RailCustomerRef] = nmiCustomerIdentity{
 			Email:    strings.TrimSpace(primary.Email),
 			Username: strings.TrimSpace(strings.TrimSpace(primary.FirstName) + " " + strings.TrimSpace(primary.LastName)),
+			Book:     c.BookID(),
 		}
 		// One entry per card, primary first: a multi-card vault's other
 		// cards are compared on their own billing ids.
@@ -510,4 +519,15 @@ func cardLast4(masked string) string {
 func nmiFlag(v any) bool {
 	text := strings.TrimSpace(fmt.Sprint(v))
 	return text == "1" || strings.EqualFold(text, "true")
+}
+
+// nmiDate reads a v5 date (a day, or a full time); zero when it is neither.
+func nmiDate(s string) time.Time {
+	s = strings.TrimSpace(s)
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }

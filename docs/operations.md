@@ -581,6 +581,14 @@ openrails proposals runs    --merchant=<slug>
 
 `ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
 
+### Foreign provider objects
+
+A gateway shared with another deployment shows its sales and schedules. A pull
+raises findings about an unknown object only at full severity when the object
+carries this book's id (see [provider recovery](provider-recovery.md)); otherwise
+the finding is low, `evidence.quiet_foreign` is true, and it neither alerts nor
+holds recovery.
+
 ### `--prune` is reversible, and refuses uncertainty
 
 A prune acts on ABSENCE — "the provider did not list this row" — the weakest

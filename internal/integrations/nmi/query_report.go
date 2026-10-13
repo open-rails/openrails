@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/decline"
 )
 
@@ -31,8 +32,10 @@ type QueryTransaction struct {
 	CustomerID       string `xml:"customerid"`
 	CustomerVaultID  string `xml:"customer_vault_id"`
 	Email            string `xml:"email"`
-	Condition        string `xml:"condition"`
-	Currency         string `xml:"currency"`
+	// MerchantDefinedFields are the merchant-defined fields, by id.
+	MerchantDefinedFields []MerchantDefinedField `xml:"merchant_defined_field"`
+	Condition             string                 `xml:"condition"`
+	Currency              string                 `xml:"currency"`
 	// CCNumber is masked (first six and last four digits).
 	CCNumber    string        `xml:"cc_number"`
 	CCBin       string        `xml:"cc_bin"`
@@ -40,6 +43,22 @@ type QueryTransaction struct {
 	AVSResponse string        `xml:"avs_response"`
 	CSCResponse string        `xml:"csc_response"`
 	Actions     []QueryAction `xml:"action"`
+}
+
+// MerchantDefinedField is one merchant-defined field of a query report.
+type MerchantDefinedField struct {
+	ID    string `xml:"id,attr"`
+	Value string `xml:",chardata"`
+}
+
+// BookID is the billing book the transaction carries, "" for none.
+func (t QueryTransaction) BookID() string {
+	for _, f := range t.MerchantDefinedFields {
+		if strings.TrimSpace(f.ID) == booktag.NMIFieldID {
+			return strings.TrimSpace(f.Value)
+		}
+	}
+	return ""
 }
 
 // QueryAction is one action on a transaction: a sale, validate, refund, void.

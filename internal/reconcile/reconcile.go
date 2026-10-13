@@ -127,6 +127,11 @@ type RemoteSubscription struct {
 	// it states none.
 	IntervalDays   int `json:"interval_days,omitempty"`
 	IntervalMonths int `json:"interval_months,omitempty"`
+	// BookID is the billing book that created the schedule, as the object
+	// carries it; empty when it carries none. CreatedAt is when the provider
+	// says it was made, zero when unknown.
+	BookID    string    `json:"book_id,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
 	// Raw preserves the provider's record for forensics (original XML element,
 	// CSV row, JSON object, or decoded account state).
 	Raw json.RawMessage `json:"raw,omitempty"`
@@ -146,9 +151,12 @@ type RemoteTransaction struct {
 	TransactionID string `json:"transaction_id"`
 	// SubscriptionID links to the rail subscription when the provider
 	// exposes the linkage; empty otherwise (see fetcher notes).
-	SubscriptionID string          `json:"subscription_id,omitempty"`
-	Type           TransactionType `json:"type"`
-	Success        bool            `json:"success"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	// BookID is the billing book that created the transaction, as it carries
+	// it; empty when it carries none.
+	BookID  string          `json:"book_id,omitempty"`
+	Type    TransactionType `json:"type"`
+	Success bool            `json:"success"`
 	// AmountCents is in rail minor units of Currency. Zero for Solana (base
 	// units, preserved in Raw) and when the amount is not exact in Currency.
 	// Currency is the provider's verbatim; empty when it reports none (CCBill

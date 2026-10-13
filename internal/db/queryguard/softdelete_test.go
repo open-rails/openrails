@@ -36,6 +36,7 @@ var allow = map[string]string{
 	"GetInitialMembershipForArchive":        "archive validates retained membership identity including later tombstones",
 	"ListObservedInitialMembershipPayments": "archive validates observed first-payment history including tombstones",
 	"ProposalSubjectIsLocal":                "a tombstoned subscription still names the provider schedule, which therefore is not foreign",
+	"PSPForeignObjectCheck":                 "a tombstoned subscription or payment still names the provider object, which therefore is not foreign",
 	"MerchantHasActivity":                   "retirement is only for never-used merchants; tombstoned rows disqualify",
 	"ProductHoldsReferences":                "a tombstoned subscription or access still referred to the product, which therefore is never deleted",
 	"PricesHoldReferences":                  "a tombstoned payment, subscription or order line still referred to the price, which therefore is never deleted",

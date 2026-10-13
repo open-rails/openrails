@@ -29,7 +29,7 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 		return queryScopeErr
 	}
 
-	if rec.Status != reconcile.FindingStatusRequiresReview {
+	if rec.Status != reconcile.FindingStatusRequiresReview || rec.Quiet() {
 		return nil
 	}
 	if rec.NotifiedAt != nil && reconcile.SeverityRank(rec.Severity) >= reconcile.SeverityRank(reconcile.Severity(rec.NotifiedSeverity)) {

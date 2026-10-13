@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/booktag"
 	"io"
 	"strings"
 	"time"
@@ -170,17 +171,21 @@ type stripeRefund struct {
 	Amount        int64  `json:"amount"`
 	Currency      string `json:"currency"`
 	Status        string `json:"status"`
+	// Metadata carries the billing book that created the refund (or, on a
+	// charge.refunded event, the charge).
+	Metadata map[string]string `json:"metadata"`
 }
 
 type stripeCharge struct {
-	ID             string `json:"id"`
-	PaymentIntent  string `json:"payment_intent"`
-	Customer       string `json:"customer"`
-	Invoice        string `json:"invoice"`
-	PaymentMethod  string `json:"payment_method"`
-	Amount         int64  `json:"amount"`
-	AmountRefunded int64  `json:"amount_refunded"`
-	Currency       string `json:"currency"`
+	ID             string            `json:"id"`
+	PaymentIntent  string            `json:"payment_intent"`
+	Customer       string            `json:"customer"`
+	Invoice        string            `json:"invoice"`
+	PaymentMethod  string            `json:"payment_method"`
+	Amount         int64             `json:"amount"`
+	AmountRefunded int64             `json:"amount_refunded"`
+	Metadata       map[string]string `json:"metadata"`
+	Currency       string            `json:"currency"`
 	// payment_method_details.card carries the brand/last4/exp for the card that
 	// was actually charged. This is the no-fetch source for the card snapshot.
 	PaymentMethodDetails struct {
@@ -856,6 +861,9 @@ func (s *StripeWebhookService) handleChargeRefunded(ctx context.Context, obj jso
 		if strings.TrimSpace(refund.PaymentIntent) == "" {
 			refund.PaymentIntent = charge.PaymentIntent
 		}
+		if refund.Metadata[booktag.StripeKey] == "" {
+			refund.Metadata = charge.Metadata
+		}
 		if err := s.recordStripeRefund(ctx, refund); err != nil {
 			return err
 		}
@@ -893,6 +901,9 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 	if original == nil {
 		var err error
 		original, err = s.lookupStripeOriginalPayment(ctx, refund.Charge, refund.PaymentIntent)
+		if errors.Is(err, errStripeOriginalUnknown) && quietUnknownObject(ctx, s.DB, refund.Metadata[booktag.StripeKey], refundID) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1228,6 +1239,8 @@ func stripeDisputeShouldReverse(eventType, status string) bool {
 	}
 }
 
+var errStripeOriginalUnknown = errors.New("stripe original payment not found for charge/payment_intent")
+
 func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, chargeID, paymentIntentID string) (*models.Payment, error) {
 	for _, candidate := range []string{strings.TrimSpace(chargeID), strings.TrimSpace(paymentIntentID)} {
 		if candidate == "" {
@@ -1241,7 +1254,7 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 			return nil, fmt.Errorf("lookup stripe original payment: %w", err)
 		}
 	}
-	return nil, fmt.Errorf("stripe original payment not found for charge/payment_intent")
+	return nil, errStripeOriginalUnknown
 }
 
 func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []stripeInvoiceLineItem) (uuid.UUID, *models.Price, error) {

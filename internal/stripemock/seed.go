@@ -280,3 +280,13 @@ func (m *Mock) Detach(pm string) {
 	defer m.mu.Unlock()
 	m.methods[pm]["customer"] = nil
 }
+
+// TagSubscription sets a subscription's metadata key and creation time, as an
+// object another system made carries them.
+func (m *Mock) TagSubscription(id, key, value string, created time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.subs[id]
+	s["metadata"] = map[string]string{key: value}
+	s["created"] = created.Unix()
+}

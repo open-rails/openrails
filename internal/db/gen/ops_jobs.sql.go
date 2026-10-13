@@ -190,7 +190,7 @@ INSERT INTO billing.reconciliation_findings (
     id, merchant_id, finding_type, subject_key, severity, status,
     rail, psp_id, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value,
-    created_at, last_seen_at, updated_at
+    evidence, created_at, last_seen_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, 'catalog.' || $3::text,
     jsonb_build_array($4::uuid::text, $5::text,
@@ -200,6 +200,11 @@ INSERT INTO billing.reconciliation_findings (
     $5::text, $6::text,
     $7::text, $8::text,
     $10::text, $11::text,
+    -- An orphan names no local object and a plan cannot carry the book id, so
+    -- on a non-live PSP it is foreign (pre-tag).
+    CASE WHEN $3::text LIKE 'orphan\_in\_%'
+          AND EXISTS(SELECT 1 FROM billing.psps p WHERE p.merchant_id = $2::uuid AND p.id = $4::uuid AND NOT p.live)
+         THEN '{"quiet_foreign":true,"provenance":"pre_tag"}'::jsonb END,
     $12::timestamptz, $12::timestamptz, $12::timestamptz
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
@@ -210,6 +215,7 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     status = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored' ELSE 'reconcile_required' END,
     resolved_at = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at END,
     resolution = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution END,
+    evidence = EXCLUDED.evidence,
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = EXCLUDED.updated_at
 WHERE EXCLUDED.last_seen_at >= billing.reconciliation_findings.last_seen_at

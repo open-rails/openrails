@@ -54,7 +54,8 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
    AND f.status IN ('reconcile_required','requires_review','ignored')
    AND f.finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
      'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift')
-   AND f.resolution IS DISTINCT FROM 'foreign')::boolean
+   AND f.resolution IS DISTINCT FROM 'foreign'
+   AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean
 `
 
 type PSPHasUnresolvedFinancialFindingsParams struct {
@@ -64,7 +65,8 @@ type PSPHasUnresolvedFinancialFindingsParams struct {
 
 // Ignore silences an operator notification; it does not settle a receipt. A
 // provider record resolved as foreign is settled: Foreign proved at resolution
-// that nothing of the merchant names it (ProposalSubjectIsLocal).
+// that nothing of the merchant names it (ProposalSubjectIsLocal); a non-live
+// PSP's unmatched object is settled when raised (evidence.quiet_foreign).
 func (q *Queries) PSPHasUnresolvedFinancialFindings(ctx context.Context, arg PSPHasUnresolvedFinancialFindingsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, pSPHasUnresolvedFinancialFindings, arg.MerchantID, arg.PspID)
 	var column_1 bool
