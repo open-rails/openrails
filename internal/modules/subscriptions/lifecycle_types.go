@@ -136,6 +136,10 @@ type CancelMembershipParams struct {
 	// RefuseOwnedRenewal refuses a customer or merchant cancel of an engine
 	// membership while an accepted renewal payment is unresolved.
 	RefuseOwnedRenewal bool
+	// Requested is a cancel the customer or the merchant asked for. It is
+	// their decision, not one drawn from provider evidence, so neither
+	// provider recovery nor a readonly posture holds it.
+	Requested bool
 }
 
 type FailMembershipParams struct {

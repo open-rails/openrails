@@ -934,6 +934,7 @@ pkg openrails/billing, const ProposalAlreadyResolved ProposalOutcome = "already_
 pkg openrails/billing, const ProposalApproved ProposalOutcome = "approved"
 pkg openrails/billing, const ProposalDismissed ProposalOutcome = "dismissed"
 pkg openrails/billing, const ProposalFailed ProposalOutcome = "failed"
+pkg openrails/billing, const ProposalForeign ProposalOutcome = "foreign"
 pkg openrails/billing, const ProposalHeld ProposalOutcome = "held"
 pkg openrails/billing, const ProposalSourcePull ProposalSource = "pull"
 pkg openrails/billing, const ProposalSourceVerification ProposalSource = "verification"

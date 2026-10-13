@@ -214,7 +214,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 				return false, apperr.Conflictf("subscription changed before cancellation; retry")
 			}
 			lifecycle := NewSubscriptionLifecycleService(txDB, nil, nil, nil, nil, nil, s.Clock())
-			_, err = lifecycle.CancelMembershipTx(ctx, txDB, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess, RefuseOwnedRenewal: true})
+			_, err = lifecycle.CancelMembershipTx(ctx, txDB, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess, RefuseOwnedRenewal: true, Requested: true})
 			if err != nil {
 				return false, err
 			}

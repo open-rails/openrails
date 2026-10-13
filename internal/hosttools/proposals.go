@@ -139,6 +139,13 @@ func ProposalsDismiss(ctx context.Context, opts ProposalsOptions, set ProposalSe
 	return resolveProposals(ctx, opts, set, notes, (*proposals.Executor).Dismiss)
 }
 
+// ProposalsForeign resolves a set as provider records that are not the
+// merchant's obligation; notes are required, and a record anything local names
+// is refused.
+func ProposalsForeign(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string) error {
+	return resolveProposals(ctx, opts, set, notes, (*proposals.Executor).Foreign)
+}
+
 func resolveProposals(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string,
 	do func(*proposals.Executor, context.Context, proposals.Request) (billing.ProposalResults, error)) error {
 	return withProposals(ctx, opts, func(ctx context.Context, database *db.DB, x *proposals.Executor) error {

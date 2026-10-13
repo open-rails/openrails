@@ -169,6 +169,9 @@ const (
 	ProposalApproved ProposalOutcome = "approved"
 	// ProposalDismissed: closed without applying.
 	ProposalDismissed ProposalOutcome = "dismissed"
+	// ProposalForeign: closed as a provider record that is not this
+	// merchant's obligation; it no longer holds provider recovery.
+	ProposalForeign ProposalOutcome = "foreign"
 	// ProposalAlreadyResolved: resolved earlier; its resolver and time are on
 	// the finding.
 	ProposalAlreadyResolved ProposalOutcome = "already_resolved"

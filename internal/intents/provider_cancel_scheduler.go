@@ -87,7 +87,7 @@ func (s *ProviderCancelScheduler) ScheduleProviderCancel(ctx context.Context, su
 		return s.enqueue(ctx, sub, TypeCCBillCancelSubscription, CCBillCancelIdempotencyKey(sub.ID),
 			CCBillCancelPayload{UserID: sub.CustomerID.String(), RailSubscriptionID: sub.RailSubscriptionID}, now)
 	default:
-		return s.enqueue(ctx, sub, TypeStripeCancelSubscription, StripeCancelIdempotencyKey(sub.ID),
+		return s.enqueue(ctx, sub, TypeStripeCancelSubscription, StripeCancelIdempotencyKey(sub.ID, sub.CanceledAt),
 			StripeCancelPayload{RailSubscriptionID: sub.RailSubscriptionID}, now)
 	}
 }

@@ -75,12 +75,15 @@ SET watermark_at=EXCLUDED.watermark_at,updated_at=now()
 WHERE billing.psp_refresh_watermarks.watermark_at<EXCLUDED.watermark_at;
 
 -- name: PSPHasUnresolvedFinancialFindings :one
--- Ignore silences an operator notification; it does not settle a receipt.
-SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings
- WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-   AND status IN ('reconcile_required','requires_review','ignored')
-   AND finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
-     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift'))::boolean;
+-- Ignore silences an operator notification; it does not settle a receipt. A
+-- provider record resolved as foreign is settled: Foreign proved at resolution
+-- that nothing of the merchant names it (ProposalSubjectIsLocal).
+SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
+ WHERE f.merchant_id=sqlc.arg(merchant_id)::uuid AND f.psp_id=sqlc.arg(psp_id)::uuid
+   AND f.status IN ('reconcile_required','requires_review','ignored')
+   AND f.finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
+     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift')
+   AND f.resolution IS DISTINCT FROM 'foreign')::boolean;
 
 -- name: ResumeProviderRecoveryHeldOperations :many
 -- Only recovery delays are expedited; issuer retry dates and live leases stand.

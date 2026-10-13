@@ -26,6 +26,23 @@ Issuer retry dates and monthly collection cadence remain unchanged. A verifier
 that commits its hold just after completion rechecks readiness after commit, so
 its live lease cannot strand the operation on the former recovery delay.
 
+A financial finding about a provider schedule that is not this merchant's
+obligation (another environment's on a shared gateway) settles only when an
+operator closes it as `foreign` (see Proposals in
+[operations](operations.md)); a dismissed one still holds.
+
+A cancel the customer or the merchant asks for is never held, by recovery or
+by readonly mode. It is recorded at once: an engine-owned subscription renews
+no more and keeps access as the cancel mode says. A provider-billed schedule
+(an NMI schedule, a Stripe-run subscription) is stopped by a durable provider
+intent committed with the cancel, which waits for recovery and for provider
+writes, and is then sent once. Until the provider confirms the stop, the
+canceled subscription keeps `deletion_scheduled_at`. A provider charge after
+the recorded cancel renews nothing: it raises `life.charge_after_cancel`, and
+its refund, which moves money, waits for recovery too. A renewal recovery held
+before it was sent does not refuse the cancel, and never charges the canceled
+subscription.
+
 Observation and application use separate domains in `psp_refresh_watermarks`:
 
 - `events` records provider-window observation, including old advisory runs.

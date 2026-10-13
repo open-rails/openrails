@@ -18,6 +18,7 @@ import (
 //	openrails proposals approve --merchant M <id>… --notes N
 //	openrails proposals approve --merchant M --psp KEY --kind K --expect N --notes N
 //	openrails proposals dismiss --merchant M <id>… --notes N
+//	openrails proposals foreign --merchant M <id>… --notes N
 //	openrails proposals runs    --merchant M
 //
 // A filtered approve prints the set and applies it only when --expect equals
@@ -104,7 +105,7 @@ func newProposalsCmd() *cobra.Command {
 		}
 		filters(c)
 		c.Flags().IntVar(&expect, "expect", 0, "Typed confirmation of a filtered set's size")
-		c.Flags().StringVar(&notes, "notes", "", "Why (required to dismiss)")
+		c.Flags().StringVar(&notes, "notes", "", "Why (required to dismiss or close as foreign)")
 		return c
 	}
 	approve := resolveCmd("approve [<id>…]", "Approve proposals: each applies in its own transaction",
@@ -114,6 +115,10 @@ func newProposalsCmd() *cobra.Command {
 	dismiss := resolveCmd("dismiss [<id>…]", "Dismiss proposals without applying them",
 		func(c *cobra.Command, opts hosttools.ProposalsOptions, s hosttools.ProposalSet) error {
 			return hosttools.ProposalsDismiss(c.Context(), opts, s, notes)
+		})
+	foreign := resolveCmd("foreign [<id>…]", "Close provider schedules that are not this merchant's (another environment's on a shared gateway); they stop holding provider recovery",
+		func(c *cobra.Command, opts hosttools.ProposalsOptions, s hosttools.ProposalSet) error {
+			return hosttools.ProposalsForeign(c.Context(), opts, s, notes)
 		})
 
 	runs := &cobra.Command{
@@ -128,6 +133,6 @@ func newProposalsCmd() *cobra.Command {
 	}
 	runs.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")
 
-	cmd.AddCommand(list, show, approve, dismiss, runs)
+	cmd.AddCommand(list, show, approve, dismiss, foreign, runs)
 	return cmd
 }

@@ -1422,6 +1422,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		RevokeReason:  revokeReason,
 		RevokeAsOf:    now,
 		RevokeSources: revokeSources,
+		Requested:     params.Requested,
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("Failed to apply local cancellation")
 		return nil, err
@@ -1478,6 +1479,7 @@ type LocalCancellation struct {
 	RevokeReason  models.AccessRevokeReason // entitlement revoke_reason (used only when RevokeSources non-empty)
 	RevokeAsOf    time.Time                 // instant entitlements are revoked as-of (converge-not-replay)
 	RevokeSources []models.AccessSourceType // entitlement sources to revoke; empty = revoke nothing
+	Requested     bool                      // the customer or merchant asked: never held by provider recovery
 }
 
 // ApplyLocalCancellation is the one definition of a cancel's local state: the
@@ -1492,8 +1494,10 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		return fmt.Errorf("apply local cancellation: db handle and subscription are required")
 	}
 	now := s.now()
-	if err := s.CheckCancellationRecovery(ctx, dbb, sub, now); err != nil {
-		return err
+	if !c.Requested {
+		if err := s.CheckCancellationRecovery(ctx, dbb, sub, now); err != nil {
+			return err
+		}
 	}
 	endedAt := c.EndedAt
 	// canceled_at never exceeds ended_at (a CHECK constraint), and an immediate

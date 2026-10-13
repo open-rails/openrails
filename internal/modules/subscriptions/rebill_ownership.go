@@ -80,8 +80,17 @@ func refuseSubmittedRenewal(ctx context.Context, d *db.DB, sub *models.Subscript
 			return ErrRenewalInProgress
 		}
 	}
-	if _, submitted := evidence["submitted_at"]; submitted || row.Status == "unknown_needs_verify" {
+	_, submitted := evidence["submitted_at"]
+	if submitted || row.Status == "unknown_needs_verify" && !recoveryHeld(evidence) {
 		return ErrRenewalInProgress
 	}
 	return nil
+}
+
+// recoveryHeld: provider recovery held the renewal before this book sent it.
+// It stays held; its fence later refuses the canceled membership, and a receipt
+// a lost book sent is still recovered as a charge after cancellation.
+func recoveryHeld(evidence map[string]json.RawMessage) bool {
+	var held bool
+	return json.Unmarshal(evidence["recovery_held"], &held) == nil && held
 }

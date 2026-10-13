@@ -35,6 +35,10 @@ func revokeStripeMembership(ctx context.Context, database *db.DB, lc *subscripti
 		if err != nil {
 			return err
 		}
+		// The canceled row keys the remote cancel, so a redelivery finds it.
+		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subID); err != nil {
+			return fmt.Errorf("reload stripe subscription %s: %w", subID, err)
+		}
 		if err := intents.NewProviderCancelScheduler(d, nil, intents.OriginProvider, reason).ScheduleProviderCancel(ctx, sub, timeutil.FirstClock(lc.Clock()).Now()); err != nil {
 			return fmt.Errorf("queue stripe cancel for %s: %w", subID, err)
 		}

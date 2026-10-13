@@ -49,11 +49,12 @@ func (q *Queries) GetPSPCompletedRefreshWatermark(ctx context.Context, arg GetPS
 }
 
 const pSPHasUnresolvedFinancialFindings = `-- name: PSPHasUnresolvedFinancialFindings :one
-SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings
- WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-   AND status IN ('reconcile_required','requires_review','ignored')
-   AND finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
-     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift'))::boolean
+SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
+ WHERE f.merchant_id=$1::uuid AND f.psp_id=$2::uuid
+   AND f.status IN ('reconcile_required','requires_review','ignored')
+   AND f.finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
+     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift')
+   AND f.resolution IS DISTINCT FROM 'foreign')::boolean
 `
 
 type PSPHasUnresolvedFinancialFindingsParams struct {
@@ -61,7 +62,9 @@ type PSPHasUnresolvedFinancialFindingsParams struct {
 	PspID      uuid.UUID
 }
 
-// Ignore silences an operator notification; it does not settle a receipt.
+// Ignore silences an operator notification; it does not settle a receipt. A
+// provider record resolved as foreign is settled: Foreign proved at resolution
+// that nothing of the merchant names it (ProposalSubjectIsLocal).
 func (q *Queries) PSPHasUnresolvedFinancialFindings(ctx context.Context, arg PSPHasUnresolvedFinancialFindingsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, pSPHasUnresolvedFinancialFindings, arg.MerchantID, arg.PspID)
 	var column_1 bool

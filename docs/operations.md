@@ -224,7 +224,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
-| `proposals list\|show\|approve\|dismiss\|runs` | review the changes provider reads propose; approve or dismiss them; list approval runs — see "Proposals" |
+| `proposals list\|show\|approve\|dismiss\|foreign\|runs` | review the changes provider reads propose; approve, dismiss or close them as foreign; list approval runs — see "Proposals" |
 | `prune list` | inspect the destructive runs a `--prune` opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
@@ -538,6 +538,7 @@ openrails proposals show    --merchant=<slug> <fnd_id>
 openrails proposals approve --merchant=<slug> <fnd_id>… [--notes=N]
 openrails proposals approve --merchant=<slug> --psp=KEY --kind=record_charge --expect=N [--notes=N]
 openrails proposals dismiss --merchant=<slug> <fnd_id>… --notes=N
+openrails proposals foreign --merchant=<slug> <fnd_id>… --notes=N
 openrails proposals runs    --merchant=<slug>
 ```
 
@@ -554,7 +555,14 @@ openrails proposals runs    --merchant=<slug>
   who approved; `undo-run --run <id>` reverses its lifecycle and access
   changes. Recorded money facts and provider writes already sent stay.
 - A dismissed proposal comes back only when a read yields other provider
-  evidence.
+  evidence. Dismissing silences it; a financial `pull.*` finding still holds
+  [provider recovery](provider-recovery.md).
+- `foreign` closes a `pull.subscription.missing` schedule that is not this
+  merchant's obligation, such as another environment's on a shared gateway.
+  It is refused while a subscription of the PSP has the schedule's id, a
+  payment method or PSP customer of the PSP has its customer reference, or
+  the read matched it to a customer by email. A foreign schedule no longer
+  holds provider recovery.
 
 `ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
 

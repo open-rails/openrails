@@ -93,6 +93,7 @@ migration 0089_order_pay_url.up.sql sha256:abca3f1b8b99066f2c0fa935647beff099636
 migration 0090_order_attempts_comment.up.sql sha256:269de11c0760f357348370ec74bd786a6cda6c072f0a9370735e16fe06d79aef
 migration 0091_destructive_kind_account_deletion.up.sql sha256:fd108701f47bbc8346af2d5865a3e623d1299da8b64885b4c938f65540657414
 migration 0093_price_psps.up.sql sha256:372948218fe67c2478a5397afbb7ed7bb83cbc25e305611d57efa4ba24eeab89
+migration 0095_foreign_findings.up.sql sha256:94005a83ed9701f583e0eee453b6224f960dab285295b4f0b4c4ce950a022c82
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2303,9 +2304,9 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_last_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint reconciliation_findings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint reconciliation_findings_pkey PRIMARY KEY (merchant_id, id)
-  constraint reconciliation_findings_proposal_resolution_check CHECK (((resolution IS NULL) OR (resolution <> ALL (ARRAY['approved'::text, 'dismissed'::text, 'superseded'::text])) OR (finding_type ~~ 'pull.%'::text)))
+  constraint reconciliation_findings_proposal_resolution_check CHECK (((resolution IS NULL) OR (resolution <> ALL (ARRAY['approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text])) OR (finding_type ~~ 'pull.%'::text)))
   constraint reconciliation_findings_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
-  constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text]))))
+  constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
   constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))

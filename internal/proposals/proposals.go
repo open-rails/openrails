@@ -7,6 +7,7 @@ package proposals
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -111,6 +112,82 @@ func (e *Executor) Dismiss(ctx context.Context, req Request) (billing.ProposalRe
 		out.Data = append(out.Data, result)
 	}
 	return out, nil
+}
+
+// Foreign closes each listed open proposal as a provider record that is not
+// this merchant's obligation, such as another environment's schedule on a
+// shared gateway; notes are required. Unlike a dismissed one it no longer
+// holds provider recovery. Only a provider schedule nothing local names
+// qualifies: no subscription by its id, no payment method or PSP customer by
+// its customer reference, no customer its read matched. Anything else is
+// refused and stays open.
+func (e *Executor) Foreign(ctx context.Context, req Request) (billing.ProposalResults, error) {
+	mid, err := e.validate(ctx, req, true)
+	if err != nil {
+		return billing.ProposalResults{}, err
+	}
+	notes := strings.TrimSpace(req.Notes)
+	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(req.IDs))}
+	for _, id := range req.IDs {
+		result := billing.ProposalResult{ID: id}
+		err := e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+			row, err := q.LockProposal(ctx, gen.LockProposalParams{MerchantID: mid, ID: id.UUID()})
+			if err != nil {
+				return err
+			}
+			if !open(row.Status) {
+				result.Outcome = billing.ProposalAlreadyResolved
+				return nil
+			}
+			if reason, err := notForeign(ctx, q, mid, row); err != nil || reason != "" {
+				if err == nil {
+					result.Outcome = billing.ProposalFailed
+					result.Error = &billing.ProposalError{Code: "finding_not_actionable", Message: reason}
+				}
+				return err
+			}
+			if err := resolve(ctx, q, mid, id.UUID(), "foreign", notes, req.Actor, nil, nil, e.now()); err != nil {
+				return err
+			}
+			result.Outcome = billing.ProposalForeign
+			return nil
+		})
+		if err != nil {
+			return out, fmt.Errorf("resolve %s as foreign: %w", id, err)
+		}
+		e.attachFinding(ctx, mid, &result)
+		out.Data = append(out.Data, result)
+	}
+	return out, nil
+}
+
+// notForeign is why row cannot be foreign, or "" when it can.
+func notForeign(ctx context.Context, q *gen.Queries, mid uuid.UUID, row gen.BillingReconciliationFinding) (string, error) {
+	if row.FindingType != string(reconcile.FindingRemoteSubMissingLocal) || row.PspID == nil {
+		return "only a provider schedule unknown locally (" + string(reconcile.FindingRemoteSubMissingLocal) + ") can be foreign; dismiss this one", nil
+	}
+	local, err := q.ProposalSubjectIsLocal(ctx, gen.ProposalSubjectIsLocalParams{MerchantID: mid, ID: row.ID})
+	if err != nil {
+		return "", err
+	}
+	if local {
+		return "a subscription, payment method or PSP customer of this merchant names this provider record", nil
+	}
+	var evidence struct {
+		Local struct {
+			EmailCandidates []json.RawMessage `json:"email_candidates"`
+		} `json:"local"`
+	}
+	if len(row.Evidence) > 0 {
+		if err := json.Unmarshal(row.Evidence, &evidence); err != nil {
+			return "", fmt.Errorf("read finding evidence: %w", err)
+		}
+	}
+	if len(evidence.Local.EmailCandidates) > 0 {
+		return "the provider read matched this record to a customer of this merchant by email", nil
+	}
+	return "", nil
 }
 
 // List pages proposals: open pull.* findings unless Status is set, most

@@ -209,6 +209,7 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 // CheckCancellationRecovery keeps automated local revocation and its eventual
 // provider delete behind the same recovered-account boundary. A positive paid
 // renewal has no cancellation effect and can still settle while writes hold.
+// A cancel the customer or merchant requested never consults it.
 func (s *SubscriptionLifecycleService) CheckCancellationRecovery(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
 	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
 		return nil

@@ -87,6 +87,7 @@ sql:
       - "internal/migrate/postgres/0088_required_entitlements.up.sql"
       - "internal/migrate/postgres/0089_order_pay_url.up.sql"
       - "internal/migrate/postgres/0090_order_attempts_comment.up.sql"
+      - "internal/migrate/postgres/0095_foreign_findings.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

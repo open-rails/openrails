@@ -40,6 +40,9 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- silenced this identity), unless it is a dismissed proposal whose provider
 -- evidence now differs (evidence_digest).
 -- name: UpsertReconciliationFinding :one
+-- An ignored finding stays ignored while its evidence is unchanged; one resolved
+-- as foreign stays so whatever the provider record later reads (evidence still
+-- refreshes).
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
@@ -59,7 +62,7 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN 'ignored'
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN 'ignored'
         ELSE EXCLUDED.status
     END,
     recommended_action = EXCLUDED.recommended_action,
@@ -81,13 +84,13 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     source = COALESCE(EXCLUDED.source, billing.reconciliation_findings.source),
     resolved_at = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_at
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN billing.reconciliation_findings.resolved_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolution
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN billing.reconciliation_findings.resolution
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
@@ -95,7 +98,7 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     -- approval run belong to the episode they closed.
     resolved_by = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.resolved_by
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN billing.reconciliation_findings.resolved_by
         WHEN billing.reconciliation_findings.resolved_at IS NULL THEN billing.reconciliation_findings.resolved_by
         ELSE NULL
     END,
@@ -104,13 +107,13 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     -- reopen of this identity notifies again.
     notified_at = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_at
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_at
     END,
     notified_severity = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
-             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest) THEN billing.reconciliation_findings.notified_severity
+             AND (EXCLUDED.evidence_digest IS NULL OR billing.reconciliation_findings.evidence_digest IS NOT DISTINCT FROM EXCLUDED.evidence_digest OR billing.reconciliation_findings.resolution = 'foreign') THEN billing.reconciliation_findings.notified_severity
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
         ELSE billing.reconciliation_findings.notified_severity
     END,
@@ -326,12 +329,25 @@ SELECT * FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND finding_type LIKE 'pull.%'
 FOR UPDATE;
 
+-- name: ProposalSubjectIsLocal :one
+-- Whether anything of the merchant names a provider record a pull.* finding
+-- reports: a subscription on its PSP by the record's id, or the record's
+-- customer reference on a payment method or PSP customer of that PSP.
+SELECT (EXISTS(SELECT 1 FROM billing.subscriptions s
+          WHERE s.merchant_id=f.merchant_id AND s.psp_id=f.psp_id AND s.rail=f.rail AND s.rail_subscription_id=f.subject_key)
+     OR EXISTS(SELECT 1 FROM billing.payment_methods pm
+          WHERE pm.merchant_id=f.merchant_id AND pm.psp_id=f.psp_id AND pm.rail_customer_ref=f.evidence->'remote'->>'customer_id')
+     OR EXISTS(SELECT 1 FROM billing.psp_customers pc
+          WHERE pc.merchant_id=f.merchant_id AND pc.psp_id=f.psp_id AND pc.remote_customer_ref=f.evidence->'remote'->>'customer_id'))::boolean
+FROM billing.reconciliation_findings f
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = sqlc.arg(id)::uuid AND f.finding_type LIKE 'pull.%';
+
 -- name: ResolveProposal :execrows
--- approved and superseded close as fixed, dismissed as ignored (a dismissed
--- proposal is raised again only on other evidence). The execution or the
--- reason is recorded under evidence.resolution.
+-- approved and superseded close as fixed, dismissed and foreign as ignored (a
+-- dismissed proposal is raised again only on other evidence). The execution or
+-- the reason is recorded under evidence.resolution.
 UPDATE billing.reconciliation_findings
-SET status = CASE sqlc.arg(resolution)::text WHEN 'dismissed' THEN 'ignored' ELSE 'fixed' END,
+SET status = CASE WHEN sqlc.arg(resolution)::text IN ('dismissed', 'foreign') THEN 'ignored' ELSE 'fixed' END,
     resolution = sqlc.arg(resolution)::text,
     operator_notes = sqlc.narg(operator_notes),
     resolved_by = sqlc.narg(resolved_by),

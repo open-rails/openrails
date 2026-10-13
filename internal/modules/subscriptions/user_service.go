@@ -277,7 +277,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), s.ProductService, s.PriceService, s.EntitlementService, s.NotificationService, s.PaymentService, s.Clock())
-		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback, RefuseOwnedRenewal: true})
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback, RefuseOwnedRenewal: true, Requested: true})
 	}
 
 	now := s.now()
@@ -328,6 +328,18 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 				return err
 			}
 			return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
+		}
+	case subscription.Rail == models.RailStripe:
+		// Stripe stops renewing at period end through the durable
+		// stripe_cancel_subscription intent committed with the cancel; a
+		// resume before then undoes it.
+		if subscription.RailSubscriptionID != "" {
+			if s.providerCancel == nil {
+				return fmt.Errorf("stripe remote-cancel scheduler unavailable")
+			}
+			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+				return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
+			}
 		}
 	case subscription.Rail == models.RailSolana:
 		return ErrCustomerActionRequired

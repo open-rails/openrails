@@ -367,8 +367,11 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 	return nil
 }
 
+// cancelForCustomer records the cancel at once. A provider-billed schedule is
+// stopped by a durable provider intent committed with it, which waits out
+// provider recovery instead of refusing the customer.
 func (s *Service) cancelForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
-	if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail != models.RailStripe {
+	if sub.CollectionPolicy != models.CollectionPolicyEngine {
 		if s.rt.UserSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
@@ -377,16 +380,11 @@ func (s *Service) cancelForCustomer(ctx context.Context, customer billing.Custom
 	if s.rt.SubscriptionLifecycleService == nil {
 		return fmt.Errorf("subscription lifecycle service unavailable")
 	}
-	if sub.CollectionPolicy != models.CollectionPolicyEngine {
-		stripeSvc := &subscriptions.StripeService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
-			return err
-		}
-	}
 	return s.rt.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		SubscriptionID:     &sub.ID,
 		CancelType:         models.CancelTypeUser,
 		CancelFeedback:     &reason,
 		RefuseOwnedRenewal: true,
+		Requested:          true,
 	})
 }

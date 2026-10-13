@@ -35,9 +35,14 @@ type StripeCancelPayload struct {
 	RailSubscriptionID string `json:"rail_subscription_id"`
 }
 
-// StripeCancelIdempotencyKey: one remote cancel per subscription.
-func StripeCancelIdempotencyKey(subscriptionID uuid.UUID) string {
-	return TypeStripeCancelSubscription + ":" + subscriptionID.String()
+// StripeCancelIdempotencyKey: one remote cancel per cancellation of the
+// subscription. A resumed and again canceled subscription is a new cancel.
+func StripeCancelIdempotencyKey(subscriptionID uuid.UUID, canceledAt *time.Time) string {
+	key := TypeStripeCancelSubscription + ":" + subscriptionID.String()
+	if canceledAt != nil {
+		key += ":" + canceledAt.UTC().Format(time.RFC3339Nano)
+	}
+	return key
 }
 
 // StripeOwned reports a subscription Stripe bills on its own schedule.
