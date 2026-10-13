@@ -28,7 +28,7 @@ func DefaultTokenType(rail, custodian string) string {
 		return ""
 	case "nmi":
 		switch strings.TrimSpace(custodian) {
-		case models.CustodianBasisTheory, models.CustodianHyperSwitch:
+		case models.CustodianBasisTheory, models.CustodianHyperSwitch, models.CustodianPlatform:
 			return charge.TokenTypePANViaProxy
 		case models.CustodianPSP:
 			return charge.TokenTypePSPToken

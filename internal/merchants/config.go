@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 )
@@ -56,6 +57,9 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 		if doc, ok := set.Custodians[strings.ToLower(row.Key)]; ok && custodianDocNames(doc.Value, row) {
 			scope.Settings, scope.Archived, scope.Revision, scope.secrets = doc.Value.Settings, doc.Value.Archived, doc.Revision, doc.Value.Secrets
 			custodianIDs[strings.ToLower(row.Key)] = row.ID
+		}
+		if row.Kind == models.CustodianPlatform && row.Key == config.PlatformCustodianKey && s.platformVault != nil && row.AccountID == config.PlatformCustodianAccountID(s.platformVault, id.UUID()) {
+			scope.Archived = false
 		}
 		out.custodians = append(out.custodians, scope)
 	}

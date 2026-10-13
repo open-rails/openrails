@@ -176,7 +176,7 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 // validateOrderSale checks an order sale: money, instrument and binding, and
 // none of a price sale's benefits.
 func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
-	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID != nil ||
+	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || invalidOrderCustodianAddress(in, p.Instrument) || in.PriceID != nil ||
 		p.OrderAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
 		p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount != p.Amount || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || !p.AcceptedAt.Equal(p.AcceptedAt.Truncate(time.Microsecond)) {
 		return errors.New("order sale contradicts its order")
@@ -199,13 +199,13 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 	case models.CustodianHyperSwitch:
 		hs := p.HyperSwitch
 		custody = hs != nil && hs.Validate() == nil && in.Rail == "nmi" && p.Recurring && !p.NewCard
-	case models.CustodianBasisTheory:
+	case models.CustodianBasisTheory, models.CustodianPlatform:
 		custody = p.HyperSwitch == nil && in.Rail == "nmi" && !p.Recurring && p.Token != "" && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
 	}
 	if !custody {
 		return errors.New("order sale custody contradicts its order")
 	}
-	bt := p.Instrument.Custodian == models.CustodianBasisTheory
+	bt := p.Instrument.Custodian == models.CustodianBasisTheory || p.Instrument.Custodian == models.CustodianPlatform
 	if p.Provider != in.Rail || !bt && ((p.Instrument.RailCustomerRef == "") != nmiToken || (p.Token != "") != nmiToken) || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" ||
 		p.PurchaseScoped != (p.NewCard && !p.Recurring && !p.Reuse) || p.Reuse && !p.NewCard || p.NewCard && p.Instrument.Mandate != nil {
 		return errors.New("order sale instrument contradicts its order")
@@ -233,4 +233,13 @@ func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
 	}
 	*p = NMISalePayload(decoded)
 	return nil
+}
+
+// Platform custody is independent of the PSP: accepted orders must retain its
+// exact address. Older merchant-custodian sales keep their existing PSP address.
+func invalidOrderCustodianAddress(in gen.BillingProviderIntent, instrument charge.FrozenInstrument) bool {
+	if instrument.Custodian != models.CustodianPlatform {
+		return in.CustodianID != nil
+	}
+	return in.CustodianID == nil || instrument.CustodianID == nil || *in.CustodianID != *instrument.CustodianID
 }

@@ -57,6 +57,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	if err != nil {
 		return err
 	}
+	svc.WithPlatformVaultStore(conn.KV)
 	// or#858: the merchant purge answers to the same #836 kill switch and #835
 	// per-merchant policy as a mass cancellation.
 	svc.WithDestructivePolicy(destructive.New(r.DB))

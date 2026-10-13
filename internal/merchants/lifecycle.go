@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 
 	"github.com/open-rails/openrails/billing"
@@ -115,7 +116,9 @@ type Service struct {
 	fingerprints *CredentialFingerprinter
 	// platformVault is the operator's card vault; nil refuses platform
 	// card custody.
-	platformVault *config.PlatformVaultConfig
+	platformVault  *config.PlatformVaultConfig
+	platformKV     *vault.KVv2Adapter
+	platformPrefix string
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -146,6 +149,9 @@ func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Co
 	service.config = configuration
 	service.fakeProviders = config.FakeProviders(cfg)
 	service.platformVault = cfg.PlatformVault
+	if cfg.Vault != nil {
+		service.platformPrefix = cfg.Vault.ScopePrefix
+	}
 	return service, nil
 }
 

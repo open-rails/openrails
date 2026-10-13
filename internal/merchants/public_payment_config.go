@@ -236,6 +236,16 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 	if err != nil {
 		return nil, err
 	}
+	platform, err := s.PlatformCardCustodian(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var platformConfig *config.ResolvedCustodian
+	var platformErr error
+	if platform != nil {
+		platformConfig, platformErr = s.PlatformCustodianConfig(ctx, id, platform.ID)
+	}
+
 	// One extra round trip for the whole catalog, not one per custodial PSP:
 	// several PSPs may reference the SAME custodian (that is the point of
 	// or#880's registry).
@@ -286,6 +296,16 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 				}).Info("payment config: declared PSP is not armed")
 				continue
 			}
+		}
+		if platform != nil && scope.Rail == string(models.RailNMI) {
+			cfg := PublicPSPConfig{PSPID: billing.PSPID(scope.ID), Key: scope.Key, Rail: scope.Rail, Custodian: models.CustodianPlatform, Flow: FlowTokenize, DisplayName: rails.DisplayName(models.RailNMI)}
+			if platformErr != nil {
+				cfg.Status, cfg.RetryAfter = billing.PSPTemporarilyUnavailable, pspRetryAfterSeconds
+			} else {
+				cfg.Config = map[string]string{"public_api_key": platformConfig.PublicAPIKey}
+			}
+			out = append(out, cfg)
+			continue
 		}
 		cfg, reason, ok := PublicPSPConfigFor(scope, custodian)
 		if !ok {

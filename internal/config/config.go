@@ -581,6 +581,9 @@ type SolanaRailConfig struct {
 // custodians row and may be shared by every PSP that references it — the
 // gateway credentials themselves stay on the PSP, one source of truth.
 type ResolvedCustodian struct {
+	// Container and CollectionApplicationID bind platform card collection to a merchant.
+	Container               string
+	CollectionApplicationID string
 	// Key is the merchant's name for this custodian (custodians.key).
 	Key string
 	// Custodian is the vendor KIND (models.CustodianBasisTheory) — the value

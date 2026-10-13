@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -135,7 +136,7 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
-	if cfg == nil || cfg.Custody == nil || cfg.Custody.Custodian != models.CustodianBasisTheory {
+	if cfg == nil || cfg.Custody == nil || (cfg.Custody.Custodian != models.CustodianBasisTheory && cfg.Custody.Custodian != models.CustodianPlatform) {
 		return nil, errors.New("this custodian does not support the Basis Theory sale transport")
 	}
 	baseURL := s.BTBaseURLOverride
@@ -644,4 +645,16 @@ func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent g
 	if err := attempts.Record(ctx, h.Sale.DB.Gen(ctx), a); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("intent_id", intent.ID).Error("record custodian sale attempt")
 	}
+}
+
+// validatePlatformCollection trusts vendor-reported identity, never browser
+// metadata. A shared tenant alone cannot establish which merchant collected it.
+func validatePlatformCollection(c *config.ResolvedCustodian, intent *basistheory.TokenIntent) error {
+	if c.Custodian != models.CustodianPlatform {
+		return nil
+	}
+	if intent == nil || intent.Type != "card" || intent.TenantID != c.AccountID || intent.CreatedBy != c.CollectionApplicationID {
+		return apperr.Invalidf("payment.token was not collected by this merchant's platform vault application").WithParam("payment.token")
+	}
+	return nil
 }

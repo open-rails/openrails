@@ -121,12 +121,23 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		}
 	}
 	var held *nmiproxy.Charger
-	if p.Instrument.Custodian == models.CustodianBasisTheory {
+	if p.Instrument.Custodian == models.CustodianBasisTheory || p.Instrument.Custodian == models.CustodianPlatform {
 		if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
 			return intents.Parked("Basis Theory sale writes unavailable")
 		}
-		if _, held, _, err = h.Sale.Custody.basisTheory(ctx, *in.PspID); err != nil {
+		cfg, proxy, bt, err := h.Sale.Custody.basisTheory(ctx, *in.PspID)
+		if err != nil {
 			return intents.Parked("Basis Theory custody cannot be armed: " + err.Error())
+		}
+		held = proxy
+		if p.Instrument.Custodian == models.CustodianPlatform {
+			token, err := bt.GetTokenIntent(ctx, p.Token)
+			if err != nil {
+				return intents.Parked("platform collection cannot be verified")
+			}
+			if err := validatePlatformCollection(cfg.Custody, token); err != nil {
+				return h.complete(ctx, in, nil, intents.TerminalWithEvidence("platform collection belongs to another merchant", map[string]any{"not_executed": true}))
+			}
 		}
 	}
 	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {

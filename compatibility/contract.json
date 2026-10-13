@@ -1427,14 +1427,14 @@
       "type AccountUpdaterJobEventData struct {\n\tJob struct {\n\t\tID    string `json:\"id\"`\n\t\tState string `json:\"state\"`\n\t} `json:\"job\"`\n\n\tID string `json:\"id\"`\n}",
       "type CardData struct {\n\tNumber          string `json:\"number\"`\n\tExpirationMonth int    `json:\"expiration_month\"`\n\tExpirationYear  int    `json:\"expiration_year\"`\n\tCVC             string `json:\"cvc,omitempty\"`\n}",
       "type CardDetails struct {\n\tBin             string `json:\"bin\"`\n\tLast4           string `json:\"last4\"`\n\tBrand           string `json:\"brand\"`\n\tFunding         string `json:\"funding\"`\n\tExpirationMonth int    `json:\"expiration_month\"`\n\tExpirationYear  int    `json:\"expiration_year\"`\n}",
-      "type CardToken struct {\n\tID          string       `json:\"id\"`\n\tTenantID    string       `json:\"tenant_id\"`\n\tType        string       `json:\"type\"`\n\tFingerprint string       `json:\"fingerprint\"`\n\tCard        *CardDetails `json:\"card\"`\n\tCreatedAt   time.Time    `json:\"created_at\"`\n\tExpiresAt   *time.Time   `json:\"expires_at\"`\n}",
+      "type CardToken struct {\n\tContainers  []string     `json:\"containers\"`\n\tID          string       `json:\"id\"`\n\tTenantID    string       `json:\"tenant_id\"`\n\tType        string       `json:\"type\"`\n\tFingerprint string       `json:\"fingerprint\"`\n\tCard        *CardDetails `json:\"card\"`\n\tCreatedAt   time.Time    `json:\"created_at\"`\n\tExpiresAt   *time.Time   `json:\"expires_at\"`\n}",
       "type Cryptogram struct {\n\tCryptogram string `json:\"cryptogram\"`\n\tECI        string `json:\"eci\"`\n}",
       "type Event struct {\n\tID          string          `json:\"id\"`\n\tTenantID    string          `json:\"tenant_id\"`\n\tType        string          `json:\"type\"`\n\tDeliveredAt *time.Time      `json:\"delivered_at\"`\n\tData        json.RawMessage `json:\"data\"`\n}",
       "type NetworkToken struct {\n\tID            string            `json:\"id\"`\n\tTenantID      string            `json:\"tenant_id\"`\n\tStatus        string            `json:\"status\"`\n\tPAR           string            `json:\"par\"`\n\tNetworkToken  *NetworkTokenCard `json:\"network_token\"`\n\tCard          *NetworkTokenCard `json:\"card\"`\n\tTokenID       string            `json:\"token_id\"`\n\tTokenIntentID string            `json:\"token_intent_id\"`\n\tCreatedAt     time.Time         `json:\"created_at\"`\n\tExtras        struct {\n\t\tDeduplicated bool `json:\"deduplicated\"`\n\t} `json:\"_extras\"`\n}",
       "type NetworkTokenCard struct {\n\tBin             string `json:\"bin\"`\n\tLast4           string `json:\"last4\"`\n\tBrand           string `json:\"brand\"`\n\tFunding         string `json:\"funding\"`\n\tExpirationMonth int    `json:\"expiration_month\"`\n\tExpirationYear  int    `json:\"expiration_year\"`\n}",
       "type NetworkTokenEventData struct {\n\tNetworkToken struct {\n\t\tID            string `json:\"id\"`\n\t\tTenantID      string `json:\"tenant_id\"`\n\t\tStatus        string `json:\"status\"`\n\t\tTokenID       string `json:\"token_id\"`\n\t\tTokenIntentID string `json:\"token_intent_id\"`\n\t} `json:\"network_token\"`\n}",
       "type TokenEventData struct {\n\tToken struct {\n\t\tID           string `json:\"id\"`\n\t\tType         string `json:\"type\"`\n\t\tPropertyName string `json:\"property_name\"`\n\t} `json:\"token\"`\n}",
-      "type TokenIntent struct {\n\tID          string       `json:\"id\"`\n\tTenantID    string       `json:\"tenant_id\"`\n\tType        string       `json:\"type\"`\n\tFingerprint string       `json:\"fingerprint\"`\n\tCard        *CardDetails `json:\"card\"`\n\tExpiresAt   time.Time    `json:\"expires_at\"`\n\tCreatedAt   time.Time    `json:\"created_at\"`\n}",
+      "type TokenIntent struct {\n\tCreatedBy   string       `json:\"created_by\"`\n\tID          string       `json:\"id\"`\n\tTenantID    string       `json:\"tenant_id\"`\n\tType        string       `json:\"type\"`\n\tFingerprint string       `json:\"fingerprint\"`\n\tCard        *CardDetails `json:\"card\"`\n\tExpiresAt   time.Time    `json:\"expires_at\"`\n\tCreatedAt   time.Time    `json:\"created_at\"`\n}",
       "type TokenIntentConvertedData struct {\n\tTokenIntent struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t} `json:\"token_intent\"`\n\tToken struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t} `json:\"token\"`\n}"
     ],
     "internal/integrations/ccbill": [
@@ -3405,6 +3405,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/payment/custodian_sale.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "basistheory": "github.com/open-rails/openrails/internal/integrations/basistheory",
       "billing": "github.com/open-rails/openrails/billing",
