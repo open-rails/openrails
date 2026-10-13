@@ -4,13 +4,16 @@
 
 -- name: RegisterPSP :one
 -- Records a PSP document's identity under its natural-key id, current under
--- the document's key. An identity another merchant owns answers no row; a key
--- another current PSP of the merchant holds violates psps_key_key.
+-- the document's key, with its declared environment: test and sandbox are one
+-- money class, so a declaration moving between them corrects the row in
+-- place. An identity another merchant owns answers no row; a key another
+-- current PSP of the merchant holds violates psps_key_key.
 INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(key)::text,
         lower(sqlc.arg(rail)::text), sqlc.arg(environment)::text, sqlc.arg(account_id)::text)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET
+ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET
     key = EXCLUDED.key,
+    environment = EXCLUDED.environment,
     superseded_at = NULL,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
@@ -31,7 +34,7 @@ WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
-  AND environment = sqlc.arg(environment)::text
+  AND (environment = 'live') = (sqlc.arg(environment)::text = 'live')
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
@@ -47,14 +50,14 @@ SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY created_at DESC, id DESC;
 
--- CROSS-MERCHANT: PSP ownership by the global (rail, environment, account_id)
+-- CROSS-MERCHANT: PSP ownership by the global (rail, money class, account_id)
 -- natural key, for webhook routing and the uniqueness preflight, both of which
--- run before any merchant context exists.
+-- run before any merchant context exists. test and sandbox are one class.
 -- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
 FROM billing.psps
 WHERE rail = lower(sqlc.arg(rail)::text)
-  AND environment = sqlc.arg(environment)::text
+  AND (environment = 'live') = (sqlc.arg(environment)::text = 'live')
   AND account_id = sqlc.arg(account_id)::text;
 
 -- CROSS-MERCHANT: an ordered page of merchants after the cursor holding a
@@ -83,7 +86,7 @@ FOR SHARE;
 INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text,
         sqlc.arg(environment)::text, sqlc.arg(account_id)::text, sqlc.arg(key)::text)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=billing.psps.id
+ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
 RETURNING *;

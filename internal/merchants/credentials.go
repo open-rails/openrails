@@ -424,19 +424,19 @@ type PSPIdentity struct {
 // unique-violation error — this names the conflict instead.
 var ErrPSPOwnedByAnotherMerchant = apperr.New(http.StatusConflict, "psp_exists", "PSP is already owned by another merchant")
 
-// PSPNaturalKey canonicalizes a PSP's GLOBAL
-// natural key (rail, environment, account_id) and derives its deterministic id
-// from it (#662). It is the SINGLE place this canonicalization lives — the same
-// normalization the ownership guard and secret layer use (lower(rail);
-// the declared environment; account_id trimmed). Every writer stores the
-// returned nRail/nEnv/nAccount so the stored row matches the id and the
-// (rail, environment, account_id) unique index exactly; the id is a pure
-// function of that key, identical across environments and fresh rebuilds.
+// PSPNaturalKey canonicalizes a PSP's GLOBAL natural key (rail, money class,
+// account_id) and derives its deterministic id from it (#662). It is the
+// SINGLE place this canonicalization lives — the same normalization the
+// ownership guard and secret layer use (lower(rail); the declared environment;
+// account_id trimmed). test and sandbox are one money class: the id is derived
+// from the class, so a PSP re-declared between them keeps its id. Every writer
+// stores the returned nRail/nEnv/nAccount: the row holds the declared
+// environment beside the class-derived id.
 func PSPNaturalKey(rail, environment, accountID string) (id uuid.UUID, nRail, nEnv, nAccount string) {
 	nRail = normalizeProviderSecretType(rail)
 	nEnv = normalizePSPEnvironment(environment)
 	nAccount = strings.TrimSpace(accountID)
-	id = uuidutil.DeterministicID(uuidutil.DeterministicNamespace, nRail, nEnv, nAccount)
+	id = uuidutil.DeterministicID(uuidutil.DeterministicNamespace, nRail, config.EnvironmentClass(nEnv), nAccount)
 	return id, nRail, nEnv, nAccount
 }
 
@@ -499,11 +499,11 @@ func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, a
 }
 
 // ResolvePSPByAccount resolves an account globally by rail and account_id in
-// any of the rail's environments: an inbound webhook names no environment.
-// The same account_id in two environments is ambiguous and refused.
+// either money class: an inbound webhook names no environment. The same
+// account_id live and non-live is ambiguous and refused.
 func (s *Service) ResolvePSPByAccount(ctx context.Context, rail, accountID string) (PSPIdentity, bool, error) {
 	var found []PSPIdentity
-	for _, environment := range rails.Environments(models.Rail(normalizeProviderSecretType(rail))) {
+	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
 		owner, ok, err := s.ResolvePSPByIdentity(ctx, rail, environment, accountID)
 		if err != nil {
 			return PSPIdentity{}, false, err
@@ -518,7 +518,7 @@ func (s *Service) ResolvePSPByAccount(ctx context.Context, rail, accountID strin
 	case 1:
 		return found[0], true, nil
 	}
-	return PSPIdentity{}, false, fmt.Errorf("merchants: %s account %s is a PSP in %d environments; its webhooks cannot tell them apart", rail, accountID, len(found))
+	return PSPIdentity{}, false, fmt.Errorf("merchants: %s account %s is both a live and a non-live PSP; its webhooks cannot tell them apart", rail, accountID)
 }
 
 // or#880: the custody sibling of ResolvePSPByIdentity moved to

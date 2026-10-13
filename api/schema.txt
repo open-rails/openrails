@@ -94,7 +94,7 @@ migration 0090_order_attempts_comment.up.sql sha256:269de11c0760f357348370ec74bd
 migration 0091_destructive_kind_account_deletion.up.sql sha256:fd108701f47bbc8346af2d5865a3e623d1299da8b64885b4c938f65540657414
 migration 0093_price_psps.up.sql sha256:372948218fe67c2478a5397afbb7ed7bb83cbc25e305611d57efa4ba24eeab89
 migration 0095_foreign_findings.up.sql sha256:94005a83ed9701f583e0eee453b6224f960dab285295b4f0b4c4ce950a022c82
-migration 0096_psp_declared_environment.up.sql sha256:f7aa48c4b8c070c8a9ed0cdadcf31b5c7615c7a140b3df76a55ff7c514b527d1
+migration 0096_psp_declared_environment.up.sql sha256:eec7846c97147b96d106f1600cb1b506f32956bdf0e1cc43c3e0489fcaf53692
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2229,7 +2229,7 @@ table billing.psps
   index CREATE UNIQUE INDEX psps_key_key ON billing.psps USING btree (merchant_id, lower(key)) WHERE (superseded_at IS NULL)
   index CREATE UNIQUE INDEX psps_live_credential_fingerprint_key ON billing.psps USING btree (rail, environment, credential_fingerprint) WHERE ((credential_duplicate_at IS NULL) AND (credential_fingerprint IS NOT NULL))
   index CREATE UNIQUE INDEX psps_pkey ON billing.psps USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX psps_rail_environment_account_id_key ON billing.psps USING btree (rail, environment, account_id)
+  index CREATE UNIQUE INDEX psps_rail_class_account_id_key ON billing.psps USING btree (rail, ((environment = 'live'::text)), account_id)
 
 table billing.rebill_cycles
   column id uuid NOT NULL DEFAULT uuidv7()

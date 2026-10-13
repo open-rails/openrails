@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -72,6 +73,7 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 		}
 		if doc, ok := set.PSPs[strings.ToLower(row.Key)]; ok && row.SupersededAt == nil && pspDocNames(doc.Value, row) {
 			p := doc.Value
+			scope.Environment = p.Environment
 			scope.Settings, scope.Archived, scope.Signer, scope.secrets = p.Settings, p.Archived, p.Signer, normalizedKeys(p.Secrets)
 			scope.Revision = doc.Revision
 			if !doc.UpdatedAt.IsZero() {
@@ -90,8 +92,10 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 	return out, nil
 }
 
+// pspDocNames reports whether a document names the row's identity: its rail,
+// money class and account. test and sandbox are one class.
 func pspDocNames(p merchantdocs.PSP, row gen.BillingPsp) bool {
-	return strings.EqualFold(p.Rail, row.Rail) && p.Environment == row.Environment && strings.TrimSpace(p.AccountID) == row.AccountID
+	return strings.EqualFold(p.Rail, row.Rail) && config.EnvironmentClass(p.Environment) == config.EnvironmentClass(row.Environment) && strings.TrimSpace(p.AccountID) == row.AccountID
 }
 
 func custodianDocNames(c merchantdocs.Custodian, row gen.BillingCustodian) bool {

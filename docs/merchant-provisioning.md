@@ -215,7 +215,9 @@ Per merchant:
   `stripe`, `solana`), `environment` (required: `live`, `test` or `sandbox`,
   as the rail has them; see [PSP environments](psp-environments.md)),
   `account_id`, `archived`, `custodian`, non-secret `settings`, `secrets`, and
-  (Solana) `signer`. A deployment's PSPs are all live or all non-live.
+  (Solana) `signer`. A deployment's PSPs are all live or all non-live. The
+  money class (live, or test and sandbox together) is part of the PSP's
+  identity: re-declaring a test PSP sandbox keeps it.
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
   `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the

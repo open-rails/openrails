@@ -44,7 +44,7 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(body), "<test_mode_status>enabled</test_mode_status>") {
+	if !strings.Contains(string(body), "<test_mode_enabled>true</test_mode_enabled>") {
 		t.Fatalf("qualification probe answered %d %q", resp.StatusCode, body)
 	}
 

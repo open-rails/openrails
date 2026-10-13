@@ -24,7 +24,8 @@ type PSP struct {
 	Rail Rail   `json:"rail"`
 	// Environment is whether the PSP moves real money: live, test (the
 	// provider's own system, no money moves) or sandbox (the provider's
-	// separate sandbox system). It is part of the PSP's identity.
+	// separate sandbox system). Its money class (live, or test and sandbox
+	// together) is part of the PSP's identity.
 	Environment string `json:"environment"`
 	// AccountID is the operator-declared account on the rail; it never
 	// changes.

@@ -350,7 +350,7 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 		if err != nil {
 			return res, fmt.Errorf("custody migration: resolve PSP %s: %w", exp.PSP, err)
 		}
-		if !ok || psp.Environment != environment {
+		if !ok || config.EnvironmentClass(psp.Environment) != config.EnvironmentClass(environment) {
 			return res, fmt.Errorf("custody migration: merchant declares no PSP %s", exp.PSP)
 		}
 		if psp.CustodianID == nil || *psp.CustodianID != custodian.ID {

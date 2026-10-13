@@ -16,9 +16,12 @@ psps:
 | `test` | The provider's own system; no money moves. | NMI (a gateway account in test mode), Stripe (`sk_test_`/`rk_test_` keys) |
 | `sandbox` | The provider's separate sandbox system. | NMI (a sandbox.nmi.com account), CCBill (its sandbox), Solana (devnet) |
 
-The field is required, and a rail refuses an environment it does not have. It is
-part of the PSP's identity: the same account id in another environment is
-another PSP.
+The field is required, and a rail refuses an environment it does not have. The
+PSP's identity is its rail, money class and account: `test` and `sandbox` are
+one class, so a PSP re-declared between them keeps its id and subscriptions,
+its stored environment is corrected, and its posture is verified again before
+it is used. `live` and non-live are different PSPs; a key cannot move between
+them.
 
 A deployment is all live or all non-live. Mixing is refused at boot (declared
 PSPs, and the PSPs the database already holds), and a PSP created or loaded

@@ -83,10 +83,10 @@ func TestPSPIDDerivesFromCanonicalNaturalKey(t *testing.T) {
 	for _, alias := range [][3]string{{"NMI", "live", "999999-0000"}, {" nmi ", "LIVE", "999999-0000"}, {"nmi", " live ", "999999-0000"}, {"nmi", "live", " 999999-0000 "}} {
 		require.Equal(t, base, PspID(alias[0], alias[1], alias[2]), "%q", alias)
 	}
-	for _, other := range [][3]string{{"stripe", "live", "999999-0000"}, {"nmi", "test", "999999-0000"}, {"nmi", "sandbox", "999999-0000"}, {"nmi", "live", "999999-0001"}} {
+	for _, other := range [][3]string{{"stripe", "live", "999999-0000"}, {"nmi", "test", "999999-0000"}, {"nmi", "live", "999999-0001"}} {
 		require.NotEqual(t, base, PspID(other[0], other[1], other[2]), "%q", other)
 	}
-	require.NotEqual(t, PspID("nmi", "test", "999999-0000"), PspID("nmi", "sandbox", "999999-0000"), "a sandbox.nmi.com account is not the gateway's")
+	require.Equal(t, PspID("nmi", "test", "999999-0000"), PspID("nmi", "sandbox", "999999-0000"), "test and sandbox are one money class: a re-declared PSP keeps its id")
 	id, rail, env, account := PSPNaturalKey("NMI", "Live", " 999999-0000 ")
 	require.Equal(t, []any{base, "nmi", "live", "999999-0000"}, []any{id, rail, env, account})
 }

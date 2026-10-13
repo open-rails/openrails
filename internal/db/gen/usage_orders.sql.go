@@ -1492,7 +1492,7 @@ func (q *Queries) UnlockUsageMonthlyCollection(ctx context.Context, merchantID u
 const usageRecoveryAccounts = `-- name: UsageRecoveryAccounts :many
 SELECT p.id, p.rail FROM billing.psps p
 WHERE p.merchant_id = $1::uuid AND p.rail IN ('nmi', 'stripe')
-  AND p.environment = (SELECT environment FROM billing.psps WHERE merchant_id = p.merchant_id AND id = $2::uuid)
+  AND (p.environment = 'live') = (SELECT environment = 'live' FROM billing.psps WHERE merchant_id = p.merchant_id AND id = $2::uuid)
 ORDER BY p.id
 `
 
@@ -1508,7 +1508,7 @@ type UsageRecoveryAccountsRow struct {
 
 // A different chosen card does not hide a prior account's paid order, even
 // if that card was added after the backup. Inspect every known card account
-// in this deployment environment; unrelated rails cannot collect it.
+// in this deployment's money class; unrelated rails cannot collect it.
 func (q *Queries) UsageRecoveryAccounts(ctx context.Context, arg UsageRecoveryAccountsParams) ([]UsageRecoveryAccountsRow, error) {
 	rows, err := q.db.Query(ctx, usageRecoveryAccounts, arg.MerchantID, arg.RoutedPsp)
 	if err != nil {

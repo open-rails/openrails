@@ -122,7 +122,7 @@ const declarePSPIdentity = `-- name: DeclarePSPIdentity :one
 INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES ($1::uuid, $2::uuid, $3::text,
         $4::text, $5::text, $6::text)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=billing.psps.id
+ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
 RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at
@@ -204,7 +204,7 @@ const getPSPByIdentity = `-- name: GetPSPByIdentity :one
 SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
-  AND environment = $3::text
+  AND (environment = 'live') = ($3::text = 'live')
   AND account_id = $4::text
 LIMIT 1
 `
@@ -542,8 +542,9 @@ const registerPSP = `-- name: RegisterPSP :one
 INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)
 VALUES ($1::uuid, $2::uuid, $3::text,
         lower($4::text), $5::text, $6::text)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET
+ON CONFLICT (rail, (environment = 'live'), account_id) DO UPDATE SET
     key = EXCLUDED.key,
+    environment = EXCLUDED.environment,
     superseded_at = NULL,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
@@ -563,8 +564,10 @@ type RegisterPSPParams struct {
 // (settings, credentials, archived) is its document in a file or Vault; a row
 // holds the identity history points at and what OpenRails discovers.
 // Records a PSP document's identity under its natural-key id, current under
-// the document's key. An identity another merchant owns answers no row; a key
-// another current PSP of the merchant holds violates psps_key_key.
+// the document's key, with its declared environment: test and sandbox are one
+// money class, so a declaration moving between them corrects the row in
+// place. An identity another merchant owns answers no row; a key another
+// current PSP of the merchant holds violates psps_key_key.
 func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, registerPSP,
 		arg.ID,
@@ -598,7 +601,7 @@ const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :o
 SELECT id, merchant_id, rail, environment, account_id
 FROM billing.psps
 WHERE rail = lower($1::text)
-  AND environment = $2::text
+  AND (environment = 'live') = ($2::text = 'live')
   AND account_id = $3::text
 `
 
@@ -616,9 +619,9 @@ type ResolvePSPOwnerByRailIdentityRow struct {
 	AccountID   string
 }
 
-// CROSS-MERCHANT: PSP ownership by the global (rail, environment, account_id)
+// CROSS-MERCHANT: PSP ownership by the global (rail, money class, account_id)
 // natural key, for webhook routing and the uniqueness preflight, both of which
-// run before any merchant context exists.
+// run before any merchant context exists. test and sandbox are one class.
 func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg ResolvePSPOwnerByRailIdentityParams) (ResolvePSPOwnerByRailIdentityRow, error) {
 	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
 	var i ResolvePSPOwnerByRailIdentityRow
