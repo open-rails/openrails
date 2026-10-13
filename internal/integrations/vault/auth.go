@@ -33,13 +33,9 @@ type Config struct {
 	// as approle/kubernetes when Vault reports it renewable (#751); otherwise
 	// see Login's token-mode doc for the (no-recovery) failure posture.
 	Token string
-	// AppRole credentials (AuthMethod == "approle"). SecretID is re-resolved
-	// fresh on every login/re-login attempt (#751 — see resolveApproleSecretID):
-	// when it is delivered via the operator-mounted-secret-file convention
-	// (config/secret_files.go — a file named VAULT_SECRET_ID), the CURRENT
-	// file content is used every time, so a rotated secret_id is picked up
-	// the moment re-auth needs it; otherwise this static value is used
-	// unchanged.
+	// AppRole credentials (AuthMethod == "approle"). The first attempt uses
+	// SecretID as supplied. Retries and reauthentication reread the mounted
+	// VAULT_SECRET_ID file when present, otherwise they use this static value.
 	RoleID   string
 	SecretID string
 	// Kubernetes auth (AuthMethod == "kubernetes").
@@ -54,7 +50,7 @@ const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 // reauthSecretIDEnvVar is the operator-mounted-secret-file name (filename =
 // env-var name, config/secret_files.go's convention) resolveApproleSecretID
-// re-reads on every login/re-login attempt when the approle secret_id is
+// re-reads on retries and reauthentication when the approle secret_id is
 // file-delivered.
 const reauthSecretIDEnvVar = "VAULT_SECRET_ID"
 
@@ -117,13 +113,9 @@ func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.
 	switch strings.ToLower(strings.TrimSpace(cfg.AuthMethod)) {
 	case "approle":
 		mount := firstNonEmpty(strings.Trim(cfg.AuthMount, "/"), "approle")
-		secretID, err := resolveApproleSecretID(cfg.SecretID)
-		if err != nil {
-			return nil, fmt.Errorf("vault: resolve approle secret_id: %w", err)
-		}
 		return client.Logical().WriteWithContext(ctx, "auth/"+mount+"/login", map[string]any{
 			"role_id":   cfg.RoleID,
-			"secret_id": secretID,
+			"secret_id": cfg.SecretID,
 		})
 	case "kubernetes":
 		// Re-read from disk on EVERY call (including every re-auth attempt):
@@ -145,8 +137,8 @@ func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.
 	}
 }
 
-// resolveApproleSecretID resolves the CURRENT approle secret_id on every
-// login/re-login attempt (#751 task 2), mirroring config.Load's own
+// resolveApproleSecretID resolves the CURRENT approle secret_id on retries
+// and reauthentication (#751 task 2), mirroring the configuration loader's
 // operator-mounted-secret-file convention (config/secret_files.go: a file
 // named after the env var, typically rendered by a Vault Agent template or a
 // CSI driver into /vault/secrets):
@@ -256,8 +248,10 @@ func (s *Supervisor) NotifyPermissionDenied(err error) {
 
 func (s *Supervisor) run(ctx context.Context) {
 	failures := 0
+	initial := true
 	for ctx.Err() == nil {
-		secret, err := s.authenticate(ctx)
+		secret, err := s.authenticate(ctx, initial)
+		initial = false
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -298,11 +292,19 @@ func (s *Supervisor) run(ctx context.Context) {
 // authenticate obtains a working token: a fresh login for AppRole/Kubernetes,
 // a self-lookup of the supplied token otherwise. A nil secret is a
 // non-expiring token with nothing to renew.
-func (s *Supervisor) authenticate(ctx context.Context) (*vaultapi.Secret, error) {
+func (s *Supervisor) authenticate(ctx context.Context, initial bool) (*vaultapi.Secret, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	if s.reauthable {
-		secret, err := login(ctx, s.client, s.cfg)
+		cfg := s.cfg
+		if !initial && cfg.AuthMethod == "approle" {
+			secretID, err := resolveApproleSecretID(cfg.SecretID)
+			if err != nil {
+				return nil, fmt.Errorf("vault: resolve approle secret_id: %w", err)
+			}
+			cfg.SecretID = secretID
+		}
+		secret, err := login(ctx, s.client, cfg)
 		if err != nil {
 			return nil, err
 		}
