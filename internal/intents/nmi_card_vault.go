@@ -76,14 +76,15 @@ type CardVaultClients interface {
 
 type NMICardVaultHandler struct {
 	DB      *db.DB
+	Posture ModeView
 	Clients CardVaultClients
 	Store   *Store
 	Clock   clockwork.Clock
 	Policy  BackoffPolicy
 }
 
-func NewNMICardVaultHandler(d *db.DB, clients CardVaultClients, store *Store, clock clockwork.Clock) *NMICardVaultHandler {
-	return &NMICardVaultHandler{DB: d, Clients: clients, Store: store, Clock: clock, Policy: DefaultBackoff}
+func NewNMICardVaultHandler(d *db.DB, clients CardVaultClients, store *Store, posture ModeView, clock clockwork.Clock) *NMICardVaultHandler {
+	return &NMICardVaultHandler{DB: d, Clients: clients, Store: store, Posture: posture, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *NMICardVaultHandler) Type() string                         { return TypeNMICardVault }
@@ -131,9 +132,6 @@ func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingPro
 	if err != nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
-	if client.ReadOnly {
-		return Parked("nmi client is read-only (mode=readonly)")
-	}
 	vault, billingEntry := CardVaultID(intent.ID), CardBillingID(intent.ID)
 
 	// The card rides the request that carried it. A run without one (a worker
@@ -148,6 +146,12 @@ func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingPro
 		}
 		if !attended {
 			return reenterCard("the request that carried the card ended before it was sent")
+		}
+		if blocked, reason := GateExecution(ctx, h.Posture, intent.MerchantID, Origin(intent.Origin)); blocked {
+			return Parked(reason)
+		}
+		if client.ReadOnly {
+			return Parked("nmi client is read-only (mode=readonly)")
 		}
 		if h.Store == nil {
 			card.Zero()
@@ -196,6 +200,9 @@ func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingPro
 		}
 		if saved {
 			return Succeeded(map[string]any{"vault_id": vault, "billing_id": billingEntry, "confirmation": "payment_method_saved", "intent_id": intent.ID})
+		}
+		if blocked, reason := GateExecution(ctx, h.Posture, intent.MerchantID, Origin(intent.Origin)); blocked {
+			return Parked(reason)
 		}
 		if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: vault}); err != nil {
 			return Ambiguous("remove the unreferenced card vault: " + err.Error())

@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -192,6 +193,13 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 
 	if req.PSPID == uuid.Nil {
 		return nil, ErrPSPRequired
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if (writeposture.View{Config: s.Config, DB: s.DB}).Posture(ctx, mid.UUID()).ReadOnly() {
+		return nil, nmi.ErrProviderReadOnly
 	}
 	client, scope, err := s.resolveNMIClientForPSP(ctx, req.PSPID)
 	if err != nil {
